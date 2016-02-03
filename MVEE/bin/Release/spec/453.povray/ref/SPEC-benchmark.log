@@ -1,0 +1,28 @@
+Redirecting Options
+  All Streams to console..........On   and file SPEC-benchmark.log
+  Debug Stream to console.........Off
+  Fatal Stream to console.........On 
+  Render Stream to console........On 
+  Statistics Stream to console....On 
+  Warning Stream to console.......Off
+Parsing Options
+  Input file: SPEC-benchmark-ref.pov (compatible to version 3.50)
+  Remove bounds........Off
+  Split unions.........Off
+  Library paths:
+Output Options
+  Image resolution 1280 by 1024 (rows 1 to 1024, columns 1 to 1280).
+  Graphic display......Off
+  Mosaic preview.......Off
+  CPU usage histogram..Off
+  Continued trace......Off
+Tracing Options
+  Quality:  9
+  Bounding boxes.......On   Bounding threshold: 1
+  Light Buffer.........On 
+  Vista Buffer.........On   Draw Vista Buffer....Off
+  Antialiasing.........On  (Method 1, Threshold 0.300, Depth 3, Jitter Off)
+  Clock value:    0.000  (Animation off)
+Possible Scene File Parser Initialization Error: Could not find file
+ 'SPEC-benchmark-ref.pov'
+Scene File Parser Initialization Error: Cannot open input file.

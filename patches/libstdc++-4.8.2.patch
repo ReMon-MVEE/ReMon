@@ -1,0 +1,50 @@
+diff -r --unified gcc-4.8.2.orig/libstdc++-v3/configure.host gcc-4.8.2/libstdc++-v3/configure.host
+--- gcc-4.8.2.orig/libstdc++-v3/configure.host	2013-06-19 03:18:38.000000000 +0200
++++ gcc-4.8.2/libstdc++-v3/configure.host	2014-12-01 11:21:21.221813412 +0100
+@@ -108,9 +108,6 @@
+   crisv32)
+     try_cpu=cris
+     ;;
+-  i[567]86 | x86_64)
+-    try_cpu=i486
+-    ;;
+   hppa*)
+     try_cpu=hppa
+     ;;
+@@ -128,9 +125,6 @@
+     try_cpu=sparc
+     ;;
+   *)
+-    if test -d ${glibcxx_srcdir}/config/cpu/${host_cpu}; then
+-      try_cpu=${host_cpu}
+-    fi
+ esac
+ 
+ 
+diff -r --unified gcc-4.8.2.orig/libstdc++-v3/include/bits/c++config gcc-4.8.2/libstdc++-v3/include/bits/c++config
+--- gcc-4.8.2.orig/libstdc++-v3/include/bits/c++config	2013-06-12 22:44:17.000000000 +0200
++++ gcc-4.8.2/libstdc++-v3/include/bits/c++config	2014-12-01 11:40:08.301059388 +0100
+@@ -462,4 +462,5 @@
+ #undef min
+ #undef max
+ 
++#include "../../../../../mvee_atomic.h"
+ // End of prewritten config; the settings discovered at configure time follow.
+Only in gcc-4.8.2/libstdc++-v3/include/bits: c++config~
+diff -r --unified gcc-4.8.2.orig/libstdc++-v3/libsupc++/guard.cc gcc-4.8.2/libstdc++-v3/libsupc++/guard.cc
+--- gcc-4.8.2.orig/libstdc++-v3/libsupc++/guard.cc	2013-02-03 18:54:05.000000000 +0100
++++ gcc-4.8.2/libstdc++-v3/libsupc++/guard.cc	2014-12-01 11:21:21.222813539 +0100
+@@ -35,9 +35,10 @@
+ # include <climits>
+ # include <syscall.h>
+ # include <unistd.h>
+-# define _GLIBCXX_USE_FUTEX
+-# define _GLIBCXX_FUTEX_WAIT 0
+-# define _GLIBCXX_FUTEX_WAKE 1
++//MVEE Patch 
++//# define _GLIBCXX_USE_FUTEX
++//# define _GLIBCXX_FUTEX_WAIT 0
++//# define _GLIBCXX_FUTEX_WAKE 1
+ #endif
+ 
+ // The IA64/generic ABI uses the first byte of the guard variable.

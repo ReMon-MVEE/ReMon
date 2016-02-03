@@ -1,0 +1,6 @@
+BENCHPATH=$SPECPATH/403.gcc
+BINPATH=$BENCHPATH/build/$SPECPROFILE
+DATAPATH=$BENCHPATH/data/test/input
+ALLDATAPATH=$BENCHPATH/data/all/input
+
+$BINPATH/gcc $DATAPATH/cccp.i -o cccp.s > cccp.out

@@ -1,0 +1,2630 @@
+diff -rupN --ignore-all-space -w -B parsec-3.0/config/gcc.bldconf parsec-3.0-drf/config/gcc.bldconf
+--- parsec-3.0/config/gcc.bldconf	2013-07-28 10:38:51.000000000 -0400
++++ parsec-3.0-drf/config/gcc.bldconf	2014-09-17 17:44:41.118882647 -0400
+@@ -78,7 +78,7 @@ export CXXCPPFLAGS=""
+ export LDFLAGS="-L${CC_HOME}/lib64 -L${CC_HOME}/lib"
+ export LIBS=""
+ export EXTRA_LIBS=""
+-export PARMACS_MACRO_FILE="pthreads"
++export PARMACS_MACRO_FILE="pthreads_barrier"
+ 
+ 
+ # OS-specific arguments
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/barnes/src/code.C parsec-3.0-drf/ext/splash2x/apps/barnes/src/code.C
+--- parsec-3.0/ext/splash2x/apps/barnes/src/code.C	2013-07-28 10:39:57.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/barnes/src/code.C	2014-09-17 14:09:44.224682112 -0400
+@@ -397,6 +397,9 @@ void tab_init()
+ 
+    CellLock = (struct CellLockType *) G_MALLOC(sizeof(struct CellLockType));
+    ALOCKINIT(CellLock->CL,MAXLOCK);
++#ifdef NODATARACE // 5
++   for (i = 0; i < MAXLOCK; i++) pthread_cond_init(&CellLock->CC[i], NULL);
++#endif
+ }
+ 
+ /*
+@@ -409,7 +412,9 @@ void SlaveStart()
+    /* Get unique ProcessId */
+    LOCK(Global->CountLock);
+      ProcessId = Global->current_id++;
++#ifndef NODATARACE // 1
+    UNLOCK(Global->CountLock);
++#endif
+ 
+    BARINCLUDE(Global->Barrier);
+ 
+@@ -455,6 +460,9 @@ void SlaveStart()
+    Local[ProcessId].tout = Local[0].tout;
+    Local[ProcessId].tnow = Local[0].tnow;
+    Local[ProcessId].nstep = Local[0].nstep;
++#ifdef NODATARACE // 1
++   UNLOCK(Global->CountLock);
++#endif
+ 
+    find_my_initial_bodies(bodytab, nbody, ProcessId);
+ 
+@@ -692,6 +700,10 @@ void stepsystem(long ProcessId)
+         CLOCK(forcecalcstart);
+     }
+ 
++#ifdef NODATARACE // 2
++    BARRIER(Global->Barrier,NPROC);
++#endif
++
+     ComputeForces(ProcessId);
+ 
+     if ((ProcessId == 0) && (Local[ProcessId].nstep >= 2)) {
+@@ -699,6 +711,10 @@ void stepsystem(long ProcessId)
+         Global->forcecalctime += forcecalcend - forcecalcstart;
+     }
+ 
++#ifdef NODATARACE // 3
++    BARRIER(Global->Barrier,NPROC);
++#endif
++
+     /* advance my bodies */
+     for (pp = Local[ProcessId].mybodytab;
+ 	 pp < Local[ProcessId].mybodytab+Local[ProcessId].mynbody; pp++) {
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/barnes/src/code.H parsec-3.0-drf/ext/splash2x/apps/barnes/src/code.H
+--- parsec-3.0/ext/splash2x/apps/barnes/src/code.H	2013-07-28 10:39:57.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/barnes/src/code.H	2014-09-17 14:04:23.830240266 -0400
+@@ -49,6 +49,9 @@ global bodyptr bodytab; 	/* array size i
+ 
+ global struct CellLockType {
+     ALOCKDEC(CL,MAXLOCK)        /* locks on the cells*/
++#ifdef NODATARACE // 5
++    pthread_cond_t CC[MAXLOCK];
++#endif
+ } *CellLock;
+ 
+ struct GlobalMemory  {	/* all this info is for the whole system */
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/barnes/src/defs.H parsec-3.0-drf/ext/splash2x/apps/barnes/src/defs.H
+--- parsec-3.0/ext/splash2x/apps/barnes/src/defs.H	2013-07-28 10:39:57.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/barnes/src/defs.H	2014-09-17 14:04:23.830240266 -0400
+@@ -21,7 +21,13 @@
+ 
+ #define MAX_PROC 1024
+ #define MAX_BODIES_PER_LEAF 10
++#ifdef MANUAL
++// Greater number of locks significantly improves data race free version of
++// loadtree (and the entire application).
++#define MAXLOCK (1024*1024)
++#else
+ #define MAXLOCK 2048            	/* maximum number of locks on DASH */
++#endif
+ #define PAGE_SIZE 4096			/* in bytes */
+ 
+ #define NSUB (1 << NDIM)        /* subcells per cell */
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/barnes/src/load.C parsec-3.0-drf/ext/splash2x/apps/barnes/src/load.C
+--- parsec-3.0/ext/splash2x/apps/barnes/src/load.C	2013-07-28 10:39:57.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/barnes/src/load.C	2014-09-17 14:12:33.405076066 -0400
+@@ -163,6 +163,9 @@ nodeptr loadtree(bodyptr p, cellptr root
+    long kidIndex;
+    volatile nodeptr *volatile qptr, mynode;
+    leafptr le;
++#ifdef NODATARACE // 4
++   nodeptr rval;
++#endif
+ 
+    intcoord(xp, Pos(p));
+    valid_root = TRUE;
+@@ -212,9 +215,15 @@ nodeptr loadtree(bodyptr p, cellptr root
+       if (l == 0) {
+ 	 error("not enough levels in tree\n");
+       }
++#ifdef NODATARACE // 4
++      // Have the node locked for the entire time while working on it.
++      ALOCK(CellLock->CL, ((cellptr) mynode)->seqnum % MAXLOCK);
++#endif
+       if (*qptr == NULL) {
++#ifndef NODATARACE // 4
+ 	 /* lock the parent cell */
+ 	 ALOCK(CellLock->CL, ((cellptr) mynode)->seqnum % MAXLOCK);
++#endif
+ 	 if (*qptr == NULL) {
+ 	    le = InitLeaf((cellptr) mynode, ProcessId);
+ 	    Parent(p) = (nodeptr) le;
+@@ -225,13 +234,17 @@ nodeptr loadtree(bodyptr p, cellptr root
+ 	    *qptr = (nodeptr) le;
+ 	    flag = FALSE;
+ 	 }
++#ifndef NODATARACE // 4
+ 	 AULOCK(CellLock->CL, ((cellptr) mynode)->seqnum % MAXLOCK);
+ 	 /* unlock the parent cell */
++#endif
+       }
+       if (flag && *qptr && (Type(*qptr) == LEAF)) {
+ 	 /*   reached a "leaf"?      */
++#ifndef NODATARACE // 4
+ 	 ALOCK(CellLock->CL, ((cellptr) mynode)->seqnum % MAXLOCK);
+ 	 /* lock the parent cell */
++#endif
+ 	 if (Type(*qptr) == LEAF) {             /* still a "leaf"?      */
+ 	    le = (leafptr) *qptr;
+ 	    if (le->num_bodies == MAX_BODIES_PER_LEAF) {
+@@ -246,9 +259,19 @@ nodeptr loadtree(bodyptr p, cellptr root
+ 	       flag = FALSE;
+ 	    }
+ 	 }
++#ifndef NODATARACE // 4
+ 	 AULOCK(CellLock->CL, ((cellptr) mynode)->seqnum % MAXLOCK);
+ 	 /* unlock the node           */
++#endif
+       }
++#ifdef NODATARACE // 4
++      // Get the return value here to avoid the race if we would to do this
++      // outside of the lock. Note that this is correct since, if qptr would
++      // change below, the loop would run at lest once more and the rval would
++      // be updated.
++      rval = Parent((leafptr) *qptr);
++      AULOCK(CellLock->CL, ((cellptr) mynode)->seqnum % MAXLOCK);
++#endif
+       if (flag) {
+ 	 mynode = *qptr;
+          kidIndex = subindex(xp, l);
+@@ -257,7 +280,11 @@ nodeptr loadtree(bodyptr p, cellptr root
+       }
+    }
+    SETV(Local[ProcessId].Root_Coords, xp);
++#ifdef NODATARACE // 4
++   return rval;
++#else
+    return Parent((leafptr) *qptr);
++#endif
+ }
+ 
+ 
+@@ -363,7 +390,14 @@ void hackcofm(long ProcessId)
+ 	 ADDM(Quad(l), Quad(l), tmpm);
+       }
+ #endif
++#ifdef NODATARACE // 5
++      ALOCK(CellLock->CL, ((cellptr) (l))->seqnum % MAXLOCK);
++#endif
+       Done(l)=TRUE;
++#ifdef NODATARACE // 5
++      pthread_cond_broadcast(&CellLock->CC[((cellptr) (l))->seqnum % MAXLOCK]);
++      AULOCK(CellLock->CL, ((cellptr) (l))->seqnum % MAXLOCK);
++#endif
+    }
+    for (cc = Local[ProcessId].mycelltab+Local[ProcessId].myncell-1;
+ 	cc >= Local[ProcessId].mycelltab; cc--) {
+@@ -374,14 +408,24 @@ void hackcofm(long ProcessId)
+       for (i = 0; i < NSUB; i++) {
+ 	 r = Subp(q)[i];
+ 	 if (r != NULL) {
++#ifdef NODATARACE // 5
++        ALOCK(CellLock->CL, ((cellptr) (r))->seqnum % MAXLOCK);
++#endif
+ 	    while(!Done(r)) {
+ 	       /* wait */
++#ifdef NODATARACE // 5
++           pthread_cond_wait(&CellLock->CC[((cellptr) (r))->seqnum % MAXLOCK],
++                             &CellLock->CL[((cellptr) (r))->seqnum % MAXLOCK]);
++#endif
+ 	    }
+ 	    Mass(q) += Mass(r);
+ 	    Cost(q) += Cost(r);
+ 	    MULVS(tmpv, Pos(r), Mass(r));
+ 	    ADDV(Pos(q), Pos(q), tmpv);
+ 	    Done(r) = FALSE;
++#ifdef NODATARACE // 5
++        AULOCK(CellLock->CL, ((cellptr) (r))->seqnum % MAXLOCK);
++#endif
+ 	 }
+       }
+       DIVVS(Pos(q), Pos(q), Mass(q));
+@@ -403,7 +447,14 @@ void hackcofm(long ProcessId)
+ 	 }
+       }
+ #endif
++#ifdef NODATARACE // 5
++      ALOCK(CellLock->CL, ((cellptr) (q))->seqnum % MAXLOCK);
++#endif
+       Done(q)=TRUE;
++#ifdef NODATARACE // 5
++      pthread_cond_broadcast(&CellLock->CC[((cellptr) (q))->seqnum % MAXLOCK]);
++      AULOCK(CellLock->CL, ((cellptr) (q))->seqnum % MAXLOCK);
++#endif
+    }
+ }
+ 
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/fmm/src/box.H parsec-3.0-drf/ext/splash2x/apps/fmm/src/box.H
+--- parsec-3.0/ext/splash2x/apps/fmm/src/box.H	2013-07-28 10:39:56.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/fmm/src/box.H	2014-09-17 14:04:23.834239982 -0400
+@@ -131,4 +131,20 @@ extern void ListIterate(long my_id, box
+ extern long AdjacentBoxes(box *b1, box *b2);
+ extern long WellSeparatedBoxes(box *b1, box *b2);
+ 
++#ifdef NODATARACE // 2
++#define waitUntilInteractionSync(b, value)                              \
++    {                                                                   \
++        ALOCK(G_Memory->lock_array, b->exp_lock_index);                 \
++        while (b->interaction_synch != value) {                         \
++            pthread_cond_wait(&G_Memory->cond_array[b->exp_lock_index], \
++                              &G_Memory->lock_array[b->exp_lock_index]); \
++        }                                                               \
++        AULOCK(G_Memory->lock_array, b->exp_lock_index);                \
++    }
++#else
++#define waitUntilInteractionSync(b, value)      \
++    while (b->interaction_synch != value);
++#endif
++
++
+ #endif /* _Box_H */
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/fmm/src/construct_grid.C parsec-3.0-drf/ext/splash2x/apps/fmm/src/construct_grid.C
+--- parsec-3.0/ext/splash2x/apps/fmm/src/construct_grid.C	2013-07-28 10:39:56.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/fmm/src/construct_grid.C	2014-09-17 14:04:23.834239982 -0400
+@@ -528,7 +528,13 @@ SubdivideBox (long my_id, box *b)
+       b->particles[i] = NULL;
+    }
+    b->num_particles = 0;
++#ifdef NODATARACE // 3
++   ALOCK(G_Memory->lock_array, b->particle_lock_index);
++#endif
+    b->type = PARENT;
++#ifdef NODATARACE // 3
++   AULOCK(G_Memory->lock_array, b->particle_lock_index);
++#endif
+ }
+ 
+ 
+@@ -540,7 +546,15 @@ SubdivideBox (long my_id, box *b)
+ void
+ MergeLocalGrid (long my_id)
+ {
++#ifndef NODATARACE // 3
+    MLGHelper(my_id, Local[my_id].Local_Grid, Grid, NULL);
++#else
++   box *tGrid;
++   LOCK(G_Memory->single_lock);
++   tGrid = Grid;
++   UNLOCK(G_Memory->single_lock);
++   MLGHelper(my_id, Local[my_id].Local_Grid, tGrid, NULL);
++#endif
+ }
+ 
+ 
+@@ -560,9 +574,18 @@ MLGHelper (long my_id, box *local_box, b
+ 	    if (global_box->type == PARENT) {
+ 	       success = TRUE;
+ 	       for (i = 0; i < NUM_OFFSPRING; i++) {
+-		  if (local_box->children[i] != NULL)
++		  if (local_box->children[i] != NULL) {
++              box *gi;
++#ifdef NODATARACE // 3
++              ALOCK(G_Memory->lock_array, global_box->particle_lock_index);
++#endif
++              gi = global_box->children[i];
++#ifdef NODATARACE // 3
++          AULOCK(G_Memory->lock_array, global_box->particle_lock_index);
++#endif
+ 		     MLGHelper(my_id, local_box->children[i],
+-			       global_box->children[i], global_box);
++			       gi, global_box);
++          }
+ 	       }
+ 	    }
+ 	    else {
+@@ -598,8 +621,15 @@ MLGHelper (long my_id, box *local_box, b
+       if (success == FALSE) {
+ 	 if (global_parent == NULL)
+ 	    global_box = Grid;
+-	 else
++	 else {
++#ifdef NODATARACE // 3
++         ALOCK(G_Memory->lock_array, global_parent->particle_lock_index);
++#endif
+ 	    global_box = global_parent->children[local_box->child_num];
++#ifdef NODATARACE // 3
++         AULOCK(G_Memory->lock_array, global_parent->particle_lock_index);
++#endif
++      }
+       }
+    }
+ }
+@@ -618,7 +648,13 @@ MergeLocalParticles (long my_id, particl
+ 		  (particle **) p_dist, num_p_dist, pb);
+    for (i= 0; i < NUM_OFFSPRING; i++) {
+       if (num_p_dist[i] > 0) {
++#ifdef NODATARACE // 3
++          ALOCK(G_Memory->lock_array, pb->particle_lock_index);
++#endif
+ 	 child = pb->children[i];
++#ifdef NODATARACE // 3
++          AULOCK(G_Memory->lock_array, pb->particle_lock_index);
++#endif
+ 	 if (child == NULL) {
+ 	    child = CreateLeaf(my_id, pb, i, p_dist[i], num_p_dist[i]);
+ 	    success = InsertBoxInGrid(my_id, child, pb);
+@@ -807,9 +843,22 @@ InsertSubtreeInPartition (long my_id, bo
+    if (b->proc == my_id) {
+       InsertBoxInPartition(my_id, b);
+    }
+-   if (b->type == PARENT) {
++#ifdef NODATARACE // 3
++     ALOCK(G_Memory->lock_array, b->particle_lock_index);
++#endif
++     unsigned char is_parent = b->type == PARENT;
++#ifdef NODATARACE // 3
++     AULOCK(G_Memory->lock_array, b->particle_lock_index);
++#endif
++   if (is_parent) {
+       for (i = 0; i < NUM_OFFSPRING; i++) {
++#ifdef NODATARACE // 3
++     ALOCK(G_Memory->lock_array, b->particle_lock_index);
++#endif
+ 	 child = b->children[i];
++#ifdef NODATARACE // 3
++     AULOCK(G_Memory->lock_array, b->particle_lock_index);
++#endif
+ 	 if (child == NULL)
+ 	    child = b->shadow[i];
+ 	 if (child != NULL)
+@@ -884,10 +933,20 @@ SetColleagues (long my_id, box *b)
+    if (pb != NULL) {
+       for (i = 0; i < b->num_siblings; i++)
+ 	 b->colleagues[b->num_colleagues++] = b->siblings[i];
++#ifdef NODATARACE // 2
++     ALOCK(G_Memory->lock_array, b->exp_lock_index);
++#endif
+       while (b->construct_synch == 0) {
+ 	 /* wait */;
++#ifdef NODATARACE // 2
++         pthread_cond_wait(&G_Memory->cond_array[b->exp_lock_index],
++                           &G_Memory->lock_array[b->exp_lock_index]);
++#endif
+       }
+       b->construct_synch = 0;
++#ifdef NODATARACE // 2
++      AULOCK(G_Memory->lock_array, b->exp_lock_index);
++#endif
+       for (i = 0; i < pb->num_colleagues; i++) {
+ 	 cb = pb->colleagues[i];
+ 	 for (j = 0; j < NUM_OFFSPRING; j++) {
+@@ -902,7 +961,15 @@ SetColleagues (long my_id, box *b)
+    if (b->type == PARENT) {
+       for (i = 0; i < NUM_OFFSPRING; i++) {
+ 	 if (b->children[i] != NULL) {
++#ifdef NODATARACE // 2
++         ALOCK(G_Memory->lock_array, b->children[i]->exp_lock_index);
++#endif
+ 	    b->children[i]->construct_synch = 1;
++#ifdef NODATARACE // 2
++           pthread_cond_broadcast(
++               &G_Memory->cond_array[b->children[i]->exp_lock_index]);
++           AULOCK(G_Memory->lock_array, b->children[i]->exp_lock_index);
++#endif
+ 	 }
+       }
+    }
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/fmm/src/cost_zones.C parsec-3.0-drf/ext/splash2x/apps/fmm/src/cost_zones.C
+--- parsec-3.0/ext/splash2x/apps/fmm/src/cost_zones.C	2013-07-28 10:39:56.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/fmm/src/cost_zones.C	2014-09-17 14:04:23.834239982 -0400
+@@ -69,10 +69,16 @@ ComputeSubTreeCosts (long my_id, box *b)
+    box *pb;
+ 
+    if (b->type == PARENT) {
+-      while (b->interaction_synch != b->num_children) {
+-      }
++     waitUntilInteractionSync(b, b->num_children);
+    }
++#ifdef NODATARACE // 2
++   ALOCK(G_Memory->lock_array, b->exp_lock_index);
++#endif
+    b->interaction_synch = 0;
++#ifdef NODATARACE // 2
++   pthread_cond_broadcast(&G_Memory->cond_array[b->exp_lock_index]);
++   AULOCK(G_Memory->lock_array, b->exp_lock_index);
++#endif
+    ComputeCostOfBox(b);
+    b->subtree_cost += b->cost;
+    pb = b->parent;
+@@ -80,6 +86,9 @@ ComputeSubTreeCosts (long my_id, box *b)
+       ALOCK(G_Memory->lock_array, pb->exp_lock_index);
+       pb->subtree_cost += b->subtree_cost;
+       pb->interaction_synch += 1;
++#ifdef NODATARACE // 2
++      pthread_cond_broadcast(&G_Memory->cond_array[pb->exp_lock_index]);
++#endif
+       AULOCK(G_Memory->lock_array, pb->exp_lock_index);
+    }
+ }
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/fmm/src/interactions.C parsec-3.0-drf/ext/splash2x/apps/fmm/src/interactions.C
+--- parsec-3.0/ext/splash2x/apps/fmm/src/interactions.C	2013-07-28 10:39:56.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/fmm/src/interactions.C	2014-09-17 14:04:23.834239982 -0400
+@@ -96,17 +96,21 @@ UpwardPass (long my_id, box *b)
+       ComputeMPExp(b);
+       ALOCK(G_Memory->lock_array, b->exp_lock_index);
+       b->interaction_synch = 1;
++#ifdef NODATARACE // 2
++      pthread_cond_broadcast(&G_Memory->cond_array[b->exp_lock_index]);
++#endif
+       AULOCK(G_Memory->lock_array, b->exp_lock_index);
+    }
+    else {
+-      while (b->interaction_synch != b->num_children) {
+-	 /* wait */;
+-      }
++     waitUntilInteractionSync(b, b->num_children);
+    }
+    if (b->parent != NULL) {
+       ShiftMPExp(b, b->parent);
+       ALOCK(G_Memory->lock_array, b->parent->exp_lock_index);
+       b->parent->interaction_synch += 1;
++#ifdef NODATARACE // 2
++      pthread_cond_broadcast(&G_Memory->cond_array[b->parent->exp_lock_index]);
++#endif
+       AULOCK(G_Memory->lock_array, b->parent->exp_lock_index);
+    }
+ }
+@@ -129,18 +133,26 @@ void
+ DownwardPass (long my_id, box *b)
+ {
+    if (b->parent != NULL) {
+-      while (b->parent->interaction_synch != 0) {
+-	 /* wait */;
+-      }
++      waitUntilInteractionSync(b->parent, 0);
+       ShiftLocalExp(b->parent, b);
+    }
+    if (b->type == CHILDLESS) {
+       EvaluateLocalExp(b);
++#ifdef NODATARACE // 2
++      ALOCK(G_Memory->lock_array, b->exp_lock_index);
++#endif
+       b->interaction_synch = 0;
++#ifdef NODATARACE // 2
++      pthread_cond_broadcast(&G_Memory->cond_array[b->exp_lock_index]);
++      AULOCK(G_Memory->lock_array, b->exp_lock_index);
++#endif
+    }
+    else {
+       ALOCK(G_Memory->lock_array, b->exp_lock_index);
+       b->interaction_synch = 0;
++#ifdef NODATARACE // 2
++      pthread_cond_broadcast(&G_Memory->cond_array[b->exp_lock_index]);
++#endif
+       AULOCK(G_Memory->lock_array, b->exp_lock_index);
+    }
+ }
+@@ -185,12 +197,18 @@ InitExp (box *b)
+    long i;
+ 
+    for (i = 0; i < Expansion_Terms; i++) {
++#ifdef NODATARACE // 1
++      ALOCK(G_Memory->lock_array, b->exp_lock_index);
++#endif
+       b->mp_expansion[i].r = 0.0;
+       b->mp_expansion[i].i = 0.0;
+       b->local_expansion[i].r = 0.0;
+       b->local_expansion[i].i = 0.0;
+       b->x_expansion[i].r = 0.0;
+       b->x_expansion[i].i = 0.0;
++#ifdef NODATARACE // 1
++      AULOCK(G_Memory->lock_array, b->exp_lock_index);
++#endif
+    }
+ }
+ 
+@@ -364,14 +382,10 @@ VListInteraction (long my_id, box *sourc
+    long j;
+ 
+    if (source_box->type == CHILDLESS) {
+-      while (source_box->interaction_synch != 1) {
+-	 /* wait */;
+-      }
++      waitUntilInteractionSync(source_box, 1);
+    }
+    else {
+-      while (source_box->interaction_synch != source_box->num_children) {
+-	 /* wait */;
+-      }
++      waitUntilInteractionSync(source_box, source_box->num_children);
+    }
+ 
+    source_pos.r = source_box->x_center;
+@@ -443,14 +457,10 @@ WListInteraction (box *source_box, box *
+    long j;
+ 
+    if (source_box->type == CHILDLESS) {
+-      while (source_box->interaction_synch != 1) {
+-	 /* wait */;
+-      }
++      waitUntilInteractionSync(source_box, 1);
+    }
+    else {
+-      while (source_box->interaction_synch != source_box->num_children) {
+-	 /* wait */;
+-      }
++      waitUntilInteractionSync(source_box, source_box->num_children);
+    }
+ 
+    source_pos.r = source_box->x_center;
+@@ -601,12 +611,18 @@ ShiftLocalExp (box *pb, box *cb)
+    z0_pow_n.i = One.i;
+    z0_pow_minus_n.r = One.r;
+    z0_pow_minus_n.i = One.i;
++#ifdef NODATARACE // 4
++   ALOCK(G_Memory->lock_array, pb->exp_lock_index);
++#endif
+    for (i = 0; i < Expansion_Terms; i++) {
+       COMPLEX_ADD(pb->local_expansion[i], pb->local_expansion[i],
+ 		  pb->x_expansion[i]);
+       COMPLEX_MUL(temp_exp[i], z0_pow_n, pb->local_expansion[i]);
+       COMPLEX_MUL(z0_pow_n, z0_pow_n, z0);
+    }
++#ifdef NODATARACE // 4
++   AULOCK(G_Memory->lock_array, pb->exp_lock_index);
++#endif
+    for (i = 0; i < Expansion_Terms; i++) {
+       result_exp[i].r = (real) 0.0;
+       result_exp[i].i = (real) 0.0;
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/fmm/src/memory.C parsec-3.0-drf/ext/splash2x/apps/fmm/src/memory.C
+--- parsec-3.0/ext/splash2x/apps/fmm/src/memory.C	2013-07-28 10:39:56.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/fmm/src/memory.C	2014-09-17 14:04:23.834239982 -0400
+@@ -50,6 +50,12 @@ InitGlobalMemory ()
+    LOCKINIT(G_Memory->single_lock);
+    LOCKINIT(G_Memory->count_lock);
+    ALOCKINIT(G_Memory->lock_array, MAX_LOCKS);
++#ifdef NODATARACE // 2
++   long i;
++   for (i = 0; i < MAX_LOCKS; i++) {
++       pthread_cond_init(&G_Memory->cond_array[i], NULL);
++   }
++#endif
+    BARINIT(G_Memory->synch, Number_Of_Processors);
+    G_Memory->max_x = -MAX_REAL;
+    G_Memory->min_x = MAX_REAL;
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/fmm/src/memory.H parsec-3.0-drf/ext/splash2x/apps/fmm/src/memory.H
+--- parsec-3.0/ext/splash2x/apps/fmm/src/memory.H	2013-07-28 10:39:56.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/fmm/src/memory.H	2014-09-17 14:04:23.834239982 -0400
+@@ -35,6 +35,9 @@ struct _G_Mem
+    LOCKDEC(count_lock)
+    long count;
+    ALOCKDEC(lock_array, MAX_LOCKS)
++#ifdef NODATARACE // 2
++   pthread_cond_t cond_array[MAX_LOCKS];
++#endif
+    BARDEC(synch)
+    volatile long *i_array;
+    volatile double *d_array;
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/fmm/src/partition_grid.C parsec-3.0-drf/ext/splash2x/apps/fmm/src/partition_grid.C
+--- parsec-3.0/ext/splash2x/apps/fmm/src/partition_grid.C	2013-07-28 10:39:56.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/fmm/src/partition_grid.C	2014-09-17 14:04:23.838239728 -0400
+@@ -105,7 +105,15 @@ InsertBoxInPartition (long my_id, box *b
+ {
+    box *level_list;
+ 
+-   if (b->type == CHILDLESS) {
++#ifdef NODATARACE // 3
++     ALOCK(G_Memory->lock_array, b->particle_lock_index);
++#endif
++   unsigned char is_childless = b->type == CHILDLESS;
++#ifdef NODATARACE // 3
++     AULOCK(G_Memory->lock_array, b->particle_lock_index);
++#endif
++
++   if (is_childless) {
+       b->prev = NULL;
+       if (Local[my_id].Childless_Partition != NULL)
+ 	 Local[my_id].Childless_Partition->prev = b;
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/ocean_cp/src/multi.C parsec-3.0-drf/ext/splash2x/apps/ocean_cp/src/multi.C
+--- parsec-3.0/ext/splash2x/apps/ocean_cp/src/multi.C	2013-07-28 10:39:56.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/ocean_cp/src/multi.C	2014-09-17 14:27:04.772687198 -0400
+@@ -27,6 +27,10 @@ EXTERN_ENV
+ #include <stdlib.h>
+ #include "decs.h"
+ 
++#ifdef NODATARACE_OPTIONAL
++LOCKDEC(lev_tolLock)
++#endif
++
+ /* perform multigrid (w cycles)                                     */
+ void multig(long my_id)
+ {
+@@ -148,7 +152,14 @@ void multig(long my_id)
+            rescal(k,my_num);
+ 
+ /* transfer residual to rhs of coarser grid                        */
++
++#ifdef NODATARACE_OPTIONAL
++       LOCK(lev_tolLock);
++#endif
+            lev_tol[k-1] = 0.3 * g_error;
++#ifdef NODATARACE_OPTIONAL
++      UNLOCK(lev_tolLock);
++#endif
+            k = k-1;
+            putz(k,my_num);
+ /* make initial guess on coarser grid zero                         */
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/ocean_ncp/src/decs.H parsec-3.0-drf/ext/splash2x/apps/ocean_ncp/src/decs.H
+--- parsec-3.0/ext/splash2x/apps/ocean_ncp/src/decs.H	2013-07-28 10:39:58.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/ocean_ncp/src/decs.H	2014-09-17 14:04:23.838239728 -0400
+@@ -20,8 +20,8 @@
+ #define IMAX         2050
+ #define JMAX         2050
+ #else
+-#define IMAX         8098
+-#define JMAX         8098
++#define IMAX         5000
++#define JMAX         5000
+ #endif
+ #define MASTER          0
+ #define RED_ITER        0
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/ocean_ncp/src/multi.C parsec-3.0-drf/ext/splash2x/apps/ocean_ncp/src/multi.C
+--- parsec-3.0/ext/splash2x/apps/ocean_ncp/src/multi.C	2013-07-28 10:39:58.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/ocean_ncp/src/multi.C	2014-09-17 14:26:51.281932235 -0400
+@@ -25,6 +25,10 @@
+ #include <stdlib.h>
+ #include "decs.h"
+ 
++#ifdef NODATARACE_OPTIONAL // 1
++LOCKDEC(lev_tolLock)
++#endif
++
+ /* perform multigrid (w cycles)                                     */
+ void multig(long my_id)
+ {
+@@ -130,7 +134,13 @@ void multig(long my_id)
+ /* if need to go to coarser grid                                   */
+            rescal(k,my_num);
+ /* transfer residual to rhs of coarser grid                        */
++#ifdef NODATARACE_OPTIONAL // 1
++       LOCK(lev_tolLock);
++#endif
+            lev_tol[k-1] = 0.3 * g_error;
++#ifdef NODATARACE_OPTIONAL // 1
++      UNLOCK(lev_tolLock);
++#endif
+            k = k-1;
+            putz(k,my_num);
+ /* make initial guess on coarser grid zero                         */
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/ocean_ncp/src/slave1.C parsec-3.0-drf/ext/splash2x/apps/ocean_ncp/src/slave1.C
+--- parsec-3.0/ext/splash2x/apps/ocean_ncp/src/slave1.C	2013-07-28 10:39:58.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/ocean_ncp/src/slave1.C	2014-09-17 14:26:21.120715114 -0400
+@@ -451,7 +451,11 @@ BARRIER(bars->barrier,nprocs)
+    if (procid == nprocs-1) {
+      sintemp = pi*((double) jmm1)*res/ysca1;
+      sintemp = sin(sintemp);
++#ifdef NODATARACE_OPTIONAL // 2
++     frcng->tauz[im-1][jm-1] = factor*sintemp;
++#else
+      frcng->tauz[im-1][jm-1] = frcng->tauz[0][jm-1];
++#endif
+    }
+    if (firstrow == 1) {
+      for(j=firstcol;j<=lastcol;j++) {
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/radiosity/src/elemman.C parsec-3.0-drf/ext/splash2x/apps/radiosity/src/elemman.C
+--- parsec-3.0/ext/splash2x/apps/radiosity/src/elemman.C	2013-07-28 10:39:56.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/radiosity/src/elemman.C	2014-09-17 14:04:23.838239728 -0400
+@@ -458,9 +458,15 @@ long bf_error_analysis(Element *elem, In
+     else
+         visibility_error = FF_VISIBILITY_ERROR ;
+ 
++#ifdef NODATARACE // 3
++    LOCK(inter->destination->elem_lock->lock);
++#endif
+     rad_avg =( inter->destination->rad.r
+               + inter->destination->rad.g
+               + inter->destination->rad.b ) * (float)(1.0 / 3.0) ;
++#ifdef NODATARACE // 3
++    UNLOCK(inter->destination->elem_lock->lock);
++#endif
+ 
+     total_error = (inter->visibility * inter->formfactor_err
+                    + visibility_error * inter->formfactor_out
+@@ -785,10 +791,16 @@ static void process_rays3(Element *e, lo
+         }
+     else
+         {
++#ifdef NODATARACE // 3
++            LOCK(e->elem_lock->lock);
++#endif
+             /* Update element radiosity at the leaf level */
+             e->rad.r = e->rad_in.r + e->rad_subtree.r + e->patch->emittance.r ;
+             e->rad.g = e->rad_in.g + e->rad_subtree.g + e->patch->emittance.g ;
+             e->rad.b = e->rad_in.b + e->rad_subtree.b + e->patch->emittance.b ;
++#ifdef NODATARACE // 3
++            UNLOCK(e->elem_lock->lock);
++#endif
+ 
+             /* Ship out radiosity to the parent */
+             elem_join_operation( e->parent, e, process_id ) ;
+@@ -840,9 +852,15 @@ static void elem_join_operation(Element
+             /* This is the continuation called by the last (4th) subprocess.
+                Perform JOIN at this level */
+             /* Update element radiosity */
++#ifdef NODATARACE // 3
++            LOCK(e->elem_lock->lock);
++#endif
+             e->rad.r = e->rad_in.r + e->rad_subtree.r + e->patch->emittance.r ;
+             e->rad.g = e->rad_in.g + e->rad_subtree.g + e->patch->emittance.g ;
+             e->rad.b = e->rad_in.b + e->rad_subtree.b + e->patch->emittance.b ;
++#ifdef NODATARACE // 3
++            UNLOCK(e->elem_lock->lock);
++#endif
+ 
+             /* Traverse the tree one level up and repeat */
+             ec = e ;
+@@ -911,11 +929,17 @@ static void gather_rays(Element *elem, l
+         {
+             /* Be careful !
+                Use FF(out) to compute incoming energy */
++
+             ff_v = inter->formfactor_out * inter->visibility ;
++#ifdef NODATARACE // 3
++            LOCK(inter->destination->elem_lock->lock);
++#endif
+             bf_r = ff_v * inter->destination->rad.r ;
+             bf_g = ff_v * inter->destination->rad.g ;
+             bf_b = ff_v * inter->destination->rad.b ;
+-
++#ifdef NODATARACE // 3
++            UNLOCK(inter->destination->elem_lock->lock);
++#endif
+             rad_elem.r += bf_r ;
+             rad_elem.g += bf_g ;
+             rad_elem.b += bf_b ;
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/radiosity/src/radiosity.H parsec-3.0-drf/ext/splash2x/apps/radiosity/src/radiosity.H
+--- parsec-3.0/ext/splash2x/apps/radiosity/src/radiosity.H	2013-07-28 10:39:56.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/radiosity/src/radiosity.H	2014-09-17 14:04:23.838239728 -0400
+@@ -281,6 +281,9 @@ typedef struct
+     /* Private varrier */
+     long pbar_count ;
+     LOCKDEC(pbar_lock)
++#ifdef NODATARACE // 1
++    pthread_cond_t cond;
++#endif
+ 
+     /* Task initializer counter */
+     long task_counter ;
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/radiosity/src/rad_main.C parsec-3.0-drf/ext/splash2x/apps/radiosity/src/rad_main.C
+--- parsec-3.0/ext/splash2x/apps/radiosity/src/rad_main.C	2013-07-28 10:39:56.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/radiosity/src/rad_main.C	2014-09-17 14:30:11.187488260 -0400
+@@ -324,8 +324,6 @@ int main(int argc, char *argv[])
+             }
+ 
+             /*	print_fork_time(0) ; */
+-
+-            print_statistics( stdout, 0 ) ;
+         }
+     else
+         {
+@@ -1118,6 +1116,10 @@ void init_global(long process_id)
+     LOCKINIT(global->pbar_lock);
+     global->pbar_count = 0 ;
+ 
++#ifdef NODATARACE // 1
++    pthread_cond_init(&global->cond, NULL);
++#endif
++
+     /* Initialize task counter */
+     global->task_counter = 0 ;
+     LOCKINIT(global->task_counter_lock);
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/radiosity/src/taskman.C parsec-3.0-drf/ext/splash2x/apps/radiosity/src/taskman.C
+--- parsec-3.0/ext/splash2x/apps/radiosity/src/taskman.C	2013-07-28 10:39:56.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/radiosity/src/taskman.C	2014-09-17 14:04:23.838239728 -0400
+@@ -105,17 +105,21 @@ void process_tasks(long process_id)
+     /* Barrier. While waiting for other processors to finish, poll the task
+        queues and resume processing if there is any task */
+ 
++    int pbar;
+     LOCK(global->pbar_lock);
+     /* Reset the barrier counter if not initialized */
+     if( global->pbar_count >= n_processors )
+         global->pbar_count = 0 ;
+ 
+     /* Increment the counter */
+-    global->pbar_count++ ;
++    pbar = global->pbar_count++ ;
++#ifdef NODATARACE // 1
++    pthread_cond_broadcast(&global->cond);
++#endif
+     UNLOCK(global->pbar_lock);
+ 
+     /* barrier spin-wait loop */
+-    while( global->pbar_count < n_processors )
++    while( pbar < n_processors )
+         {
+             /* Wait for a while and then retry dequeue */
+             if( _process_task_wait_loop() )
+@@ -129,10 +133,26 @@ void process_tasks(long process_id)
+                     /* Task found. Exit the barrier and work on it */
+                     LOCK(global->pbar_lock);
+                     global->pbar_count-- ;
++#ifdef NODATARACE // 1
++                    pthread_cond_broadcast(&global->cond);
++#endif
+                     UNLOCK(global->pbar_lock);
+                     goto retry_entry ;
+                 }
+ 
++#ifdef NODATARACE // 1
++            else {
++                // No tasks currently, wait for someone else to reach the
++                // barrier.
++                LOCK(global->pbar_lock);
++                while (pbar == global->pbar_count) {
++                    pthread_cond_wait(&global->cond, &global->pbar_lock);
++                }
++                // Update the count.
++                pbar = global->pbar_count;
++                UNLOCK(global->pbar_lock);
++            }
++#endif
+         }
+ 
+     BARRIER(global->barrier, n_processors);
+@@ -147,9 +167,16 @@ long _process_task_wait_loop()
+     /* Wait for a while and then retry */
+     for( i = 0 ; i < 1000 && ! finished ; i++ )
+         {
+-            if(    ((i & 0xff) == 0) && ((*(volatile long*)(&global->pbar_count)) >= n_processors) )
+-
++            if((i & 0xff) == 0) {
++#ifdef NODATARACE // 1
++                LOCK(global->pbar_lock);
++#endif
++                if ((*(volatile long*)(&global->pbar_count)) >= n_processors)
+                 finished = 1 ;
++#ifdef NODATARACE // 1
++                UNLOCK(global->pbar_lock);
++#endif
++            }
+         }
+ 
+     return( finished ) ;
+@@ -193,7 +220,15 @@ void create_ff_refine_task(Element *e1,
+     Task *t ;
+ 
+     /* Check existing parallelism */
++#ifndef NODATARACE // 2
+     if( taskq_too_long(&global->task_queue[ taskqueue_id[process_id] ]) )
++#else
++    int too_long;
++    LOCK((&global->task_queue[ taskqueue_id[process_id]])->q_lock);
++    too_long = taskq_too_long(&global->task_queue[ taskqueue_id[process_id] ]);
++    UNLOCK((&global->task_queue[ taskqueue_id[process_id]])->q_lock);
++    if(too_long)
++#endif
+         {
+             /* Task queue is too long. Solve it immediately */
+             ff_refine_elements( e1, e2, level, process_id ) ;
+@@ -217,9 +252,19 @@ void create_ff_refine_task(Element *e1,
+ void create_ray_task(Element *e, long process_id)
+ {
+     /* Check existing parallelism */
++#ifndef NODATARACE // 2
+     if(   ((e->n_interactions + e->n_vis_undef_inter)
+            < N_inter_parallel_bf_refine)
+        || taskq_too_long(&global->task_queue[ taskqueue_id[process_id] ]) )
++#else
++    int too_long;
++    LOCK((&global->task_queue[ taskqueue_id[process_id]])->q_lock);
++    too_long = taskq_too_long(&global->task_queue[ taskqueue_id[process_id] ]);
++    UNLOCK((&global->task_queue[ taskqueue_id[process_id]])->q_lock);
++    if(   ((e->n_interactions + e->n_vis_undef_inter)
++           < N_inter_parallel_bf_refine)
++       || too_long)
++#endif
+         {
+             /* Task size is small, or the queue is too long.
+                Solve it immediately */
+@@ -270,8 +315,17 @@ void create_visibility_tasks(Element *e,
+         }
+ 
+     /* Check existing parallelism */
++#ifndef NODATARACE // 2
+     if(   (total_undefs < N_visibility_per_task)
+        || taskq_too_long(&global->task_queue[ taskqueue_id[process_id] ]) )
++#else
++    int too_long;
++    LOCK((&global->task_queue[ taskqueue_id[process_id]])->q_lock);
++    too_long = taskq_too_long(&global->task_queue[ taskqueue_id[process_id] ]);
++    UNLOCK((&global->task_queue[ taskqueue_id[process_id]])->q_lock);
++    if(   (total_undefs < N_visibility_per_task)
++       || too_long)
++#endif
+         {
+             /* Task size is small, or the queue is too long.
+                Solve it immediately. */
+@@ -337,8 +391,17 @@ void create_visibility_tasks(Element *e,
+ void create_radavg_task(Element *e, long mode, long process_id)
+ {
+     /* Check existing parallelism */
++#ifndef NODATARACE // 2
+     if(   (e->n_interactions < N_inter_parallel_bf_refine)
+        || taskq_too_long(&global->task_queue[ taskqueue_id[process_id] ]) )
++#else
++    int too_long;
++    LOCK((&global->task_queue[ taskqueue_id[process_id]])->q_lock);
++    too_long = taskq_too_long(&global->task_queue[ taskqueue_id[process_id] ]);
++    UNLOCK((&global->task_queue[ taskqueue_id[process_id]])->q_lock);
++    if(   (e->n_interactions < N_inter_parallel_bf_refine)
++       || too_long)
++#endif
+         {
+             /* Task size is too small or queue is too long.
+                Solve it immediately */
+@@ -442,8 +505,16 @@ Task *dequeue_task(long qid, long max_vi
+             /* Select a task queue */
+             tq = &global->task_queue[ qid ] ;
+ 
++
+             /* Check the length (test-test&set) */
+-            if( tq->n_tasks > 0 )
++#ifdef NODATARACE // 2
++            LOCK(tq->q_lock);
++#endif
++            int nTasks = tq->n_tasks;
++#ifdef NODATARACE // 2
++            UNLOCK(tq->q_lock);
++#endif
++            if( nTasks > 0 )
+                 {
+                     /* Lock the task queue */
+                     LOCK(tq->q_lock);
+@@ -520,7 +591,11 @@ Task *get_task(long process_id)
+                 {
+                     tq = &global->task_queue[ q_id ] ;
+ 
+-                    if( tq->n_free > 0 )
++#ifdef NODATARACE // 2
++                    if (1)
++#else
++                    if( tq->n_free )
++#endif
+                         {
+                             LOCK(tq->f_lock);
+                             if( tq->free )
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/raytrace/src/cr.C parsec-3.0-drf/ext/splash2x/apps/raytrace/src/cr.C
+--- parsec-3.0/ext/splash2x/apps/raytrace/src/cr.C	2013-07-28 10:39:57.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/raytrace/src/cr.C	2014-09-17 14:04:23.838239728 -0400
+@@ -371,7 +371,7 @@ INT	*n;
+ 		npepa = ObjectMalloc(OT_PEPARRAY, n_in);
+ 	else
+ 		{
+-		npepa == NULL;
++		npepa = NULL;
+ 		*n = 0;
+ 		return (npepa);
+ 		}
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/raytrace/src/main.C parsec-3.0-drf/ext/splash2x/apps/raytrace/src/main.C
+--- parsec-3.0/ext/splash2x/apps/raytrace/src/main.C	2013-07-28 10:39:57.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/raytrace/src/main.C	2014-09-17 14:32:46.653147011 -0400
+@@ -364,10 +364,13 @@ CHAR	*argv[];
+ 	gm->pid    = 0;
+ 	gm->rid    = 1;
+ 
+-	BARINIT(gm->start)
++	BARINIT(gm->start, nprocs)
+ 	LOCKINIT(gm->pidlock)
+ 	LOCKINIT(gm->ridlock)
+ 	LOCKINIT(gm->memlock)
++#ifdef NODATARACE // 1
++    LOCKINIT(gm->randLock);
++#endif
+ 	ALOCKINIT(gm->wplock, nprocs)
+ 
+ /* POSSIBLE ENHANCEMENT:  Here is where one might distribute the 
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/raytrace/src/rt.H parsec-3.0-drf/ext/splash2x/apps/raytrace/src/rt.H
+--- parsec-3.0/ext/splash2x/apps/raytrace/src/rt.H	2013-07-28 10:39:57.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/raytrace/src/rt.H	2014-09-17 14:04:23.842239444 -0400
+@@ -646,6 +646,9 @@ typedef struct	gmem
+ 	LOCKDEC(pidlock)		/* Lock to increment pid.	     */
+ 	LOCKDEC(ridlock)		/* Lock to increment rid.	     */
+ 	LOCKDEC(memlock)		/* Lock for memory manager.	     */
++#ifdef NODATARACE // 1
++    LOCKDEC(randLock);
++#endif
+ 	ALOCKDEC(wplock, MAX_PROCS)	/* Locks for shared work pools.      */
+     UINT par_start_time;
+     UINT partime[MAX_PROCS];
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/raytrace/src/trace.C parsec-3.0-drf/ext/splash2x/apps/raytrace/src/trace.C
+--- parsec-3.0/ext/splash2x/apps/raytrace/src/trace.C	2013-07-28 10:39:57.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/raytrace/src/trace.C	2014-09-17 14:04:23.842239444 -0400
+@@ -46,8 +46,14 @@ REAL	frand()
+ 	REAL	r;
+ 	static	LONG	lLastRand = 0;
+ 
++#ifdef NODATARACE // 1
++    LOCK(gm->randLock);
++#endif
+ 	lLastRand = lLastRand*214013L + 2531011L;
+ 	r  = (REAL)((lLastRand >> 16) & 0x7FFF)/32768.0;
++#ifdef NODATARACE // 1
++    UNLOCK(gm->randLock);
++#endif
+ 	return (r);
+ 	}
+ 
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/raytrace/src/workpool.C parsec-3.0-drf/ext/splash2x/apps/raytrace/src/workpool.C
+--- parsec-3.0/ext/splash2x/apps/raytrace/src/workpool.C	2013-07-28 10:39:57.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/raytrace/src/workpool.C	2014-09-17 18:09:49.983681677 -0400
+@@ -208,7 +208,11 @@ INT	pid;
+ 
+ 	/* First, try to get job from pid's own pool (or pool 0). */
+ 
++#ifdef NODATARACE // 2
++    if (1)
++#else
+ 	if (gm->wpstat[i][0] == WPS_VALID)
++#endif
+ 		 if (GetJob(job, i) == WPS_VALID)
+ 			{
+ 			return (WPS_VALID);
+@@ -224,7 +228,11 @@ INT	pid;
+ 
+ 		while (i != pid)
+ 			{
++#ifdef NODATARACE // 2
++            if (1)
++#else
+ 			if (gm->wpstat[i][0] == WPS_VALID)
++#endif
+ 				if (GetJob(job, i) == WPS_VALID)
+ 					{
+ 					return (WPS_VALID);
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/volrend/src/adaptive.C parsec-3.0-drf/ext/splash2x/apps/volrend/src/adaptive.C
+--- parsec-3.0/ext/splash2x/apps/volrend/src/adaptive.C	2013-07-28 10:39:56.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/volrend/src/adaptive.C	2014-09-17 14:33:45.731696898 -0400
+@@ -42,6 +42,10 @@ EXTERN_ENV
+ 
+ #include "anl.h"
+ 
++#ifdef NODATARACE_OPTIONAL // 1
++  LOCKDEC(jacobianLock)
++#endif
++
+ void Ray_Trace(long my_node)
+ {
+   long i,j;
+@@ -60,6 +64,9 @@ void Ray_Trace(long my_node)
+   /* then make a copy of object space d{x,y,z} per image space dz,     */
+   /* which controls number of ray samples per object space voxel       */
+   /* (i.e. Z-sampling rate), to allow recomputation per region.        */
++#ifdef NODATARACE_OPTIONAL // 1
++  LOCK(jacobianLock)
++#endif
+   for (i=0; i<NM; i++) {
+     invjacobian[X][i] = uout_invvertex[0][0][1][i] -
+       uout_invvertex[0][0][0][i];
+@@ -83,6 +90,11 @@ void Ray_Trace(long my_node)
+   num_traced_rays_hit_volume = 0;
+   num_samples_trilirped = 0;
+ 
++#ifdef NODATARACE_OPTIONAL // 1
++  UNLOCK(jacobianLock)
++#endif
++
++
+   /* Invoke adaptive or non-adaptive ray tracer                          */
+   if (adaptive) {
+ 
+@@ -91,10 +103,14 @@ void Ray_Trace(long my_node)
+     CLOCK(starttime);
+     Pre_Shade(my_node);
+ 
++#ifdef NODATARACE // 2
++    BARRIER(Global->TimeBarrier,num_nodes);
++#else
+     LOCK(Global->CountLock);
+     Global->Counter--;
+     UNLOCK(Global->CountLock);
+     while (Global->Counter);
++#endif
+ 
+     Ray_Trace_Adaptively(my_node);
+ 
+@@ -132,10 +148,19 @@ void Ray_Trace(long my_node)
+ 
+     Pre_Shade(my_node);
+ 
++#ifdef NODATARACE // 3
++    //See Ray_Trace_Non_Adaptively.
++    Global->Queue[my_node][0] = 0;
++#endif
++
++#ifdef NODATARACE // 2
++    BARRIER(Global->TimeBarrier,num_nodes);
++#else
+     LOCK(Global->CountLock);
+     Global->Counter--;
+     UNLOCK(Global->CountLock);
+     while (Global->Counter);
++#endif
+ 
+     Ray_Trace_Non_Adaptively(my_node);
+ 
+@@ -341,8 +366,17 @@ void Ray_Trace_Non_Adaptively(long my_no
+   lnum_yblocks = ROUNDUP((float)num_yqueue/(float)block_ylen);
+   lnum_blocks = lnum_xblocks * lnum_yblocks;
+   local_node = my_node;
++#ifndef NODATARACE // 3
++  // This is a bug. A thread could be setting this to 0 AFTER all the tasks in
++  // in its queue are already done by some other thread, leading to this thread
++  // re-executing everything. I *think* Ray_Trace is not commutative, see
++  // raytrace.C:480. So, we initialize this BEFORE doing the acutal ray trace,
++  // see :158.
+   Global->Queue[local_node][0] = 0;
+   while (Global->Queue[num_nodes][0] > 0) {
++#else
++  while (1) {
++#endif
+     xstart = (local_node % image_section[X]) * num_xqueue;
+     xstop = MIN(xstart+num_xqueue,image_len[X]);
+     ystart = (local_node / image_section[X]) * num_yqueue;
+@@ -368,6 +403,7 @@ void Ray_Trace_Non_Adaptively(long my_no
+       work = Global->Queue[local_node][0]++;
+       AULOCK(Global->QLock,local_node);
+     }
++#ifndef NODATARACE // 3
+     if (my_node == local_node) {
+       ALOCK(Global->QLock,num_nodes);
+       Global->Queue[num_nodes][0]--;
+@@ -377,6 +413,21 @@ void Ray_Trace_Non_Adaptively(long my_no
+     while (Global->Queue[local_node][0] >= lnum_blocks &&
+ 	   Global->Queue[num_nodes][0] > 0)
+       local_node = (local_node+1)%num_nodes;
++#else
++    // Check if threre are tasks in remote queues.
++    // We don't use Global->Queue[num_nodes][0], no need.
++    int i;
++    for (i = 1; i < num_nodes; i++) {
++        local_node = (local_node+1)%num_nodes;
++        ALOCK(Global->QLock,local_node);
++        work = Global->Queue[local_node][0];
++        AULOCK(Global->QLock,local_node);
++        if (work < lnum_blocks) break;
++    }
++    // If all queues are empty, end.
++    if (i == num_nodes) break;
++    // Otherwise, there are tasks in local_node queue, do it.
++#endif
+   }
+ }
+ 
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/apps/volrend/src/main.C parsec-3.0-drf/ext/splash2x/apps/volrend/src/main.C
+--- parsec-3.0/ext/splash2x/apps/volrend/src/main.C	2013-07-28 10:39:56.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/apps/volrend/src/main.C	2014-09-17 14:42:59.608598184 -0400
+@@ -42,6 +42,12 @@ MAIN_ENV
+ 
+ #include "anl.h"
+ 
++#ifdef NODATARACE_OPTIONAL // 1
++LOCKDEC(frameLock)
++LOCKDEC(globalLock)
++#endif
++
++
+ int ROTATE_STEPS = 8;
+ 
+ struct GlobalMemory *Global;
+@@ -104,10 +110,10 @@ int main(int argc, char *argv[])
+ 
+   if (num_nodes > 1){
+     WAIT_FOR_END(num_nodes);
++  }
+ #ifdef ENABLE_PARSEC_HOOKS
+ 	__parsec_roi_end();
+ #endif
+-  }
+ 
+   MAIN_END;
+ #ifdef ENABLE_PARSEC_HOOKS
+@@ -281,8 +287,13 @@ void Render_Loop()
+ /*  POSSIBLE ENHANCEMENT:  Here is where one might reset statistics, if
+     		one wanted to.
+ */
+-
++#ifdef NODATARACE_OPTIONAL // 1
++      LOCK(frameLock);
++#endif
+       frame = step;
++#ifdef NODATARACE_OPTIONAL // 1
++      UNLOCK(frameLock);
++#endif
+       /* initialize images here */
+       local_image_address = image_address + image_partition * my_node;
+       local_mask_image_address = mask_image_address +
+@@ -315,8 +326,14 @@ void Render_Loop()
+ 
+       BARRIER(Global->SlaveBarrier,num_nodes);
+ 
++#ifdef NODATARACE_OPTIONAL // 1
++      LOCK(globalLock);
++#endif
+       Global->Counter = num_nodes;
+       Global->Queue[num_nodes][0] = num_nodes;
++#ifdef NODATARACE_OPTIONAL // 1
++      UNLOCK(globalLock);
++#endif
+       Global->Queue[my_node][0] = 0;
+ 
+       Render(my_node);
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/kernels/cholesky/src/mf.C parsec-3.0-drf/ext/splash2x/kernels/cholesky/src/mf.C
+--- parsec-3.0/ext/splash2x/kernels/cholesky/src/mf.C	2013-07-28 10:39:58.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/kernels/cholesky/src/mf.C	2014-09-17 14:46:39.256335162 -0400
+@@ -26,6 +26,9 @@ struct Update **updateHash;
+ 
+ struct taskQ {
+ 	LOCKDEC(taskLock)
++#ifdef NODATARACE
++    pthread_cond_t taskCond;
++#endif
+ 	struct Task *volatile taskQ; 
+ 	struct Task *volatile taskQlast;
+ 	struct Task *volatile probeQ; 
+@@ -42,6 +45,9 @@ void InitTaskQueues(long P)
+   for (i=0; i<P; i++) {
+     LOCKINIT(tasks[i].taskLock)
+ 
++#ifdef NODATARACE
++    pthread_cond_init(&tasks[i].taskCond, NULL);
++#endif
+     tasks[i].taskQ = (struct Task *) NULL;
+     tasks[i].taskQlast = (struct Task *) NULL;
+     tasks[i].probeQ = (struct Task *) NULL;
+@@ -116,6 +122,9 @@ void Send(long src_block, long dest_bloc
+     tasks[procnum].taskQlast = t;
+   }
+ 
++#ifdef NODATARACE
++  pthread_cond_signal(&tasks[procnum].taskCond);
++#endif
+   UNLOCK(tasks[procnum].taskLock)
+ }
+ 
+@@ -132,8 +141,15 @@ void GetBlock(long *desti, long *destj,
+ 
+   for (;;) {
+ 
++#ifdef NODATARACE
++    if (1) {
++      LOCK(tasks[MyNum].taskLock);
++      while (!tasks[MyNum].taskQ && !tasks[MyNum].probeQ)
++        pthread_cond_wait(&tasks[MyNum].taskCond, &tasks[MyNum].taskLock);
++#else
+     if (tasks[MyNum].taskQ || tasks[MyNum].probeQ) {
+       LOCK(tasks[MyNum].taskLock)
++#endif
+       t = NULL;
+       if (tasks[MyNum].probeQ) {
+         t = (struct Task *) tasks[MyNum].probeQ;
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/kernels/fft/src/fft.C parsec-3.0-drf/ext/splash2x/kernels/fft/src/fft.C
+--- parsec-3.0/ext/splash2x/kernels/fft/src/fft.C	2013-07-28 10:39:58.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/kernels/fft/src/fft.C	2014-09-17 14:47:43.630399138 -0400
+@@ -64,6 +64,9 @@ MAIN_ENV
+ struct GlobalMemory {
+   long id;
+   LOCKDEC(idlock)
++#ifdef NODATARACE
++  LOCKDEC(is_outputLock)
++#endif
+   BARDEC(start)
+   long *transtimes;
+   long *totaltimes;
+@@ -312,6 +315,10 @@ int main(int argc, char *argv[])
+ 
+   BARINIT(Global->start, P);
+   LOCKINIT(Global->idlock);
++#ifdef NODATARACE
++  LOCKINIT(Global->is_outputLock);
++#endif
++
+   Global->id = 0;
+   InitX(x);                  /* place random values in x */
+ 
+@@ -879,10 +886,16 @@ void FFT1DOnce(long direction, long M, l
+       }
+     }
+   }
++#ifdef NODATARACE
++  LOCK(Global->is_outputLock)
++#endif
+   if(is_output == 1){
+       printf("FFt1DOnce: iter_num = %lu\n", iter_num);
+       is_output = 0;
+   }
++#ifdef NODATARACE
++  UNLOCK(Global->is_outputLock)
++#endif
+ }
+ 
+ 
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/kernels/lu_cb/src/run.sh parsec-3.0-drf/ext/splash2x/kernels/lu_cb/src/run.sh
+--- parsec-3.0/ext/splash2x/kernels/lu_cb/src/run.sh	2013-07-28 10:39:58.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/kernels/lu_cb/src/run.sh	2014-09-17 14:04:23.842239444 -0400
+@@ -53,7 +53,7 @@ case "${INPUTSIZE}" in
+ 	exit 1;;
+ esac
+  
+-PROG="${PARSECDIR}/ext/splash2/kernels/${TARGET}/inst/${PARSECPLAT}/bin/${TARGET}"
++PROG="${PARSECDIR}/ext/splash2x/kernels/${TARGET}/inst/${PARSECPLAT}/bin/${TARGET}"
+ 
+ 
+ #Some tests
+diff -rupN --ignore-all-space -w -B parsec-3.0/ext/splash2x/kernels/lu_ncb/src/run.sh parsec-3.0-drf/ext/splash2x/kernels/lu_ncb/src/run.sh
+--- parsec-3.0/ext/splash2x/kernels/lu_ncb/src/run.sh	2013-07-28 10:39:58.000000000 -0400
++++ parsec-3.0-drf/ext/splash2x/kernels/lu_ncb/src/run.sh	2014-09-17 14:04:23.846239202 -0400
+@@ -53,7 +53,7 @@ case "${INPUTSIZE}" in
+ 	exit 1;;
+ esac
+  
+-PROG="${PARSECDIR}/ext/splash2/kernels/${TARGET}/inst/${PARSECPLAT}/bin/${TARGET}"
++PROG="${PARSECDIR}/ext/splash2x/kernels/${TARGET}/inst/${PARSECPLAT}/bin/${TARGET}"
+ 
+ 
+ #Some tests
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/apps/bodytrack/src/FlexImageLib/FlexImageStore.h parsec-3.0-drf/pkgs/apps/bodytrack/src/FlexImageLib/FlexImageStore.h
+--- parsec-3.0/pkgs/apps/bodytrack/src/FlexImageLib/FlexImageStore.h	2013-07-28 10:39:45.000000000 -0400
++++ parsec-3.0-drf/pkgs/apps/bodytrack/src/FlexImageLib/FlexImageStore.h	2014-09-17 14:56:41.936735571 -0400
+@@ -31,6 +31,11 @@
+ 
+ #include "FlexDefs.h"
+ 
++#ifdef NODATARACE // 2
++#include <pthread.h>
++extern pthread_mutex_t refLock;
++#endif
++
+ template <class T, int C>
+ class FlexImageStore { 
+ 
+@@ -129,13 +134,27 @@ template <class T, int C>
+ bool FlexImageStore<T,C>::DecReferences()
+ {
+ 	//CSingleLock l(mLock, true);
+-	return( (--mCount) == 0);
++    bool result;
++#ifdef NODATARACE // 2
++    pthread_mutex_lock(&refLock);
++#endif
++    result = (--mCount) == 0;
++#ifdef NODATARACE // 2
++    pthread_mutex_unlock(&refLock);
++#endif
++	return result;
+ }
+ template <class T, int C>
+ void FlexImageStore<T,C>::IncReferences()
+ {
+ 	//CSingleLock l(mLock, true);
++#ifdef NODATARACE // 2
++    pthread_mutex_lock(&refLock);
++#endif
+ 	mCount++;
++#ifdef NODATARACE // 2
++    pthread_mutex_unlock(&refLock);
++#endif
+ }
+ 
+ template<class T, int C>
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/apps/bodytrack/src/TrackingBenchmark/AsyncIO.cpp parsec-3.0-drf/pkgs/apps/bodytrack/src/TrackingBenchmark/AsyncIO.cpp
+--- parsec-3.0/pkgs/apps/bodytrack/src/TrackingBenchmark/AsyncIO.cpp	2013-07-28 10:39:44.000000000 -0400
++++ parsec-3.0-drf/pkgs/apps/bodytrack/src/TrackingBenchmark/AsyncIO.cpp	2014-09-17 14:04:23.846239202 -0400
+@@ -48,6 +48,18 @@ void AsyncImageLoader::LoadSet(std::vect
+ 	}	
+ }
+ 
++size_t imageSetSize(std::deque<ImageSet> &imgBuffer, threads::Mutex &lock) {
++    size_t result;
++#ifdef NODATARACE // 1
++    lock.Lock();
++#endif
++    result = imgBuffer.size();
++#ifdef NODATARACE // 1
++    lock.Unlock();
++#endif
++    return result;
++}
++
+ //thread entry function - continuously loads images (producer)
+ void AsyncImageLoader::Run()
+ {
+@@ -68,8 +80,15 @@ void AsyncImageLoader::Run()
+ 		mFGBuffer.push_back(FGImages);
+ 		mDataLock.Unlock();
+ 		
++#ifdef NODATARACE // 1
++    mLock2.Lock();
++#endif
+ 		mCondEmpty.NotifyOne();														//notify waiting threads of data
+-		if(mImageBuffer.size() >= mBufferSize)										//if buffer is full
++#ifdef NODATARACE // 1
++    mLock2.Unlock();
++#endif
++
++    if(imageSetSize(mImageBuffer, mDataLock) >= mBufferSize)										//if buffer is full
+ 		{	mLock1.Lock();
+ 			mCondFull.Wait();														//wait on full condition (wait until a request removes a set of images)
+ 			mLock1.Unlock();
+@@ -84,7 +103,7 @@ bool AsyncImageLoader::GetNextImageSet(I
+ 	if(mFailed)																		
+ 		return false;
+ 
+-	while(mImageBuffer.size() == 0)													//if buffer is empty, wait until images are loaded
++	while(imageSetSize(mImageBuffer, mDataLock) == 0)													//if buffer is empty, wait until images are loaded
+ 	{	mLock2.Lock();
+ 		mCondEmpty.Wait();
+ 		mLock2.Unlock();
+@@ -95,7 +114,13 @@ bool AsyncImageLoader::GetNextImageSet(I
+ 	FGMaps = mFGBuffer[0];      mFGBuffer.pop_front();
+ 	mDataLock.Unlock();
+ 
++#ifdef NODATARACE // 1
++    mLock1.Lock();
++#endif
+ 	mCondFull.NotifyOne();															//notify loading thread that buffer is not full
++#ifdef NODATARACE // 1
++    mLock1.Unlock();
++#endif
+ 	return true;
+ }
+ 
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/apps/bodytrack/src/TrackingBenchmark/main.cpp parsec-3.0-drf/pkgs/apps/bodytrack/src/TrackingBenchmark/main.cpp
+--- parsec-3.0/pkgs/apps/bodytrack/src/TrackingBenchmark/main.cpp	2013-07-28 10:39:44.000000000 -0400
++++ parsec-3.0-drf/pkgs/apps/bodytrack/src/TrackingBenchmark/main.cpp	2014-09-17 15:02:44.479289684 -0400
+@@ -65,6 +65,10 @@ using namespace tbb;
+ #include "TrackingModel.h"
+ #include "system.h"
+ 
++#ifdef NODATARACE // 2
++#include <pthread.h>
++pthread_mutex_t refLock;
++#endif
+ 
+ using namespace std;
+ 
+@@ -382,6 +386,10 @@ int main(int argc, char **argv)
+         __parsec_bench_begin(__parsec_bodytrack);
+ #endif
+ 
++#ifdef NODATARACE // 2
++        pthread_mutex_init(&refLock, NULL);
++#endif
++
+ 	if(!ProcessCmdLine(argc, argv, path, cameras, frames, particles, layers, threads, threadModel, OutputBMP))	
+ 		return 0;
+ 
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/apps/facesim/src/TaskQ/lib/taskQDistCommon.c parsec-3.0-drf/pkgs/apps/facesim/src/TaskQ/lib/taskQDistCommon.c
+--- parsec-3.0/pkgs/apps/facesim/src/TaskQ/lib/taskQDistCommon.c	2013-07-28 10:39:49.000000000 -0400
++++ parsec-3.0-drf/pkgs/apps/facesim/src/TaskQ/lib/taskQDistCommon.c	2014-09-17 15:06:28.758598327 -0400
+@@ -360,6 +361,13 @@ void taskQEnd( void) {
+     signalTasks();
+ 
+ #ifdef ENABLE_PTHREADS
++#ifdef DETERMINABLE
++    int _M4_i;
++    for ( _M4_i = 0; _M4_i < MAX_THREADS; _M4_i++) {
++        if (_M4_threadsTableAllocated[_M4_i] == 1)
++            pthread_join(_M4_threadsTable[_M4_i], NULL);
++    }
++#endif
+     ALAMERE_END();;
+ #endif //ENABLE_PTHREADS
+ }
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/apps/facesim/src/TaskQ/lib/taskQDistFixed.c parsec-3.0-drf/pkgs/apps/facesim/src/TaskQ/lib/taskQDistFixed.c
+--- parsec-3.0/pkgs/apps/facesim/src/TaskQ/lib/taskQDistFixed.c	2013-07-28 10:39:49.000000000 -0400
++++ parsec-3.0-drf/pkgs/apps/facesim/src/TaskQ/lib/taskQDistFixed.c	2014-09-17 14:04:23.850239055 -0400
+@@ -24,7 +24,9 @@ static inline int getATaskFromHead( Task
+ static inline int stealTasksSpecialized( TaskQ *myT, TaskQ *srcT) {
+     TaskQList *srcShared =  ( TaskQList *)&srcT->q.shared;
+     volatile int *srcCount = &srcShared->count;
++#ifndef NODATARACE
+     if ( *srcCount == 0)    return 0; // Quick Check. Unprotected.
++#endif
+ 
+     TaskQList *myShared =  ( TaskQList *)&myT->q.shared;
+ 
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/apps/ferret/src/benchmark/ferret-pthreads.c parsec-3.0-drf/pkgs/apps/ferret/src/benchmark/ferret-pthreads.c
+--- parsec-3.0/pkgs/apps/ferret/src/benchmark/ferret-pthreads.c	2013-07-28 10:39:48.000000000 -0400
++++ parsec-3.0-drf/pkgs/apps/ferret/src/benchmark/ferret-pthreads.c	2014-09-17 15:07:43.255723913 -0400
+@@ -118,6 +119,9 @@ int cnt_enqueue;
+ int cnt_dequeue;
+ char path[BUFSIZ];
+ 
++#ifdef NODATARACE
++pthread_mutex_t cnt_lock;
++#endif
+ 
+ int scan_dir (const char *, char *head);
+ 
+@@ -163,7 +168,13 @@ int file_helper (const char *file)
+ 		r = image_read_hsv(file, &data->width, &data->height, &data->HSV);
+ 		*/
+ 
++#ifdef NODATARACE
++    pthread_mutex_lock(&cnt_lock);
++#endif
+ 	cnt_enqueue++;
++#ifdef NODATARACE
++    pthread_mutex_unlock(&cnt_lock);
++#endif
+ 	enqueue(&q_load_seg, data);
+ 
+ 	return 0;
+@@ -399,9 +410,15 @@ void *t_out (void *dummy)
+ 		free(rank->name);
+ 		free(rank);
+ 
++#ifdef NODATARACE
++    pthread_mutex_lock(&cnt_lock);
++#endif
+ 		cnt_dequeue++;
+ 		
+ 		fprintf(stderr, "(%d,%d)\n", cnt_enqueue, cnt_dequeue);
++#ifdef NODATARACE
++    pthread_mutex_unlock(&cnt_lock);
++#endif
+ 	}
+ 
+ 	assert(cnt_enqueue == cnt_dequeue);
+@@ -428,6 +445,10 @@ int main (int argc, char *argv[])
+ 
+ 	int ret, i;
+ 
++#ifdef NODATARACE
++    pthread_mutex_init(&cnt_lock, NULL);
++#endif
++
+ #ifdef PARSEC_VERSION
+ #define __PARSEC_STRING(x) #x
+ #define __PARSEC_XSTRING(x) __PARSEC_STRING(x)
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/apps/fluidanimate/src/pthreads.cpp parsec-3.0-drf/pkgs/apps/fluidanimate/src/pthreads.cpp
+--- parsec-3.0/pkgs/apps/fluidanimate/src/pthreads.cpp	2013-07-28 10:39:44.000000000 -0400
++++ parsec-3.0-drf/pkgs/apps/fluidanimate/src/pthreads.cpp	2014-09-17 15:24:39.989929040 -0400
+@@ -19,7 +18,9 @@
+ 
+ #include "fluid.hpp"
+ #include "cellpool.hpp"
++#ifndef NATIVE_BARRIER
+ #include "parsec_barrier.hpp"
++#endif
+ 
+ #ifdef ENABLE_VISUALIZATION
+ #include "fluidview.hpp"
+@@ -658,7 +659,7 @@ int InitNeighCellList(int ci, int cj, in
+         if(ii >= 0 && ii < nx && jj >= 0 && jj < ny && kk >= 0 && kk < nz)
+         {
+           int index = (kk*ny + jj)*nx + ii;
+-          if((index < my_index) && (cnumPars[index] != 0))
++          if((index != my_index) && (cnumPars[index] != 0))
+           {
+             neighCells[numNeighCells] = index;
+             ++numNeighCells;
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/apps/raytrace/src/LRT/include/lrt.h parsec-3.0-drf/pkgs/apps/raytrace/src/LRT/include/lrt.h
+--- parsec-3.0/pkgs/apps/raytrace/src/LRT/include/lrt.h	2013-07-28 10:39:43.000000000 -0400
++++ parsec-3.0-drf/pkgs/apps/raytrace/src/LRT/include/lrt.h	2014-09-17 14:04:23.850239055 -0400
+@@ -110,6 +110,10 @@ extern "C" {
+ 		     RTfloat upX, RTfloat upY, RTfloat upZ,
+ 		     RTfloat angle, RTfloat aspect);
+ 
++#ifdef DETERMINABLE
++  LRTvoid lrtDone(LRTContext context);
++#endif
++
+ } // extern C
+ 
+ /*@{*/
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/apps/raytrace/src/LRT/render.cxx parsec-3.0-drf/pkgs/apps/raytrace/src/LRT/render.cxx
+--- parsec-3.0/pkgs/apps/raytrace/src/LRT/render.cxx	2013-07-28 10:39:43.000000000 -0400
++++ parsec-3.0-drf/pkgs/apps/raytrace/src/LRT/render.cxx	2014-09-17 15:10:56.369909407 -0400
+@@ -21,6 +21,14 @@
+ # include "RTTL/Grid/Grid.hxx"
+ #endif
+ 
++#ifdef NODATARACE // 1
++#include <pthread.h>
++static _ALIGN(DEFAULT_ALIGNMENT) struct {
++    pthread_mutex_t mutex;
++    int value;
++} m_tileCounter;
++#endif
++
+ #define NORMALIZE_PRIMARY_RAYS
+ 
+ #define RAY_PACKET_LAYOUT_TRIANGLE    STORE_NEAR_FAR_DISTANCE | MIN_MAX_RECIPROCAL
+@@ -133,7 +141,9 @@ protected:
+ 
+   // need to be aligned, therefore made static
+   static SharedThreadData m_threadData;
++#ifndef NODATARACE // 1
+   static AtomicCounter m_tileCounter;
++#endif
+ 
+   /* textures */
+ 
+@@ -190,7 +200,11 @@ public:
+     m_threads = 1;
+     m_threadsCreated = false;
+     m_geometryMode = MINIRT_POLYGONAL_GEOMETRY;
++#ifdef NODATARACE // 1
++    m_tileCounter.value = 0;
++#else
+     Context::m_tileCounter.reset();
++#endif
+   }
+ 
+   /* ------------------------------------ */
+@@ -236,7 +250,9 @@ public:
+ };
+ 
+ _ALIGN(DEFAULT_ALIGNMENT) Context::SharedThreadData Context::m_threadData;
++#ifndef NODATARACE // 1
+ _ALIGN(DEFAULT_ALIGNMENT) AtomicCounter Context::m_tileCounter;
++#endif
+ 
+ 
+ /*! get four pixels in sse-float-format, converts those to RGB-uchar */
+@@ -588,7 +604,13 @@ int Context::task(int jobID, int threadI
+   const int tilesPerRow = m_threadData.resX >> TILE_WIDTH_SHIFT;
+   while(1)
+     {
++#ifdef NODATARACE // 1
++      pthread_mutex_lock(&m_tileCounter.mutex);
++      int index = m_tileCounter.value++;
++      pthread_mutex_unlock(&m_tileCounter.mutex);
++#else
+       int index = Context::m_tileCounter.inc();
++#endif
+       if (index >= m_threadData.maxTiles) break;
+ 
+       /* todo: get rid of '/' and '%' */
+@@ -636,7 +658,11 @@ void Context::renderFrame(Camera *camera
+ 
+   if (m_threads>1)
+     {
++#ifdef NODATARACE // 1
++      m_tileCounter.value = 0;
++#else
+       Context::m_tileCounter.reset();
++#endif
+       startThreads();
+       waitForAllThreads();
+     }
+@@ -717,6 +743,9 @@ void Context::renderTile(LRT::FrameBuffe
+ 
+ LRTContext lrtCreateContext()
+ {
++#ifdef NODATARACE // 1
++    pthread_mutex_init(&m_tileCounter.mutex, NULL);
++#endif
+   Context *c = new Context;
+   c->init(Context::MINIRT_POLYGONAL_GEOMETRY);
+   return c;
+@@ -868,3 +897,6 @@ LRTvoid lrtRenderFrame(LRTFrameBufferHan
+ 		       frameBuffer->res.y);
+ }
+ 
++#ifdef DETERMINABLE
++LRTvoid lrtDone(LRTContext _context) { ((Context*) _context)->joinThreads(); }
++#endif
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/apps/raytrace/src/MiniView/rtview.cxx parsec-3.0-drf/pkgs/apps/raytrace/src/MiniView/rtview.cxx
+--- parsec-3.0/pkgs/apps/raytrace/src/MiniView/rtview.cxx	2013-07-28 10:39:43.000000000 -0400
++++ parsec-3.0-drf/pkgs/apps/raytrace/src/MiniView/rtview.cxx	2014-09-17 15:11:29.098890286 -0400
+@@ -490,6 +490,9 @@ int main(int argc, char* argv[])
+ #ifdef ENABLE_PARSEC_HOOKS
+     __parsec_roi_end();
+ #endif
++#ifdef DETERMINABLE
++    lrtDone(lrtContext);
++#endif
+     cout << "Done" << endl << flush;
+   }
+ 
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/apps/raytrace/src/RTTL/common/RTThread.cxx parsec-3.0-drf/pkgs/apps/raytrace/src/RTTL/common/RTThread.cxx
+--- parsec-3.0/pkgs/apps/raytrace/src/RTTL/common/RTThread.cxx	2013-07-28 10:39:43.000000000 -0400
++++ parsec-3.0-drf/pkgs/apps/raytrace/src/RTTL/common/RTThread.cxx	2014-09-17 14:04:23.854238722 -0400
+@@ -23,6 +23,21 @@ public:
+     int code;
+     if (locked == false) code = lock();
+     m_suspended = value;
++#ifdef NODATARACE // 2
++    // Signal server that we are now suspended (this is needed for
++    // waitUntillAllThreadsAreSuspended).
++    if (m_suspended == true) MultiThreadedSyncPrimitive::resume();
++#endif
++#ifdef MANUAL
++    // MultiThreadedSyncPrimitive::suspend() below is just cond wait. cond
++    // signal will come from resume, which sets m_suspended to false. For proper
++    // use of cond_wait (to protect agains spurious lock), we test the condition
++    // wait.  This changes the semantics only when suspend is called with value
++    // = false, since in that case no wait will be done at all. This is only
++    // done at end of threadFunc and actually work in our benefit when we want
++    // to join the threads.
++    while (m_suspended == true)
++#endif
+     code = MultiThreadedSyncPrimitive::suspend();
+     code = unlock();
+   }
+@@ -71,10 +86,24 @@ protected:
+       // Gently push suspended threads allowing them to discover
+       // that they should return from threadFunc.
+       for (int i = 0; i < nt; i++) {
++#ifdef NODATARACE // 2
++        m_scheduler[i].lock();
++#endif
+         m_scheduler[i].resume();
++#ifdef NODATARACE // 2
++        m_scheduler[i].unlock();
++#endif
+       }
+       unlock();
+ 
++#ifdef DETERMINABLE
++      // At this point all threads will be allow to reach suspend(false, -1)
++      // (see threadFunc) which, with the MANUAL fix, will allow them to
++      // exit. So it is safe to wait for them here.
++      for (int i = 0; i < nt; i++) {
++        pthread_join(m_server.m_thread[i], NULL);
++      }
++#endif
+       // Wait till all threads do just that.
+       int i = 0;
+       while (i < nt) {
+@@ -154,6 +183,7 @@ private:
+   // All other member functions are not accessible by derived classes.
+ 
+   _INLINE void waitUntillAllThreadsAreSuspended() {
++#ifndef NODATARACE // 2
+     int ns;
+     do {
+       //_mm_pause(); // sleep(0);
+@@ -162,6 +192,15 @@ private:
+       for (int i = 0; i < m_threads; i++)
+         ns += m_scheduler[i].suspended();
+     } while (ns != m_threads);
++#else
++    for (int i = 0; i < m_threads; i++) {
++        m_scheduler[i].lock();
++        while (m_scheduler[i].suspended() == 0) {
++            ((MultiThreadedSyncPrimitive*) (&m_scheduler[i]))->suspend();
++        }
++        m_scheduler[i].unlock();
++    }
++#endif
+   }
+ 
+ 
+@@ -348,6 +387,12 @@ void MultiThreadedTaskQueue::createThrea
+ }
+ 
+ 
++#ifdef DETERMINABLE
++void MultiThreadedTaskQueue::joinThreads() {
++    m_server.clean();
++}
++#endif
++
+ /// This is a public function.
+ void MultiThreadedTaskQueue::startThreads() {
+   m_finished_jobs = m_assigned_jobs = 0;
+@@ -356,8 +401,10 @@ void MultiThreadedTaskQueue::startThread
+ 
+ /// This is a public function.
+ void MultiThreadedTaskQueue::waitForAllThreads() {
++#ifndef NODATARACE // 3
+   if (m_finished_jobs == m_threads)
+     return;
++#endif
+   int code = m_server.lock();
+   //printf("%c", char('a' + m_finished_jobs));
+ 
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/apps/raytrace/src/RTTL/common/RTThread.hxx parsec-3.0-drf/pkgs/apps/raytrace/src/RTTL/common/RTThread.hxx
+--- parsec-3.0/pkgs/apps/raytrace/src/RTTL/common/RTThread.hxx	2013-07-28 10:39:43.000000000 -0400
++++ parsec-3.0-drf/pkgs/apps/raytrace/src/RTTL/common/RTThread.hxx	2014-09-17 14:04:23.854238722 -0400
+@@ -221,6 +221,9 @@ public:
+     startThreads();
+     waitForAllThreads();
+   }
++#ifdef DETERMINABLE
++  virtual void joinThreads();
++#endif
+ 
+   _INLINE int numberOfThreads() const { return m_threads; }
+ 
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/apps/vips/src/libvips/iofuncs/im_init_world.c parsec-3.0-drf/pkgs/apps/vips/src/libvips/iofuncs/im_init_world.c
+--- parsec-3.0/pkgs/apps/vips/src/libvips/iofuncs/im_init_world.c	2013-07-28 10:39:47.000000000 -0400
++++ parsec-3.0-drf/pkgs/apps/vips/src/libvips/iofuncs/im_init_world.c	2014-09-17 14:04:23.858238347 -0400
+@@ -95,6 +95,10 @@ im_get_argv0( void )
+ 	return( im__argv0 );
+ }
+ 
++#ifdef NODATARACE // 2
++G_LOCKS_DECLARE(vips);
++#endif
++
+ /**
+  * im_init_world:
+  * @argv0: name of application
+@@ -169,6 +173,10 @@ im_init_world( const char *argv0 )
+ 
+ 	IM_SETSTR( im__argv0, argv0 );
+ 
++#ifdef NODATARACE // 2
++    G_LOCKS_INIT(vips);
++#endif
++
+ 	/* Need gobject etc.
+ 	 */
+ 	g_type_init();
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/apps/vips/src/libvips/iofuncs/im_prepare.c parsec-3.0-drf/pkgs/apps/vips/src/libvips/iofuncs/im_prepare.c
+--- parsec-3.0/pkgs/apps/vips/src/libvips/iofuncs/im_prepare.c	2013-07-28 10:39:47.000000000 -0400
++++ parsec-3.0-drf/pkgs/apps/vips/src/libvips/iofuncs/im_prepare.c	2014-09-17 14:04:23.858238347 -0400
+@@ -230,6 +230,10 @@ im_prepare_to_generate( REGION *reg, REG
+ 	return( 0 );
+ }
+ 
++#ifdef NODATARACE // 2
++G_LOCK_DEFINE_STATIC(invalidLock);
++#endif
++
+ /** 
+  * im_prepare_to:
+  * @reg: region to prepare
+@@ -376,7 +380,13 @@ im_prepare_to( REGION *reg, REGION *dest
+ 	 * We need this extra thing here because, unlike im_prepare(), we
+ 	 * don't im_region_buffer() dest before writing it.
+ 	 */
++#ifdef NODATARACE // 2
++    G_LOCK(invalidLock);
++#endif
+ 	dest->invalid = FALSE;
++#ifdef NODATARACE // 2
++    G_UNLOCK(invalidLock);
++#endif
+ 
+ 	return( 0 );
+ }
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/apps/vips/src/libvips/iofuncs/package.c parsec-3.0-drf/pkgs/apps/vips/src/libvips/iofuncs/package.c
+--- parsec-3.0/pkgs/apps/vips/src/libvips/iofuncs/package.c	2013-07-28 10:39:47.000000000 -0400
++++ parsec-3.0-drf/pkgs/apps/vips/src/libvips/iofuncs/package.c	2014-09-17 14:04:23.858238347 -0400
+@@ -56,6 +56,10 @@
+ #include <vips/internal.h>
+ #include <vips/debug.h>
+ 
++#ifdef ENABLE_PARSEC_HOOKS
++#include <hooks.h>
++#endif
++
+ #ifdef WITH_DMALLOC
+ #include <dmalloc.h>
+ #endif /*WITH_DMALLOC*/
+@@ -1106,10 +1110,16 @@ dispatch_function( im_function *fn, im_o
+ 					return( -1 );
+ 		}
+ 
++#ifdef ENABLE_PARSEC_HOOKS
++        __parsec_roi_begin();
++#endif
+ 	/* Call function.
+ 	 */
+ 	if( fn->disp( vargv ) ) 
+ 		return( -1 );
++#ifdef ENABLE_PARSEC_HOOKS
++        __parsec_roi_end();
++#endif
+ 
+ 	/* Print output.
+ 	 */
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/apps/vips/src/libvips/iofuncs/threadpool.c parsec-3.0-drf/pkgs/apps/vips/src/libvips/iofuncs/threadpool.c
+--- parsec-3.0/pkgs/apps/vips/src/libvips/iofuncs/threadpool.c	2013-07-28 10:39:47.000000000 -0400
++++ parsec-3.0-drf/pkgs/apps/vips/src/libvips/iofuncs/threadpool.c	2014-09-17 14:04:23.858238347 -0400
+@@ -544,7 +544,14 @@ vips_thread_main_loop( void *a )
+ 		vips_thread_work_unit( thr );
+ 		im_semaphore_up( &pool->tick );
+ 
+-		if( pool->stop || pool->error )
++#ifdef NODATARACE // 1
++        g_mutex_lock( pool->allocate_lock );
++#endif
++        gboolean _stop = pool->stop;
++#ifdef NODATARACE // 1
++        g_mutex_unlock( pool->allocate_lock );
++#endif
++		if( _stop || pool->error )
+ 			break;
+ 	} 
+ 
+@@ -853,14 +860,28 @@ vips_threadpool_run( VipsImage *im,
+ 
+ 		VIPS_DEBUG_MSG( "vips_threadpool_run: tick\n" );
+ 
+-		if( pool->stop || pool->error )
++#ifdef NODATARACE // 1
++        g_mutex_lock( pool->allocate_lock );
++#endif
++        gboolean _stop = pool->stop;
++#ifdef NODATARACE // 1
++        g_mutex_unlock( pool->allocate_lock );
++#endif
++		if( _stop || pool->error )
+ 			break;
+ 
+ 		if( progress &&
+ 			progress( pool->a ) ) 
+ 			pool->error = TRUE;
+ 
+-		if( pool->stop || pool->error )
++#ifdef NODATARACE // 1
++        g_mutex_lock( pool->allocate_lock );
++#endif
++        _stop = pool->stop;
++#ifdef NODATARACE // 1
++        g_mutex_unlock( pool->allocate_lock );
++#endif
++		if( _stop || pool->error )
+ 			break;
+ 	}
+ 
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/apps/vips/src/tools/iofuncs/vips.c parsec-3.0-drf/pkgs/apps/vips/src/tools/iofuncs/vips.c
+--- parsec-3.0/pkgs/apps/vips/src/tools/iofuncs/vips.c	2013-07-28 10:39:48.000000000 -0400
++++ parsec-3.0-drf/pkgs/apps/vips/src/tools/iofuncs/vips.c	2014-09-17 18:14:18.278931575 -0400
+@@ -79,6 +79,10 @@
+ 
+ #include <vips/vips.h>
+ 
++#ifdef ENABLE_PARSEC_HOOKS
++#include <hooks.h>
++#endif
++
+ #ifdef OS_WIN32
+ #define strcasecmp(a,b) _stricmp(a,b)
+ #endif
+@@ -901,6 +905,19 @@ main( int argc, char **argv )
+ 	im_function *fn;
+ 	int i, j;
+ 
++#ifdef PARSEC_VERSION
++#define __PARSEC_STRING(x) #x
++#define __PARSEC_XSTRING(x) __PARSEC_STRING(x)
++        printf("PARSEC Benchmark Suite Version "__PARSEC_XSTRING(PARSEC_VERSION)"\n");
++        fflush(NULL);
++#else
++        printf("PARSEC Benchmark Suite\n");
++        fflush(NULL);
++#endif //PARSEC_VERSION
++#ifdef ENABLE_PARSEC_HOOKS
++        __parsec_bench_begin(__parsec_vips);
++#endif
++
+ 	if( im_init_world( argv[0] ) )
+ 	        error_exit( NULL );
+ 	textdomain( GETTEXT_PACKAGE );
+@@ -1020,5 +1037,9 @@ main( int argc, char **argv )
+ 
+ 	im_close_plugins();
+ 
++#ifdef ENABLE_PARSEC_HOOKS
++        __parsec_bench_end();
++#endif
++
+ 	return( 0 );
+ }
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/apps/x264/src/common/common.h parsec-3.0-drf/pkgs/apps/x264/src/common/common.h
+--- parsec-3.0/pkgs/apps/x264/src/common/common.h	2013-07-28 10:39:44.000000000 -0400
++++ parsec-3.0-drf/pkgs/apps/x264/src/common/common.h	2014-09-17 14:04:23.858238347 -0400
+@@ -268,6 +268,32 @@ struct x264_t
+         int         i_frame_size;
+     } out;
+ 
++#ifdef NODATARACE // 1
++    /* cabac context */
++    x264_cabac_t    cabac;
++
++    /* Current MB DCT coeffs */
++    struct
++    {
++        DECLARE_ALIGNED_16( int16_t luma16x16_dc[16] );
++        DECLARE_ALIGNED_16( int16_t chroma_dc[2][4] );
++        // FIXME share memory?
++        DECLARE_ALIGNED_16( int16_t luma8x8[4][64] );
++        DECLARE_ALIGNED_16( int16_t luma4x4[16+8][16] );
++    } dct;
++
++    /* We use only one SPS and one PPS */
++    x264_sps_t      sps_array[1];
++    x264_sps_t      *sps;
++    x264_pps_t      pps_array[1];
++    x264_pps_t      *pps;
++
++    uint32_t        nr_count[2];
++#endif
++#ifdef NODATARACE // 3
++    x264_pthread_mutex_t nr_count_mutex;
++#endif
++
+     /**** thread synchronization starts here ****/
+ 
+     /* frame number/poc */
+@@ -283,11 +309,13 @@ struct x264_t
+     int             i_nal_type;     /* threads only */
+     int             i_nal_ref_idc;  /* threads only */
+ 
++#ifndef NODATARACE // 1
+     /* We use only one SPS and one PPS */
+     x264_sps_t      sps_array[1];
+     x264_sps_t      *sps;
+     x264_pps_t      pps_array[1];
+     x264_pps_t      *pps;
++#endif
+     int             i_idr_pic_id;
+ 
+     /* quantization matrix for decoding, [cqm][qp%6][coef_y][coef_x] */
+@@ -306,13 +334,17 @@ struct x264_t
+ 
+     DECLARE_ALIGNED_16( uint32_t nr_residual_sum[2][64] );
+     DECLARE_ALIGNED_16( uint16_t nr_offset[2][64] );
++#ifndef NODATARACE // 1
+     uint32_t        nr_count[2];
++#endif
+ 
+     /* Slice header */
+     x264_slice_header_t sh;
+ 
++#ifndef NODATARACE // 1
+     /* cabac context */
+     x264_cabac_t    cabac;
++#endif
+ 
+     struct
+     {
+@@ -354,6 +386,7 @@ struct x264_t
+ 
+ 
+ 
++#ifndef NODATARACE // 1
+     /* Current MB DCT coeffs */
+     struct
+     {
+@@ -363,6 +396,7 @@ struct x264_t
+         DECLARE_ALIGNED_16( int16_t luma8x8[4][64] );
+         DECLARE_ALIGNED_16( int16_t luma4x4[16+8][16] );
+     } dct;
++#endif
+ 
+     /* MB table and cache for current frame/mb */
+     struct
+@@ -374,6 +408,7 @@ struct x264_t
+         int     i_b8_stride;
+         int     i_b4_stride;
+ 
++#ifndef NODATARACE // 1
+         /* Current index */
+         int     i_mb_x;
+         int     i_mb_y;
+@@ -387,11 +422,13 @@ struct x264_t
+         int     b_chroma_me;
+         int     b_trellis;
+         int     b_noise_reduction;
++#endif
+         int     i_psy_rd; /* Psy RD strength--fixed point value*/
+         int     i_psy_trellis; /* Psy trellis strength--fixed point value*/
+ 
+         int     b_interlaced;
+ 
++#ifndef NODATARACE // 1
+         /* Allowed qpel MV range to stay within the picture + emulated edge pixels */
+         int     mv_min[2];
+         int     mv_max[2];
+@@ -413,6 +450,7 @@ struct x264_t
+         int     i_mb_type_topright;
+         int     i_mb_prev_xy;
+         int     i_mb_top_xy;
++#endif
+ 
+         /**** thread synchronization ends here ****/
+         /* subsequent variables are either thread-local or constant,
+@@ -456,6 +494,44 @@ struct x264_t
+         /* if we've already done MC, we don't need to do it again */
+         int b_skip_mc;
+ 
++#ifdef NODATARACE // 1
++        /* Current index */
++        int     i_mb_x;
++        int     i_mb_y;
++        int     i_mb_xy;
++        int     i_b8_xy;
++        int     i_b4_xy;
++
++        /* neighboring MBs */
++        unsigned int i_neighbour;
++        unsigned int i_neighbour8[4];       /* neighbours of each 8x8 or 4x4 block that are available */
++        unsigned int i_neighbour4[16];      /* at the time the block is coded */
++        int     i_mb_type_top;
++        int     i_mb_type_left;
++        int     i_mb_type_topleft;
++        int     i_mb_type_topright;
++        int     i_mb_prev_xy;
++        int     i_mb_top_xy;
++
++        /* Search parameters */
++        int     i_me_method;
++        int     i_subpel_refine;
++        int     b_chroma_me;
++        int     b_trellis;
++        int     b_noise_reduction;
++
++        /* Allowed qpel MV range to stay within the picture + emulated edge pixels */
++        int     mv_min[2];
++        int     mv_max[2];
++        /* Subpel MV range for motion search.
++         * same mv_min/max but includes levels' i_mv_range. */
++        int     mv_min_spel[2];
++        int     mv_max_spel[2];
++        /* Fullpel MV range for motion search */
++        int     mv_min_fpel[2];
++        int     mv_max_fpel[2];
++#endif
++
+         struct
+         {
+             /* space for p_fenc and p_fdec */
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/apps/x264/src/encoder/analyse.c parsec-3.0-drf/pkgs/apps/x264/src/encoder/analyse.c
+--- parsec-3.0/pkgs/apps/x264/src/encoder/analyse.c	2013-07-28 10:39:44.000000000 -0400
++++ parsec-3.0-drf/pkgs/apps/x264/src/encoder/analyse.c	2014-09-17 14:04:23.862237944 -0400
+@@ -270,8 +270,20 @@ static void x264_mb_analyse_init( x264_t
+                     int i_ref = i ? h->i_ref1 : h->i_ref0;
+                     for( j=0; j<i_ref; j++ )
+                     {
++#ifdef NODATARACE // 2
++                        x264_pthread_mutex_lock( &fref[j]->mutex );
++                        while( fref[j]->i_lines_completed < thresh) {
++                            x264_pthread_cond_wait( &fref[j]->cv,
++                                                    &fref[j]->mutex);
++
++                        }
++#else
+                         x264_frame_cond_wait( fref[j], thresh );
++#endif
+                         thread_mvy_range = X264_MIN( thread_mvy_range, fref[j]->i_lines_completed - pix_y );
++#ifdef NODATARACE // 2
++                        x264_pthread_mutex_unlock( &fref[j]->mutex );
++#endif
+                     }
+                 }
+                 if( h->param.b_deterministic )
+@@ -2866,6 +2878,7 @@ static void x264_analyse_update_cache( x
+             }
+     }
+ 
++#ifndef NODATARACE // 2
+ #ifndef NDEBUG
+     if( h->param.i_threads > 1 && !IS_INTRA(h->mb.i_type) )
+     {
+@@ -2896,6 +2909,7 @@ static void x264_analyse_update_cache( x
+         }
+     }
+ #endif
++#endif
+ }
+ 
+ #include "slicetype.c"
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/apps/x264/src/encoder/encoder.c parsec-3.0-drf/pkgs/apps/x264/src/encoder/encoder.c
+--- parsec-3.0/pkgs/apps/x264/src/encoder/encoder.c	2013-07-28 10:39:44.000000000 -0400
++++ parsec-3.0-drf/pkgs/apps/x264/src/encoder/encoder.c	2014-09-17 14:04:23.862237944 -0400
+@@ -775,6 +775,9 @@ x264_t *x264_encoder_open   ( x264_param
+     {
+         if( i > 0 )
+             *h->thread[i] = *h;
++#ifdef NODATARACE // 3
++        x264_pthread_mutex_init( &h->thread[i]->nr_count_mutex, NULL );
++#endif
+         h->thread[i]->fdec = x264_frame_pop_unused( h );
+         h->thread[i]->out.p_bitstream = x264_malloc( h->out.i_bitstream );
+         if( x264_macroblock_cache_init( h->thread[i] ) < 0 )
+@@ -1299,7 +1302,11 @@ static void x264_thread_sync_context( x2
+ 
+     // copy everything except the per-thread pointers and the constants.
+     memcpy( &dst->i_frame, &src->i_frame, offsetof(x264_t, mb.type) - offsetof(x264_t, i_frame) );
++#ifdef NODATARACE // 1
++    memcpy(&dst->stat.i_slice_count, &src->stat.i_slice_count, offsetof(x264_t, predict_16x16) - offsetof(x264_t, stat.i_slice_count));
++#else
+     dst->stat = src->stat;
++#endif
+ }
+ 
+ static void x264_thread_sync_stat( x264_t *dst, x264_t *src )
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/apps/x264/src/encoder/macroblock.c parsec-3.0-drf/pkgs/apps/x264/src/encoder/macroblock.c
+--- parsec-3.0/pkgs/apps/x264/src/encoder/macroblock.c	2013-07-28 10:39:44.000000000 -0400
++++ parsec-3.0-drf/pkgs/apps/x264/src/encoder/macroblock.c	2014-09-17 14:04:23.862237944 -0400
+@@ -539,8 +539,13 @@ void x264_macroblock_encode( x264_t *h )
+             DECLARE_ALIGNED_16( int16_t dct8x8[4][8][8] );
+             b_decimate &= !h->mb.b_trellis; // 8x8 trellis is inherently optimal decimation
+             h->dctf.sub16x16_dct8( dct8x8, h->mb.pic.p_fenc[0], h->mb.pic.p_fdec[0] );
++#ifdef NODATARACE // 3
++            x264_pthread_mutex_lock( &h->nr_count_mutex );
++#endif
+             h->nr_count[1] += h->mb.b_noise_reduction * 4;
+-
++#ifdef NODATARACE // 3
++            x264_pthread_mutex_unlock( &h->nr_count_mutex );
++#endif
+             for( idx = 0; idx < 4; idx++ )
+             {
+                 if( h->mb.b_noise_reduction )
+@@ -576,7 +581,13 @@ void x264_macroblock_encode( x264_t *h )
+         {
+             DECLARE_ALIGNED_16( int16_t dct4x4[16][4][4] );
+             h->dctf.sub16x16_dct( dct4x4, h->mb.pic.p_fenc[0], h->mb.pic.p_fdec[0] );
++#ifdef NODATARACE // 3
++            x264_pthread_mutex_lock( &h->nr_count_mutex );
++#endif
+             h->nr_count[0] += h->mb.b_noise_reduction * 16;
++#ifdef NODATARACE // 3
++            x264_pthread_mutex_unlock( &h->nr_count_mutex );
++#endif
+ 
+             for( i8x8 = 0; i8x8 < 4; i8x8++ )
+             {
+@@ -813,6 +824,9 @@ int x264_macroblock_probe_skip( x264_t *
+ void x264_noise_reduction_update( x264_t *h )
+ {
+     int cat, i;
++#ifdef NODATARACE // 3
++    x264_pthread_mutex_lock( &h->nr_count_mutex );
++#endif
+     for( cat = 0; cat < 2; cat++ )
+     {
+         int size = cat ? 64 : 16;
+@@ -831,6 +845,9 @@ void x264_noise_reduction_update( x264_t
+                  + h->nr_residual_sum[cat][i]/2)
+               / ((uint64_t)h->nr_residual_sum[cat][i] * weight[i]/256 + 1);
+     }
++#ifdef NODATARACE // 3
++    x264_pthread_mutex_unlock( &h->nr_count_mutex );
++#endif
+ }
+ 
+ /*****************************************************************************
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/kernels/dedup/src/mbuffer.c parsec-3.0-drf/pkgs/kernels/dedup/src/mbuffer.c
+--- parsec-3.0/pkgs/kernels/dedup/src/mbuffer.c	2013-07-28 10:38:51.000000000 -0400
++++ parsec-3.0-drf/pkgs/kernels/dedup/src/mbuffer.c	2014-09-17 15:33:39.180186516 -0400
+@@ -21,7 +21,9 @@
+ #ifdef ENABLE_PTHREADS
+ 
+ //Use spin locks instead of mutexes (this file only)
++#ifndef MANUAL
+ #define ENABLE_SPIN_LOCKS
++#endif
+ 
+ #ifdef ENABLE_SPIN_LOCKS
+ typedef pthread_spinlock_t pthread_lock_t;
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/kernels/dedup/src/openssl/md32_common.h parsec-3.0-drf/pkgs/kernels/dedup/src/openssl/md32_common.h
+--- parsec-3.0/pkgs/kernels/dedup/src/openssl/md32_common.h	2013-07-28 10:38:51.000000000 -0400
++++ parsec-3.0-drf/pkgs/kernels/dedup/src/openssl/md32_common.h	2014-09-17 14:04:23.866237545 -0400
+@@ -165,7 +165,7 @@
+ 				asm (			\
+ 				"roll %1,%0"		\
+ 				: "=r"(ret)		\
+-				: "I"(n), "0"(a)	\
++				: "I"(n), "0"((unsigned int)(a))	\
+ 				: "cc");		\
+ 			   ret;				\
+ 			})
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/kernels/streamcluster/src/streamcluster.cpp parsec-3.0-drf/pkgs/kernels/streamcluster/src/streamcluster.cpp
+--- parsec-3.0/pkgs/kernels/streamcluster/src/streamcluster.cpp	2013-07-28 10:38:52.000000000 -0400
++++ parsec-3.0-drf/pkgs/kernels/streamcluster/src/streamcluster.cpp	2014-09-17 15:36:34.444015215 -0400
+@@ -18,8 +19,13 @@
+ 
+ #ifdef ENABLE_THREADS
+ #include <pthread.h>
++#ifndef NATIVE_BARRIER
+ #include "parsec_barrier.hpp"
+ #endif
++#ifdef NODATARACE_OPTIONAL // 3
++pthread_mutex_t gl_cost_of_opening_x_mutex;
++#endif
++#endif
+ 
+ #ifdef TBB_VERSION
+ #define TBB_STEALER (tbb::task_scheduler_init::occ_stealer)
+@@ -801,8 +807,16 @@ float pspeedy(Points *points, float z, l
+   }
+ #ifdef ENABLE_THREADS
+   pthread_barrier_wait(barrier);
++#ifdef NODATARACE_OPTIONAL // 2
++  pthread_mutex_lock(&mutex);
++#endif
+ #endif
+   open = false;
++#ifdef ENABLE_THREADS
++#ifdef NODATARACE_OPTIONAL // 2
++  pthread_mutex_unlock(&mutex);
++#endif
++#endif
+   double mytotal = 0;
+   for( int k = k1; k < k2; k++ )  {
+     mytotal += points->p[k].cost;
+@@ -1116,8 +1130,18 @@ double pgain(long x, Points *points, dou
+ #endif
+   // Now, check whether opening x would save cost; if so, do it, and
+   // otherwise do nothing
++#ifdef ENABLE_THREADS
++  double l_gl_cost_of_opening_x;
++#ifdef NODATARACE_OPTIONAL // 3
++  pthread_mutex_lock(&gl_cost_of_opening_x_mutex);
++#endif
++  l_gl_cost_of_opening_x = gl_cost_of_opening_x;
++#ifdef NODATARACE_OPTIONAL // 3
++  pthread_mutex_unlock(&gl_cost_of_opening_x_mutex);
++#endif
++#endif
+ 
+-  if ( gl_cost_of_opening_x < 0 ) {
++  if ( l_gl_cost_of_opening_x < 0 ) {
+     //  we'd save money by opening x; we'll do it
+     for ( int i = k1; i < k2; i++ ) {
+       bool close_center = gl_lower[center_table[points->p[i].assign]] > 0 ;
+@@ -1144,7 +1168,19 @@ double pgain(long x, Points *points, dou
+   }
+   else {
+     if( pid==0 )
++#ifdef ENABLE_THREADS
++#ifdef NODATARACE_OPTIONAL // 3
++        {
++            pthread_mutex_lock(&gl_cost_of_opening_x_mutex);
++#endif
++#endif
+       gl_cost_of_opening_x = 0;  // the value we'll return
++#ifdef ENABLE_THREADS
++#ifdef NODATARACE_OPTIONAL // 3
++            pthread_mutex_unlock(&gl_cost_of_opening_x_mutex);
++        }
++#endif
++#endif
+   }
+ #ifdef ENABLE_THREADS
+   pthread_barrier_wait(barrier);
+@@ -1518,6 +1554,10 @@ float pkmedian(Points *points, long kmin
+     hiz += hizs[i];
+   }
+ 
++#ifdef NODATARACE // 1
++  pthread_barrier_wait(barrier);
++#endif
++
+   loz=0.0; z = (hiz+loz)/2.0;
+   /* NEW: Check whether more centers than points! */
+   if (points->num <= kmax) {
+@@ -2022,6 +2062,9 @@ int main(int argc, char **argv)
+     stream = new FileStream(infilename);
+   }
+ 
++#ifdef NODATARACE_OPTIONAL // 3
++  pthread_mutex_init(&gl_cost_of_opening_x_mutex);
++#endif
+ 
+ #ifdef ENABLE_PARSEC_HOOKS
+   __parsec_roi_begin();
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/libs/glib/src/glib/gslice.c parsec-3.0-drf/pkgs/libs/glib/src/glib/gslice.c
+--- parsec-3.0/pkgs/libs/glib/src/glib/gslice.c	2013-07-28 10:38:55.000000000 -0400
++++ parsec-3.0-drf/pkgs/libs/glib/src/glib/gslice.c	2014-09-17 14:04:23.866237545 -0400
+@@ -404,7 +404,9 @@ g_mutex_lock_a (GMutex *mutex,
+                 guint  *contention_counter)
+ {
+   gboolean contention = FALSE;
++#ifndef MANUAL
+   if (!g_mutex_trylock (mutex))
++#endif
+     {
+       g_mutex_lock (mutex);
+       contention = TRUE;
+@@ -611,7 +613,9 @@ magazine_cache_trim (Allocator *allocato
+     }
+   g_mutex_unlock (allocator->magazine_mutex);
+   /* free trash */
++#ifndef NODATARACE
+   if (trash)
++#endif
+     {
+       const gsize chunk_size = SLAB_CHUNK_SIZE (allocator, ix);
+       g_mutex_lock (allocator->slab_mutex);
+@@ -778,7 +782,14 @@ static inline gboolean
+ thread_memory_magazine2_is_full (ThreadMemory *tmem,
+                                  guint         ix)
+ {
+-  return tmem->magazine2[ix].count >= allocator_get_magazine_threshold (allocator, ix);
++#ifdef NODATARACE
++    g_mutex_lock (allocator->magazine_mutex);
++#endif
++    gboolean result = tmem->magazine2[ix].count >= allocator_get_magazine_threshold (allocator, ix);
++#ifdef NODATARACE
++    g_mutex_unlock (allocator->magazine_mutex);
++#endif
++    return result;
+ }
+ 
+ static inline gpointer
+diff -rupN --ignore-all-space -w -B parsec-3.0/pkgs/libs/parmacs/src/m4/parmacs.pthreads_barrier.c.m4 parsec-3.0-drf/pkgs/libs/parmacs/src/m4/parmacs.pthreads_barrier.c.m4
+--- parsec-3.0/pkgs/libs/parmacs/src/m4/parmacs.pthreads_barrier.c.m4	1969-12-31 19:00:00.000000000 -0500
++++ parsec-3.0-drf/pkgs/libs/parmacs/src/m4/parmacs.pthreads_barrier.c.m4	2014-09-17 17:51:31.589016248 -0400
+@@ -0,0 +1,185 @@
++divert(-1)
++define(NEWPROC,) dnl
++
++define(BARRIER, `{
++	pthread_barrier_wait(&($1));
++}')
++
++define(BARDEC, `
++pthread_barrier_t	($1);
++')
++
++define(BARINIT, `{
++	pthread_barrier_init(&($1), NULL, $2);
++}')
++
++define(BAREXCLUDE, `{;}')
++
++define(BARINCLUDE, `{;}')
++
++define(GSDEC, `long ($1);')
++define(GSINIT, `{ ($1) = 0; }')
++define(GETSUB, `{
++  if (($1)<=($3))
++    ($2) = ($1)++;
++  else {
++    ($2) = -1;
++    ($1) = 0;
++  }
++}')
++
++define(NU_GSDEC, `long ($1);')
++define(NU_GSINIT, `{ ($1) = 0; }')
++define(NU_GETSUB, `GETSUB($1,$2,$3,$4)')
++
++define(ADEC, `long ($1);')
++define(AINIT, `{;}')
++define(PROBEND, `{;}')
++
++define(LOCKDEC, `pthread_mutex_t ($1);')
++define(LOCKINIT, `{pthread_mutex_init(&($1), NULL);}')
++define(LOCK, `{pthread_mutex_lock(&($1));}')
++define(UNLOCK, `{pthread_mutex_unlock(&($1));}')
++
++define(NLOCKDEC, `long ($1);')
++define(NLOCKINIT, `{;}')
++define(NLOCK, `{;}')
++define(NUNLOCK, `{;}')
++
++define(ALOCKDEC, `pthread_mutex_t $1[$2];')
++define(ALOCKINIT, `{
++	unsigned long	i, Error;
++
++	for (i = 0; i < $2; i++) {
++		Error = pthread_mutex_init(&$1[i], NULL);
++		if (Error != 0) {
++			printf("Error while initializing array of locks.\n");
++			exit(-1);
++		}
++	}
++}')
++define(ALOCK, `{pthread_mutex_lock(&$1[$2]);}')
++define(AULOCK, `{pthread_mutex_unlock(&$1[$2]);}')
++
++define(PAUSEDEC, `
++struct {
++	pthread_mutex_t	Mutex;
++	pthread_cond_t	CondVar;
++	unsigned long	Flag;
++} $1;
++')
++define(PAUSEINIT, `{
++	pthread_mutex_init(&$1.Mutex, NULL);
++	pthread_cond_init(&$1.CondVar, NULL);
++	$1.Flag = 0;
++}
++')
++define(CLEARPAUSE, `{
++	$1.Flag = 0;
++	pthread_mutex_unlock(&$1.Mutex);}
++')
++define(SETPAUSE, `{
++	pthread_mutex_lock(&$1.Mutex);
++	$1.Flag = 1;
++	pthread_cond_broadcast(&$1.CondVar);
++	pthread_mutex_unlock(&$1.Mutex);}
++')
++define(EVENT, `{;}')
++define(WAITPAUSE, `{
++	pthread_mutex_lock(&$1.Mutex);
++	while ($1.Flag == 0) {
++		pthread_cond_wait(&$1.CondVar, &$1.Mutex);
++	}
++}')
++define(PAUSE, `{;}')
++
++define(AUG_ON, ` ')
++define(AUG_OFF, ` ')
++define(TRACE_ON, ` ')
++define(TRACE_OFF, ` ')
++define(REF_TRACE_ON, ` ')
++define(REF_TRACE_OFF, ` ')
++define(DYN_TRACE_ON, `;')
++define(DYN_TRACE_OFF, `;')
++define(DYN_REF_TRACE_ON, `;')
++define(DYN_REF_TRACE_OFF, `;')
++define(DYN_SIM_ON, `;')
++define(DYN_SIM_OFF, `;')
++define(DYN_SCHED_ON, `;')
++define(DYN_SCHED_OFF, `;')
++define(AUG_SET_LOLIMIT, `;')
++define(AUG_SET_HILIMIT, `;')
++
++define(MENTER, `{;}')
++define(DELAY, `{;}')
++define(CONTINUE, `{;}')
++define(MEXIT, `{;}')
++define(MONINIT, `{;}')
++
++define(WAIT_FOR_END, `{
++	long	i, Error;
++	for (i = 0; i < ($1) - 1; i++) {
++		Error = pthread_join(PThreadTable[i], NULL);
++		if (Error != 0) {
++			printf("Error in pthread_join().\n");
++			exit(-1);
++		}
++	}
++}')
++
++define(CREATE, `{
++	long	i, Error;
++
++	for (i = 0; i < ($2) - 1; i++) {
++		Error = pthread_create(&PThreadTable[i], NULL, (void * (*)(void *))($1), NULL);
++		if (Error != 0) {
++			printf("Error in pthread_create().\n");
++			exit(-1);
++		}
++	}
++
++	$1();
++}')
++
++define(MAIN_INITENV, `{;}')
++define(MAIN_END, `')
++
++define(MAIN_ENV,`
++#include <pthread.h>
++#include <sys/time.h>
++#include <unistd.h>
++#include <stdlib.h>
++#include <malloc.h>
++#define MAX_THREADS 1024
++pthread_t PThreadTable[MAX_THREADS];
++')
++
++define(ENV, ` ')
++define(EXTERN_ENV, `
++#include <pthread.h>
++#include <sys/time.h>
++#include <unistd.h>
++#include <stdlib.h>
++#include <malloc.h>
++extern pthread_t PThreadTable[];
++')
++
++define(G_MALLOC, `malloc($1);')
++define(G_FREE, `;')
++define(G_MALLOC_F, `malloc($1)')
++define(NU_MALLOC, `malloc($1);')
++define(NU_FREE, `;')
++define(NU_MALLOC_F, `malloc($1)')
++
++define(GET_HOME, `{($1) = 0;}')
++define(GET_PID, `{($1) = 0;}')
++define(AUG_DELAY, `{sleep ($1);}')
++define(ST_LOG, `{;}')
++define(SET_HOME, `{;}')
++define(CLOCK, `{
++	struct timeval	FullTime;
++
++	gettimeofday(&FullTime, NULL);
++	($1) = (unsigned long)(FullTime.tv_usec + FullTime.tv_sec * 1000000);
++}')
++divert(0)

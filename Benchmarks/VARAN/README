@@ -1,0 +1,144 @@
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@                            BEANSTALK rev 157d88b                             @
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+compile:
+	$ cp -R beanstalkd.orig beanstalkd
+	$ cd beanstalkd
+	$ make -j 16
+
+run:
+	$ sudo ./MVEE 2 -- ~/MVEE/Benchmarks/VARAN/beanstalkd/beanstalkd -p 8080
+
+benchmark:
+	$ ~/MVEE/Benchmarks/VARAN/beanstalkd-benchmark/bin/beanstalkd_benchmark_linux_amd64 -c 10 -h="host:22"
+
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@                               LIGHTTPD 1.4.36                                @
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+prerequisites:
+	* compile MVEE/Benchmarks/VARAN/wrk
+	* install libbz2-dev package
+
+compile:
+	$ cp -R lighttpd-1.4.36.orig lighttpd-1.4.36
+	$ cd lighttpd-1.4.36
+	$ ./configure
+	$ make -j 16
+
+set up:
+	$ mkdir -p /tmp/lighttpd/servers/
+	$ mkdir -p /tmp/lighttpd/logs/
+	$ cp tests/docroot/www/index.html /tmp/lighttpd/servers
+	
+run:
+	$ sudo ./MVEE 2 -- ~/MVEE/Benchmarks/VARAN/lighttpd-1.4.36/src/lighttpd -f ~/MVEE/Benchmarks/VARAN/lighttpd-1.4.36/mvee.conf -m ~/MVEE/Benchmarks/VARAN/lighttpd-1.4.36/src/.libs/
+
+benchmark:
+	$ ~/MVEE/Benchmarks/VARAN/wrk -d 10 -t 10 http://<hostname>:8080
+
+
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@                              MEMCACHED 1.4.17                                @
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+prerequisites:
+	* libevent-pthreads-2.0-5
+	* libevent-dev
+	* libmemcached-tools
+
+compile:
+	$ cp -R memcached-1.4.17.orig memcached-1.4.17
+	$ cd memcached-1.4.17
+	$ ./configure
+	$ make -j 16
+	
+run:
+	$ sudo ./MVEE 2 -- ~/MVEE/Benchmarks/VARAN/memcached-1.4.17/memcached -p 8080
+
+benchmark:
+	$ memcslap --servers <hostname>:8080
+
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@                                 NGINX 1.5.12                                 @
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+prerequisites:
+	* compile MVEE/Benchmarks/VARAN/wrk
+
+compile:
+	$ cp -R nginx-1.5.12.orig nginx-1.5.12
+	$ cd nginx-1.5.12
+	$ ./configure --prefix=/tmp/nginx/
+	$ make -j 16
+
+set up:
+	$ mkdir -p /tmp/nginx/logs
+	$ mkdir -p /tmp/nginx/html
+	$ cp -R conf /tmp/nginx/
+	$ cp ~/MVEE/Benchmarks/VARAN/lighttpd-1.4.36.orig/tests/docroot/www/index.html /tmp/nginx/html
+
+run:
+	$ sudo ./MVEE 2 -- ~/MVEE/Benchmarks/VARAN/nginx-1.5.12/objs/nginx
+
+benchmark:
+	$ ~/MVEE/Benchmarks/VARAN/wrk -d 10 -t 10 http://<hostname>:8080
+
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@                                 REDIS 3.0.3                                  @
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+compile:
+	$ cp -R redis-3.0.3.orig redis-3.0.3
+	$ cd redis-3.0.3
+	$ make -j 16
+
+run:
+	$ sudo ./MVEE 2 -- ~/MVEE/Benchmarks/VARAN/redis-3.0.3/src/redis-server ~/MVEE/Benchmarks/VARAN/redis-3.0.3/redis.conf
+
+benchmark:
+	$ ~/MVEE/Benchmarks/VARAN/redis-3.0.3/src/redis-benchmark -h <hostname> -p 8080
+
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@                               APACHE 1.3.29                                  @
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+compile:
+	$ cp -R apache_1.3.29.orig apache_1.3.29
+	$ cd apache_1.3.29
+	$ bash ./configure --prefix=/tmp/apache/ --exec-prefix=/tmp/apache/
+	$ sed -i 's/getline/apache_getline/' src/support/htdigest.c 
+	$ sed -i 's/getline/apache_getline/' src/support/htpasswd.c 
+	$ sed -i 's/getline/apache_getline/' src/support/logresolve.c 
+	$ make -j 16
+
+set up:
+	$ mkdir -p /tmp/apache/htdocs/
+	$ mkdir -p /tmp/apache/logs/
+	$ cp -R conf /tmp/apache/
+	$ cp ~/MVEE/Benchmarks/VARAN/apache_1.3.29.orig/htdocs/manual/logs.html /tmp/apache/htdocs/index.html
+
+run:
+	$ ./MVEE 2 -- ~/MVEE/Benchmarks/VARAN/apache_1.3.29/src/httpd
+
+test:
+	$ ab -n 10000 http://<hostname>:8080/
+	
+Only works with MVEE_ALLOW_SHM!!!
+
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@                                THTTPD 2.26                                   @
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+compile:
+	$ cp -R thttpd-2.26.orig thttpd-2.26
+	$ cd thttpd-2.26
+	$ ./configure
+	$ make -j 16
+
+run:
+	$ ./MVEE 2 -- ~/MVEE/Benchmarks/VARAN/thttpd-2.26/thttpd -p 8080 -d ~/MVEE/Benchmarks/VARAN/lighttpd-1.4.36.orig/tests/docroot/www/
+
+test:
+	$ ab -n 1000 -c 2 http://<hostname>:8080/

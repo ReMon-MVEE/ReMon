@@ -1,0 +1,6 @@
+BENCHPATH=$SPECPATH/462.libquantum
+BINPATH=$BENCHPATH/build/$SPECPROFILE
+DATAPATH=$BENCHPATH/data/test/input
+ALLDATAPATH=$BENCHPATH/data/all/input
+
+$BINPATH/libquantum 33 5 > test.out

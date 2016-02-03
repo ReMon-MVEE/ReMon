@@ -1,0 +1,46 @@
+diff -r --unified /home/stijn/parsec-2.1-mirror/pkgs/libs/glib/src/glib/gatomic.c /home/stijn/parsec-2.1/pkgs/libs/glib/src/glib/gatomic.c
+--- /home/stijn/parsec-2.1-mirror/pkgs/libs/glib/src/glib/gatomic.c	2013-07-24 18:09:00.624055743 +0200
++++ /home/stijn/parsec-2.1/pkgs/libs/glib/src/glib/gatomic.c	2014-01-16 17:42:26.978263585 +0100
+@@ -21,12 +21,14 @@
+  */
+  
+ #include "config.h"
++#define G_ATOMIC_OP_MEMORY_BARRIER_NEEDED
++#define DEFINE_WITH_MUTEXES
+ 
+ #include "glib.h"
+ #include "gthreadprivate.h"
+ #include "galias.h"
+ 
+-#if defined (__GNUC__)
++#if 0
+ # if defined (G_ATOMIC_I486)
+ /* Adapted from CVS version 1.10 of glibc's sysdeps/i386/i486/bits/atomic.h 
+  */
+@@ -663,7 +665,8 @@
+   g_mutex_unlock (g_atomic_mutex);
+ }
+ #endif /* G_ATOMIC_OP_MEMORY_BARRIER_NEEDED */   
+-#elif defined (G_ATOMIC_OP_MEMORY_BARRIER_NEEDED)
++#endif
++#if 0
+ gint
+ g_atomic_int_get (volatile gint *atomic)
+ {
+diff -r --unified /home/stijn/parsec-2.1-mirror/pkgs/libs/glib/src/gobject/gclosure.c /home/stijn/parsec-2.1/pkgs/libs/glib/src/gobject/gclosure.c
+--- /home/stijn/parsec-2.1-mirror/pkgs/libs/glib/src/gobject/gclosure.c	2013-07-24 18:09:00.300176560 +0200
++++ /home/stijn/parsec-2.1/pkgs/libs/glib/src/gobject/gclosure.c	2014-01-16 17:44:46.600767519 +0100
+@@ -51,11 +51,11 @@
+   do                                                    		                \
+     {                                                   		                \
+       ClosureInt tmp;                                   		                \
+-      tmp.vint = old_int = cunion->vint;                		                \
++      tmp.vint = old_int = g_atomic_int_get(&cunion->vint);		\
+       _SET_OLD tmp.closure._field;                                                      \
+       tmp.closure._field _OP _value;                      		                \
+       _SET_NEW tmp.closure._field;                                                      \
+-      new_int = tmp.vint;                               		                \
++      new_int = g_atomic_int_get(&tmp.vint);				\
+       success = g_atomic_int_compare_and_exchange (&cunion->vint, old_int, new_int);    \
+     }                                                   		                \
+   while (!success && _must_set);                                                        \

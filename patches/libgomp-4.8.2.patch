@@ -1,0 +1,41 @@
+diff -r --unified gcc-4.8.2.orig/libgomp/config/linux/ptrlock.h gcc-4.8.2/libgomp/config/linux/ptrlock.h
+--- gcc-4.8.2.orig/libgomp/config/linux/ptrlock.h	2013-01-14 19:18:49.000000000 +0100
++++ gcc-4.8.2/libgomp/config/linux/ptrlock.h	2014-12-01 11:21:27.316588026 +0100
+@@ -39,8 +39,8 @@
+ 
+ static inline void *gomp_ptrlock_get (gomp_ptrlock_t *ptrlock)
+ {
+-  if (ptrlock->ptr != NULL)
+-    return ptrlock->ptr;
++  //  if (ptrlock->ptr != NULL)
++  //    return ptrlock->ptr; 
+ 
+   gomp_mutex_lock (&ptrlock->lock);
+   if (ptrlock->ptr != NULL)
+diff -r --unified gcc-4.8.2.orig/libgomp/configure gcc-4.8.2/libgomp/configure
+--- gcc-4.8.2.orig/libgomp/configure	2013-10-16 09:27:58.000000000 +0200
++++ gcc-4.8.2/libgomp/configure	2014-12-01 11:21:27.319588408 +0100
+@@ -16052,11 +16052,6 @@
+ fi
+ { $as_echo "$as_me:${as_lineno-$LINENO}: result: $libgomp_cv_have_sync_builtins" >&5
+ $as_echo "$libgomp_cv_have_sync_builtins" >&6; }
+-  if test $libgomp_cv_have_sync_builtins = yes; then
+-
+-$as_echo "#define HAVE_SYNC_BUILTINS 1" >>confdefs.h
+-
+-  fi
+ 
+ XCFLAGS="$XCFLAGS$XPCFLAGS"
+ 
+diff -r --unified gcc-4.8.2.orig/libgomp/libgomp.h gcc-4.8.2/libgomp/libgomp.h
+--- gcc-4.8.2.orig/libgomp/libgomp.h	2013-01-14 19:18:49.000000000 +0100
++++ gcc-4.8.2/libgomp/libgomp.h	2014-12-01 11:56:46.338904866 +0100
+@@ -34,6 +34,7 @@
+ #ifndef LIBGOMP_H 
+ #define LIBGOMP_H 1
+ 
++#include "../mvee_atomic.h"
+ #include "config.h"
+ #include "gstdint.h"
+ 
+Only in gcc-4.8.2/libgomp/: libgomp.h~

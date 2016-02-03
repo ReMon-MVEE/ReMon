@@ -1,0 +1,6 @@
+BENCHPATH=$SPECPATH/458.sjeng
+BINPATH=$BENCHPATH/build/$SPECPROFILE
+DATAPATH=$BENCHPATH/data/test/input
+ALLDATAPATH=$BENCHPATH/data/all/input
+
+$BINPATH/sjeng $DATAPATH/test.txt > test.out
