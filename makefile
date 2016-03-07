@@ -144,7 +144,7 @@ $(MVEE_BUILD)/%.o: %.cpp
 
 $(BIN): $(OBJ)
 	@-mkdir -p $(MVEE_OUT)
-	$(STD_CXX) -o $@ $(STD_LDFLAGS) $^ $(STD_LIBS)
+	$(STD_CXX) -fuse-ld=bfd -o $@ $(STD_LDFLAGS) $^ $(STD_LIBS)
 endif
 
 clean: 
