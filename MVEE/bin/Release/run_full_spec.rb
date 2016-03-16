@@ -2,36 +2,20 @@
 
 @specintresults  = Hash.new
 @specfpresults   = Hash.new
-@replicae        = (2..4)
-@specint         = (60..70) # xalan (71) doesn't run on 32bit
-@specfp          = (118..134)
+@variants        = (2..4)
+@specint         = (1..12)
+@specfp          = (13..29)
 @runs            = 5
 
-def install_orig_libc()
-  print("Installing original eglibc 2.19\n")
-  orig = Dir.pwd
-  Dir.chdir(File.expand_path("~/eglibc-builds/eglibc-orig/"))
-  `ls -1 | egrep "libc6\_|dbg|libc\-bin" | xargs sudo dpkg -i`
-  Dir.chdir(orig)
-end
-
-def install_ghumvee_libc()
-  print("Installing GHUMVEE eglibc 2.19\n")
-  orig = Dir.pwd
-  Dir.chdir(File.expand_path("~/eglibc-builds/eglibc-mvee-current"))
-  `ls -1 | egrep "libc6\_|dbg|libc\-bin" | xargs sudo dpkg -i`
-  Dir.chdir(orig)
-end
-
 def get_bench_name(benchnum)
-  _benchname=`grep "case #{benchnum}:" -A8 ../../Src/MVEE_demos.cpp | grep execl | head -n1`.split(",")[2].match(/[[:digit:]]{3}\.[[:alnum:]]*/)
-  return _benchname[0] if _benchname
+  _benchname=`grep "REGISTER.*(#{benchnum}," ../../Src/MVEE_demos.cpp`.split('"')[1]
+  return _benchname if _benchname
   "dunno"
 end
 
-def run_bench(benchnum, replicae, native, force_pie)
+def run_bench(benchnum, variants, native, force_pie)
   arr = Array.new
-  `./MVEE #{benchnum} #{replicae} #{"-n" if native} #{"-f1" if force_pie} 2>&1`.each_line { |ln|
+  `./MVEE #{benchnum} #{variants} #{"-n" if native} #{"-f1" if force_pie} 2>&1`.each_line { |ln|
     arr << ln
     if ln.match(/ERROR/) or ln.match(/Killed/)
       p arr
@@ -51,8 +35,8 @@ def dump_spreadsheet(filename, results)
 
   File.open(filename, "w") { |file|
     columns="Benchmark;Native (non-PIE);Native (PIE);"
-    @replicae.each { |replicae|
-      columns << "GHUMVEE (#{replicae} Replicae);"
+    @variants.each { |variants|
+      columns << "GHUMVEE (#{variants} Variants);"
     }
     print_spreadsheet(file, columns + "\n")
 
@@ -80,7 +64,6 @@ def dump_spreadsheet(filename, results)
 end
 
 def run_suite(suite, results)
-  # install_orig_libc()
   # print("Native - non-PIE:\n")
   
   # suite.each { |num|
@@ -109,25 +92,22 @@ def run_suite(suite, results)
   #   }
   # }
 
-  # install_ghumvee_libc()
-
-  @replicae.each { |replicae|
-    print("#{replicae} replicae:\n")
+  @variants.each { |variants|
+    print("#{variants} variants:\n")
     suite.each { |num|
       benchname = get_bench_name(num)
       print("    #{benchname}\n")
       (1..@runs).each { |tmp|
-        res = run_bench(num, replicae, false, false)
+        res = run_bench(num, variants, false, false)
         results[benchname] = Hash.new if not results[benchname]
-        results[benchname][replicae] = Array.new if not results[benchname][replicae]
-        results[benchname][replicae] << res
+        results[benchname][variants] = Array.new if not results[benchname][variants]
+        results[benchname][variants] << res
         print("        #{res}\n")
       }
     }
   }  
 end
 
-`sudo sysctl -w kernel.yama.ptrace_scope=0`
 `sudo sysctl -w kernel.randomize_va_space=1`
 print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n")
 print("@" + "SPECINT 2006".center(78) + "@\n")
