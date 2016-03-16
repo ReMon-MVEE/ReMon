@@ -864,7 +864,9 @@ void monitor::handle_execve_get_args(int childnum)
             {
                 unsigned long argvp = mvee_wrap_ptrace(PTRACE_PEEKDATA, childs[childnum].childpid,
                                                        ARG2(childnum) + sizeof(long)*i, NULL);
+//				warnf("Reading argv[%d] data\n", i);
                 char*         tmp   = mvee_rw_read_string(childs[childnum].childpid, argvp);
+//				warnf("done\n");
                 if (tmp)
                 {
                     set_mmap_table->mmap_execve_argv.push_back(std::string(tmp));
@@ -916,6 +918,7 @@ long monitor::handle_execve_precall(int childnum)
     for (int i = 1; i < mvee::numvariants; ++i)
     {
         handle_execve_get_args(i);
+#if 0
         if (set_mmap_table->mmap_execve_image != orig_image)
         {
             warnf("execve image mismatch\n");
@@ -925,7 +928,8 @@ long monitor::handle_execve_precall(int childnum)
         {
             warnf("execve args mismatch\n");
             return MVEE_PRECALL_CALL_DENY | MVEE_PRECALL_ARGS_MISMATCH;
-        }
+		}
+#endif
     }
 
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;

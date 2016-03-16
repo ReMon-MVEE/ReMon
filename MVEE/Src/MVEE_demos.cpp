@@ -13,6 +13,7 @@
 -----------------------------------------------------------------------------*/
 #include <stdlib.h>
 #include <assert.h>
+#include <sstream>
 #include "MVEE.h"
 #include "MVEE_monitor.h"
 #include "MVEE_private_arch.h"
@@ -23,7 +24,7 @@
 
     This is obviously not that useful when running benchmarks natively...
 -----------------------------------------------------------------------------*/
-void mvee::set_demo_options(int demonum)
+void mvee::set_demo_options(int demonum, std::vector<VariantArch>& archs)
 {
     if (!mvee::config.mvee_use_system_libc)
         mvee::add_library_path(mvee::config.mvee_libc_path);
@@ -33,29 +34,45 @@ void mvee::set_demo_options(int demonum)
         mvee::add_library_path(mvee::config.mvee_libgomp_path);
     if (!mvee::config.mvee_use_system_gnomelibs)
         mvee::add_library_path(mvee::config.mvee_gnomelibs_path);
-
 	
 	switch(demonum)
 	{
 		// PARSEC bodytrack
-    	case 81:
+    	case 31:
 		// PARSEC fluidanimate
-    	case 86:
+    	case 36:
 		// PARSEC raytrace
-     	case 88:
+     	case 38:
         // PARSEC streamcluster
-    	case 89:
+    	case 39:
 			mvee::demo_schedule_type = MVEE_CLEVER_SCHEDULING;
 			break;
 
 		// PARSEC x264
-	    case 92:
+	    case 42:
 			mvee::demo_has_many_threads = true;
+			break;
+
+		// Cross-ISA MVEE PoC
+		case 57:
+			if (archs.size() > 1)
+				archs[1] = ARCH_AARCH64;
 			break;
 	}
 
-	if (demonum >= 158 && demonum <= 171)
+	// SPLASH-2x
+	if (demonum >= 43 && demonum <= 56)
 		mvee::demo_schedule_type = MVEE_CLEVER_SCHEDULING;
+}
+
+/*-----------------------------------------------------------------------------
+    get_spec_profile -
+-----------------------------------------------------------------------------*/
+const char* mvee::get_spec_profile(bool native)
+{
+	if (native)
+		return SPECPROFILENOPIE;
+	return SPECPROFILEPIE;
 }
 
 /*-----------------------------------------------------------------------------
@@ -69,32 +86,26 @@ void mvee::setup_env(int demonum, bool native)
     {
         std::string ipmon_path = mvee::config.mvee_root_path;
         ipmon_path += "/IP-MON/libipmon.so";
-
         setenv("LD_PRELOAD", mvee::strdup(ipmon_path.c_str()), 1);
     }
 
-
-    if ((demonum < 60 || demonum > 72)
-        && (demonum < 118 || demonum > 134))
-        return;
-
-    if ((demonum >= 60 && demonum <= 72)
-        || (demonum >= 118 && demonum <= 134))
+    if (demonum >= 1 && demonum <= 29)
     {
-        setenv("SPEC",        "/home/stijn/spec2006/spec2006inst",                   1);
-        setenv("SPECPATH",    "/home/stijn/spec2006/spec2006inst/benchspec/CPU2006", 1);
-        setenv("SPECLIBPATH", "/home/stijn/spec2006/spec2006inst/bin/lib",           1);
-//        if (native)
-            setenv("SPECPROFILE", SPECPROFILENOPIE, 1);
-//        else
-//            setenv("SPECPROFILE", SPECPROFILEPIE, 1);
+		std::string spec_path = mvee::config.mvee_root_path;
+		spec_path += mvee::config.mvee_spec2006_path;
+
+        setenv("SPEC",        spec_path.c_str(),                                    1);		
+        setenv("SPECPATH",    std::string(spec_path + "benchspec/CPU2006").c_str(), 1);
+		setenv("SPECLIBPATH", std::string(spec_path + "bin/lib").c_str(),           1);
+		setenv("SPECPROFILE", get_spec_profile(native),                             1);
+
+		// export this one for our spec scripts
+		setenv("MVEEROOT",    mvee::config.mvee_root_path,                          1);
     }
 }
 
 /*-----------------------------------------------------------------------------
-    start_demo - !!! Most of this stuff is HORRIBLY outdated !!!
-
-    NOTE: This code runs in the replicae processes, not in the monitor!!!
+    start_demo - This code runs in the variant processes, not in the monitor!!!
 -----------------------------------------------------------------------------*/
 void mvee::start_demo(int demonum, int childindex, bool native)
 {
@@ -108,604 +119,172 @@ void mvee::start_demo(int demonum, int childindex, bool native)
     {
         // Simply runs the ls command. Orchestra can't handle this demo because of the ioctl syscall...
         case 0:
-        {
+		{
             execl("/bin/ls", "ls", "-al", "MVEE", NULL);
             break;
         }
-        // Hello world app
-        case 1:
-        {
-            execl("../../../ForkTest/a.out", "a.out", NULL);
-            break;
-        }
-        // File hashing test app
-        case 2:
-        {
-            execl("../../../../../../usr/bin/make", "make", "-j", "8", NULL);
-            break;
-        }
-        // Creates a bunch of threads, does some printf'ing and calculates a number...
-        // This _SHOULD_ deadlock with the default libc
-        // Since there are printfs from different threads, this will also fail with Weak Determinism systems
-        case 3:
-        {
-            execl("../../../TestApp3/TestApp3", "TestApp3", NULL);
-            break;
-        }
-        // The first real killer app => GNOME's calculator.
-        case 5:
-        {
-            //        mvee_mon_add_interposer(MVEE_FILE_GTK_INTERPOSER);
-            //        mvee_mon_add_interposer(MVEE_FILE_GLIB_INTERPOSER);
-            //        mvee_mon_add_interposer(MVEE_FILE_ORBIT_INTERPOSER);
-            //        mvee_mon_add_interposer(MVEE_FILE_PANGO_INTERPOSER);
-            execl("/usr/bin/gnome-calculator", "gnome-calculator", NULL);
-            break;
-        }
-        // Spams hello world until you kill it... This app registers a couple of
-        // signal handlers. => if you send one of these signals to the app,
-        // the monitor should intercept it and deliver it when the variants
-        // are synced.
-        case 6:
-        {
-            execl("../../../TestApp6/TestApp6", "TestApp6", NULL);
-            break;
-        }
-        // mmap testing application. Tries to mmap with PROT_READ|PROT_WRITE and MAP_SHARED.
-        // This shouldn't be allowed.
-        case 7:
-        {
-            execl("../../../TestApp7/bin/Debug/TestApp", "TestApp", NULL);
-            break;
-        }
-        // Pretty much the same as app 6. No idea why this demois even here
-        case 8:
-        {
-            execl("../../../TestApp8/TestApp8", "TestApp8", NULL);
-            break;
-        }
-        // Socket testing app. Tries to bind a socket.
-        case 9:
-        {
-            execl("../../../TestApp9/TestApp9", "TestApp9", NULL);
-            break;
-        }
-        // Simple I/O Benchmark
-        case 10:
-        {
-            execl("../../../TestApp10/TestApp10", "TestApp10", NULL);
-            break;
-        }
-        // Simple CPU Benchmark
-        case 11:
-        {
-            execl("../../../TestApp11/TestApp11", "TestApp11", NULL);
-            break;
-        }
-        // Simple Memory Benchmark (Sequential Reading)
-        case 12:
-        {
-            execl("../../../TestApp12/TestApp12", "TestApp12", NULL);
-            break;
-        }
-        // Simple Threading Benchmark (Short Lived Threads)
-        case 13:
-        {
-            //mvee_mon_add_interposer(MVEE_FILE_PTHREAD_INTERPOSER);
-            execl("../../../TestApp13/TestApp13", "TestApp13", NULL);
-            break;
-        }
-        // Simple Memory Benchmark (Random Reading)
-        case 14:
-        {
-            execl("../../../TestApp12/TestApp12", "TestApp12", "1", NULL);
-            break;
-        }
-        // Simple Threading Benchmark (Long Lived Threads)
-        case 15:
-        {
-            execl("../../../TestApp15/TestApp15", "TestApp15", NULL);
-            break;
-        }
-        // xclock test. This is the most trivial graphical application in the
-        // universe. Unlike other graphical applications, this one should run
-        // just fine without any interposers...
-        case 16:
-        {
-            execl("/usr/bin/xclock", "xclock", NULL);
-            break;
-        }
-        // Similar to the mmap test. This one uses sysv's ipc interface to
-        // attach to shared memory. This is not allowed...
-        case 17:
-        {
-            execl("../../../SHMTest/bin/Debug/SHMTest", "SHMTest", NULL);
-            break;
-        }
-        // simple socket client (requires running server)
-        case 18:
-        {
-            execl("../../../TestApp16/Client/bin/Debug/Client", "Client", NULL);
-            break;
-        }
-        // simple socket server
-        case 19:
-        {
-            execl("../../../TestApp16/Server/bin/Debug/Server", "Server", NULL);
-            break;
-        }
-        // large file read
-        case 20:
-        {
-            execl("../../../LargeRead/bin/Debug/LargeRead", "LargeRead", NULL);
-            break;
-        }
-        // first non-trivial networking application. Running wget inside the
-        // MVEE actually revealed a stack overflow bug!
-        case 21:
-        {
-            execl("/usr/bin/wget", "wget", "http://www.google.com", NULL);
-            break;
-        }
-        // Another networking test
-        case 22:
-        {
-            assert(mvee::demo_args.size() >= 2);
-            execl("../../../UDPSocket/Client", "Client", mvee::demo_args[0].c_str(), mvee::demo_args[1].c_str(), NULL);
-            break;
-        }
-        // This is a test for our monitor's SEGV handler.
-        case 23:
-        {
-            execl("../../../SignalTest/SignalTest", "SignalTest", NULL);
-            break;
-        }
-        // Very similar to xclock but with some extra I/O.
-        // Once again, no interposers needed.
-        case 24:
-        {
-            execl("/usr/bin/xeyes", "xeyes", NULL);
-            break;
-        }
-        // Tests some RDTSC related monitor functions
-        case 25:
-        {
-            execl("../../../RdtscTest/bin/Debug/RdtscTest", "RdtscTest", NULL);
-            break;
-        }
-        // Tests getTID/getPID/... functions
-        case 26:
-        {
-            execl("/home/stijn/MVEE/PIDTIDTest/PIDTIDTest", "PIDTIDTest", NULL);
-            break;
-        }
-        // clock_gettime test
-        case 27:
-        {
-            execl("../../../ClockTest/bin/Debug/ClockTest", "ClockTest", NULL);
-            break;
-        }
-        // O_CREAT | O_EXCL test
-        case 28:
-        {
-            execl("../../../ExclusiveCreateTest/ExclusiveCreateTest", "ExclusiveCreateTest", NULL);
-            break;
-        }
-        // Simple graphical program on the GTK stack
-        case 29:
-        {
-            execl("../../../HelloWorldGTK/bin/Debug/HelloWorldGTK", "HelloWorldGTK", NULL);
-            break;
-        }
-        case 30:
-            execl("../../../StatTest/StatTest",                           "StatTest",         "MVEE", NULL);
-            break;
-        case 31:
-            execl("/usr/games/mahjongg",                                  "mahjongg",         NULL);
-            break;
-        case 32:
-            execl("../../../ForkTest/ForkTest",                           "ForkTest",         NULL);
-            break;
-        case 33:
-            execl("../../../ExecTest/bin/Debug/ExecTest",                 "ExecTest",         NULL);
-            break;
-        case 34:
-            execl("../../../CondVarTest/bin/Debug/CondVarTest",           "CondVarTest",      NULL);
-            break;
-        case 35:
-            execl("../../../SocketPairTest/SocketPairTest",               "SocketPairTest",   NULL);
-            break;
-        case 36:
-            execl("../../../FileLockTest/FileLockTest",                   "FileLockTest",     NULL);
-            break;
-        case 37:
-            execl("../../../SetXidTest/bin/Debug/SetXidTest",             "SetXidTest",       NULL);
-            break;
-        case 38:
-            execl("../../../MutexTest/bin/Debug/MutexTest",               "MutexTest",        NULL);
-            break;
-        case 39:
-            execl("../../../NetLinkTest/NetLinkTest",                     "NetLinkTest",      NULL);
-            break;
-        case 40:
-            execl("../../../PollTest/PollTest",                           "PollTest",         NULL);
-            break;
-        case 42:
-            execl("../../../HashingBenchmark/bin/Debug/HashingBenchmark", "HashingBenchmark", NULL);
-            break;
-        case 54:
-            //mvee_mon_add_interposer(MVEE_FILE_PTHREAD_INTERPOSER);
-            //mvee_mon_add_interposer(MVEE_FILE_ORBIT_INTERPOSER);
-            execl("/usr/bin/kcalc",          "kcalc",        NULL);
-            break;
-        case 56:
-            execl("/usr/games/quadrapassel", "quadrapassel", NULL);
-            break;
-        case 60:
-            execl("/bin/sh",                 "sh",           "./spec/400.perlbench/ref/runme.sh",  NULL);
-            break;
-        case 61:
-            execl("/bin/sh",                 "sh",           "./spec/401.bzip2/ref/runme.sh",      NULL);
-            break;
-        case 62:
-            execl("/bin/sh",                 "sh",           "./spec/403.gcc/ref/runme.sh",        NULL);
-            break;
-        case 63:
-            execl("/bin/sh",                 "sh",           "./spec/429.mcf/ref/runme.sh",        NULL);
-            break;
-        case 64:
-            execl("/bin/sh",                 "sh",           "./spec/445.gobmk/ref/runme.sh",      NULL);
-            break;
-        case 65:
-            execl("/bin/sh",                 "sh",           "./spec/456.hmmer/ref/runme.sh",      NULL);
-            break;
-        case 66:
-            execl("/bin/sh",                 "sh",           "./spec/458.sjeng/ref/runme.sh",      NULL);
-            break;
-        case 67:
-            execl("/bin/sh",                 "sh",           "./spec/462.libquantum/ref/runme.sh", NULL);
-            break;
-        case 68:
-            execl("/bin/sh",                 "sh",           "./spec/464.h264ref/ref/runme.sh",    NULL);
-            break;
-        case 69:
-            execl("/bin/sh",                 "sh",           "./spec/471.omnetpp/ref/runme.sh",    NULL);
-            break;
-        case 70:
-            execl("/bin/sh",                 "sh",           "./spec/473.astar/ref/runme.sh",      NULL);
-            break;
-        case 71:
-            execl("/bin/sh",                 "sh",           "./spec/483.xalancbmk/ref/runme.sh",  NULL);
-            break;
+		
+		//
+		// SPECint 2006 benchmarks
+		//
+#define REGISTER_SPEC(num, name) case num: { spec_bench = name; break; }
+		REGISTER_SPEC(1 , "400.perlbench"  );
+		REGISTER_SPEC(2 , "401.bzip2"      );
+		REGISTER_SPEC(3 , "403.gcc"        );
+		REGISTER_SPEC(4 , "429.mcf"        );
+		REGISTER_SPEC(5 , "445.gobmk"      );
+		REGISTER_SPEC(6 , "456.hmmer"      );
+		REGISTER_SPEC(7 , "458.sjeng"      );
+		REGISTER_SPEC(8 , "462.libquantum" );
+		REGISTER_SPEC(9 , "464.h264ref"    );
+		REGISTER_SPEC(10, "471.omnetpp"    );
+		REGISTER_SPEC(11, "473.astar"      );
+		REGISTER_SPEC(12, "483.xalancbmk"  );
 
-        case 73:
-            execl("/usr/bin/kate", "kate", NULL);
-            break;
-        //
-        // PARSEC blackscholes benchmark
-        //
-        case 80:
-            parsec_bench  = "blackscholes";
-            break;
-        //
-        // PARSEC bodytrack benchmark
-        //
-        case 81:
-            parsec_bench  = "bodytrack";
-            break;
-        //
-        // PARSEC canneal benchmark
-        //
-        case 82:
-            // parsec_bench = "canneal";
-            break;
-        //
-        // PARSEC dedup benchmark
-        //
-        case 83:
-            parsec_bench  = "dedup";
-            break;
-        //
-        // PARSEC facesim benchmark
-        //
-        case 84:
-            parsec_bench = "facesim";
-			parsec_ver = 3;
-            break;
-        //
-        // PARSEC ferret benchmark
-        //
-        case 85:
-            parsec_bench  = "ferret";
-			parsec_ver = 3;
-            break;
-        //
-        // PARSEC fluidanimate benchmark
-        //
-        case 86:
-            parsec_bench  = "fluidanimate";
-            break;
-        //
-        // PARSEC freqmine benchmark
-        //
-        case 87:
-            parsec_bench  = "freqmine";
-            parsec_config = "gcc-openmp";
-            break;
-        //
-        // PARSEC raytrace benchmark
-        //
-        case 88:
-            parsec_bench  = "raytrace";
-            break;
-        //
-        // PARSEC streamcluster benchmark
-        //
-        case 89:
-            parsec_bench  = "streamcluster";
-            break;
-        //
-        // PARSEC swaptions benchmark
-        //
-        case 90:
-            parsec_bench  = "swaptions";
-            break;
-        //
-        // PARSEC vips benchmark
-        //
-        case 91:
-            parsec_bench  = "vips";
-            break;
-        //
-        // PARSEC x264 benchmark
-        //
-        case 92:
-            parsec_bench  = "x264";
-            break;
-        case 105:
-            //      execl("/usr/bin/mplayer", "mplayer", "-vo", "x11", "-nosound", "/home/stijn/cscw94_10_m2.mpg", NULL);
-            execl("/usr/bin/mplayer", "mplayer", "-vo", "x11", "-ao", "null", "-hardframedrop", "/home/stijn/big_buck_bunny_1080p_h264.mov", NULL);
-            //execl("/usr/bin/mplayer", "mplayer", "-vo", "x11", "-ao", "null", "-hardframedrop", "/home/stijn/big_buck_bunny_720p_h264.mov", NULL);
-            break;
-        case 106:
-            execl("/usr/bin/vlc",                     "vlc",         "--no-xvideo-shm", "/media/sf_Hostdocs/FF14.mp4", NULL);
-            break;
-        case 107:
-            execl("/usr/bin/javac",                   "javac",       "-version",        NULL);
-            break;
-        case 108:
-            execl("../../../system_test/system_test", "system_test", "ls",              NULL);
-            break;
-        //
-        // RDTSCBenchmark
-        //
-        case 113:
-            execl("/home/stijn/MVEE/RDTSCBenchmark/RDTSCBenchmark", "RDTSCBenchmark", NULL);
-            break;
-        case 114:
-            execl("/home/stijn/MVEE/mmantest/mmantest",             "mmantest",       NULL);
-            break;
-        case 116:
-            execl("/home/stijn/MVEE/miniferret/miniferret",         "miniferret",     NULL);
-            break;
-        case 117:
-            //execl("/bin/tar", "tar", "-xvf", "/home/stijn/parsec-2.1/pkgs/apps/vips/inputs/input_native.tar", NULL);
-            execl("/bin/tar", "tar", "-xvf", "/home/stijn/MVEE/MVEE/bin/Debug/logs.tar.gz", NULL);
-            break;
-        // SPECfp 2006
-        case 118:
-            execl("/bin/sh",                                                          "sh",                           "./spec/410.bwaves/ref/runme.sh",    NULL);
-            break;
-        case 119:
-            execl("/bin/sh",                                                          "sh",                           "./spec/416.gamess/ref/runme.sh",    NULL);
-            break;
-        case 120:
-            execl("/bin/sh",                                                          "sh",                           "./spec/433.milc/ref/runme.sh",      NULL);
-            break;
-        case 121:
-            execl("/bin/sh",                                                          "sh",                           "./spec/434.zeusmp/ref/runme.sh",    NULL);
-            break;
-        case 122:
-            execl("/bin/sh",                                                          "sh",                           "./spec/435.gromacs/ref/runme.sh",   NULL);
-            break;
-        case 123:
-            execl("/bin/sh",                                                          "sh",                           "./spec/436.cactusADM/ref/runme.sh", NULL);
-            break;
-        case 124:
-            execl("/bin/sh",                                                          "sh",                           "./spec/437.leslie3d/ref/runme.sh",  NULL);
-            break;
-        case 125:
-            execl("/bin/sh",                                                          "sh",                           "./spec/444.namd/ref/runme.sh",      NULL);
-            break;
-        case 126:
-            execl("/bin/sh",                                                          "sh",                           "./spec/447.dealII/ref/runme.sh",    NULL);
-            break;
-        case 127:
-            execl("/bin/sh",                                                          "sh",                           "./spec/450.soplex/ref/runme.sh",    NULL);
-            break;
-        case 128:
-            execl("/bin/sh",                                                          "sh",                           "./spec/453.povray/ref/runme.sh",    NULL);
-            break;
-        case 129:
-            execl("/bin/sh",                                                          "sh",                           "./spec/454.calculix/ref/runme.sh",  NULL);
-            break;
-        case 130:
-            execl("/bin/sh",                                                          "sh",                           "./spec/459.GemsFDTD/ref/runme.sh",  NULL);
-            break;
-        case 131:
-            execl("/bin/sh",                                                          "sh",                           "./spec/465.tonto/ref/runme.sh",     NULL);
-            break;
-        case 132:
-            execl("/bin/sh",                                                          "sh",                           "./spec/470.lbm/ref/runme.sh",       NULL);
-            break;
-        case 133:
-            execl("/bin/sh",                                                          "sh",                           "./spec/481.wrf/ref/runme.sh",       NULL);
-            break;
-        case 134:
-            execl("/bin/sh",                                                          "sh",                           "./spec/482.sphinx3/ref/runme.sh",   NULL);
-            break;
-        case 135:
-            execl("/home/stijn/buffertest",                                           "buffertest",                   NULL);
-            break;
-        case 136:
-            execl("/home/stijn/MVEE/gettimeofdaytest/gettimeofdaytest",               "gettimeofdaytest",             NULL);
-            break;
-        case 137:
-            execl("/usr/lib/ccache/gcc",                                              "gcc",                          "--version", NULL);
-            break;
-        case 141:
-            execl("/usr/local/nginx/sbin/nginx",                                      "nginx",                        NULL);
-            break;
-        case 142:
-            execl("/home/stijn/MVEE/getpidtest/getpidtest",                           "getpidtest",                   NULL);
-            break;
-        case 143:
-            execl("/home/stijn/openssl-1.0.1e/apps/openssl",                          "openssl",                      "s_server", "-cert",                                        "server.crt", "-key", "server.key", "-accept", "443", "-www", NULL);
-            break;
-        case 144:
-            execl("/usr/local/sbin/proftpd",                                          "proftpd",                      "-c",       "/home/stijn/MVEE/exploits/proftpd/basic.conf", "-d",         "10",   NULL);
-            break;
-        case 145:
-            execl("/home/stijn/MVEE/syscall_stresstest/syscall_stresstest_1_thread",  "syscall_stresstest_1_thread",  NULL);
-            break;
-        case 146:
-            execl("/home/stijn/MVEE/syscall_stresstest/syscall_stresstest_2_threads", "syscall_stresstest_2_threads", NULL);
-            break;
-        case 147:
-            execl("/home/stijn/MVEE/syscall_stresstest/syscall_stresstest_4_threads", "syscall_stresstest_4_threads", NULL);
-            break;
-        case 148:
-            execl("/home/stijn/MVEE/exploits/mcrypt/installs/bin/mcrypt",             "mcrypt",                       "-d", NULL);
-            break;
-        case 149:
-            execl("/home/stijn/MVEE/ptrace_bug/ptrace_bug",                           "ptrace_bug",                   NULL);
-            break;
-        case 150:
-            execl("/home/stijn/MVEE/i_like_pie/i_like_pie",                           "i_like_pie",                   NULL);
-            break;
-        case 151:
-            //      execl("/usr/local/bin/http-master", "http-master", NULL);
-            execl("/home/stijn/.nvm/v0.11.14/bin/node", "node", "/home/stijn/node-test/https-test.js", NULL);
-            break;
-        case 152:
-            execl("/bin/sh",                            "sh",   "/etc/init.d/torque-server",           "start",            NULL);
-            break;
-        case 153:
-            execl("/bin/sh",                            "sh",   "/etc/init.d/torque-server",           "stop",             NULL);
-            break;
-        case 154:
-            execl("/bin/sh",                            "sh",   "-c",                                  "/usr/bin/firefox", NULL);
-            break;
-        //
-        // PARSEC dedup benchmark
-        //
-        case 155:
-            parsec_bench = "deduputcb";
-            break;
-        case 156:
-            execl("/usr/bin/id", "id", NULL);
-            break;
-        case 157:
-            execl("/bin/sh",     "sh", "-c", "/bin/ls", NULL);
-            break;
+		// 
+		// SPECfp 2006 benchmarks
+		//
+		REGISTER_SPEC(13, "410.bwaves"     );
+		REGISTER_SPEC(14, "416.gamess"     );
+		REGISTER_SPEC(15, "433.milc"       );
+		REGISTER_SPEC(16, "434.zeusmp"     );
+		REGISTER_SPEC(17, "435.gromacs"    );
+		REGISTER_SPEC(18, "436.cactusADM"  );
+		REGISTER_SPEC(19, "437.leslie3d"   );
+		REGISTER_SPEC(20, "444.namd"       );
+		REGISTER_SPEC(21, "447.dealII"     );
+		REGISTER_SPEC(22, "450.soplex"     );
+		REGISTER_SPEC(23, "453.povray"     );
+		REGISTER_SPEC(24, "454.calculix"   );
+		REGISTER_SPEC(25, "459.GemsFDTD"   );
+		REGISTER_SPEC(26, "465.tonto"      );
+		REGISTER_SPEC(27, "470.lbm"        );
+		REGISTER_SPEC(28, "481.wrf"        );
+		REGISTER_SPEC(29, "482.sphinx3"    );
 
-        case 158:
-            splash_bench = "splash2x.barnes";
-            break;
-        case 159:
-            splash_bench = "splash2x.cholesky";
-            break;
-        case 160:
-            splash_bench = "splash2x.fft";
-            break;
-        case 161:
-            splash_bench = "splash2x.fmm";
-            break;
-        case 162:
-            splash_bench = "splash2x.lu_cb";
-            break;
-        case 163:
-            splash_bench = "splash2x.lu_ncb";
-            break;
-        case 164:
-            splash_bench = "splash2x.ocean_cp";
-            break;
-        case 165:
-            splash_bench = "splash2x.ocean_ncp";
-            break;
-        case 166:
-            splash_bench = "splash2x.radiosity";
-            break;
-        case 167:
-            splash_bench = "splash2x.radix";
-            break;
-        case 168:
-            splash_bench = "splash2x.raytrace";
-            break;
-        case 169:
-            splash_bench = "splash2x.volrend";
-            break;
-        case 170:
-            splash_bench = "splash2x.water_nsquared";
-            break;
-        case 171:
-            splash_bench = "splash2x.water_spatial";
-            break;
-        case 172:
-            execl("/usr/bin/ruby", "ruby", "--version", NULL);
-            break;
-	case 173:
-		execl("/home/stijn/MVEE/ipmontest/ipmontest", "ipmontest", "5", NULL);
-		break;
-	case 174:
-		execl("/home/stijn/MVEE/ipmontest/ipmontest", "ipmontest", "6", NULL);
-		break;
+		//
+		// PARSEC benchmarks
+		//
+#define REGISTER_PARSEC(num, ver, config, name) case num: { parsec_bench = name; parsec_ver = ver; parsec_config = #config; break; }
+		REGISTER_PARSEC(30, 2, "gcc-pthreads", "blackscholes"  );
+		REGISTER_PARSEC(31, 2, "gcc-pthreads", "bodytrack"     );
+		REGISTER_PARSEC(32, 2, "gcc-pthreads", "canneal"       );
+		REGISTER_PARSEC(33, 2, "gcc-pthreads", "dedup"         );
+		REGISTER_PARSEC(34, 3, "gcc-pthreads", "facesim"       );
+		REGISTER_PARSEC(35, 3, "gcc-pthreads", "ferret"        );
+		REGISTER_PARSEC(36, 2, "gcc-pthreads", "fluidanimate"  );
+		REGISTER_PARSEC(37, 2, "gcc-openmp"  , "freqmine"      );
+		REGISTER_PARSEC(38, 2, "gcc-pthreads", "raytrace"      );
+		REGISTER_PARSEC(39, 2, "gcc-pthreads", "streamcluster" );
+		REGISTER_PARSEC(40, 2, "gcc-pthreads", "swaptions"     );
+		REGISTER_PARSEC(41, 2, "gcc-pthreads", "vips"          );
+		REGISTER_PARSEC(42, 2, "gcc-pthreads", "x264"          );
 
-    }
+		// 
+		// SPLASH-2x benchmarks
+		//
+#define REGISTER_SPLASH(num, name) case num: { splash_bench = name; break; }
+		REGISTER_SPLASH(43, "splash2x.barnes"         ); 
+		REGISTER_SPLASH(44, "splash2x.cholesky"       ); 
+		REGISTER_SPLASH(45, "splash2x.fft"            ); 
+		REGISTER_SPLASH(46, "splash2x.fmm"            ); 
+		REGISTER_SPLASH(47, "splash2x.lu_cb"          ); 
+		REGISTER_SPLASH(48, "splash2x.lu_ncb"         ); 
+		REGISTER_SPLASH(49, "splash2x.ocean_cp"       ); 
+		REGISTER_SPLASH(50, "splash2x.ocean_ncp"      ); 
+		REGISTER_SPLASH(51, "splash2x.radiosity"      ); 
+		REGISTER_SPLASH(52, "splash2x.radix"          ); 
+		REGISTER_SPLASH(53, "splash2x.raytrace"       ); 
+		REGISTER_SPLASH(54, "splash2x.volrend"        ); 
+		REGISTER_SPLASH(55, "splash2x.water_nsquared" ); 
+		REGISTER_SPLASH(56, "splash2x.water_spatial"  ); 
 
-    if (parsec_bench)
-    {
-        assert(mvee::demo_args.size() >= 2);
-#ifdef MVEE_ALLOW_PERF
-        if (mvee::use_perf)
-        {
-            execl("/bin/bash", "bash",
-                  "/home/stijn/parsec-2.1/bin/parsecmgmt-perf",
-                  "-a", "run", "-p", parsec_bench, "-i", mvee::demo_args[1].c_str(), "-n", mvee::demo_args[0].c_str(), "-c", parsec_config ? parsec_config : "gcc", NULL);
-        }
-        else
-#endif
-		if (parsec_ver == 2)
+		// 
+		// Cross-ISA MVEE PoC
+		//
+		case 57:
 		{
-            execl("/bin/bash", "bash",
-                  "/home/stijn/parsec-2.1/bin/parsecmgmt",
-                  "-a", "run", "-p", parsec_bench, "-i", mvee::demo_args[1].c_str(), "-n", mvee::demo_args[0].c_str(), "-c", parsec_config ? parsec_config : "gcc", NULL);
-        }
-		else
-		{
-            execl("/bin/bash", "bash",
-                  "/home/stijn/parsec-3.0/bin/parsecmgmt",
-                  "-a", "run", "-p", parsec_bench, "-i", mvee::demo_args[1].c_str(), "-n", mvee::demo_args[0].c_str(), "-c", parsec_config ? parsec_config : "gcc-pthreads", NULL);
+			if (childindex == 0)
+				start_variant_qemu(ARCH_AARCH64, "/home/stijn/ReMon/TestsMultiarch/HelloWorld/hello-aarch64", NULL);
+			else
+				start_variant_qemu(ARCH_AMD64, "/home/stijn/ReMon/TestsMultiarch/HelloWorld/hello-x86_64", NULL);
+			break;
 		}
     }
-    else if (splash_bench)
+
+    if (parsec_bench || splash_bench)
     {
-        execl("/bin/bash", "bash",
-              "/home/stijn/parsec-3.0/bin/parsecmgmt",
-              "-a", "run", "-p", splash_bench, "-i", mvee::demo_args[1].c_str(), "-n", mvee::demo_args[0].c_str(), "-c", "gcc-pthreads", NULL);
+        assert(mvee::demo_args.size() >= 2);
+
+		std::stringstream cmd;
+		cmd << mvee::config.mvee_root_path;
+		cmd << ((parsec_ver == 2 && !splash_bench) ? 
+			mvee::config.mvee_parsec2_path : 
+				mvee::config.mvee_parsec3_path);
+		
+#ifdef MVEE_ALLOW_PERF
+        if (mvee::use_perf)
+			cmd << "/bin/parsecmgmt-perf";
+		else
+#endif
+			cmd << "/bin/parsecmgmt";
+
+		if (access(cmd.str().c_str(), F_OK) == -1)
+		{
+			printf("ERROR: Tried to start a PARSEC/SPLASH benchmark but could not find PARSEC management script at:\n   %s\n", cmd.str().c_str());
+			return;
+		}
+
+		cmd << " -a run -p " << parsec_bench 
+			<< " -n " << mvee::demo_args[0] 
+			<< " -i " << mvee::demo_args[1] 
+			<< " -c " << (parsec_config ? parsec_config : "gcc-pthreads");
+
+		start_variant_indirect(cmd.str().c_str());
     }
     else if (spec_bench)
     {
-        const char* config = native ? SPECCONFIGNOPIE : SPECCONFIGPIE;
-        execl("/home/stijn/spec2006/spec2006inst/bin/specperl", "specperl",
-              "-I", "/home/stijn/spec2006/spec2006inst/bin",
-              "-I", "/home/stijn/spec2006/spec2006inst/bin/lib",
-              "/home/stijn/spec2006/spec2006inst/bin/runspec", "--action=run", "-c", config, "-n", "1", "--loose", "--input", "ref", spec_bench, NULL);
+		std::stringstream cmd, specpath;
+
+		// check if we can find the runme script
+		cmd << mvee::config.mvee_root_path
+		    << "/MVEE/bin/Release/spec/" 
+			<< spec_bench << "/ref/runme.sh";
+
+		if (access(cmd.str().c_str(), F_OK) == -1)
+		{
+			printf("ERROR: Tried to start a SPEC benchmark but could not find runme script at:\n  %s\n",
+				   cmd.str().c_str());
+			return;
+		}
+
+		// check if SPEC is installed
+		specpath << mvee::config.mvee_root_path
+				 << mvee::config.mvee_spec2006_path
+				 << "/benchspec/";
+
+		if (access(specpath.str().c_str(), F_OK) == -1)
+		{
+			printf("ERROR: Tried to start a SPEC benchmark but could not find SPEC folder at:\n  %s\n",
+				   specpath.str().c_str());
+			return;
+		}
+
+		// check if the binaries are installed
+		specpath << "CPU2006/"
+				 << spec_bench
+				 << "/build/"
+				 << get_spec_profile(native);
+
+		if (access(specpath.str().c_str(), F_OK) == -1)
+		{
+			printf("ERROR: Tried to start a SPEC benchmark but could not find build folder at:\n  %s\n",
+				   specpath.str().c_str());
+			return;
+		}
+
+		start_variant_indirect(cmd.str().c_str());
     }
 
-
     printf("ERROR: the monitor could not start demo %d. Please check if the binary exists...\n", demonum);
-//    printf("ERROR: if you're running with MVEE_HIDE_VDSO or MVEE_FORCE_DISJOINT_CODE, this\n");
-//    printf("ERROR: might be caused by not having a valid MVEE_LD_Loader!\n");
-//    printf("ERROR: Compile one for your architecture by running the comp.sh script in MVEE/MVEE_LD_Loader\n");
 }

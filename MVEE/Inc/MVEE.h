@@ -65,6 +65,16 @@ long mvee_wrap_ptrace                 (unsigned short request, pid_t pid, unsign
 #include "MVEE_numcalls.h" // defines MAX_CALLS
 #define NO_CALL   0x01000000
 
+enum VariantArch
+{
+	ARCH_HOST,          // Variant should run natively
+	ARCH_I386,          // Variant should run on top of qemu-i386
+	ARCH_AMD64,         // Variant should run on top of qemu-amd64
+	ARCH_ARM,           // Variant should run on top of qemu-arm
+	ARCH_AARCH64        // Variant should run on top of qemu-aarch64
+};
+
+
 /*-----------------------------------------------------------------------------
     GHUMVEE Config File Configuration - refer to the default MVEE.ini for
     documentation.
@@ -87,6 +97,10 @@ struct mvee_config
     const char*   mvee_libstdcpp_path;
     const char*   mvee_libgfortran_path;
     const char*   mvee_gnomelibs_path;
+	const char*   mvee_spec2006_path;
+	const char*   mvee_parsec2_path;
+	const char*   mvee_parsec3_path;
+	const char*   mvee_qemu_path;
     config_t*     config;
 };
 
@@ -277,13 +291,17 @@ private:
     static void log_fini(bool terminated);
 
     //
-    // Demo Initialization
+    // Variant Initialization
     //
-    static void        add_library_path(const char* library_path, bool append_arch_suffix=true, bool prepend_mvee_root=true);
-    static std::string prepare_argv();
-    static void        set_demo_options(int demonum);
-    static void        setup_env(int demonum, bool native);
-    static void        start_demo(int demonum, int childindex, bool native);
+    static void        add_library_path       (const char* library_path, bool append_arch_suffix=true, bool prepend_mvee_root=true);
+    static std::string prepare_argv           ();
+    static void        set_demo_options       (int demonum, std::vector<VariantArch>& archs);
+    static void        setup_env              (int demonum, bool native);
+    static void        start_demo             (int demonum, int childindex, bool native);
+	static void        start_variant_qemu     (VariantArch arch, const char* path, ...);
+	static void        start_variant_direct   (const char* path, ...);
+	static void        start_variant_indirect (const char* cmd);
+	static const char* get_spec_profile       (bool native);
 
     //
     // Config Initialization

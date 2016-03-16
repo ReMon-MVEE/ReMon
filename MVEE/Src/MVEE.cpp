@@ -66,6 +66,10 @@ struct mvee_config                     mvee::config         =
     "/patched_binaries/libstdc++/",         // libstdcpp_path
     "/patched_binaries/libgfortran/",       // libgfortran_path
     "/patched_binaries/gnomelibs/",         // gnomelibs_path
+	"/ext/spec2006/",                       // spec2006_path
+	"/ext/parsec-2.1/",                     // parsec2_path
+	"/ext/parsec-3.0/",                     // parsec3_path
+	"/ext/qemu/",                           // qemu_path
     NULL
 };
 unsigned int                           mvee::demo_schedule_type                  = 0;
@@ -184,7 +188,7 @@ sigset_t mvee::old_sigset_to_new_sigset(unsigned long old_sigset)
 }
 
 /*-----------------------------------------------------------------------------
-    mvee_mon_prepare_argv
+    mvee_mon_prepare_argv - serializes the program arguments
 -----------------------------------------------------------------------------*/
 std::string mvee::prepare_argv()
 {
@@ -1113,6 +1117,10 @@ void mvee::mvee_config_to_config_t (config_t* config)
     mvee::config_store(CONFIG_TYPE_STRING, config, "libstdcpp_path",         &mvee::config.mvee_libstdcpp_path);
     mvee::config_store(CONFIG_TYPE_STRING, config, "libgfortran_path",       &mvee::config.mvee_libgfortran_path);
     mvee::config_store(CONFIG_TYPE_STRING, config, "gnomelibs_path",         &mvee::config.mvee_gnomelibs_path);
+    mvee::config_store(CONFIG_TYPE_STRING, config, "spec2006_path",          &mvee::config.mvee_spec2006_path);
+    mvee::config_store(CONFIG_TYPE_STRING, config, "parsec2_path",           &mvee::config.mvee_parsec2_path);
+    mvee::config_store(CONFIG_TYPE_STRING, config, "parsec3_path",           &mvee::config.mvee_parsec3_path);
+    mvee::config_store(CONFIG_TYPE_STRING, config, "qemu_path",              &mvee::config.mvee_qemu_path);
 }
 
 /*-----------------------------------------------------------------------------
@@ -1157,6 +1165,10 @@ void mvee::config_t_to_mvee_config (config_t* config)
     mvee::config_lookup(CONFIG_TYPE_STRING, config, "libstdcpp_path",         &mvee::config.mvee_libstdcpp_path);
     mvee::config_lookup(CONFIG_TYPE_STRING, config, "libgfortran_path",       &mvee::config.mvee_libgfortran_path);
     mvee::config_lookup(CONFIG_TYPE_STRING, config, "gnomelibs_path",         &mvee::config.mvee_gnomelibs_path);
+    mvee::config_lookup(CONFIG_TYPE_STRING, config, "spec2006_path",          &mvee::config.mvee_spec2006_path);
+    mvee::config_lookup(CONFIG_TYPE_STRING, config, "parsec2_path",           &mvee::config.mvee_parsec2_path);
+    mvee::config_lookup(CONFIG_TYPE_STRING, config, "parsec3_path",           &mvee::config.mvee_parsec3_path);
+    mvee::config_lookup(CONFIG_TYPE_STRING, config, "qemu_path",              &mvee::config.mvee_qemu_path);
 }
 
 /*-----------------------------------------------------------------------------
@@ -1254,7 +1266,86 @@ void mvee_mon_external_termination_request(int sig)
 }
 
 /*-----------------------------------------------------------------------------
-    mvee_mon_start_unmonitored - Just forks off <mvee::numvariants> childs, starts them
+    start_variant_indirect - This is called if the MVEE is invoked using:
+	./MVEE <number of variants> -- <cmd>
+
+	We pass the cmd to /bin/bash because it is really clever and knows how
+	to interpret whatever the cmd is.
+-----------------------------------------------------------------------------*/
+void mvee::start_variant_indirect(const char* cmd)
+{
+	execl("/bin/bash", "bash", "-c", cmd, NULL);
+}
+
+/*-----------------------------------------------------------------------------
+    start_variant_qemu - Start a binary through the qemu-user binary for the
+	specified architecture
+-----------------------------------------------------------------------------*/
+void mvee::start_variant_qemu(VariantArch arch, const char* binary, ...)
+{
+	std::deque<const char*> args;
+	va_list va;
+	const char* arg;
+
+	args.push_back(binary);
+	va_start(va, binary);
+	do
+	{
+		arg = va_arg(va, const char*);
+		args.push_back(arg);
+	} while (arg);
+	va_end(va);
+	args.push_back(NULL);
+	
+	// Find the qemu-user binary
+	std::stringstream qemupath;
+	qemupath << mvee::config.mvee_root_path
+			 << mvee::config.mvee_qemu_path;
+
+	switch(arch)
+	{
+		case ARCH_I386: 
+			qemupath << "/i386-linux-user/qemu-i386"; 		   
+			args.push_front("qemu-i386");
+			break;
+		case ARCH_AMD64:
+			qemupath << "/x86_64-linux-user/qemu-x86_64";
+			args.push_front("qemu-x86_64");
+			break;
+		case ARCH_ARM:
+			qemupath << "/arm-linux-user/qemu-arm";
+			args.push_front("qemu-arm");
+			break;
+		case ARCH_AARCH64:
+			qemupath << "/aarch64-linux-user/qemu-aarch64";
+			args.push_front("qemu-aarch64");
+			break;			
+		default:
+			printf("ERROR: Unknown architecture requested for QEMU variant\n");
+			return;
+	}
+
+	if (access(qemupath.str().c_str(), X_OK) == -1)
+	{
+		printf("ERROR: Tried to start a QEMU variant but could not find qemu-user binary at:\n  %s\n",
+			   qemupath.str().c_str());
+		return;
+	}
+
+	const char** _args = NULL;
+	int i = 0;
+	_args = new const char*[args.size()];
+	for (auto _arg : args)
+		_args[i++] = _arg;
+
+	// this should not return
+	execv(qemupath.str().c_str(), (char* const*)_args);
+
+	printf("ERROR: Failed to start QEMU variant\n");
+}
+
+/*-----------------------------------------------------------------------------
+    start_unmonitored - Just forks off <mvee::numvariants> childs, starts them
     and immediately stops them with SIGSTOP. The monitor then starts the timer
     and immediately resumes all childs
 -----------------------------------------------------------------------------*/
@@ -1278,13 +1369,15 @@ void mvee::start_unmonitored()
     if (i < mvee::numvariants)
     {
         mvee::setup_env(mvee::demo_num, true);
+
+		// raise SIGSTOP so the monitor process can attach before we exec
         kill(getpid(), SIGSTOP);
+
+		// demo_num will be != 1 if we invoke the MVEE using ./MVEE <demo num> <number of variants>
         if (mvee::demo_num != -1)
             mvee::start_demo(mvee::demo_num, i, true);
         else
-        {
-            execl("/bin/sh", "sh", "-c", mvee::prepare_argv().c_str(), NULL);
-        }
+			mvee::start_variant_indirect(mvee::prepare_argv().c_str());
     }
     else
     {
@@ -1376,6 +1469,10 @@ void mvee::start_monitored()
 {
     int                i, res, status;
     std::vector<pid_t> procs(mvee::numvariants);
+	std::vector<VariantArch> archs(mvee::numvariants);
+
+	std::fill(archs.begin(), archs.end(), ARCH_HOST);
+
 
     sigset_t           set;
     sigemptyset(&set);
@@ -1405,8 +1502,8 @@ void mvee::start_monitored()
         sigaddset(&set, SIGINT);
         pthread_sigmask(SIG_UNBLOCK, &set, NULL);
 
-        mvee::set_demo_options(mvee::demo_num);
-        mvee::active_monitor = new monitor(procs);
+        mvee::set_demo_options(mvee::demo_num, archs);
+        mvee::active_monitor = new monitor(procs, archs);
 
         // Install signal handlers for SIGINT and SIGQUIT so we can shut down safely after CTRL+C
         signal(SIGINT,  mvee_mon_external_termination_request);
@@ -1417,10 +1514,7 @@ void mvee::start_monitored()
             res = wait4(procs[i], &status, 0, NULL);
 
             if (WIFSTOPPED(status) && res > 0)
-            {
-                ///                mvee_wrap_ptrace(PTRACE_SYSCALL, procs[i], 0, NULL);
                 mvee_wrap_ptrace(PTRACE_DETACH, procs[i], 0, NULL);
-            }
         }
 
         mvee::register_monitor(mvee::active_monitor);
@@ -1506,7 +1600,7 @@ void mvee::start_monitored()
         if (mvee::demo_num != -1)
             mvee::start_demo(mvee::demo_num, i, false);
         else
-            execl("/bin/sh", "sh", "-c", mvee::prepare_argv().c_str(), NULL);
+			mvee::start_variant_indirect(mvee::prepare_argv().c_str());
     }
 }
 

@@ -128,6 +128,7 @@ public:
 class childstate
 {
 public:
+	VariantArch   arch;                                             // 
     pid_t         childpid;                                         // Process ID of this child
     long          prevcallnum;                                      // Previous system call executed by the child. Set when the call returns.
     long          callnum;                                          // System call number being executed by this child.
@@ -253,7 +254,7 @@ public:
     //
     // Constructors
     //
-    monitor(std::vector<pid_t>& pids);
+    monitor(std::vector<pid_t>& pids, std::vector<VariantArch>& archs);
     monitor(monitor* parent_monitor, bool shares_fd_table=false, bool shares_mmap_table=false, bool shares_sighand_table=false, bool shares_tgid=false);
     ~monitor();
 
@@ -387,7 +388,7 @@ private:
     // Initializing new children
     //
     int         init_ptrace_options             (int childnum);
-    void        init_child                      (int childnum, pid_t childpid, pid_t childtgid=0);
+    void        init_child                      (int childnum, pid_t childpid, pid_t childtgid, VariantArch arch);
     bool        restart_child                   (int childnum);
     static void serialize_and_relocate_arr      (std::deque<char*>& arr, char*& serialized, char**& relocated, unsigned long target_address);
     std::deque<char*>
