@@ -3,7 +3,7 @@ BINPATH=$BENCHPATH/build/$SPECPROFILE
 DATAPATH=$BENCHPATH/data/ref/input
 ALLDATAPATH=$BENCHPATH/data/all/input
 
-cd /home/stijn/MVEE/MVEE/bin/Release/spec/mvee_run
+cd $MVEEROOT/MVEE/bin/Release/spec/mvee_run
 $BINPATH/gcc $DATAPATH/166.i -o 166.s > 166.out
 $BINPATH/gcc $DATAPATH/200.i -o 200.s > 200.out
 $BINPATH/gcc $DATAPATH/c-typeck.i -o c-typeck.s > c-typeck.out

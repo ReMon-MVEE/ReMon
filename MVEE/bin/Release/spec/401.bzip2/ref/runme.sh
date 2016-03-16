@@ -3,7 +3,7 @@ BINPATH=$BENCHPATH/build/$SPECPROFILE
 DATAPATH=$BENCHPATH/data/ref/input
 ALLDATAPATH=$BENCHPATH/data/all/input
 
-cd /home/stijn/MVEE/MVEE/bin/Release/spec/mvee_run
+cd $MVEEROOT/MVEE/bin/Release/spec/mvee_run
 $BINPATH/bzip2 $DATAPATH/input.source 280 > input.source.out
 $BINPATH/bzip2 $DATAPATH/chicken.jpg 30 > chicken.jpg.out
 $BINPATH/bzip2 $DATAPATH/liberty.jpg 30 > liberty.jpg.out
