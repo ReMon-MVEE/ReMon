@@ -159,16 +159,19 @@ void mmap_table::init()
 
 mmap_table::mmap_table()
     : mmap_execve_id(0),
+	  have_diversified_variants(false),
 #ifdef MVEE_FILTER_LOGGING
-    set_logging_enabled(false),
+	  set_logging_enabled(false),
 #else
-    set_logging_enabled(true),
+	  set_logging_enabled(true),
 #endif
-    enlarged_initial_stacks(false)
+	  thread_group_shutting_down(false),
+	  enlarged_initial_stacks(false)
 {
     init();
     full_map.resize(mvee::numvariants);
     cached_instrs.resize(mvee::numvariants);
+	mmap_startup_info.resize(mvee::numvariants);
 
 #ifdef MVEE_MMAN_DEBUG
     print_mmap_table(mvee::logf);
@@ -179,21 +182,21 @@ mmap_table::mmap_table(const mmap_table& parent)
 {
     init();
 
-    mmap_execve_id          = parent.mmap_execve_id;
-    mmap_execve_image       = parent.mmap_execve_image;
-    mmap_execve_args        = parent.mmap_execve_args;
-    mmap_execve_argv        = parent.mmap_execve_argv;
-	mmap_execve_loader      = parent.mmap_execve_loader;
+    mmap_execve_id            = parent.mmap_execve_id;
+	mmap_startup_info         = parent.mmap_startup_info;
+	have_diversified_variants = parent.have_diversified_variants;
 #ifdef MVEE_FILTER_LOGGING
-    set_logging_enabled     = parent.set_logging_enabled;
+    set_logging_enabled       = parent.set_logging_enabled;
 #endif
-    enlarged_initial_stacks = parent.enlarged_initial_stacks;
-    cached_instrs           = parent.cached_instrs;
-    cached_syms             = parent.cached_syms;
+    enlarged_initial_stacks   = parent.enlarged_initial_stacks;
+    cached_instrs             = parent.cached_instrs;
+    cached_syms               = parent.cached_syms;
 
     full_map.resize(mvee::numvariants);
+
     for (int i = 0; i < mvee::numvariants; ++i)
     {
+		// copy memory map
         std::set<mmap_region_info*>::iterator it = parent.full_map[i].begin();
 
         for (; it != parent.full_map[i].end(); ++it)
@@ -283,7 +286,14 @@ void mmap_table::print_mmap_table(void (*logfunc)(const char* format, ...))
     logfunc("======================================== MMAN TABLE DUMP ========================================\n");
     grab_lock();
     logfunc("ORIGINAL MONITORID: %d\n", mmap_execve_id);
-    logfunc("PROC: %s %s\n",            mmap_execve_image.c_str(), mmap_execve_args.c_str());
+
+	for (int i = 0; i < mvee::numvariants; ++i)
+	{
+		logfunc("PROC %d: %s %s\n", i, 
+				mmap_startup_info[i].image.c_str(), 
+				mmap_startup_info[i].serialized_argv.c_str());
+	}
+
     for (int i = 0; i < mvee::numvariants; ++i)
     {
         for (std::set<mmap_region_info*, region_sort>::iterator it = full_map[i].begin();
@@ -294,6 +304,7 @@ void mmap_table::print_mmap_table(void (*logfunc)(const char* format, ...))
             (*it)->print_region_info(prefix, logfunc);
         }
     }
+
     release_lock();
     logfunc("=================================================================================================\n");
 }

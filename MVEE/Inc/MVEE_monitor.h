@@ -851,6 +851,12 @@ private:
     bool        restart_child                   (int childnum);
 
 	//
+	// Writes new execve arguments to inject the
+	// MVEE_LD_Loader/interpreter/library path/qemu-user binary etc/...
+	//
+	void        rewrite_execve_args             (int childnum, VariantArch arch, bool write_to_stack=true, bool rewrite_envp=false);
+
+	//
 	// Serializes a deque by writing a raw serialized buffer and a raw pointer
 	// array containing pointers to the elements in the serialized buffer.
 	// The pointers are relocated because we assume that the serialized buffer
@@ -859,10 +865,10 @@ private:
     static void serialize_and_relocate_arr      (std::deque<char*>& arr, char*& serialized, char**& relocated, unsigned long target_address);
 
 	//
-	// Get the original execve arguments array for the master variant
+	// Get the original execve arguments array for the specified variant
 	//
     std::deque<char*>
-                get_original_argv               ();
+                get_original_argv               (int childnum);
 
 	// *************************************************************************
     // Monitor startup/shutdown

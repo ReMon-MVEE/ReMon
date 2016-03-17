@@ -200,17 +200,27 @@ struct region_sort
 };
 
 //
+// Information about the execve call that created an address space
+//
+class startup_info
+{
+public:
+	std::string              image;                   // original name of the program we wanted to start
+	std::string              serialized_argv;         // serialized program arguments
+	std::deque<std::string>  argv;                    // vectorized program arguments
+	std::string              interp;                  // interpreter used to start the original program
+};
+
+//
 // Mmap info table
 //
 class mmap_table
 {
 public:
-    int         mmap_execve_id;                       // monitorid of the child that created the table
-    std::string mmap_execve_image;                    // aka the program name...
-    std::string mmap_execve_args;                     // program arguments
-    std::deque<std::string>
-                mmap_execve_argv;                     //
-	std::string mmap_execve_loader;                   // The loader we actually used to load the program
+    int         mmap_execve_id;                       // monitorid of the child that created the table/address space
+	std::vector<startup_info>
+                mmap_startup_info;                    // information about the execve call used to create this address space
+	bool        have_diversified_variants;            // Set to true if we have compile-time diversified variants
     bool        set_logging_enabled;                  // are we logging for this set
     bool        thread_group_shutting_down;           // is this thread group shutting down asynchronously?
     bool        enlarged_initial_stacks;              // we artificially enlarge the initial stacks to the stack limit to prevent DCL from mapping anything that might overlap with a future stack page

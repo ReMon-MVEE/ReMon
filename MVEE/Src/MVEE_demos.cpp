@@ -191,6 +191,15 @@ void mvee::start_demo(int demonum, int childindex, bool native)
 				start_variant_qemu(ARCH_AMD64, "/home/stijn/ReMon/TestsMultiarch/HelloWorld/hello-x86", NULL);
 			break;
 		}
+
+		//
+		// Super smart Cross-ISA MVEE PoC
+		//
+		case 58:
+		{
+			start_variant_direct("/home/stijn/ReMon/TestsMultiarch/HelloWorld/hello-aarch64", "hello-aarch64", NULL);
+			break;
+		}
     }
 
     if (parsec_bench || splash_bench)

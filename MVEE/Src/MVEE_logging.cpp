@@ -194,16 +194,21 @@ void monitor::log_monitor_state(void (*logfunc)(const char* format, ...))
     logfunc("* monitorid: %d\n",          monitorid);
     logfunc("* monitor state: %s\n",      getTextualState(state));
     logfunc("* created by monitor: %d\n", parentmonitorid);
-    logfunc("* monitoring program: %s %s\n",
-            set_mmap_table->mmap_execve_image.c_str(),
-            set_mmap_table->mmap_execve_args.c_str());
+
+	for (int i = 0; i < mvee::numvariants; ++i)
+	{
+		logfunc("* monitoring variant %d: %s %s\n", i,				
+				set_mmap_table->mmap_startup_info[i].image.c_str(),
+				set_mmap_table->mmap_startup_info[i].serialized_argv.c_str());
+	}
     logfunc("* monitoring main thread? %s\n", monitorid == set_mmap_table->mmap_execve_id ? "YES" : "NO");
+
     if (monitorid == set_mmap_table->mmap_execve_id)
     {
         for (int i = 0; i < mvee::numvariants; ++i)
         {
             char        cmd[1000];
-            sprintf(cmd, "ps ux | grep %s | grep \" %d \" | grep -v grep", set_mmap_table->mmap_execve_image.c_str(),
+            sprintf(cmd, "ps ux | grep %s | grep \" %d \" | grep -v grep", set_mmap_table->mmap_startup_info[i].image.c_str(),
                     childs[i].childpid);
             std::string buf = mvee::log_read_from_proc_pipe(cmd, NULL);
             logfunc("* child %d ps: %s\n", i, buf.c_str());
@@ -253,7 +258,7 @@ void monitor::log_backtraces()
     warnf("Backtrace requested. current monitor state: %s\n",
                 getTextualState(state));
 
-	if (set_mmap_table->mmap_execve_image.size() == 0)
+	if (set_mmap_table->mmap_startup_info[0].image.length() == 0)
 	{
 		warnf("Can't backtrace because variants haven't been fully initialized yet\n");
 	}
@@ -1228,8 +1233,8 @@ void mvee::log_dump_locking_stats(monitor* mon, mmap_table* mmap_table, shm_tabl
     {
         mmap_table->grab_lock();
         fprintf(mvee::lockstats_logfile, "Stats for process:\n    > PROC: %s\n    > ARGS: %s\n",
-                mmap_table->mmap_execve_image.c_str(),
-                mmap_table->mmap_execve_args.c_str());
+				mmap_table->mmap_startup_info[0].image.c_str(),
+                mmap_table->mmap_startup_info[0].serialized_argv.c_str());
         fprintf(mvee::lockstats_logfile, "Process was created by monitor: %d\n",
                 mmap_table->mmap_execve_id);
         fprintf(mvee::lockstats_logfile, "Stats were dumped by monitor: %d\n",

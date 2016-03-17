@@ -30,6 +30,8 @@
 /*-----------------------------------------------------------------------------
   MVEE LD Loader
 -----------------------------------------------------------------------------*/
+#define HOST_ARCH                  ARCH_AMD64
+#define HOST_ARCH_STR              " x86-64"
 #define MVEE_ARCH_SUFFIX           "/amd64/"
 #define MVEE_ARCH_INTERP_PATH      "/lib64/"
 #define MVEE_ARCH_INTERP_NAME      "ld-linux-x86-64.so.2"

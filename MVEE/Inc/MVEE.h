@@ -378,22 +378,33 @@ public:
 	// 
     static std::string   os_get_interp               ();
 
+	//
+	// Identify the architecture the specified file was built for.
+	// If the file is not an ELF file, or if it is an ELF file built
+	// for the host platform, we return ELF.
+	// If it is an ELF file for a different platform, we return one
+	// of the different ARCH_* options.
+	//
+	static VariantArch   os_identify_arch            (std::string& file);
+
 	// 
 	// Determine the name of the interpreter to be used to execute @file
 	// and add it to the @add_to_list deque.
 	//
 	// We do this by: 
-	// 
-	// 1) calling file -L to check if the file is an ELF file. If it is, we add
-	// the default interpreter.  
 	//
-	// 2) checking the first line of the file to see if it starts with a
+	// 1) Adding the qemu-user interpreter in case @arch is not ARCH_HOST
+	//
+	// 2) Adding no interpreter at all if the file is an ELF file for the
+	// host platform
+	//
+	// 3) checking the first line of the file to see if it starts with a
 	// hashbang (#!). If it does, we add the interpreter specified by the
 	// hashbang line.
 	//
-	// 3) looking at the file extention. We currently support .sh and .rb files
+	// 4) looking at the file extension. We currently support .sh and .rb files
 	// 
-    static bool          os_add_interp_for_file      (std::deque<char*>& add_to_list, std::string& file);
+    static bool          os_add_interp_for_file      (std::deque<char*>& add_to_list, std::string& file, VariantArch arch);
 
 	// 
 	// Cache the interpreter name for the specified file
@@ -421,6 +432,12 @@ public:
 	// an RPATH, then we convert it to a full pathname
 	//
 	static std::string   os_get_rpath                (std::string& binary);
+
+	//
+	// Returns the path to the qemu-user binary for the specified architecture 
+	// Also returns the basename of said binary
+	//
+	static std::string   os_get_qemu_user_for_arch   (VariantArch arch, std::string& basename);
 
     // *************************************************************************
     // Miscellaneous Support Functions

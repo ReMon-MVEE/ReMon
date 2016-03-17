@@ -264,29 +264,54 @@ bool monitor::handle_is_known_false_positive(const char* program_name, long call
         else
             warnf("this is an unkown false positive :(\n");
     }
-    else if (callnum == __NR_open)
+    else if (callnum == __NR_open && MVEE_PRECALL_MISMATCHING_ARG((*precall_flags)) == 1)
     {
         bool true_positive = false;
+		std::vector<std::string> files(mvee::numvariants);
 
+		for (int i = 0; i < mvee::numvariants; ++i)
+		{
+			char* str = mvee_rw_read_string(childs[i].childpid, ARG1(i));
+			if (str)
+			{
+				files[i] = std::string(str);
+				delete[] str;
+			}			
+		}
+
+		// Allow variants to open "> MVEE Child <num> >" with mismatching nums
         for (int i = 0; i < mvee::numvariants; ++i)
         {
-            char* str = mvee_rw_read_string(childs[i].childpid, ARG1(i));
             char  tmp[20];
             sprintf(tmp, "MVEE Child %d >", i);
 
-            if (str && strcmp(str, tmp))
+            if (files[i].compare(tmp) != 0)
             {
-                //				warnf("true positve - str is %s - tmp is %s\n", str, tmp);
                 true_positive = true;
-                SAFEDELETEARRAY(str);
                 break;
             }
-            SAFEDELETEARRAY(str);
         }
 
-        if (true_positive)
-            return false;
-        return true;
+        if (!true_positive)
+			return true;
+
+		// Allow MVEE_LD_Loader to open compile-time diversified variants
+		true_positive = false;
+		if (set_mmap_table->have_diversified_variants)
+		{
+			for (int i = 0; i < mvee::numvariants; ++i)
+			{
+				if (files[i].compare(set_mmap_table->mmap_startup_info[i].image) != 0)
+				{
+					true_positive = true;
+					break;
+				}
+			}
+		}		
+
+		if (true_positive)
+			return false;
+		return true;
     }
 	else if (callnum == __NR_execve)
 	{
@@ -310,10 +335,17 @@ bool monitor::handle_is_known_false_positive(const char* program_name, long call
 					return false;
 			}
 
+			set_mmap_table->have_diversified_variants = true;
 			return true;
 		}
 		
 		return false;			
+	}
+	// allow mmap mismatch due to mmap of unsynced file
+    else if (callnum == __NR_mmap && MVEE_PRECALL_MISMATCHING_ARG((*precall_flags)) == 2)
+	{
+		// TODO
+		return true;
 	}
 
 out:
@@ -674,17 +706,23 @@ long monitor::handle_open_postcall(int childnum)
         // opened file if the call hasn't been denied
         char*       resolved_path = NULL;
         std::string tmp_path      = STRINGARG(0, 1);
+		if (tmp_path.length() == 0)
+			tmp_path = set_fd_table->get_full_path(childs[0].childpid, AT_FDCWD, (void*)ARG1(0));
 
         if (tmp_path.find("/proc/") == 0)
         {
             char maps[30];
             sprintf(maps, "/proc/%d/maps", childs[0].childpid);
 
-            if (!tmp_path.compare(maps))
+            if (tmp_path.compare(maps) == 0)
                 unsynced = 1;
+			else if (tmp_path.compare("/proc/self/maps") == 0)
+				unsynced = 1;
         }
-        if (!tmp_path.compare("/proc/self/maps"))
-            unsynced = 1;
+		else if (tmp_path.compare(set_mmap_table->mmap_startup_info[0].image) == 0)
+		{
+			unsynced = 1;
+		}
 
         resolved_path = realpath(tmp_path.c_str(), NULL);
 
@@ -877,7 +915,7 @@ void monitor::handle_execve_get_args(int childnum)
 
     std::stringstream args;
 
-    set_mmap_table->mmap_execve_argv.clear();
+    set_mmap_table->mmap_startup_info[childnum].argv.clear();
 
     // determine number of arguments
     if (ARG2(childnum))
@@ -903,7 +941,7 @@ void monitor::handle_execve_get_args(int childnum)
 //				warnf("done\n");
                 if (tmp)
                 {
-                    set_mmap_table->mmap_execve_argv.push_back(std::string(tmp));
+                    set_mmap_table->mmap_startup_info[childnum].argv.push_back(std::string(tmp));
                     args << tmp << " ";
                 }
                 SAFEDELETEARRAY(tmp);
@@ -911,16 +949,17 @@ void monitor::handle_execve_get_args(int childnum)
         }
     }
 
-    set_mmap_table->mmap_execve_image = set_fd_table->get_full_path(childs[childnum].childpid, AT_FDCWD, (void*)ARG1(childnum));
-    set_mmap_table->mmap_execve_args  = args.str();
+    set_mmap_table->mmap_startup_info[childnum].image = 
+		set_fd_table->get_full_path(childs[childnum].childpid, AT_FDCWD, (void*)ARG1(childnum));
+    set_mmap_table->mmap_startup_info[childnum].serialized_argv  = args.str();
 
 #if defined(MVEE_FILTER_LOGGING) && !defined(MVEE_BENCHMARK)
-    if (set_mmap_table->mmap_execve_image.find("parsec-2.1") != std::string::npos
-        || set_mmap_table->mmap_execve_image.find("parsec-3.0") != std::string::npos
-        || set_mmap_table->mmap_execve_image.find("spec2006") != std::string::npos)
+    if (set_mmap_table->mmap_startup_info[childnum].image.find("parsec-2.1") != std::string::npos
+        || set_mmap_table->mmap_startup_info[childnum].image.find("parsec-3.0") != std::string::npos
+        || set_mmap_table->mmap_startup_info[childnum].image.find("spec2006") != std::string::npos)
     {
         set_mmap_table->set_logging_enabled = 1;
-        warnf("Logging enabled for binary: %s\n", set_mmap_table->mmap_execve_image.c_str());
+        warnf("Logging enabled for binary: %s\n", set_mmap_table->mmap_startup_info[childnum].image.c_str());
     }
 #endif
 }
@@ -935,9 +974,9 @@ long monitor::handle_execve_log_args(int childnum)
 
         debugf("pid: %d - SYS_EXECVE(%s (0x" PTRSTR ") -- %s (0x" PTRSTR ")\n",
                    childs[i].childpid,
-                   set_mmap_table->mmap_execve_image.c_str(),
+                   set_mmap_table->mmap_startup_info[i].image.c_str(),
                    ARG1(i),
-                   set_mmap_table->mmap_execve_args.c_str(),
+                   set_mmap_table->mmap_startup_info[i].serialized_argv.c_str(),
                    ARG2(i));
     }
 
@@ -949,24 +988,24 @@ long monitor::handle_execve_precall(int childnum)
 	VariantArch arch;
 
     handle_execve_get_args(0);
-    std::string orig_image = set_mmap_table->mmap_execve_image;
-    std::string orig_args  = set_mmap_table->mmap_execve_args;
 
-	if (mvee::is_qemu_executable(orig_image, arch))
+	if (mvee::is_qemu_executable(set_mmap_table->mmap_startup_info[0].image, arch))
 		warnf("Variant %d is switching to ISA: %s\n", 0, getTextualISA(arch));
 
     for (int i = 1; i < mvee::numvariants; ++i)
     {
         handle_execve_get_args(i);
-		if (mvee::is_qemu_executable(set_mmap_table->mmap_execve_image, arch))
+		if (mvee::is_qemu_executable(set_mmap_table->mmap_startup_info[i].image, arch))
 			warnf("Variant %d is switching to ISA: %s\n", i, getTextualISA(arch));
 
-        if (set_mmap_table->mmap_execve_image != orig_image)
+        if (set_mmap_table->mmap_startup_info[i].image.compare(
+				set_mmap_table->mmap_startup_info[0].image))
         {
             cache_mismatch_info("execve image mismatch\n");
             return MVEE_PRECALL_CALL_DENY | MVEE_PRECALL_ARGS_MISMATCH(1);
         }
-        if (set_mmap_table->mmap_execve_args != orig_args)
+        if (set_mmap_table->mmap_startup_info[i].serialized_argv.compare(
+				set_mmap_table->mmap_startup_info[0].serialized_argv))
         {
             cache_mismatch_info("execve args mismatch\n");
             return MVEE_PRECALL_CALL_DENY | MVEE_PRECALL_ARGS_MISMATCH(2);
@@ -978,115 +1017,73 @@ long monitor::handle_execve_precall(int childnum)
 
 long monitor::handle_execve_call(int childnum)
 {
+	if (childnum != -1)
+	{
+		warnf("unsynced execve dispatch - was this intentional?\n");
+		return MVEE_CALL_ALLOW;
+	}
+	
 #ifndef MVEE_BENCHMARK
-    warnf("Children are executing another program: %s -- %s\n",
-                set_mmap_table->mmap_execve_image.c_str(),
-                set_mmap_table->mmap_execve_args.c_str());
+	if (set_mmap_table->have_diversified_variants)
+	{
+		warnf("Executing compile-time diversified variants\n");
+		
+		for (int i = 0; i < mvee::numvariants; ++i)
+		{
+			warnf("Variant %d: %s -- %s\n", i,
+				  set_mmap_table->mmap_startup_info[i].image.c_str(),
+				  set_mmap_table->mmap_startup_info[i].serialized_argv.c_str());
+		}
+	}
+	else
+	{
+		warnf("Executing non-diversified variants: %s -- %s\n",
+			  set_mmap_table->mmap_startup_info[0].image.c_str(),
+			  set_mmap_table->mmap_startup_info[0].serialized_argv.c_str());		
+	}
 #endif
 
 #ifdef MVEE_ALLOW_PERF
-    if (set_mmap_table->mmap_execve_image.find("perf/perf") != std::string::npos)
+    if (set_mmap_table->mmap_startup_info[0].image.find("perf/perf") != std::string::npos)
         perf = 1;
 #endif
 
-    if (!mvee::config.mvee_hide_vdso
-        && !mvee::config.mvee_use_dcl
-        && mvee::custom_library_path.size() == 0)
-        return MVEE_CALL_ALLOW;
+	// Identify the architecture for each binary
+	std::vector<VariantArch> archs(mvee::numvariants);
+	if (!set_mmap_table->have_diversified_variants)
+	{
+		std::fill(archs.begin(), archs.end(), 
+				  mvee::os_identify_arch(set_mmap_table->mmap_startup_info[0].image));
 
-    unsigned int      i, argv_len = 0;
-
-    std::deque<char*> original_argv = get_original_argv();
-
-    // we're going to use the MVEE_LD_Loader to load the original program indirectly
-    // the full path to the original image is now MVEE_LD_Loader's argv[1]
-    if (original_argv.size() > 1)
-    {
-        SAFEDELETEARRAY(original_argv.front());
-        original_argv.pop_front();
-    }
-    original_argv.push_front(mvee::strdup(set_mmap_table->mmap_execve_image.c_str()));
-
-    // the program might be trying to exec a script
-    if (!mvee::os_add_interp_for_file(original_argv, set_mmap_table->mmap_execve_image))
-    {
-        SAFEDELETEARRAY(original_argv.front());
-        original_argv.pop_front();
-        return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOENT);
-    }
-
-//	std::string rpath = mvee::os_get_rpath(set_mmap_table->mmap_execve_image);
-
-    if (mvee::custom_library_path.size() > 0/* || rpath.size() > 0*/)
-    {
-		std::stringstream ss;
-/*		if (rpath.size() > 0)
-		ss << rpath;*/
-		if (mvee::custom_library_path.size() > 0)
+		if (archs[0] == ARCH_HOST && 
+			!mvee::config.mvee_hide_vdso && 
+			!mvee::config.mvee_use_dcl && 
+			mvee::custom_library_path.length() == 0)
+			return MVEE_CALL_ALLOW;
+	}
+	else
+	{
+		bool have_different_archs = false;
+		for (int i = 0; i < mvee::numvariants; ++i)
 		{
-			if (ss.gcount() > 0)
-				ss << ":";
-			ss << mvee::custom_library_path;
+			archs[i] = mvee::os_identify_arch(set_mmap_table->mmap_startup_info[i].image);
+
+			if (archs[i] != archs[0])
+				have_different_archs = true;
 		}
 
-		char* tmp = mvee::strdup(ss.str().c_str());
-        original_argv.push_front(tmp);
-        original_argv.push_front(mvee::strdup("--library-path"));
-    }
+		// force all variants to run on top of QEMU user even if they can run
+		// natively on the host platform
+		if (have_different_archs)
+		{
+			for (int i = 0; i < mvee::numvariants; ++i)
+				if (archs[i] == ARCH_HOST)
+					archs[i] = HOST_ARCH;
+		}
+	}
 
-    if (mvee::config.mvee_hide_vdso || mvee::config.mvee_use_dcl)
-        original_argv.push_front(mvee::strdup(MVEE_LD_LOADER_NAME));
-    else
-        original_argv.push_front(mvee::strdup(MVEE_ARCH_INTERP_NAME));
-
-    for (i = 0; i < original_argv.size(); ++i)
-        if (original_argv[i])
-            argv_len += strlen(original_argv[i]) + 1;
-
-    char*       serialized_argv = (char*)mvee_rw_safe_alloc(argv_len);
-    char**      relocated_argv  = NULL;
-    serialize_and_relocate_arr(original_argv, serialized_argv, relocated_argv, 0);
-
-    // get new file image
-    set_mmap_table->mmap_execve_loader =
-        (mvee::config.mvee_hide_vdso || mvee::config.mvee_use_dcl) ?
-        mvee::os_get_mvee_ld_loader() : mvee::os_get_interp();
-
-    for (i = 0; i < (unsigned int)mvee::numvariants; ++i)
-    {
-        long int child_stack_pointer = SP(childs[i].regs) - 1024 - argv_len;
-
-        for (unsigned j = 0; j < original_argv.size(); ++j)
-            // relocated_argv[0] will be NULL at this point because it's at position 0 in the serialized array
-            if (relocated_argv[j] || (j == 0))
-                relocated_argv[j] += child_stack_pointer;
-
-        // write new argv strings
-        mvee_rw_copy_data(mvee::os_gettid(), (unsigned long)serialized_argv,
-                          childs[i].childpid, child_stack_pointer, argv_len);
-        // write new argv array
-        mvee_rw_copy_data(mvee::os_gettid(), (unsigned long)relocated_argv,
-                          childs[i].childpid,
-                          child_stack_pointer - sizeof(char*)*(original_argv.size()), sizeof(char*)*(original_argv.size()));
-
-        mvee_rw_copy_data(mvee::os_gettid(), (unsigned long)set_mmap_table->mmap_execve_loader.c_str(),
-                          childs[i].childpid,
-                          child_stack_pointer - sizeof(char*)*(original_argv.size()) - set_mmap_table->mmap_execve_loader.length() - 1,
-                          set_mmap_table->mmap_execve_loader.length() + 1);
-
-        // set new execve arguments
-        SETARG1(i, (child_stack_pointer - sizeof(char*)*(original_argv.size()) - set_mmap_table->mmap_execve_loader.length() - 1));
-        SETARG2(i, (child_stack_pointer - sizeof(char*)*(original_argv.size())));
-
-        for (unsigned j = 0; j < original_argv.size(); ++j)
-            if (relocated_argv[j])
-                relocated_argv[j] -= child_stack_pointer;
-    }
-
-    for (i = 0; i < original_argv.size(); ++i)
-        SAFEDELETEARRAY(original_argv[i]);
-    SAFEDELETEARRAY(relocated_argv);
-    SAFEDELETEARRAY(serialized_argv);
+	for (int i = 0; i < mvee::numvariants; ++i)
+		rewrite_execve_args(i, archs[i], true, false);
 
     return MVEE_CALL_ALLOW;
 }
@@ -1179,12 +1176,9 @@ long monitor::handle_execve_postcall(int childnum)
     }
 	else
 	{		
-		if (mvee::str_ends_with(set_mmap_table->mmap_execve_loader, MVEE_LD_LOADER_NAME))
-		{
-			warnf("Could not start the variants (EXECVE error).\n");
-			warnf("You probably forgot to compile the MVEE LD Loader. Please refer to MVEE/README.txt\n");
-			shutdown(true);
-		}
+		warnf("Could not start the variants (EXECVE error).\n");
+		warnf("You probably forgot to compile the MVEE LD Loader. Please refer to MVEE/README.txt\n");
+		shutdown(true);
 	}
 
 #ifdef MVEE_FD_DEBUG
@@ -2355,9 +2349,11 @@ long monitor::handle_setsid_precall(int childnum)
 {
     warnf("Process is creating a new session (i.e. it's becoming a daemon!)\n");
     for (int i = 0; i < mvee::numvariants; ++i)
+	{
         warnf("> Process %d PID: %d\n", i, childs[i].childpid);
-    warnf("> Process Name: %s\n", set_mmap_table->mmap_execve_image.c_str());
-    warnf("> Process Args: %s\n", set_mmap_table->mmap_execve_args.c_str());
+		warnf("> Process %d Name: %s\n", i, set_mmap_table->mmap_startup_info[i].image.c_str());
+		warnf("> Process %d Args: %s\n", i, set_mmap_table->mmap_startup_info[i].serialized_argv.c_str());
+	}
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
@@ -2700,16 +2696,16 @@ long monitor::handle_readlink_call(int childnum)
 	// ridiculous hack for java and other shit
 	if (str && !strcmp(str, "/proc/self/exe"))
 	{
-		if (ARG3(0) > set_mmap_table->mmap_execve_image.length())
+		if (ARG3(0) > set_mmap_table->mmap_startup_info[0].image.length())
 		{
 			for (int i = 0; i < mvee::numvariants; ++i)
 			{
 				mvee_rw_write_data(childs[i].childpid, ARG2(i), 
-								   set_mmap_table->mmap_execve_image.length(), 
-								   (unsigned char*)set_mmap_table->mmap_execve_image.c_str());
+								   set_mmap_table->mmap_startup_info[0].image.length(), 
+								   (unsigned char*)set_mmap_table->mmap_startup_info[0].image.c_str());
 			}
 
-			return MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(set_mmap_table->mmap_execve_image.length());
+			return MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(set_mmap_table->mmap_startup_info[0].image.length());
 		}
 	}
 

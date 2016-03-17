@@ -346,8 +346,6 @@ bool monitor::restart_child(int childnum)
     // We can get the original argvs from the set_mmap_table and the original envps
     // from /proc/<pid>/environ
     int               pid    = childs[childnum].childpid, status;
-    std::deque<char*> envp;
-    std::string       image  = set_mmap_table->mmap_execve_image;
 
     debugf("We're attempting to restart child: %d (PID: %d)\n",
                childnum, childs[childnum].childpid);
@@ -378,98 +376,7 @@ bool monitor::restart_child(int childnum)
         }
     }
 
-    // Get the original arguments
-    std::deque<char*> argv  = get_original_argv();
-
-    debugf("Argc was %d\n", argv.size());
-
-    // Get the original envp array
-    char              cmd[256];
-    sprintf(cmd, "strings /proc/%d/environ", childs[childnum].childpid);
-
-    std::string       envps = mvee::log_read_from_proc_pipe(cmd, NULL);
-    if (envps != "")
-    {
-        std::stringstream ss(envps);
-        std::string       ln;
-
-        while(std::getline(ss, ln, '\n'))
-            envp.push_back(mvee::strdup(ln.c_str()));
-    }
-    envp.push_back(NULL);
-
-    // the original image becomes the first argument for our LD_Loader
-    SAFEDELETEARRAY(argv.front());
-    argv.pop_front();
-    argv.push_front(mvee::strdup(image.c_str()));
-    argv.push_front(mvee::strdup(MVEE_LD_LOADER_NAME));
-    image = mvee::os_get_mvee_ld_loader();
-
-    // serialize, relocate, write, ...
-    unsigned long     argv_len                      = 0, envp_len = 0;
-
-    for (unsigned i = 0; i < argv.size(); ++i)
-        if (argv[i])
-            argv_len += strlen(argv[i]) + 1;
-    for (unsigned i = 0; i < envp.size(); ++i)
-        if (envp[i])
-            envp_len += strlen(envp[i]) + 1;
-
-    char*             serialized_argv               = new char[argv_len];
-    char*             serialized_envp               = new char[envp_len];
-    char**            relocated_argv                = NULL;
-    char**            relocated_envp                = NULL;
-
-    // Find an appropriate location to write all of this stuff
-    unsigned long     total_len                     =
-        (image.length() + 1) +                      // the new execve image
-        (sizeof(char*) * argv.size()) +             // the argv pointer array
-        (sizeof(char*) * envp.size()) +             // the envp pointer array
-        argv_len +
-        envp_len;
-
-    mmap_region_info* writable                      = set_mmap_table->find_writable_region(childnum, total_len);
-    if (!writable)
-    {
-        warnf("Could not find a writable region of at least %lu bytes long in the address space of child: %d (PID: %d) => restart failed\n",
-                    total_len, childnum, pid);
-        shutdown(false);
-        return false;
-    }
-
-    // now serialize and relocate
-    // We want the following layout in the writable region
-    // +------------------+---------------+---------------+--------------+--------------+
-    // | new execve image | argv pointers | envp pointers | argv strings | envp strings |
-    // +------------------+---------------+---------------+--------------+--------------+
-    //
-    unsigned long     image_target_address          = writable->region_base_address;
-    unsigned long     relocated_argv_target_address = image_target_address + image.length() + 1;
-    unsigned long     relocated_envp_target_address = relocated_argv_target_address + (sizeof(char*) * argv.size());
-    unsigned long     argv_target_address           = relocated_envp_target_address + (sizeof(char*) * envp.size());
-    unsigned long     envp_target_address           = argv_target_address + argv_len;
-
-    serialize_and_relocate_arr(argv, serialized_argv, relocated_argv, argv_target_address);
-    serialize_and_relocate_arr(envp, serialized_envp, relocated_envp, envp_target_address);
-
-    debugf("Writing new execve arguments...\n");
-    if (mvee_rw_copy_data(mvee::os_gettid(), (unsigned long)image.c_str(), pid, image_target_address, image.length() + 1) == -1
-        || mvee_rw_copy_data(mvee::os_gettid(), (unsigned long)relocated_argv, pid, relocated_argv_target_address, sizeof(char*) * argv.size()) == -1
-        || mvee_rw_copy_data(mvee::os_gettid(), (unsigned long)relocated_envp, pid, relocated_envp_target_address, sizeof(char*) * envp.size()) == -1
-        || mvee_rw_copy_data(mvee::os_gettid(), (unsigned long)serialized_argv, pid, argv_target_address, argv_len) == -1
-        || mvee_rw_copy_data(mvee::os_gettid(), (unsigned long)serialized_envp, pid, envp_target_address, envp_len) == -1)
-    {
-        warnf("Couldn't copy execve arguments to address space of child: %d (PID: %d) => restart failed\n", childnum, pid);
-        shutdown(false);
-        return false;
-    }
-
-    // set the registers
-    debugf("Setting execve registers...\n");
-    SETARG1(childnum, image_target_address);
-    SETARG2(childnum, relocated_argv_target_address);
-    SETARG3(childnum, relocated_envp_target_address);
-    WRITE_SYSCALL_NO(childnum, __NR_execve);
+	rewrite_execve_args(childnum, childs[childnum].arch, false, true);
 
     // dispatch the call and wait for the return
     debugf("Restarting child...\n");
@@ -498,6 +405,170 @@ bool monitor::restart_child(int childnum)
         }
     }
 
+    return result;
+}
+
+/*-----------------------------------------------------------------------------
+    rewrite_execve_args
+-----------------------------------------------------------------------------*/
+void monitor::rewrite_execve_args(int childnum, VariantArch arch, bool write_to_stack, bool rewrite_envp)
+{
+    std::string       image  = set_mmap_table->mmap_startup_info[childnum].image;
+    std::deque<char*> argv   = get_original_argv(childnum);
+	std::deque<char*> envp;
+	pid_t pid = childs[childnum].childpid;
+
+	// We might want to do this if we want to restart a variant altogether
+	if (rewrite_envp)
+	{
+		// Get the original envp array
+		char              cmd[256];
+		sprintf(cmd, "strings /proc/%d/environ", childs[childnum].childpid);
+
+		std::string       envps = mvee::log_read_from_proc_pipe(cmd, NULL);
+		if (envps != "")
+		{
+			std::stringstream ss(envps);
+			std::string       ln;
+
+			while(std::getline(ss, ln, '\n'))
+				envp.push_back(mvee::strdup(ln.c_str()));
+		}
+		envp.push_back(NULL);
+	}
+
+    // the original image becomes the first argument for our interpreter/qemu loader
+    SAFEDELETEARRAY(argv.front());
+    argv.pop_front();
+    argv.push_front(mvee::strdup(image.c_str()));
+
+	// if we're not running natively, insert the qemu-user binary here
+	if (arch != ARCH_HOST)
+	{
+		std::string qemu_user_basename, qemu_user_path = 
+			mvee::os_get_qemu_user_for_arch(arch, qemu_user_basename);
+
+		if (qemu_user_path.length() > 0)
+			argv.push_front(mvee::strdup(qemu_user_path.c_str()));
+	}
+
+	// insert custom library path
+    if (mvee::custom_library_path.length() > 0)
+    {
+		std::stringstream ss;
+        if (mvee::custom_library_path.size() > 0)
+        {
+            if (ss.gcount() > 0)
+                ss << ":";
+            ss << mvee::custom_library_path;
+        }
+
+		argv.push_front(mvee::strdup(ss.str().c_str()));
+		argv.push_front(mvee::strdup("--library-path"));
+    }
+
+	// insert interpreter if necessary
+	if (arch != ARCH_HOST || mvee::custom_library_path.length() > 0)
+	{
+		if (mvee::config.mvee_hide_vdso || mvee::config.mvee_use_dcl)
+		{
+			argv.push_front(mvee::strdup(MVEE_LD_LOADER_NAME));
+			image = mvee::os_get_mvee_ld_loader();
+		}
+		else
+		{
+			argv.push_front(mvee::strdup(MVEE_ARCH_INTERP_NAME));
+			image = mvee::os_get_interp();
+		}
+	}
+
+	// Everything is set up and ready to write...
+#ifndef MVEE_BENCHMARK
+	std::stringstream full_serialized_argv;
+	for (auto arg : argv)
+		if (arg)
+			full_serialized_argv << arg << " ";
+	debugf("Injecting the following execve args - image: %s - argv: %s\n",
+		 image.c_str(),
+		 full_serialized_argv.str().c_str());
+#endif
+
+    // serialize, relocate, write, ...
+    unsigned long argv_len = 0, envp_len = 0;
+
+    for (unsigned i = 0; i < argv.size(); ++i)
+        if (argv[i])
+            argv_len += strlen(argv[i]) + 1;
+    for (unsigned i = 0; i < envp.size(); ++i)
+        if (envp[i])
+            envp_len += strlen(envp[i]) + 1;
+
+    char*             serialized_argv               = new char[argv_len];
+    char*             serialized_envp               = (envp_len > 0) ? new char[envp_len] : NULL;
+    char**            relocated_argv                = NULL;
+    char**            relocated_envp                = NULL;
+
+    // Find an appropriate location to write all of this stuff
+    unsigned long     total_len                     =
+        (image.length() + 1) +                      // the new execve image
+        (sizeof(char*) * argv.size()) +             // the argv pointer array
+        (sizeof(char*) * envp.size()) +             // the envp pointer array
+        argv_len +
+        envp_len;
+	
+	unsigned long image_target_address;
+	if (write_to_stack)
+	{
+		image_target_address = SP(childs[childnum].regs) - 1024 - total_len;
+	}
+	else
+	{
+		mmap_region_info* writable = set_mmap_table->find_writable_region(childnum, total_len);
+		if (!writable)
+		{
+			warnf("Could not find a writable region of at least %lu bytes long in the address space of child: %d (PID: %d) => execve arguments writing failed\n",
+				  total_len, childnum, pid);
+			shutdown(false);
+			return;
+		}
+		image_target_address = writable->region_base_address;
+	}
+
+    // now serialize and relocate
+    // We want the following layout in the writable region
+    // +------------------+---------------+---------------+--------------+--------------+
+    // | new execve image | argv pointers | envp pointers | argv strings | envp strings |
+    // +------------------+---------------+---------------+--------------+--------------+
+    //
+    unsigned long     relocated_argv_target_address = image_target_address + image.length() + 1;
+    unsigned long     relocated_envp_target_address = relocated_argv_target_address + (sizeof(char*) * argv.size());
+    unsigned long     argv_target_address           = relocated_envp_target_address + (sizeof(char*) * envp.size());
+    unsigned long     envp_target_address           = argv_target_address + argv_len;
+
+    serialize_and_relocate_arr(argv, serialized_argv, relocated_argv, argv_target_address);
+	if (rewrite_envp)
+		serialize_and_relocate_arr(envp, serialized_envp, relocated_envp, envp_target_address);
+
+    debugf("Writing new execve arguments...\n");
+    if (mvee_rw_copy_data(mvee::os_gettid(), (unsigned long)image.c_str(), pid, image_target_address, image.length() + 1) == -1
+        || mvee_rw_copy_data(mvee::os_gettid(), (unsigned long)relocated_argv, pid, relocated_argv_target_address, sizeof(char*) * argv.size()) == -1
+        || (rewrite_envp && mvee_rw_copy_data(mvee::os_gettid(), (unsigned long)relocated_envp, pid, relocated_envp_target_address, sizeof(char*) * envp.size()) == -1)
+        || mvee_rw_copy_data(mvee::os_gettid(), (unsigned long)serialized_argv, pid, argv_target_address, argv_len) == -1
+        || (rewrite_envp && mvee_rw_copy_data(mvee::os_gettid(), (unsigned long)serialized_envp, pid, envp_target_address, envp_len) == -1))
+    {
+        warnf("Couldn't copy execve arguments to address space of child: %d (PID: %d) => execve arguments writing\n", childnum, pid);
+        shutdown(false);
+        return;
+    }
+
+    // set the registers
+    debugf("Setting execve registers...\n");
+    SETARG1(childnum, image_target_address);
+    SETARG2(childnum, relocated_argv_target_address);
+	if (rewrite_envp)
+		SETARG3(childnum, relocated_envp_target_address);
+    WRITE_SYSCALL_NO(childnum, __NR_execve);
+
     SAFEDELETEARRAY(serialized_argv);
     SAFEDELETEARRAY(serialized_envp);
     SAFEDELETEARRAY(relocated_argv);
@@ -506,8 +577,6 @@ bool monitor::restart_child(int childnum)
         SAFEDELETEARRAY(argv[i]);
     for (unsigned i = 0; i < envp.size(); ++i)
         SAFEDELETEARRAY(envp[i]);
-
-    return result;
 }
 
 /*-----------------------------------------------------------------------------
@@ -819,14 +888,14 @@ nobacktrace:
 }
 
 /*-----------------------------------------------------------------------------
-    get_original_argv - reads the mmap_execve_argv into a std::deque
+    get_original_argv - 
 -----------------------------------------------------------------------------*/
-std::deque<char*> monitor::get_original_argv()
+std::deque<char*> monitor::get_original_argv(int childnum)
 {
     std::deque<char*> argv;
 
-    for (unsigned i = 0; i < set_mmap_table->mmap_execve_argv.size(); ++i)
-        argv.push_back(mvee::strdup(set_mmap_table->mmap_execve_argv[i].c_str()));
+    for (unsigned i = 0; i < set_mmap_table->mmap_startup_info[childnum].argv.size(); ++i)
+        argv.push_back(mvee::strdup(set_mmap_table->mmap_startup_info[childnum].argv[i].c_str()));
 
     argv.push_back(NULL);
     return argv;
@@ -1061,9 +1130,7 @@ bool monitor::handle_rdtsc_event(int childnum)
 
                 return true;
             }
-
         }
-
     }
 
     return false;

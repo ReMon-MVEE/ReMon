@@ -1204,7 +1204,7 @@ void mmap_table::verify_mman_table (int childnum, pid_t childpid)
 {
 //#if 0
 
-    if (mmap_execve_image == "")
+    if (mmap_startup_info[0].image.length() == 0)
         return;
 
 //#ifdef MVEE_MMAN_DEBUG
