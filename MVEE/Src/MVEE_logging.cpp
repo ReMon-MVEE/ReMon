@@ -35,6 +35,36 @@
 #include "MVEE_memory.h"
 
 /*-----------------------------------------------------------------------------
+    cache_mismatch_info
+-----------------------------------------------------------------------------*/
+void monitor::cache_mismatch_info(const char* format, ...)
+{
+	char buffer[4096];
+    va_list va;
+    va_start(va, format);
+	if (vsnprintf(buffer, 4096, format, va) > 0)
+		mismatch_info << buffer;		
+    va_end(va);
+}
+
+/*-----------------------------------------------------------------------------
+    dump_mismatch_info
+-----------------------------------------------------------------------------*/
+void monitor::dump_mismatch_info()
+{
+	warnf(mismatch_info.str().c_str());
+	flush_mismatch_info();
+}
+
+/*-----------------------------------------------------------------------------
+    flush_mismatch_info
+-----------------------------------------------------------------------------*/
+void monitor::flush_mismatch_info()
+{
+	mismatch_info.str("");
+}
+
+/*-----------------------------------------------------------------------------
     log_ipmon_state
 -----------------------------------------------------------------------------*/
 void monitor::log_ipmon_state()
@@ -151,14 +181,6 @@ void monitor::log_ipmon_state()
 }
 
 /*-----------------------------------------------------------------------------
-    log_monitor_state_live
------------------------------------------------------------------------------*/
-void monitor::log_monitor_state_live()
-{
-
-}
-
-/*-----------------------------------------------------------------------------
     log_monitor_state
 -----------------------------------------------------------------------------*/
 void monitor::log_monitor_state(void (*logfunc)(const char* format, ...))
@@ -231,22 +253,29 @@ void monitor::log_backtraces()
     warnf("Backtrace requested. current monitor state: %s\n",
                 getTextualState(state));
 
+	if (set_mmap_table->mmap_execve_image.size() == 0)
+	{
+		warnf("Can't backtrace because variants haven't been fully initialized yet\n");
+	}
+	else
+	{
 # if defined(MVEE_BENCHMARK) && defined(MVEE_FORCE_ENABLE_BACKTRACING)
     log_monitor_state(mvee::warnf);
 # else
     log_monitor_state(mvee::logf);
 # endif
 
-    for (int i = 0; i < mvee::numvariants; ++i)
-    {
-        if (!childs[i].child_terminated)
-            log_child_backtrace(i, 0, 1);
-        else
-            debugf("pid: %d was already TERMINATED - can't backtrace!\n", childs[i].childpid);
-    }
+		for (int i = 0; i < mvee::numvariants; ++i)
+		{
+			if (!childs[i].child_terminated)
+				log_child_backtrace(i, 0, 1);
+			else
+				debugf("pid: %d was already TERMINATED - can't backtrace!\n", childs[i].childpid);
+		}
 
-	log_ipmon_state();
-    log_dump_queues(set_shm_table.get());
+		log_ipmon_state();
+		log_dump_queues(set_shm_table.get());
+	}
 #endif
 }
 

@@ -683,6 +683,59 @@ std::string mvee::os_get_rpath(std::string& binary)
 }
 
 /*-----------------------------------------------------------------------------
+    is_qemu_executable - Returns true if the specified file is a valid executable
+	in our QEMU subfolder
+-----------------------------------------------------------------------------*/
+bool mvee::is_qemu_executable(std::string& file, VariantArch& arch)
+{
+	char* tmp = NULL;
+	std::string real_qemu_path, real_file_path;
+	std::stringstream path;
+	path << os_get_mvee_root_dir()
+		 << mvee::config.mvee_qemu_path;
+
+	arch = ARCH_HOST;
+
+	// Normalize the qemu path
+	tmp = realpath(path.str().c_str(), NULL);
+	if (!tmp)
+		return false;
+
+	real_qemu_path = std::string(tmp);
+	free(tmp);
+	tmp = NULL;
+	
+	// Normalize the file path
+	tmp = realpath(file.c_str(), tmp); 
+	if (!tmp)
+		return false;
+
+	real_file_path = std::string(tmp);
+	free(tmp);
+
+	// Test if the file path starts with qemu path
+	if (real_file_path.find(real_qemu_path) != 0)
+		return false;
+
+	// Test if the file is an executable
+	if (access(real_file_path.c_str(), X_OK) != 0)
+		return false;
+
+	if (mvee::str_ends_with(real_file_path, "/qemu-i386"))
+		arch = ARCH_I386;
+	else if (mvee::str_ends_with(real_file_path, "/qemu-x86_64"))
+		arch = ARCH_AMD64;
+	else if (mvee::str_ends_with(real_file_path, "/qemu-arm"))
+		arch = ARCH_ARM;
+	else if (mvee::str_ends_with(real_file_path, "/qemu-aarch64"))
+		arch = ARCH_AARCH64;
+	else
+		warnf("Unknown QEMU binary: %s\n", real_file_path.c_str());
+
+	return true;
+}
+
+/*-----------------------------------------------------------------------------
     lock
 -----------------------------------------------------------------------------*/
 void mvee::lock()
@@ -1332,9 +1385,8 @@ void mvee::start_variant_qemu(VariantArch arch, const char* binary, ...)
 		return;
 	}
 
-	const char** _args = NULL;
+	const char** _args = new const char*[args.size()];
 	int i = 0;
-	_args = new const char*[args.size()];
 	for (auto _arg : args)
 		_args[i++] = _arg;
 
@@ -1469,11 +1521,6 @@ void mvee::start_monitored()
 {
     int                i, res, status;
     std::vector<pid_t> procs(mvee::numvariants);
-	std::vector<VariantArch> archs(mvee::numvariants);
-
-	std::fill(archs.begin(), archs.end(), ARCH_HOST);
-
-
     sigset_t           set;
     sigemptyset(&set);
     sigaddset(&set, SIGINT);
@@ -1502,8 +1549,8 @@ void mvee::start_monitored()
         sigaddset(&set, SIGINT);
         pthread_sigmask(SIG_UNBLOCK, &set, NULL);
 
-        mvee::set_demo_options(mvee::demo_num, archs);
-        mvee::active_monitor = new monitor(procs, archs);
+        mvee::set_demo_options(mvee::demo_num);
+        mvee::active_monitor = new monitor(procs);
 
         // Install signal handlers for SIGINT and SIGQUIT so we can shut down safely after CTRL+C
         signal(SIGINT,  mvee_mon_external_termination_request);

@@ -91,12 +91,14 @@
 #define MVEE_CALL_TYPE_NORMAL             2
 
 // Possible return values of the PRECALL system call handler
-#define MVEE_PRECALL_ARGS_MATCH           0x0001                    // These two are a bit redundant...
-#define MVEE_PRECALL_ARGS_MISMATCH        0x0002                    //
+#define MVEE_PRECALL_ARGS_MATCH           0x0001                    
+#define MVEE_PRECALL_ARGS_MISMATCH(a)     (0x0002 | (a << 6))
 #define MVEE_PRECALL_CALL_DENY            0x0004
 #define MVEE_PRECALL_CALL_DISPATCH_NORMAL 0x0008
 #define MVEE_PRECALL_CALL_DISPATCH_FORK   0x0010
 #define MVEE_PRECALL_CALL_DISPATCH_MASTER 0x0020
+#define MVEE_PRECALL_MISMATCHING_ARG(precall_flags) \
+	((precall_flags & (~0x3F)) >> 6)
 
 // Possible return values of the CALL system call handler
 #define MVEE_CALL_ALLOW                   0x0001

@@ -66,6 +66,7 @@ const char* getTextualXattrFlags        (int flags);
 const char* getTextualTimerType         (int type);
 const char* getTextualSyslogAction      (int action);
 const char* getTextualFileType          (int type);
+const char* getTextualISA               (VariantArch arch);
 std::string getTextualTimerFlags        (int flags);
 std::string getTextualWaitEventType     (int status);
 std::string getTextualEpollEvents       (unsigned int events);

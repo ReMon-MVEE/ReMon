@@ -24,7 +24,7 @@
 
     This is obviously not that useful when running benchmarks natively...
 -----------------------------------------------------------------------------*/
-void mvee::set_demo_options(int demonum, std::vector<VariantArch>& archs)
+void mvee::set_demo_options(int demonum)
 {
     if (!mvee::config.mvee_use_system_libc)
         mvee::add_library_path(mvee::config.mvee_libc_path);
@@ -34,35 +34,16 @@ void mvee::set_demo_options(int demonum, std::vector<VariantArch>& archs)
         mvee::add_library_path(mvee::config.mvee_libgomp_path);
     if (!mvee::config.mvee_use_system_gnomelibs)
         mvee::add_library_path(mvee::config.mvee_gnomelibs_path);
-	
-	switch(demonum)
-	{
-		// PARSEC bodytrack
-    	case 31:
-		// PARSEC fluidanimate
-    	case 36:
-		// PARSEC raytrace
-     	case 38:
-        // PARSEC streamcluster
-    	case 39:
-			mvee::demo_schedule_type = MVEE_CLEVER_SCHEDULING;
-			break;
 
-		// PARSEC x264
-	    case 42:
-			mvee::demo_has_many_threads = true;
-			break;
-
-		// Cross-ISA MVEE PoC
-		case 57:
-			if (archs.size() > 1)
-				archs[1] = ARCH_AARCH64;
-			break;
-	}
-
-	// SPLASH-2x
-	if (demonum >= 43 && demonum <= 56)
+	if (demonum == 31 || // bodytrack
+		demonum == 36 || // fluidanimate
+		demonum == 38 || // raytrace
+		demonum == 39 || // streamcluster
+		(demonum >= 43 && demonum <= 56)) // SPLASH-2x
 		mvee::demo_schedule_type = MVEE_CLEVER_SCHEDULING;
+
+	if (demonum == 42) // x264
+		mvee::demo_has_many_threads = true;	
 }
 
 /*-----------------------------------------------------------------------------
@@ -207,7 +188,7 @@ void mvee::start_demo(int demonum, int childindex, bool native)
 			if (childindex == 0)
 				start_variant_qemu(ARCH_AARCH64, "/home/stijn/ReMon/TestsMultiarch/HelloWorld/hello-aarch64", NULL);
 			else
-				start_variant_qemu(ARCH_AMD64, "/home/stijn/ReMon/TestsMultiarch/HelloWorld/hello-x86_64", NULL);
+				start_variant_qemu(ARCH_AMD64, "/home/stijn/ReMon/TestsMultiarch/HelloWorld/hello-x86", NULL);
 			break;
 		}
     }

@@ -189,13 +189,19 @@ bool monitor::handle_is_known_false_positive(const char* program_name, long call
     if (set_mmap_table->thread_group_shutting_down)
         return true;
 
-    warnf("checking for known false positives\n");
-
     bool               result = false;
 
+	// progran_name is not set until the first variant has called execve
+	if (!program_name)
+	{
+		debugf("Mismatch allowed because it happened during MVEE initialization\n");
+		return true;
+	}
+
     // check the program name first
-    if (strstr(program_name, "416.gamess") && callnum == __NR_write)
+    if (callnum == __NR_write && program_name && strstr(program_name, "416.gamess"))
     {
+		warnf("checking for known false positives\n");
         // 416.gamess uses a broken TIME function to print stuff like "GENERATED AT ...."
         // the broken time function returns a block of non-allocated memory, rather than
         // the actual time (doh!)
@@ -282,6 +288,33 @@ bool monitor::handle_is_known_false_positive(const char* program_name, long call
             return false;
         return true;
     }
+	else if (callnum == __NR_execve)
+	{
+		// execve might mismatch because we're starting different binaries.
+		// We allow this in very specific cases
+		if (MVEE_PRECALL_MISMATCHING_ARG((*precall_flags)) == 1)
+		{
+			for (int i = 0; i < mvee::numvariants; ++i)
+			{
+				char* str = mvee_rw_read_string(childs[i].childpid, ARG1(i));
+				std::string file;
+				
+				if (!str)
+					return false;
+				
+				file = std::string(str);
+				SAFEDELETEARRAY(str);
+				
+				VariantArch arch;
+				if (!mvee::is_qemu_executable(file, arch))
+					return false;
+			}
+
+			return true;
+		}
+		
+		return false;			
+	}
 
 out:
     for (int i = 0; i < mvee::numvariants; ++i)
@@ -296,16 +329,14 @@ long monitor::handle_check_open_call(const std::string& full_path, int* flags, i
 {
     int err = 0;
 
-    //warnf("checking open call: %s\n", full_path);
-
     if (full_path == "/dev/port")
     {
-        warnf("The program is trying to access I/O ports (open(/dev/port...)). This call has been denied.\n");
+        cache_mismatch_info("The program is trying to access I/O ports (open(/dev/port...)). This call has been denied.\n");
         return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
     }
     else if (full_path == "/dev/dri/")
     {
-        warnf("The program is trying to do direct rendering (open(%s)). This call has been denied.\n", full_path.c_str());
+        cache_mismatch_info("The program is trying to do direct rendering (open(%s)). This call has been denied.\n", full_path.c_str());
         return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
     }
     else
@@ -544,16 +575,19 @@ long monitor::handle_open_log_args(int childnum)
 long monitor::handle_open_precall(int childnum)
 {
     for (int i = 0; i < mvee::numvariants - 1; ++i)
-        if (((ARG2(i) & O_FILEFLAGSMASK) != (ARG2(i+1) & O_FILEFLAGSMASK))
-            || ((ARG2(i) & O_CREAT) && ((ARG3(i) & S_FILEMODEMASK) != (ARG3(i+1) & S_FILEMODEMASK))))
-            return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;
+	{
+        if ((ARG2(i) & O_FILEFLAGSMASK) != (ARG2(i+1) & O_FILEFLAGSMASK))
+			return MVEE_PRECALL_ARGS_MISMATCH(2) | MVEE_PRECALL_CALL_DENY;
+		if ((ARG2(i) & O_CREAT) && ((ARG3(i) & S_FILEMODEMASK) != (ARG3(i+1) & S_FILEMODEMASK)))
+			return MVEE_PRECALL_ARGS_MISMATCH(3) | MVEE_PRECALL_CALL_DENY;
+	}            
 
     CHECKPOINTER(1);
     CHECKSTRING(1);
 
     std::string full_path = set_fd_table->get_full_path(childs[0].childpid, AT_FDCWD, (void*)ARG1(0));
     if (full_path == "")
-        return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;
+        return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
 
     childs[0].args[1].set_str(full_path);
 
@@ -912,24 +946,31 @@ long monitor::handle_execve_log_args(int childnum)
 
 long monitor::handle_execve_precall(int childnum)
 {
+	VariantArch arch;
+
     handle_execve_get_args(0);
     std::string orig_image = set_mmap_table->mmap_execve_image;
     std::string orig_args  = set_mmap_table->mmap_execve_args;
+
+	if (mvee::is_qemu_executable(orig_image, arch))
+		warnf("Variant %d is switching to ISA: %s\n", 0, getTextualISA(arch));
+
     for (int i = 1; i < mvee::numvariants; ++i)
     {
         handle_execve_get_args(i);
-#if 0
+		if (mvee::is_qemu_executable(set_mmap_table->mmap_execve_image, arch))
+			warnf("Variant %d is switching to ISA: %s\n", i, getTextualISA(arch));
+
         if (set_mmap_table->mmap_execve_image != orig_image)
         {
-            warnf("execve image mismatch\n");
-            return MVEE_PRECALL_CALL_DENY | MVEE_PRECALL_ARGS_MISMATCH;
+            cache_mismatch_info("execve image mismatch\n");
+            return MVEE_PRECALL_CALL_DENY | MVEE_PRECALL_ARGS_MISMATCH(1);
         }
         if (set_mmap_table->mmap_execve_args != orig_args)
         {
-            warnf("execve args mismatch\n");
-            return MVEE_PRECALL_CALL_DENY | MVEE_PRECALL_ARGS_MISMATCH;
+            cache_mismatch_info("execve args mismatch\n");
+            return MVEE_PRECALL_CALL_DENY | MVEE_PRECALL_ARGS_MISMATCH(2);
 		}
-#endif
     }
 
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
@@ -1174,20 +1215,6 @@ long monitor::handle_chdir_precall(int childnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-/*
- * iCTF exploit protection
- long monitor::hndl_chdir_call(int childnum)
- {
- char* str = mvee_rw_read_string(childs[0].childpid, ARG1(0));
- if (!strstr(str, "ctf/simpleftp") || strstr(str, "../"))
- {
- warnf("chdir denied: %s\n", str);
- return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
- }
- return MVEE_CALL_ALLOW;
- }
- */
-
 long monitor::handle_chdir_postcall(int childnum)
 {
     char* str;
@@ -1229,32 +1256,6 @@ long monitor::handle_chmod_precall(int childnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-/*
- * iCTF exploit protection
- long monitor::hndl_chmod_call(int childnum)
- {
- char* str = mvee_rw_read_string(childs[0].childpid, ARG1(0));
- std::string file = std::string(str);
- SAFEDELETEARRAY(str);
-
-
- if (ARG2(0) != 0xc0)
- {
- warnf("chmod denied: %s\n", file.c_str());
- return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
- }
-
- if (file.find("incoming") != 0)
- {
- warnf("denied chmod for: %s\n", file.c_str());
- return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
- }
-
- return MVEE_CALL_ALLOW;
-
- }
- */
-
 /*-----------------------------------------------------------------------------
   sys_fchmod - (unsigned int fd, mode_t mode)
 -----------------------------------------------------------------------------*/
@@ -1264,28 +1265,6 @@ long monitor::handle_fchmod_precall(int childnum)
     CHECKFD(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
-
-/*
- * iCTF exploit protection
- long monitor::hndl_fchmod_call(int childnum)
- {
- fd_info* info = set_fd_table->get_fd_info(ARG1(0));
-
- if (!info || info->path.find("incoming") != 0)
- {
- warnf("fchmod denied: %s\n", info->path.c_str());
- return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
- }
-
- if (ARG2(0) != 0xc0)
- {
- warnf("fchmod denied: %s\n", info->path.c_str());
- return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
- }
-
- return MVEE_CALL_ALLOW;
- }
- */
 
 /*-----------------------------------------------------------------------------
   sys_lseek - (unsigned int fd, off_t offset, unsigned int origin)
@@ -1378,11 +1357,11 @@ long monitor::handle_sendfile_precall(int childnum)
 -----------------------------------------------------------------------------*/
 long monitor::handle_ptrace_call(int childnum)
 {
-    warnf("The program is trying to use ptrace. This call has been denied.\n");
-    warnf("request: %s\n",        getTextualRequest(ARG1(0)));
-    warnf("pid: %d\n",            ARG2(0));
-    warnf("addr: 0x" PTRSTR "\n", ARG3(0));
-    warnf("data: 0x" PTRSTR "\n", ARG4(0));
+    cache_mismatch_info("The program is trying to use ptrace. This call has been denied.\n");
+    cache_mismatch_info("request: %s\n",        getTextualRequest(ARG1(0)));
+    cache_mismatch_info("pid: %d\n",            ARG2(0));
+    cache_mismatch_info("addr: 0x" PTRSTR "\n", ARG3(0));
+    cache_mismatch_info("data: 0x" PTRSTR "\n", ARG4(0));
 
     return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
 }
@@ -2859,12 +2838,10 @@ long monitor::handle_munmap_precall(int childnum)
     {
         for (int i = 0; i < mvee::numvariants; ++i)
         {
-            if ((unsigned long)ARG1(i) != childs[i].last_upper_region_start
-                || (unsigned long)ARG2(i) != childs[i].last_upper_region_size)
-            {
-                warnf("this is not the last upper region!!!");
-                return MVEE_PRECALL_CALL_DENY | MVEE_PRECALL_ARGS_MISMATCH;
-            }
+            if ((unsigned long)ARG1(i) != childs[i].last_upper_region_start)
+				return MVEE_PRECALL_CALL_DENY | MVEE_PRECALL_ARGS_MISMATCH(1);
+			if ((unsigned long)ARG2(i) != childs[i].last_upper_region_size)
+				return MVEE_PRECALL_CALL_DENY | MVEE_PRECALL_ARGS_MISMATCH(2);
         }
     }
     else
@@ -2878,7 +2855,7 @@ long monitor::handle_munmap_precall(int childnum)
         std::vector<unsigned long> addresses(mvee::numvariants);
         FILLARGARRAY(1, addresses);
         if (set_mmap_table->foreach_region(addresses, ARG2(0), this, handle_munmap_precall_callback) != 0)
-            return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;
+            return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
     }
 
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
@@ -2978,7 +2955,7 @@ long monitor::handle_ftruncate_precall(int childnum)
 -----------------------------------------------------------------------------*/
 long monitor::handle_ioperm_call(int childnum)
 {
-    warnf("The program is trying to access I/O ports. This call has been denied.\n");
+    cache_mismatch_info("The program is trying to access I/O ports. This call has been denied.\n");
     return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
 }
 
@@ -3046,8 +3023,8 @@ long monitor::handle_quotactl_precall(int childnum)
         }
         default:
         {
-            warnf("unknown sys_quotactl subcommand: %d - FIXME!\n", subcmd);
-            return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;
+            cache_mismatch_info("unknown sys_quotactl subcommand: %d - FIXME!\n", subcmd);
+            return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
         }
     }
 
@@ -4318,7 +4295,7 @@ long monitor::handle_ipc_precall(int childnum)
         return result;
     }
 
-    return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;
+    return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
 }
 
 long monitor::handle_ipc_call(int childnum)
@@ -4710,11 +4687,11 @@ long monitor::handle_msync_precall(int childnum)
     if (private_mapping)
         return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
     if (region)
-        warnf("msync on region: 0x" PTRSTR "-0x" PTRSTR " (%s)\n", region->region_base_address, region->region_base_address + region->region_size, region->region_backing_file_path.c_str());
+        cache_mismatch_info("msync on region: 0x" PTRSTR "-0x" PTRSTR " (%s)\n", region->region_base_address, region->region_base_address + region->region_size, region->region_backing_file_path.c_str());
     else
-        warnf("msync on unknown region\n");
-    warnf("msyncing a shared mapping -> this is not implemented yet. FIXME\n");
-    return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;
+        cache_mismatch_info("msync on unknown region\n");
+    cache_mismatch_info("msyncing a shared mapping -> this is not implemented yet. FIXME\n");
+    return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
 }
 
 /*-----------------------------------------------------------------------------
@@ -4945,7 +4922,7 @@ long monitor::handle_prctl_precall(int childnum)
      if (ARG1(i) != ARG1(i+1) || ARG2(i) != ARG2(i+1) ||
      ARG3(i) != ARG3(i+1) || ARG4(i) != ARG4(i+1) ||
      ARG5(i) != ARG5(i+1))
-     return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;
+     return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
      */
 
     CHECKARG(1);
@@ -4966,7 +4943,7 @@ long monitor::handle_prctl_call(int childnum)
     // check if the children are trying to re-enable rdtsc
     if (ARG1(0) == PR_SET_TSC && ARG2(0) == PR_TSC_ENABLE)
     {
-        warnf("The program is trying to enable directly reading the time stamp counter. This call has been denied.\n");
+        cache_mismatch_info("The program is trying to enable directly reading the time stamp counter. This call has been denied.\n");
         return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
     }
     return MVEE_CALL_ALLOW;
@@ -5495,65 +5472,6 @@ long monitor::handle_stat_precall(int childnum)
     CHECKPOINTER(2);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
-
-
-// iCTF bassretard exploit protection
-#if 0
-long monitor::hndl_stat_call(int childnum)
-{
-
-    char*       filename = mvee_rw_read_string(childs[0].childpid, ARG1(0));
-    std::string file     = std::string(filename);
-    SAFEDELETEARRAY(filename);
-
-    fd_info*    info     = set_fd_table->get_fd_info(mvee::most_recent_fd, 0);
-
-    if (!info || info->path.find("log/") == std::string::npos)
-        return MVEE_CALL_ALLOW;
-
-    if (file.find("notes/") != std::string::npos)
-    {
-        std::string user_email;
-        std::string creator_email;
-        char        cmd[500];
-
-        struct stat _st;
-        if (stat(file.c_str(), &_st) != 0)
-        {
-            warnf("file does not exist\n");
-            return MVEE_CALL_ALLOW;
-        }
-
-        if (info)
-        {
-            sprintf(cmd, "cat %s | sed 's/.*user=.*&email=\\(.*\\)&note=.*/\\1/'", info->path.c_str());
-            user_email = mvee::log_read_from_proc_pipe(cmd, NULL);
-            //	  warnf("user used following email: %s\n", user_email.c_str());
-        }
-
-        sprintf(cmd, "tail -n 1 %s | sed 's/^NOTE: //' | tr -d '\\n'", file.c_str());
-        std::string current_content = mvee::log_read_from_proc_pipe(cmd, NULL);
-        //      warnf("current file content: %s\n", current_content.c_str());
-
-        if (current_content == "")
-            return MVEE_CALL_ALLOW;
-
-        std::string user            = file.substr(strlen("notes/"));
-        sprintf(cmd, "grep -r \"user=%s&email=.*&note=%s HTTP\" log/ | sed 's/.*user=.*&email=\\(.*\\)&note=.*/\\1/' | head -n 1 | tr -d '\\n'", user.c_str(), current_content.c_str());
-        creator_email = mvee::log_read_from_proc_pipe(cmd, NULL);
-
-        //      warnf("creator email: %s\n", creator_email.c_str());
-
-        if (user_email != creator_email)
-        {
-            warnf("Denied access to flags file because user used email: %s\n", user_email.c_str());
-            warnf("But last note was created with email: %s\n",                creator_email.c_str());
-            return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
-        }
-    }
-    return MVEE_CALL_ALLOW;
-}
-#endif
 
 long monitor::handle_stat_postcall(int childnum)
 {
@@ -7051,9 +6969,12 @@ long monitor::handle_openat_log_args(int childnum)
 long monitor::handle_openat_precall(int childnum)
 {
     for (int i = 0; i < mvee::numvariants - 1; ++i)
-        if (((ARG3(i) & O_FILEFLAGSMASK) != (ARG3(i+1) & O_FILEFLAGSMASK))
-            || ((ARG3(i) & O_CREAT) && ((ARG4(i) & S_FILEMODEMASK) != (ARG4(i+1) & S_FILEMODEMASK))))
-            return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;
+	{
+        if ((ARG3(i) & O_FILEFLAGSMASK) != (ARG3(i+1) & O_FILEFLAGSMASK))
+            return MVEE_PRECALL_ARGS_MISMATCH(3) | MVEE_PRECALL_CALL_DENY;
+		if ((ARG3(i) & O_CREAT) && ((ARG4(i) & S_FILEMODEMASK) != (ARG4(i+1) & S_FILEMODEMASK)))
+			return MVEE_PRECALL_ARGS_MISMATCH(4) | MVEE_PRECALL_CALL_DENY;
+	}
 
     CHECKFD(1);
     CHECKPOINTER(2);
@@ -7066,7 +6987,7 @@ long monitor::handle_openat_precall(int childnum)
     //	warnf("openat: %s\n", full_path.c_str());
 
     if (full_path == "")
-        return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;
+        return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
 
     if (full_path.find("/proc/self/") == 0
         && full_path != "/proc/self/maps"
@@ -7353,28 +7274,6 @@ long monitor::handle_fchmodat_precall (int childnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-/*
- * iCTF exploit protection
- long monitor::hndl_fchmodat_call(int childnum)
- {
- std::string full_path = set_fd_table->get_full_path(childs[0].childpid, ARG1(0), (void*)ARG2(0));
-
- if (full_path.find("incoming") != 0)
- {
- warnf("fchmodat denied: %s\n", full_path.c_str());
- return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
- }
-
- if (ARG3(0) != 0xc0)
- {
- warnf("fchmodat denied: %s\n", full_path.c_str());
- return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
- }
-
- return MVEE_CALL_ALLOW;
- }
- */
-
 /*-----------------------------------------------------------------------------
   sys_faccessat - (int dirfd, const char *pathname, int mode)
 -----------------------------------------------------------------------------*/
@@ -7422,15 +7321,15 @@ long monitor::handle_utimensat_precall(int childnum)
         if (!argarray[i])
             should_compare = false;
     if (should_compare && !call_compare_child_strings(argarray, 0))
-        return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;
+        return MVEE_PRECALL_ARGS_MISMATCH(2) | MVEE_PRECALL_CALL_DENY;
 
     if (ARG3(0))
     {
         unsigned char* master_times = mvee_rw_read_data(childs[0].childpid, ARG3(0), sizeof(struct timespec)*2);
         if (!master_times)
         {
-            warnf("couldn't read master times\n");
-            return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;
+            cache_mismatch_info("couldn't read master times\n");
+            return MVEE_PRECALL_ARGS_MISMATCH(3) | MVEE_PRECALL_CALL_DENY;
         }
         bool           mismatch     = false;
         for (int i = 1; i < mvee::numvariants; ++i)
@@ -7438,8 +7337,8 @@ long monitor::handle_utimensat_precall(int childnum)
             unsigned char* slave_times = mvee_rw_read_data(childs[i].childpid, ARG3(i), sizeof(struct timespec)*2);
             if (!slave_times)
             {
-                warnf("couldn't read slave times\n");
-                return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;
+                cache_mismatch_info("couldn't read slave times\n");
+                return MVEE_PRECALL_ARGS_MISMATCH(3) | MVEE_PRECALL_CALL_DENY;
             }
 
             if (memcmp(master_times, slave_times, sizeof(struct timespec)*2))
@@ -7449,7 +7348,7 @@ long monitor::handle_utimensat_precall(int childnum)
         SAFEDELETEARRAY(master_times);
 
         if (mismatch)
-            return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;
+            return MVEE_PRECALL_ARGS_MISMATCH(3) | MVEE_PRECALL_CALL_DENY;
     }
 
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;

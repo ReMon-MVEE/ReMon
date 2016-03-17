@@ -63,10 +63,10 @@
         FILLARGARRAY(numarg, pointers);                                                      \
         if (call_compare_pointers(pointers) == 1)                                            \
         {                                                                                    \
-            warnf("argument %d mismatch - pointer null-nonnull - syscall: %ld (%s)\n", \
+            cache_mismatch_info("argument %d mismatch - pointer null-nonnull - syscall: %ld (%s)\n", \
                         numarg, childs[0].callnum,                                           \
                         getTextualSyscall(childs[0].callnum));                               \
-            return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;                      \
+            return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
         }                                                                                    \
     }
 
@@ -78,12 +78,12 @@
     {                                                                                  \
         if (ARG ## numarg(i) != ARG ## numarg(i-1))                                    \
         {                                                                              \
-            warnf("argument %d mismatch - syscall: %ld (%s)\n",                  \
+            cache_mismatch_info("argument %d mismatch - syscall: %ld (%s)\n",                  \
                         numarg, childs[0].callnum,                                     \
                         getTextualSyscall(childs[0].callnum));                         \
-            warnf("ARG%d(%d) = 0x" PTRSTR " - ARG%d(%d) = 0x" PTRSTR "\n",       \
+            cache_mismatch_info("ARG%d(%d) = 0x" PTRSTR " - ARG%d(%d) = 0x" PTRSTR "\n",       \
                         numarg, i, ARG ## numarg(i), numarg, i-1, ARG ## numarg(i-1)); \
-            return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;                \
+            return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;	\
         }                                                                              \
     }
 
@@ -97,12 +97,12 @@
 		if (ARG ## numarg(i) != ARG ## numarg(i-1)						\
 			&& (int)ARG ## numarg(i) != childs[i].hidden_buffer_array_id) \
 		{																\
-			warnf("argument %d mismatch - syscall: %ld (%s)\n",	\
+			cache_mismatch_info("argument %d mismatch - syscall: %ld (%s)\n",	\
 						numarg, childs[0].callnum,						\
 						getTextualSyscall(childs[0].callnum));			\
-			warnf("ARG%d(%d) = 0x" PTRSTR " - ARG%d(%d) = 0x" PTRSTR "\n", \
+			cache_mismatch_info("ARG%d(%d) = 0x" PTRSTR " - ARG%d(%d) = 0x" PTRSTR "\n", \
 						numarg, i, ARG ## numarg(i), numarg, i-1, ARG ## numarg(i-1)); \
-			return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;	\
+			return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;	\
 		}																\
 	}
 
@@ -119,12 +119,12 @@
             GETTEXTADDRDIRECT(i, slave_addr, numarg, addrlen);                       \
             if (master_addr != slave_addr)                                           \
             {                                                                        \
-                warnf("argument %d mismatch - sockaddr - syscall: %ld (%s)\n", \
+                cache_mismatch_info("argument %d mismatch - sockaddr - syscall: %ld (%s)\n", \
                             numarg, childs[0].callnum,                               \
                             getTextualSyscall(childs[0].callnum));                   \
-                warnf("master sockaddr: %s - slave %d sockaddr: %s\n",         \
+                cache_mismatch_info("master sockaddr: %s - slave %d sockaddr: %s\n",         \
                             master_addr.c_str(), i, slave_addr.c_str());             \
-                return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;          \
+                return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;          \
             }                                                                        \
         }                                                                            \
     }
@@ -137,10 +137,10 @@
     {                                                                         \
         if ((ARG ## numarg(i) & (mask)) != (ARG ## numarg(i-1) & (mask)))     \
         {                                                                     \
-            warnf("argument %d mismatch - flags - syscall: %ld (%s)\n", \
+            cache_mismatch_info("argument %d mismatch - flags - syscall: %ld (%s)\n", \
                         numarg, childs[0].callnum,                            \
                         getTextualSyscall(childs[0].callnum));                \
-            return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;       \
+            return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;       \
         }                                                                     \
     }
 
@@ -160,10 +160,10 @@
 		FILLARGARRAY(numarg, pointers);									\
 		if (!call_compare_fd_sets(pointers, nfds))						\
 		{																\
-			warnf("argument %d mismatch - fd_sets - syscall: %ld (%s)\n",	\
+			cache_mismatch_info("argument %d mismatch - fd_sets - syscall: %ld (%s)\n",	\
 						numarg, childs[0].callnum,						\
                         getTextualSyscall(childs[0].callnum));			\
-            return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;	\
+            return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;	\
         }																\
     }
 
@@ -177,10 +177,10 @@
         FILLARGARRAY(numarg, argarray);                                                 \
         if (!call_compare_child_buffers(argarray, len))                                 \
         {                                                                               \
-            warnf("buffer contents mismatch - argument %d - syscall: %ld (%s)\n", \
+            cache_mismatch_info("buffer contents mismatch - argument %d - syscall: %ld (%s)\n", \
                         numarg, childs[0].callnum,                                      \
                         getTextualSyscall(childs[0].callnum));                          \
-            return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;                 \
+            return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;                 \
         }                                                                               \
     }
 
@@ -194,10 +194,10 @@
         FILLARGARRAY(numarg, argarray);                                         \
         if (!call_compare_child_strings(argarray, 0))                           \
         {                                                                       \
-            warnf("strings mismatch - argument %d - syscall: %ld (%s)\n", \
+            cache_mismatch_info("strings mismatch - argument %d - syscall: %ld (%s)\n", \
                         numarg, childs[0].callnum,                              \
                         getTextualSyscall(childs[0].callnum));                  \
-            return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;         \
+            return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;         \
         }                                                                       \
     }
 
@@ -210,10 +210,10 @@
         FILLARGARRAY(numarg, argarray);                                         \
         if (!call_compare_signal_handlers(argarray))                            \
         {                                                                       \
-            warnf("sighand mismatch - argument %d - syscall: %ld (%s)\n", \
+            cache_mismatch_info("sighand mismatch - argument %d - syscall: %ld (%s)\n", \
                         numarg, childs[0].callnum,                              \
                         getTextualSyscall(childs[0].callnum));                  \
-            return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;         \
+            return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;         \
         }                                                                       \
     }
 
@@ -226,10 +226,10 @@
         FILLARGARRAY(numarg, addresses);                                              \
         if (!set_mmap_table->compare_ranges(addresses, len))                          \
         {                                                                             \
-            warnf("memory region mismatch - argument %d - syscall: %ld (%s)\n", \
+            cache_mismatch_info("memory region mismatch - argument %d - syscall: %ld (%s)\n", \
                         numarg, childs[0].callnum,                                    \
                         getTextualSyscall(childs[0].callnum));                        \
-            return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;               \
+            return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;               \
         }                                                                             \
     }
 
@@ -242,7 +242,7 @@
         std::vector<unsigned long> addresses(mvee::numvariants);        \
         FILLARGARRAY(numarg, addresses);                                \
         if (!call_compare_io_vectors(addresses, len))                   \
-            return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY; \
+            return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
     }
 
 //
@@ -254,7 +254,7 @@
         std::vector<unsigned long> addresses(mvee::numvariants);        \
         FILLARGARRAY(numarg, addresses);                                \
         if (!call_compare_io_vectors(addresses, len, 1))                \
-            return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY; \
+            return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
     }
 
 //
@@ -266,7 +266,7 @@
         std::vector<unsigned long> addresses(mvee::numvariants);        \
         FILLARGARRAY(numarg, addresses);                                \
         if (!call_compare_msgvectors(addresses))                        \
-            return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY; \
+            return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
     }
 
 //
@@ -278,7 +278,7 @@
         std::vector<unsigned long> addresses(mvee::numvariants);        \
         FILLARGARRAY(numarg, addresses);                                \
         if (!call_compare_msgvectors(addresses, true))                  \
-            return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY; \
+            return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
     }
 
 //
@@ -292,7 +292,7 @@
         for (unsigned int i = 0; i < (unsigned int)len; ++i)                \
         {                                                                   \
             if (!call_compare_msgvectors(addresses))                        \
-                return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY; \
+                return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
             for (int j = 0; j < mvee::numvariants; ++j)                     \
                 addresses[j] += sizeof(struct mmsghdr);                     \
         }                                                                   \
@@ -309,7 +309,7 @@
         for (unsigned int i = 0; i < (unsigned int)len; ++i)                \
         {                                                                   \
             if (!call_compare_msgvectors(addresses, true))                  \
-                return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY; \
+                return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
             for (int j = 0; j < mvee::numvariants; ++j)                     \
                 addresses[j] += sizeof(mmsghdr);                            \
         }                                                                   \
@@ -334,10 +334,10 @@
                 || (action.sa_handler && !master_action.sa_handler)                       \
                 || (!action.sa_handler && master_action.sa_handler))                      \
             {                                                                             \
-                warnf("sigaction mismatch - argument %d - syscall: %ld (%s)\n",     \
+                cache_mismatch_info("sigaction mismatch - argument %d - syscall: %ld (%s)\n",     \
                             numarg, childs[0].callnum,                                    \
                             getTextualSyscall(childs[0].callnum));                        \
-                return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;               \
+                return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;               \
             }                                                                             \
         }                                                                                 \
     }
@@ -356,10 +356,10 @@
             sigset_t set = call_get_sigset(i, argarray[i], is_old_call);           \
             if (!call_compare_sigsets(&master_set, &set))                          \
             {                                                                      \
-                warnf("sigset mismatch - argument %d - syscall: %ld (%s)\n", \
+                cache_mismatch_info("sigset mismatch - argument %d - syscall: %ld (%s)\n", \
                             numarg, childs[0].callnum,                             \
                             getTextualSyscall(childs[0].callnum));                 \
-                return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;        \
+                return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;        \
             }                                                                      \
         }                                                                          \
     }
@@ -375,22 +375,22 @@
         struct epoll_event master_event, slave_event;                                                          \
         if (!mvee_rw_read_struct(childs[0].childpid, events[0], sizeof(struct epoll_event), &master_event))    \
         {                                                                                                      \
-            warnf("couldn't read epoll_event\n");                                                        \
-            return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;                                        \
+            cache_mismatch_info("couldn't read epoll_event\n");                                                        \
+            return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;                                        \
         }                                                                                                      \
         for (int i = 1; i < mvee::numvariants; ++i)                                                            \
         {                                                                                                      \
             if (!mvee_rw_read_struct(childs[i].childpid, events[i], sizeof(struct epoll_event), &slave_event)) \
             {                                                                                                  \
-                warnf("couldn't read epoll_event\n");                                                    \
-                return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;                                    \
+                cache_mismatch_info("couldn't read epoll_event\n");                                                    \
+                return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;                                    \
             }                                                                                                  \
             if (slave_event.events != master_event.events)                                                     \
             {                                                                                                  \
-                warnf("epoll event mismatch in argument %d - syscall: %ld (%s)\n",                       \
+                cache_mismatch_info("epoll event mismatch in argument %d - syscall: %ld (%s)\n",                       \
                             numarg, childs[0].callnum,                                                         \
                             getTextualSyscall(childs[0].callnum));                                             \
-                return MVEE_PRECALL_ARGS_MISMATCH | MVEE_PRECALL_CALL_DENY;                                    \
+                return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;                                    \
             }                                                                                                  \
         }                                                                                                      \
     }

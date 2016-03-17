@@ -42,12 +42,8 @@
 unsigned char monitor::call_is_known_false_positive(long* precall_flags)
 {
     set_mmap_table->grab_lock();
-    if (set_mmap_table->mmap_execve_image.length() == 0)
-    {
-        set_mmap_table->release_lock();
-        return 0;
-    }
-    char*         program_name = mvee::strdup(set_mmap_table->mmap_execve_image.c_str());
+    char*         program_name = (set_mmap_table->mmap_execve_image.length() == 0) ? 
+		NULL : mvee::strdup(set_mmap_table->mmap_execve_image.c_str());
     set_mmap_table->release_lock();
 
     long          callnum      = childs[0].callnum;

@@ -21,6 +21,7 @@
 #include <memory>
 #include <vector>
 #include <deque>
+#include <sstream>
 #include "MVEE_config.h"
 #include "MVEE_private_arch.h"
 
@@ -128,7 +129,7 @@ public:
 class childstate
 {
 public:
-	VariantArch   arch;                                             // 
+	VariantArch   arch;                                             // Which instruction set architecture is this variant using (this is only relevant for QEMU variants)
     pid_t         childpid;                                         // Process ID of this child
     long          prevcallnum;                                      // Previous system call executed by the child. Set when the call returns.
     long          callnum;                                          // System call number being executed by this child.
@@ -210,72 +211,177 @@ public:
 };
 
 //
-// Per-monitor state
+// This class represents the monitors that monitor the variants.  Unless
+// otherwise noted, all of member functions are implemented in MVEE_monitor.cpp
 //
 class monitor
 {
 public:
-    //
-    // Public interface for the MVEE logger
-    //
-    bool is_logging_enabled                  ();
-    bool is_group_shutting_down              ();
-    void log_monitor_state_short             (int err);
 
-    //
-    // Public interface for the MVEE monitor management
-    //
-    void  signal_shutdown                     ();
-    void  signal_registration                 ();
-    std::vector<pid_t>
-          getpids                             ();
-    void  join_thread                         ();
-    pid_t get_mastertgid                      ();
-    void  set_should_check_multithread_state  ();
+	// *************************************************************************
+    // Public interface for the MVEE logger
+    // *************************************************************************
 
 	// 
+    // Returns true if the logf function should log to this monitor's monitor
+    // log
+	// 
+    bool is_logging_enabled                  ();
+
+	// 
+	// Returns true if this monitor's variants are shutting down
+	//
+    bool is_group_shutting_down              ();
+
+	// 
+	// Implemented in MVEE_logging.cpp. Logs basic information about this
+	// monitor and the variants it's monitoring.
+	//
+    void log_monitor_state_short             (int err);
+
+	// *************************************************************************
+    // Public interface for the MVEE monitor management - These functions are
+	// available to the main mvee process
+	// *************************************************************************
+
+	//
+	// Wakes up the monitor and sets its should_shutdown flag
+	//
+    void  signal_shutdown                     ();
+
+	//
+	// Wakes up the monitor and sets its monitor_registered flag, indicating
+	// that it can begin executing the main monitor loop
+	//
+    void  signal_registration                 ();
+
+	//
+	// Get the process ids of the variant threads monitored by this monitor
+	// 
+    std::vector<pid_t>
+          getpids                             ();
+
+	// 
+	// Calls pthread_join on the specified monitor's pthread_t object
+	//
+    void  join_thread                         ();
+
+	// 
+	// Get the Task Group ID of the master variant monitored by this monitor
+	//
+    pid_t get_mastertgid                      ();
+
+	// 
+	// Sets the should_check_multithread_state flag for this monitor, indicating
+	// that it should check if it's still monitoring a multi-threaded process
+	// upon the next opportunity. We use this mechanism to dynamically
+	// enable/disable the synchronization agents in the variants
+	//
+    void  set_should_check_multithread_state  ();
+
+	// *************************************************************************
 	// Scheduling support
+	// ************************************************************************* 
+
+	//
+	// Returns the logical CPU core id of the core to which the master variant
+	// thread was assigned (if any)
 	// 
 	int   get_master_core                     ();
 
-    //
+	// *************************************************************************
     // Public variables for the MVEE logger
-    //
-    FILE* monitor_log;                                              // we now have each monitor log to the global log (MVEE.log) as well as its own log (MVEE_<id>.log)
-    int   monitorid;                                                // Identifier for this set of equivalent forked processes
+	// *************************************************************************
 
-    //
+    // File handle for this monitor's local log file (i.e. MVEE_<monitorid>.log)
+    FILE* monitor_log;
+
+    // Unique identifier for this
+    int   monitorid;
+
+	// *************************************************************************
     // System Call Handlers
-    //
+	// *************************************************************************
+
+	// 
+	// Dummy functions called when we don't have a handler for a specific
+	// syscall
+	//
     long handle_donthave                     (int childnum);
     long handle_dontneed                     (int childnum);
+
+	//
+	// Include an automatically generated syscall handler table. All of these
+	// handler functions are implemented in MVEE_syscalls_handlers.cpp
+	//
     #include "MVEE_syscall_handler_prototypes.h"
 
-    //
-    // Constructors
-    //
-    monitor(std::vector<pid_t>& pids, std::vector<VariantArch>& archs);
+	// *************************************************************************
+    // Constructors/Destructors
+	// *************************************************************************
+
+	// 
+	// Constructor used for the primary monitor thread (i.e. the one that attaches
+	// to the initial variant processes)
+	//
+    monitor(std::vector<pid_t>& pids);
+
+	//
+	// Constructor used for the secondary monitor threads (i.e. the monitor threads
+	// that attach to descendants of the initial variant processes)
+	//
     monitor(monitor* parent_monitor, bool shares_fd_table=false, bool shares_mmap_table=false, bool shares_sighand_table=false, bool shares_tgid=false);
     ~monitor();
 
 private:
 
-    //
-    // Main monitor thread
-    //
+	// *************************************************************************
+    // Main monitor thread function - This runs the main monitoring loop
+	// *************************************************************************
     static void* thread                              (void* param);
 
-    //
+	// *************************************************************************
     // System call support (these are all in MVEE_syscalls_support.cpp)
     // These functions mostly support the MVEE<->variant datatransfers
-    //
+	// *************************************************************************
+
+	// 
+	// Check if our cached regs variable is still up to date for variant
+	// @childnum, possibly refreshing it if necessary 
+	//
     void             call_check_regs                     (int childnum);
+
+	// 
+	// Returns true if the specified syscall result indicates an error
+	//
     bool             call_check_result                   (long int result);
+
+	//
+	// Returns true if none of the variants's syscalls returned errors
+	//
     bool             call_postcall_all_syscalls_succeeded();
+
+	// 
+	// Returns the syscall result for variant @childnum
+	//
     long             call_postcall_get_child_result      (int childnum);
+
+	// 
+	// Overwrite the syscall result for variant @childnum
+	//
     void             call_postcall_set_child_result      (int childnum, unsigned long result);
+
+	//
+	// Returns a vector containing the syscall results for all variants
+	//
     std::vector<unsigned long>
                      call_postcall_get_result_vector     ();
+
+	//
+	// Comparison functions. These are pretty self-explanatory.  They generally
+	// accept a pointer to a data structure for each variant. If the data
+	// matches, the comparison function returns true.
+	// 
     bool             call_compare_child_strings          (std::vector<unsigned long>& stringptrs, size_t maxlength=0);
     bool             call_compare_child_buffers          (std::vector<unsigned long>& bufferptrs, size_t size);
     bool             call_compare_wait_pids              (std::vector<pid_t>& pids);
@@ -286,120 +392,506 @@ private:
     bool             call_compare_io_vectors             (std::vector<unsigned long>& addresses, size_t len, bool layout_only=false);
     bool             call_compare_msgvectors             (std::vector<unsigned long>& addresses, bool layout_only=false);
 	bool             call_compare_fd_sets                (std::vector<unsigned long>& addresses, int nfds);
+
+	//
+	// Serialization Functions. These are helper functions for the syscall
+	// logging handlers in MVEE_syscall_handlers.cpp
+	// 
     std::string      call_serialize_io_vector            (int childnum, struct iovec* vec, unsigned int vecsz);
     std::string      call_serialize_msgvector            (int childnum, struct msghdr* msg);
     std::string      call_serialize_io_buffer            (int childnum, unsigned long buf, unsigned long buflen);
+
+	// 
+	// Replication functions. These accept a pointer to a data structure for
+	// each variant. The data structure is deep copied from the address space of
+	// the master variant to the address spaces of the slaves
+	//
     void             call_replicate_io_vector            (std::vector<unsigned long>& addresses, long bytes_copied);
     void             call_replicate_msgvector            (std::vector<unsigned long>& addresses, long bytes_sent);
     void             call_replicate_mmsgvector           (std::vector<unsigned long>& addresses, int vlen);
     void             call_replicate_mmsgvectorlens       (std::vector<unsigned long>& addresses, int sent, int attempted);
     void             call_replicate_buffer               (std::vector<unsigned long>& addresses, int size);
+
+	//
+	// getter functions. These accept pointers to a specific data structure and
+	// do a deep copy to a local data structure.
+	//
     sigset_t         call_get_sigset                     (int childnum, unsigned long sigset_ptr, bool is_old_call);
     struct sigaction call_get_sigaction                  (int childnum, unsigned long sigaction_ptr, bool is_old_call);
     struct sockaddr* call_get_sockaddr                   (int childnum, unsigned long ptr, socklen_t addr_len);
 
-    //
+	// *************************************************************************
     // Specific Syscall handlers (these are all in MVEE_syscalls_handlers.cpp)
-    //
+	// *************************************************************************
+
+	// 
+    // False positive handling. This is called when a syscall argument mismatch
+	// is detected when executing program @program_name. Based on the
+	// @precall_flags, we can see which argument caused the mismatch detection.
+	// If this function returns true, we ignore the mismatch
+	//
     bool        handle_is_known_false_positive      (const char* program_name, long callnum, long* precall_flags);
+
+	//
+	// Returns true if we should allow open/openat calls to open file @fullpath
+	//
     long        handle_check_open_call              (const std::string& full_path, int* flags, int mode);
+
+	// 
+	// Fetching the arguments for an execve call is complicated and slow.
+	// We therefore use a specialized function that caches the results.
+	// 
     void        handle_execve_get_args              (int childnum);
+
+	// 
+	// callback function for the iterator function that iterates over regions
+	// that were unmapped by the preceding sys_munmap call.  This function
+	// handles writebacks of memory regions that _WERE_ MAP_SHARED, but that
+	// were changed by the MVEE to MAP_PRIVATE. Please refer to the original
+	// GHUMVEE paper for details.
+	//
     static bool handle_munmap_precall_callback      (mmap_table* table, std::vector<mmap_region_info*>& infos, void* mon);
 
-    //
-    // Generic Syscall handlers (these are in MVEE_syscalls.cpp)
-    //
+	// *************************************************************************
+    // Generic Syscall handlers (these are in MVEE_syscalls.cpp) - This is the
+    // main interface for the general monitor logic implemented in
+    // MVEE_monitor.cpp
+	// *************************************************************************
+
+	// 
+	// Check if the syscall arguments mismatch we detected is a known benign
+	// divergence. This is a wrapper around handle_is_known_false_positive
+	// (described above)
+	// 
     unsigned char call_is_known_false_positive        (long* precall_flags);
+
+	// 
+	// Resume all variants (generally using PTRACE_SYSCALL)
+	//
     void          call_resume_all                     ();
+
+	// 
+	// Replace the syscall number for all variants with __NR_getpid and then
+	// resume them. This forces all variants to execute sys_getpid instead of
+	// the call they were about to execute
+	// 
     void          call_resume_fake_syscall            ();
+
+	// 
+	// Determines if syscall @callnum should be executed in lockstep for variant
+	// @childnum
+	// 
+	// For standard syscalls, this is a wrapper around the get_call_type handle
+	// functions for the syscall that is currently being executed by variant
+	// @childnum
+	//
     unsigned char call_precall_get_call_type          (int childnum, long callnum);
+
+	//
+	// Runs all of the early precall handling (i.e. comparing the syscall
+	// arguments and possibly logging them to the log file). This function is
+	// not executed if the current syscall is not subject to lockstepping.
+	// 
+	// For standard syscalls, this is a wrapper around the log_args and precall
+	// handler functions for the syscall that is currently being executed by the
+	// variants
+	// 
     long          call_precall                        ();
+
+	//
+	// Runs the late precall handling (i.e. overwriting syscall results if
+	// necessary) for syscalls that are not subject to lockstepping
+	// 
+	// For standard syscalls, this is a wrapper around the call handler function
+	// for the syscall that is currently being executed by variant @childnum
+	// 
     long          call_call_dispatch_unsynced         (int childnum);
+
+	//
+	// Runs the late precall handling (i.e. overwriting syscall results if
+	// necessary) for syscalls that are subject to lockstepping
+	// 
+	// For standard syscalls, this is a wrapper around the call handler function
+	// for the syscall that is currently being executed by the variants
+	// 
     long          call_call_dispatch                  ();
+
+	//
+	// Runs the postcall handling for syscalls that are not subject to
+	// lockstepping
+	// 
+	// For standard syscalls, this is a wrapper around the postcall handler
+	// function for the syscall that is currently being executed by variant
+	// @childnum
+	// 
     long          call_postcall_return_unsynced       (int childnum);
+
+	//
+	// Runs the postcall handling for syscalls that are subject to lockstepping
+	// 
+	// For standard syscalls, this is a wrapper around the postcall handler
+	// function for the syscall that is currently being executed by the variants
+	// 
     long          call_postcall_return                ();
+
+	//
+	// Shifts the syscall arguments for variant @childnum by @cnt arguments.
+	//
+	// Example: shifting the arguments by 1 would cause ARG2 to be copied into
+	// ARG1, ARG3 into ARG2, ...  
+	//
+	// We use this so we can use this on 32-bit for multiplexed calls such as
+	// sys_ipc and sys_socketcall.
+	//
+	// Note: We only shift our locally cached copies of the syscall arguments,
+	// not the actual in-process arguments
+	// 
     void          call_shift_args                     (int childnum, int cnt);
+
+	// 
+	// Locks the specified set of locks. We use these locks to prevent
+	// related syscall from being executed simultaneously
+	//
     void          call_grab_locks                     (unsigned char syslocks);
+
+	// 
+	// Releases the specified set of locks.
+	// 
     void          call_release_locks                  (unsigned char syslocks);
+
+	// 
+	// Helper functions for syslock locking
+	//
     void          call_grab_syslocks                  (int childnum, unsigned long callnum, unsigned char which);
     void          call_release_syslocks               (int childnum, unsigned long callnum, unsigned char which);
+
+	//
+	// Wait for all variants to be stopped
+	//
     void          call_wait_all                       ();
+
+	//
+	// Injects a syscall into the variants. This function, which should only be
+	// called when the variants are in ptrace-stopped state, overwrites the
+	// syscall number and syscall arguments for all variants. It then resumes
+	// them, and waits for the syscalls to return.
+	// 
     void          call_execute_synced_call            (bool at_syscall_exit, unsigned long callnum, std::vector<std::deque<unsigned long> >& call_args);
 
-    //
-    // Event handling
-    //
+	// *************************************************************************
+    // Event handling - This is all of the non-syscall related event handling
+	// These functions are implemented in MVEE_monitor.cpp
+	// *************************************************************************
+
+	//
+	// Processes a signal delivery to variant @index. The wait4 return status
+	// is given in @status.
+	//
     void handle_signal_event                 (int index, int status);
+
+	//
+	// Process a SIGTRAP signal, possibly resulting from the execution of an
+	// RDTSC instruction. We disassemble the faulting instruction to verify
+	// this. If the faulting instruction is indeed RDTSC, we ensure that
+	// all variants get consistent results and return true.
+	// 
     bool handle_rdtsc_event                  (int index);
+
+	// 
+	// Generic SIGTRAP handling. 
+	//
     void handle_trap_event                   (int index);
+
+	// 
+	// Processes the creation of a new task by variant @index
+	//
     void handle_fork_event                   (int index, int event);
+
+	//
+	// Processes the entrance into a syscall by variant @index. This function
+	// only implements the really high-level syscall handling logic and relies
+	// on the generic syscall handler functions in MVEE_syscalls.cpp to handle
+	// the specifics.
+	//
     void handle_syscall_entrance_event       (int index);
+
+	// 
+	// Processes the return from a syscall @index. This function only implements
+	// the really high-level syscall handling logic and relies on the generic
+	// syscall handler functions in MVEE_syscalls.cpp to handle the specifics.
+	//
     void handle_syscall_exit_event           (int index);
+
+	//
+	// Processes a SIGSYSTRAP signal. This function figures out if the signal
+	// was caused by a syscall entrance or exit and delegates to one of the
+	// above functions accordingly
+	//
     void handle_syscall_event                (int index);
+
+	// 
+	// Processes the death of variant @index.
+	//
     void handle_exit_event                   (int index);
+
+	//
+	// Processes the first SIGSTOP we see from variant @index, which we have not
+	// attached to yet
+	//
     void handle_attach_event                 (int index, int status);
+
+	//
+	// Processes the second SIGSTOP we see from variant @index. This second
+	// SIGSTOP is caused by our PTRACE_ATTACH operation.
+	//
     void handle_resume_event                 (int index);
+
+	//
+	// Handles an event from a variant we are not currently attached to
+	//
     void handle_detach_event                 (pid_t childpid, int status);
+
+	// 
+	// Entrypoint for all event handling
+	//
     void handle_event                        (pid_t childpid, int status);
 
-    //
+	// *************************************************************************
     // Signal specific event handling
-    //
+	// *************************************************************************
+
+	//
+	// Removes the specified signal from this monitor's pending_signals list,
+	// preventing future delivery of said signal to the variants
+	//
     std::vector<mvee_pending_signal>::iterator discard_pending_signal              (std::vector<mvee_pending_signal>::iterator& it);
+
+	//
+	// Entrypoint for all signal related events. This handles all variant
+	// interruptions due to signal deliveries.  The wait4 status is given in
+	// @status. The function returns false if the variant was terminated due to
+	// the signal delivery (this can happen for example if the interrupting
+	// signal is a SIGKILL)
+	// 
     void                                       handle_sig_delivery_stop            (int index, int status);
+
+	// 
+	// Inspects the pending_signals list and possibly initiates the delivery
+	// of one of the pending signals to the variants. Returns true if a signal
+	// delivery was initiated
+	//
     bool                                       sig_prepare_delivery                ();
+
+	//
+	// Handles the delivery of a SIGCHLD signal that was delivered while we were
+	// executing a mastercall. Returns true if the mastercall was successfully
+	// restarted
+	//
 	bool                                       sig_handle_sigchld_race             (std::vector<mvee_pending_signal>::iterator it);
+
+	//
+	// Finishes the delivery of a signal whose delivery was initiated in a
+	// preceding sig_prepare_delivery call
+	//
     void                                       sig_finish_delivery                 ();
+
+	//
+	// Handles the execution of sys_rt_sigreturn calls. This call is executed
+	// when the the execution of a signal handler finishes. This function should
+	// restore the original register context for each variant and resume them
+	//
     void                                       sig_return_from_sighandler          ();
+
+	//
+	// Handle ERESTART_* errors resulting from signal deliveries during blocking
+	// syscalls.
+	//
     void                                       sig_restart_syscall                 (int childnum);
     void                                       sig_restart_partially_interrupted_syscall();
+
+	// 
+	// Set the have_pending_signals flag, indicating that the sig_prepare_delivery
+	// function might have to initiate a signal delivery
+	//
 	void                                       sig_set_pending_signals             (bool pending_signals);
+
+	// 
+	// Returns true if variant @childnum's instruction pointer points to the
+	// IP-MON executable code
+	//
 	bool                                       in_ipmon                            (int childnum, unsigned long ip);
+
+	//
+	// Returns true if variant @childnum's instruction pointer points to a
+	// syscall instruction inside IP-MON's executable code
+	//
 	bool                                       in_ipmon_syscall                    (int childnum, unsigned long ip);
 
-    //
+	// *************************************************************************
     // Hardware breakpoint support
-    //
+	// *************************************************************************
+
+	// 
+	// Update variant @childnum's debug registers after we have set or unset a
+	// hardware breakpoint
+	// 
     void hwbp_refresh_regs              (int childnum);
+
+	//
+	// Set or remove a hardware breakpoint at address @addr in variant
+	// @childnum. Refer to MVEE_monitor.h for a list of possible breakpoint
+	// types
+	//
     bool hwbp_set_watch                 (int childnum, unsigned long addr, unsigned char bp_type);
     bool hwbp_unset_watch               (int childnum, unsigned long addr);
 
-    //
-    // Logging/Backtracing functions
-    //
+	// *************************************************************************
+    // Logging/Backtracing functions - These are implemented in MVEE_logging.cpp
+	// *************************************************************************
+
+	// 
+	// Opens the monitor-local log file (i.e. MVEE_<monitorid>.log)
+	//
     void log_init                        ();
+
+	// 
+	// Closes the monitor-local log file (i.e. MVEE_<monitorid>.log)
+	//
     void log_fini                        ();
+
+	//
+	// Logs a stack trace for variant @childnum
+	//
     void log_child_backtrace             (int childnum, int max_depth=0, int calculate_file_offsets=0, int is_segfault=0);
+
+	// 
+	// Logs source line information for the instruction found at address
+	// @address in variant @childnum
+	// 
     void log_caller_info                 (int childnum, int level, unsigned long address, int calculate_file_offsets=0, void (*logfunc)(const char*, ...)=NULL);
+
+	//
+	// Log the extended state of this monitor and its variants
+	//
     void log_monitor_state               (void (*logfunc)(const char* format, ...)=NULL);
-    void log_monitor_state_live          ();
+
+	//
+	// Log stack traces for all variants
+	//
     void log_backtraces                  ();
+
+	// 
+	// Log the contents of all known shared memory segments attached by the
+	// variants. Among other things, we use this to visualize the contents
+	// of the synchronization buffers
+	//
     void log_dump_queues                 (shm_table* shm_table);
+
+	//
+	// Error Logging Functions
+	//
     void log_unhandled_sig               (int status, int index);
     void log_call_mismatch               (int index1, int index2);
     void log_callargs_mismatch           ();
     void log_segfault                    (int childnum);
     void log_hw_bp_event                 (int childnum, siginfo_t* sig);
-    void log_ipmon_state                 ();
-	void log_calculate_clock_spread      ();
-	void log_stack(int childnum);
 
-    //
-    // Initializing new children
-    //
+	//
+	// Visualizes the contents of IP-MON's Replication Buffer
+	//
+    void log_ipmon_state                 ();
+
+	//
+	// Calculates statistics for the synchronization operations in the
+	// synchronization buffers attached to the variants
+	// 
+	void log_calculate_clock_spread      ();
+	
+	//
+	// Log the contents of the stack around the current stack pointer in variant
+	// @childnum
+	//
+	void log_stack                       (int childnum);
+
+	//
+	// Write messages into the mismatch info stream.  These messages may or may
+	// not be printed to stdout/log files later, depending on whether or not the
+	// mismatch was flagged as a benign divergence
+	//
+	void cache_mismatch_info             (const char* format, ...);
+
+	// 
+	// dump the mismatch stream to stdout/log files
+	//
+	void dump_mismatch_info              ();
+
+	// 
+	// reset the mismatch info stream
+	//
+	void flush_mismatch_info             ();
+
+	// *************************************************************************
+    // Variant Initialization
+	// *************************************************************************   
+
+	//
+	// Set PTRACE options for a newly attached variant
+	//
     int         init_ptrace_options             (int childnum);
-    void        init_child                      (int childnum, pid_t childpid, pid_t childtgid, VariantArch arch);
+
+	//
+	// Initialize the childstate struct for variant @childnum
+	//
+    void        init_child                      (int childnum, pid_t childpid, pid_t childtgid);
+
+	//
+	// Restart variant @childnum to its initial state by injecting a sys_execve
+	// call with the original arguments
+	//
     bool        restart_child                   (int childnum);
+
+	//
+	// Serializes a deque by writing a raw serialized buffer and a raw pointer
+	// array containing pointers to the elements in the serialized buffer.
+	// The pointers are relocated because we assume that the serialized buffer
+	// will be written at @target_address
+	//
     static void serialize_and_relocate_arr      (std::deque<char*>& arr, char*& serialized, char**& relocated, unsigned long target_address);
+
+	//
+	// Get the original execve arguments array for the master variant
+	//
     std::deque<char*>
                 get_original_argv               ();
 
-    //
+	// *************************************************************************
     // Monitor startup/shutdown
-    //
+	// *************************************************************************    
+
+	//
+	// Shut down the current monitor thread. This frees all of the resources
+	// allocated by this monitor and possibly kills any variants that are still
+	// active. If necessary, the shutdown function also generates backtraces.
+	// Finally, the shutdown function will signal the mvee garbage collection
+	// thread by calling mvee::unregister_monitor, and it will then simply wait
+	// to be garbage collected.
+	//
     void shutdown                            (bool success);
+
+	//
+	// Handle any incoming events from variants we have detached from, but are
+	// not attached to other monitor threads yet.
+	//
     void await_pending_transfers         ();
+
+	//
+	// Initialize all of our variables to their default values
+	//
     void init();
+
+	//
+	// Pin our variant threads to the most suitable logical CPU cores
+	// 
 	void schedule_threads();
 
     //
@@ -487,6 +979,8 @@ private:
     sigset_t                          old_blocked_signals;
 
 	int master_core;
+
+	std::stringstream mismatch_info;                          // cached mismatch info
 };
 
 class detachedchild

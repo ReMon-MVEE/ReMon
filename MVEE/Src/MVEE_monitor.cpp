@@ -253,8 +253,8 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
     for (int i = 0; i < mvee::numvariants; ++i)
     {
         init_child(i, parent_monitor->childs[i].pendingpid,
-                   shares_tgid ? parent_monitor->childs[i].childtgid : parent_monitor->childs[i].pendingpid,
-			parent_monitor->childs[i].arch);
+                   shares_tgid ? parent_monitor->childs[i].childtgid : parent_monitor->childs[i].pendingpid);
+		childs[i].arch = parent_monitor->childs[i].arch;		
     }
 
     // child monitors are a different story. New childs (forks/vforks/clones) always
@@ -267,7 +267,7 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
     debugf("Spawned child monitor - id: %d\n", monitorid);
 }
 
-monitor::monitor(std::vector<pid_t>& pids, std::vector<VariantArch>& archs)
+monitor::monitor(std::vector<pid_t>& pids)
 {
     init();
 
@@ -283,7 +283,7 @@ monitor::monitor(std::vector<pid_t>& pids, std::vector<VariantArch>& archs)
     state             = STATE_WAITING_ATTACH;
 
     for (int i = 0; i < mvee::numvariants; ++i)
-        init_child(i, pids[i], pids[i], archs[i]);
+        init_child(i, pids[i], pids[i]);
 
     std::vector<pid_t> newpids = getpids();
     mvee::register_variants(newpids);
@@ -327,9 +327,8 @@ int monitor::init_ptrace_options(int childnum)
 /*-----------------------------------------------------------------------------
     init_child - Initializes the state info for a new child traced by the monitor.
 -----------------------------------------------------------------------------*/
-void monitor::init_child(int childnum, pid_t childpid, pid_t childtgid, VariantArch arch)
+void monitor::init_child(int childnum, pid_t childpid, pid_t childtgid)
 {
-	childs[childnum].arch      = arch;
     childs[childnum].callnum   = NO_CALL;
     childs[childnum].childpid  = childpid;
     childs[childnum].childtgid = childtgid ? childtgid : childpid;
@@ -723,7 +722,7 @@ void monitor::shutdown(bool success)
                 if (!childs[i].child_terminated)
                 {
 #ifndef MVEE_BENCHMARK
-                    log_child_backtrace(i);
+					log_child_backtrace(i);
 #endif
                     childs[i].child_terminated = true;
                     kill(childs[i].childtgid, SIGKILL);
@@ -1557,11 +1556,16 @@ args_match:
         {
             if (!call_is_known_false_positive(&precall_flags))
             {
+				dump_mismatch_info();
                 log_callargs_mismatch();
                 shutdown(false);
             }
             else
             {
+				flush_mismatch_info();
+
+				// clear call deny flag
+				precall_flags &= ~MVEE_PRECALL_CALL_DENY;
                 goto args_match;
             }
         }

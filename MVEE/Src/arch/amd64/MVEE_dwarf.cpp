@@ -11,6 +11,7 @@
 #include <libelf.h>
 #include <dwarf.h>
 #include <libdwarf.h>
+#include "MVEE.h"
 #include "MVEE_logging.h"
 #include "MVEE_mman.h"
 #include "MVEE_private_arch.h"
