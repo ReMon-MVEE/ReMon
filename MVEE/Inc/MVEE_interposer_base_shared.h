@@ -80,12 +80,12 @@ struct mvee_interposer_buffer_info
     Shared global variables
 -----------------------------------------------------------------------------*/
 //
-// Which child are we (as seen by the monitor)
+// Which variant are we (as seen by the monitor)
 //
-extern unsigned short mvee_interposer_childnum;
+extern unsigned short mvee_interposer_variantnum;
 
 //
-// How many childs are there?
+// How many variants are there?
 //
 extern unsigned short mvee_interposer_numvariants;
 

@@ -50,7 +50,7 @@ public:
     struct user_regs_struct regs;
     long int                cfa;
 
-    mvee_dwarf_context(pid_t childpid);
+    mvee_dwarf_context(pid_t variantpid);
 };
 
 //
@@ -75,8 +75,8 @@ public:
 class mmap_addr2line_proc
 {
 public:
-    std::string read_from_addr2line_pipe(const std::string& cmd, int childnum);
-    mmap_addr2line_proc(std::string& file, int childnum, pid_t childpid, unsigned long address, unsigned long region_size);
+    std::string read_from_addr2line_pipe(const std::string& cmd, int variantnum);
+    mmap_addr2line_proc(std::string& file, int variantnum, pid_t variantpid, unsigned long address, unsigned long region_size);
     ~mmap_addr2line_proc();
 
 private:
@@ -113,7 +113,7 @@ public:
     Dwarf_Signed cie_count;
     Dwarf_Signed fde_count;
 
-    dwarf_info(std::string& file, int childnum, pid_t childpid, mmap_region_info* region_info);
+    dwarf_info(std::string& file, int variantnum, pid_t variantpid, mmap_region_info* region_info);
     ~dwarf_info();
 };
 
@@ -126,7 +126,7 @@ public:
     //
     // mandatory fields
     //
-    unsigned long region_base_address;        // start address of the mapping. Can be different for every child due to ASLR etc.
+    unsigned long region_base_address;        // start address of the mapping. Can be different for every variant due to ASLR etc.
     unsigned long region_size;                // region size in bytes
 
     //
@@ -149,14 +149,14 @@ public:
     // Debugging/Backtracing support
     //
     void                 print_region_info          (const char* log_prefix, void (*logfunc)(const char* format, ...)=NULL);
-    dwarf_info*          get_dwarf_info             (int childnum, pid_t childpid);
-    mmap_addr2line_proc* get_addr2line_proc         (int childnum, pid_t childpid);
-    unsigned long        map_memory_pc_to_file_pc   (int childnum, pid_t childpid, unsigned long in_memory_offset);
+    dwarf_info*          get_dwarf_info             (int variantnum, pid_t variantpid);
+    mmap_addr2line_proc* get_addr2line_proc         (int variantnum, pid_t variantpid);
+    unsigned long        map_memory_pc_to_file_pc   (int variantnum, pid_t variantpid, unsigned long in_memory_offset);
 
     //
     // Constructor
     //
-    mmap_region_info(int childnum, unsigned long address, unsigned long size, unsigned int prot_flags, fd_info* backing_file, unsigned int backing_file_offset, unsigned int map_flags);
+    mmap_region_info(int variantnum, unsigned long address, unsigned long size, unsigned int prot_flags, fd_info* backing_file, unsigned int backing_file_offset, unsigned int map_flags);
 
 private:
     std::shared_ptr<mmap_addr2line_proc>
@@ -205,6 +205,7 @@ struct region_sort
 class startup_info
 {
 public:
+	std::string              real_image;              // real name of the program we started (might differ from image because we use an interpreter binary)
 	std::string              image;                   // original name of the program we wanted to start
 	std::string              serialized_argv;         // serialized program arguments
 	std::deque<std::string>  argv;                    // vectorized program arguments
@@ -217,7 +218,7 @@ public:
 class mmap_table
 {
 public:
-    int         mmap_execve_id;                       // monitorid of the child that created the table/address space
+    int         mmap_execve_id;                       // monitorid of the variant that created the table/address space
 	std::vector<startup_info>
                 mmap_startup_info;                    // information about the execve call used to create this address space
 	bool        have_diversified_variants;            // Set to true if we have compile-time diversified variants
@@ -231,35 +232,35 @@ public:
     mmap_table                  ();
     mmap_table                  (const mmap_table& parent);
     ~mmap_table                 ();
-    void truncate_table              ();
-    void truncate_table_child        (int childnum);
+    void truncate_table         ();
+    void truncate_table_variant (int variantnum);
 
     //
     // Initial map building
     //
     static unsigned int get_numerical_prot_flags    (const char* textual_prot_flags);
     std::string         get_textual_prot_flags      (unsigned int prot_flags);
-    void                refresh_child_maps          (int childnum, pid_t childpid);
+    void                refresh_variant_maps        (int variantnum, pid_t variantpid);
 
     //
     // Region functions
     //
-    mmap_region_info* get_region_info             (int childnum, unsigned long address, unsigned long region_size=0);
-    mmap_region_info* merge_regions               (int childnum, mmap_region_info* region1, mmap_region_info* region2, bool dont_touch_map=false);
-    mmap_region_info* split_region                (int childnum, mmap_region_info* existing_region, unsigned long split_address);
-    mmap_region_info* get_vdso_region             (int childnum);
-    mmap_region_info* get_heap_region             (int childnum);
-    bool              get_ld_loader_bounds        (int childnum, unsigned long& loader_base, unsigned long& loader_size);
+    mmap_region_info* get_region_info             (int variantnum, unsigned long address, unsigned long region_size=0);
+    mmap_region_info* merge_regions               (int variantnum, mmap_region_info* region1, mmap_region_info* region2, bool dont_touch_map=false);
+    mmap_region_info* split_region                (int variantnum, mmap_region_info* existing_region, unsigned long split_address);
+    mmap_region_info* get_vdso_region             (int variantnum);
+    mmap_region_info* get_heap_region             (int variantnum);
+    bool              get_ld_loader_bounds        (int variantnum, unsigned long& loader_base, unsigned long& loader_size);
     static bool       is_same_region              (mmap_region_info* region1, mmap_region_info* region2);
     static bool       check_region_overlap        (mmap_region_info* region1, mmap_region_info* region2);
     bool              compare_region_addresses    (std::vector<unsigned long>& addresses);
-    bool              insert_region               (int childnum, mmap_region_info* region);
+    bool              insert_region               (int variantnum, mmap_region_info* region);
 
     //
     // Iterators
     //
     int foreach_region              (std::vector<unsigned long>& addresses, unsigned long size, void* callback_param, bool (*callback)(mmap_table*, std::vector<mmap_region_info*>&, void*));
-    int foreach_region_one_child    (int childnum, unsigned long address, unsigned long size, void* callback_param, bool (*callback)(mmap_table*, mmap_region_info*, void*));
+    int foreach_region_one_variant  (int variantnum, unsigned long address, unsigned long size, void* callback_param, bool (*callback)(mmap_table*, mmap_region_info*, void*));
 
     //
     // Range functions
@@ -270,21 +271,21 @@ public:
     // System call support
     //
     static bool mman_mprotect_range_callback(mmap_table* table, mmap_region_info* region_info, void* callback_param);
-    bool        mprotect_range              (int childnum, unsigned long base, unsigned long size, unsigned int new_prot_flags);
+    bool        mprotect_range              (int variantnum, unsigned long base, unsigned long size, unsigned int new_prot_flags);
     static bool mman_munmap_range_callback(mmap_table* table, mmap_region_info* region_info, void* callback_param);
-    bool        munmap_range                (int childnum, unsigned long base, unsigned long size);
-    bool        map_range                   (int childnum, unsigned long address, unsigned long size, unsigned int map_flags, unsigned int prot_flags, fd_info* region_backing_file, unsigned int region_backing_file_offset);
+    bool        munmap_range                (int variantnum, unsigned long base, unsigned long size);
+    bool        map_range                   (int variantnum, unsigned long address, unsigned long size, unsigned int map_flags, unsigned int prot_flags, fd_info* region_backing_file, unsigned int region_backing_file_offset);
 
     //
     // Disjoint Code Layouting support
     //
     void calculate_disjoint_bases    (unsigned long size, std::vector<unsigned long>& bases);
-    int  check_vdso_overlap          (int childnum);
+    int  check_vdso_overlap          (int variantnum);
 
     //
     // IP-MON Support
     //
-    mmap_region_info* find_writable_region        (int childnum, unsigned long len, pid_t look_for_thread=0, bool is_main_thread=false);
+    mmap_region_info* find_writable_region        (int variantnum, unsigned long len, pid_t look_for_thread=0, bool is_main_thread=false);
 
     //
     // Logging functions
@@ -297,13 +298,13 @@ public:
     long int*          select_dwarf_reg            (mvee_dwarf_context* context, int dwarf_reg);
     unsigned long long read_sleb128                (unsigned char** ptr, unsigned char* ptr_max);
     unsigned long long read_uleb128                (unsigned char** ptr, unsigned char* ptr_max);
-    int                dwarf_step                  (int childnum, pid_t childpid, mvee_dwarf_context* context);
-    std::string        get_caller_info             (int childnum, pid_t childpid, unsigned long address, int calculate_file_offsets=0);
-    unsigned long      get_stack_base              (int childnum);
-    unsigned long      resolve_symbol              (int childnum, const char* sym, const char* lib_name);
-    std::string        get_normalized_map_dump     (int childnum);
-    char*              get_normalized_maps_output  (int childnum, pid_t childpid);
-    void               verify_mman_table           (int childnum, pid_t childpid);
+    int                dwarf_step                  (int variantnum, pid_t variantpid, mvee_dwarf_context* context);
+    std::string        get_caller_info             (int variantnum, pid_t variantpid, unsigned long address, int calculate_file_offsets=0);
+    unsigned long      get_stack_base              (int variantnum);
+    unsigned long      resolve_symbol              (int variantnum, const char* sym, const char* lib_name);
+    std::string        get_normalized_map_dump     (int variantnum);
+    char*              get_normalized_maps_output  (int variantnum, pid_t variantpid);
+    void               verify_mman_table           (int variantnum, pid_t variantpid);
 
     //
     // Synchronization functions
@@ -317,7 +318,7 @@ private:
     pthread_mutex_t mmap_lock;
     std::vector<
         std::set<mmap_region_info*, region_sort> >
-                    full_map;                         // all mapped regions - separate for each child since their address spaces might differ due to ASLR/DCL
+                    full_map;                         // all mapped regions - separate for each variant since their address spaces might differ due to ASLR/DCL
     std::vector<
         std::map<unsigned long, resolved_instruction> >
                     cached_instrs;                    // cached addr2line results

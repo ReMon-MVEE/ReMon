@@ -56,7 +56,7 @@ public:
     std::vector<unsigned long> fds;                   // file descriptor values in all variants - note: if master_file == true, these fds will be virtual fds for all slave variants
     std::string                path;                  // For a filesystem file descriptor, the full path to the corresponding file
     unsigned long              access_flags;          // e.g. O_RDONLY
-    bool                       master_file;           // if set to true, this file is only actually opened by the master child
+    bool                       master_file;           // if set to true, this file is only actually opened by the master variant
     bool                       close_on_exec;         // fds are duplicated across forks but if O_CLOEXEC is set, they will be closed if the new fork executes execve
     bool                       unsynced_reads;        // if set to true, sys_read* calls from this fd are dispatched as normal calls rather than mastercalls
     ssize_t                    original_file_size;    // for shared mappings that we changed to private, we need to know the original file size!!!
@@ -68,9 +68,8 @@ public:
 };
 
 //
-// File Descriptor Table. Since ALL file operations
-// are synchronized, we only need one of these tables per set
-// of equivalent childs.
+// File Descriptor Table. Since ALL file operations are synchronized, we only
+// need one of these tables per set of equivalent variants.
 //
 class fd_table
 {
@@ -88,13 +87,13 @@ public:
     void          free_cloexec_fds    ();
 
     // Getters
-    fd_info*      get_fd_info         (unsigned long fd, int childnum=0);
+    fd_info*      get_fd_info         (unsigned long fd, int variantnum=0);
     fd_info*      get_fd_info_by_path (const char* path);
     std::string   get_full_path       (pid_t master_pid, unsigned long master_dirfd, void* master_path_ptr);
-    unsigned long get_free_fd         (int childnum, unsigned long bias=(unsigned long)-1);
+    unsigned long get_free_fd         (int variantnum, unsigned long bias=(unsigned long)-1);
 
-    bool          is_fd_unsynced      (unsigned long fd, int childnum=0);
-    bool          is_fd_master_file   (unsigned long fd, int childnum=0);
+    bool          is_fd_unsynced      (unsigned long fd, int variantnum=0);
+    bool          is_fd_master_file   (unsigned long fd, int variantnum=0);
 
     // Epoll support
     void          epoll_id_register   (unsigned long epfd, unsigned long fd, std::vector<unsigned long> ids);
@@ -104,7 +103,7 @@ public:
 
 
     void          master_fd_set_to_non_master_fd_sets
-        (fd_set *master_fd_set, int nfds, std::vector<fd_set>& child_fd_sets);
+        (fd_set *master_fd_set, int nfds, std::vector<fd_set>& variant_fd_sets);
 
     //
     void          print_fd_table ();

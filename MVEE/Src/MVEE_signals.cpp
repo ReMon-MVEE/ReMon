@@ -35,12 +35,12 @@
    injection.
 
    2.2) if the first rendez-vous point is the entry of any other syscall,
-   we make a backup of the replicae's contexts, skip the syscall by replacing
+   we make a backup of the variants's contexts, skip the syscall by replacing
    the syscall no by __NR_getpid an then transfer the control to the infinte
    loop function in GHUMVEE's eglibc.
 
-   While in the infinite loop, we can let the replicae run freely while we
-   send the signal using sys_tgkill and inject it when the childs are in
+   While in the infinite loop, we can let the variants run freely while we
+   send the signal using sys_tgkill and inject it when the variants are in
    signal-delivery-stop.
 
 Consequently, when we see the sys_[rt_]sigreturn, our course of action depends
@@ -117,7 +117,7 @@ void sighand_table::full_release_lock()
 /*-----------------------------------------------------------------------------
     is_control_flow_signal - Returns true if the given signal is a
     synchronous signal that was probably caused by the normal control flow of
-    the children themselves.
+    the variants themselves.
 -----------------------------------------------------------------------------*/
 bool sighand_table::is_control_flow_signal(int sig)
 {

@@ -98,29 +98,29 @@
 //
 #define SYSCALL_NO(regs)                        regs.orig_rax
 // platform independent program counter fetch (through ptrace)
-#define FETCH_IP(childnum, rip)                 long rip     = mvee_wrap_ptrace(PTRACE_PEEKUSER, childs[childnum].childpid, 8*RIP, NULL);
-#define FETCH_IP_DIRECT(childnum, rip)          rip = mvee_wrap_ptrace(PTRACE_PEEKUSER, childs[childnum].childpid, 8*RIP, NULL);
+#define FETCH_IP(variantnum, rip)                 long rip     = mvee_wrap_ptrace(PTRACE_PEEKUSER, variants[variantnum].variantpid, 8*RIP, NULL);
+#define FETCH_IP_DIRECT(variantnum, rip)          rip = mvee_wrap_ptrace(PTRACE_PEEKUSER, variants[variantnum].variantpid, 8*RIP, NULL);
 // platform independent program counter write
-#define WRITE_IP(childnum, eip)                 mvee_wrap_ptrace(PTRACE_POKEUSER, childs[childnum].childpid, 8*RIP, (void*)(long)(eip));
+#define WRITE_IP(variantnum, eip)                 mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid, 8*RIP, (void*)(long)(eip));
 #define WRITE_IP_PID(pid, eip)                  mvee_wrap_ptrace(PTRACE_POKEUSER, pid, 8*RIP, (void*)(eip));
 // platform independent stack pointer write
-#define WRITE_SP(childnum, sp)                  mvee_wrap_ptrace(PTRACE_POKEUSER, childs[childnum].childpid, 8*RSP, (void*)(long)(sp));
+#define WRITE_SP(variantnum, sp)                  mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid, 8*RSP, (void*)(long)(sp));
 // platform independent rdtsc result write
-#define WRITE_RDTSC_RESULT(childnum, low, high)                                               \
-    mvee_wrap_ptrace(PTRACE_POKEUSER, childs[childnum].childpid, 8*RDX, (void*)(long)(high)); \
-    mvee_wrap_ptrace(PTRACE_POKEUSER, childs[childnum].childpid, 8*RAX, (void*)(long)(low));
+#define WRITE_RDTSC_RESULT(variantnum, low, high)                                               \
+    mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid, 8*RDX, (void*)(long)(high)); \
+    mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid, 8*RAX, (void*)(long)(low));
 // platform independent orig syscall no fetch
-#define FETCH_SYSCALL_NO(childnum, callno)      long callno  = mvee_wrap_ptrace(PTRACE_PEEKUSER, childs[childnum].childpid, 8*ORIG_RAX, NULL);
+#define FETCH_SYSCALL_NO(variantnum, callno)      long callno  = mvee_wrap_ptrace(PTRACE_PEEKUSER, variants[variantnum].variantpid, 8*ORIG_RAX, NULL);
 #define FETCH_SYSCALL_NO_PID(pid, callno)       long callno  = mvee_wrap_ptrace(PTRACE_PEEKUSER, pid, 8*ORIG_RAX, NULL);
 // platform independent orig syscall write (e.g. for resuming fake syscalls)
-#define WRITE_SYSCALL_NO(childnum, callno)      mvee_wrap_ptrace(PTRACE_POKEUSER, childs[childnum].childpid, 8*ORIG_RAX, (void*)(long)(callno));
+#define WRITE_SYSCALL_NO(variantnum, callno)      mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid, 8*ORIG_RAX, (void*)(long)(callno));
 // platform independent syscall return fetch
-#define FETCH_SYSCALL_RETURN(childnum, callret) long callret = mvee_wrap_ptrace(PTRACE_PEEKUSER, childs[childnum].childpid, 8*RAX, NULL);
+#define FETCH_SYSCALL_RETURN(variantnum, callret) long callret = mvee_wrap_ptrace(PTRACE_PEEKUSER, variants[variantnum].variantpid, 8*RAX, NULL);
 // platform independent new syscall write (e.g. restoring syscall no after sighandler return)
-#define WRITE_NEW_SYSCALL_NO(childnum, callno)  mvee_wrap_ptrace(PTRACE_POKEUSER, childs[childnum].childpid, 8*RAX, (void*)(long)(callno));
-#define WRITE_SYSCALL_RETURN(childnum, callret) WRITE_NEW_SYSCALL_NO(childnum, callret)
+#define WRITE_NEW_SYSCALL_NO(variantnum, callno)  mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid, 8*RAX, (void*)(long)(callno));
+#define WRITE_SYSCALL_RETURN(variantnum, callret) WRITE_NEW_SYSCALL_NO(variantnum, callret)
 // platform independent function argument passing
-#define WRITE_FASTCALL_ARG1(childnum, arg)      mvee_wrap_ptrace(PTRACE_POKEUSER, childs[childnum].childpid, 8*RDI, (void*)(long)(arg));
+#define WRITE_FASTCALL_ARG1(variantnum, arg)      mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid, 8*RDI, (void*)(long)(arg));
 #define WRITE_FASTCALL_ARG1_PID(pid, arg)       mvee_wrap_ptrace(PTRACE_POKEUSER, pid, 8*RDI, (void*)(arg));
 
 /*-----------------------------------------------------------------------------
@@ -128,31 +128,31 @@
 -----------------------------------------------------------------------------*/
 
 //
-// Retrieve the syscall argument of a child
+// Retrieve the syscall argument of a variant
 //
-#define ARG1(childnum)                          childs[childnum].regs.rdi
-#define ARG2(childnum)                          childs[childnum].regs.rsi
-#define ARG3(childnum)                          childs[childnum].regs.rdx
-#define ARG4(childnum)                          childs[childnum].regs.r10
-#define ARG5(childnum)                          childs[childnum].regs.r8
-#define ARG6(childnum)                          childs[childnum].regs.r9
+#define ARG1(variantnum)                          variants[variantnum].regs.rdi
+#define ARG2(variantnum)                          variants[variantnum].regs.rsi
+#define ARG3(variantnum)                          variants[variantnum].regs.rdx
+#define ARG4(variantnum)                          variants[variantnum].regs.r10
+#define ARG5(variantnum)                          variants[variantnum].regs.r8
+#define ARG6(variantnum)                          variants[variantnum].regs.r9
 
 //
-// Set a child's CPU register
+// Set a variant's CPU register
 //
-#define SET_CHILD_REGISTER(childnum, reg, value)                          \
-    mvee_wrap_ptrace(PTRACE_POKEUSER, childs[childnum].childpid, 8 * reg, \
+#define SET_VARIANT_REGISTER(variantnum, reg, value)                          \
+    mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid, 8 * reg, \
                      (void*)value)
 
 //
-// Change the syscall argument of a child
+// Change the syscall argument of a variant
 //
-#define SETARG1(childnum, value)                SET_CHILD_REGISTER(childnum, RDI, (long)(value))
-#define SETARG2(childnum, value)                SET_CHILD_REGISTER(childnum, RSI, (long)(value))
-#define SETARG3(childnum, value)                SET_CHILD_REGISTER(childnum, RDX, (long)(value))
-#define SETARG4(childnum, value)                SET_CHILD_REGISTER(childnum, R10, (long)(value))
-#define SETARG5(childnum, value)                SET_CHILD_REGISTER(childnum, R8, (long)(value))
-#define SETARG6(childnum, value)                SET_CHILD_REGISTER(childnum, R9, (long)(value))
+#define SETARG1(variantnum, value)                SET_VARIANT_REGISTER(variantnum, RDI, (long)(value))
+#define SETARG2(variantnum, value)                SET_VARIANT_REGISTER(variantnum, RSI, (long)(value))
+#define SETARG3(variantnum, value)                SET_VARIANT_REGISTER(variantnum, RDX, (long)(value))
+#define SETARG4(variantnum, value)                SET_VARIANT_REGISTER(variantnum, R10, (long)(value))
+#define SETARG5(variantnum, value)                SET_VARIANT_REGISTER(variantnum, R8, (long)(value))
+#define SETARG6(variantnum, value)                SET_VARIANT_REGISTER(variantnum, R9, (long)(value))
 
 /*-----------------------------------------------------------------------------
   HDE Macros
@@ -163,32 +163,32 @@
 /*-----------------------------------------------------------------------------
   Print Registers
 -----------------------------------------------------------------------------*/
-#define PRINT_REG(childnum, logfunc, reg) \
-    mvee::log_register(#reg, (unsigned long*)&childs[childnum].regs.reg, logfunc);
+#define PRINT_REG(variantnum, logfunc, reg) \
+    mvee::log_register(#reg, (unsigned long*)&variants[variantnum].regs.reg, logfunc);
 
-#define log_registers(childnum, logfunc)      \
-    {                                         \
-        childs[childnum].regs_valid = false;  \
-        call_check_regs(childnum);            \
-        PRINT_REG(childnum, logfunc, rax);    \
-        PRINT_REG(childnum, logfunc, rbx);    \
-        PRINT_REG(childnum, logfunc, rcx);    \
-        PRINT_REG(childnum, logfunc, rdx);    \
-        PRINT_REG(childnum, logfunc, rdi);    \
-        PRINT_REG(childnum, logfunc, rsi);    \
-        PRINT_REG(childnum, logfunc, rip);    \
-        PRINT_REG(childnum, logfunc, eflags); \
-        PRINT_REG(childnum, logfunc, rsp);    \
-        PRINT_REG(childnum, logfunc, rbp);    \
-        PRINT_REG(childnum, logfunc, r8);     \
-        PRINT_REG(childnum, logfunc, r9);     \
-        PRINT_REG(childnum, logfunc, r10);    \
-        PRINT_REG(childnum, logfunc, r11);    \
-        PRINT_REG(childnum, logfunc, r12);    \
-        PRINT_REG(childnum, logfunc, r13);    \
-        PRINT_REG(childnum, logfunc, r14);    \
-        PRINT_REG(childnum, logfunc, r15);    \
-    }                                         \
+#define log_registers(variantnum, logfunc)			\
+    {												\
+        variants[variantnum].regs_valid = false;	\
+        call_check_regs(variantnum);				\
+        PRINT_REG(variantnum, logfunc, rax);		\
+        PRINT_REG(variantnum, logfunc, rbx);		\
+        PRINT_REG(variantnum, logfunc, rcx);		\
+        PRINT_REG(variantnum, logfunc, rdx);		\
+        PRINT_REG(variantnum, logfunc, rdi);		\
+        PRINT_REG(variantnum, logfunc, rsi);		\
+        PRINT_REG(variantnum, logfunc, rip);		\
+        PRINT_REG(variantnum, logfunc, eflags);		\
+        PRINT_REG(variantnum, logfunc, rsp);		\
+        PRINT_REG(variantnum, logfunc, rbp);		\
+        PRINT_REG(variantnum, logfunc, r8);			\
+        PRINT_REG(variantnum, logfunc, r9);			\
+        PRINT_REG(variantnum, logfunc, r10);		\
+        PRINT_REG(variantnum, logfunc, r11);		\
+        PRINT_REG(variantnum, logfunc, r12);		\
+        PRINT_REG(variantnum, logfunc, r13);		\
+        PRINT_REG(variantnum, logfunc, r14);		\
+        PRINT_REG(variantnum, logfunc, r15);		\
+    }												\
 
 
 #endif /* MVEE_PRIVATE_ARCH_H_ */

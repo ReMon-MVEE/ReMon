@@ -88,7 +88,7 @@ void mvee::setup_env(int demonum, bool native)
 /*-----------------------------------------------------------------------------
     start_demo - This code runs in the variant processes, not in the monitor!!!
 -----------------------------------------------------------------------------*/
-void mvee::start_demo(int demonum, int childindex, bool native)
+void mvee::start_demo(int demonum, int variantindex, bool native)
 {
     const char* parsec_bench  = NULL;
     const char* parsec_config = NULL;
@@ -185,7 +185,7 @@ void mvee::start_demo(int demonum, int childindex, bool native)
 		//
 		case 57:
 		{
-			if (childindex == 0)
+			if (variantindex == 0)
 				start_variant_qemu(ARCH_AARCH64, "/home/stijn/ReMon/TestsMultiarch/HelloWorld/hello-aarch64", NULL);
 			else
 				start_variant_qemu(ARCH_AMD64, "/home/stijn/ReMon/TestsMultiarch/HelloWorld/hello-x86", NULL);

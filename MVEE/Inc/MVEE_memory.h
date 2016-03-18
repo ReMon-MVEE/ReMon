@@ -38,10 +38,10 @@ bool mvee_rw_copy_string                   (pid_t source_pid, unsigned long sour
 //
 // Functions for reading from/writing to a child's VA
 //
-bool           mvee_rw_write_data           (pid_t childpid, unsigned long addr, ssize_t datalength, unsigned char* databuf);
-unsigned char* mvee_rw_read_data            (pid_t childpid, unsigned long addr, ssize_t datalength, int append_zero_byte=0);
-char*          mvee_rw_read_string          (pid_t childpid, unsigned long addr, ssize_t maxlength=0);
-bool           mvee_rw_read_struct          (pid_t childpid, unsigned long addr, ssize_t datalength, void* buf);
+bool           mvee_rw_write_data           (pid_t variantpid, unsigned long addr, ssize_t datalength, unsigned char* databuf);
+unsigned char* mvee_rw_read_data            (pid_t variantpid, unsigned long addr, ssize_t datalength, int append_zero_byte=0);
+char*          mvee_rw_read_string          (pid_t variantpid, unsigned long addr, ssize_t maxlength=0);
+bool           mvee_rw_read_struct          (pid_t variantpid, unsigned long addr, ssize_t datalength, void* buf);
 
 unsigned char* mvee_rw_safe_alloc           (long int alloc_size);
 

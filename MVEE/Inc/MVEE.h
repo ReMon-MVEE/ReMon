@@ -31,7 +31,7 @@
 struct config_t;
 struct config_setting_t;
 class monitor;
-class detachedchild;
+class detachedvariant;
 class mmap_addr2line_proc;
 class dwarf_info;
 class shm_table;
@@ -215,7 +215,7 @@ public:
 
 	//
 	// Safely store the specified set of variant pids in the
-	// mvee::replica_pid_mapping map.
+	// mvee::variant_pid_mapping map.
 	//
     static void                                 register_variants           (std::vector<pid_t>& pids);
 
@@ -268,25 +268,25 @@ public:
 	// monitor can look through this list to fetch information about the
 	// variants it should attach to.
 	//
-    static void                                 add_detached_child          (detachedchild* child);
+    static void                                 add_detached_variant        (detachedvariant* variant);
 
 	// 
     // Returns true if the mvee::detachlist vector contains information about 
 	// variants that have been detached from the specified monitor
 	//
-    static bool                                 have_detached_childs        (monitor* mon);
+    static bool                                 have_detached_variants      (monitor* mon);
 	
 	// 
 	// Removes the specified variant from the mvee::detachlist vector.
-	// Returns the detachedchild struct for the removed variant.
+	// Returns the detachedvariant struct for the removed variant.
 	//
-    static detachedchild*                       remove_detached_child       (pid_t childpid);
+    static detachedvariant*                     remove_detached_variant     (pid_t variantpid);
 
 	// 
 	// Returns true if the mvee::detachlist vecotr contains information
 	// about variants to which the specified monitor should attach
 	//
-    static int                                  have_pending_childs         (monitor* mon);
+    static int                                  have_pending_variants       (monitor* mon);
 
     // 
 	// Returns a smart pointer to the mmap_addr2line_proc structure for the
@@ -618,7 +618,7 @@ private:
 	// in the context of one of the variant processes. This is usually as simple
 	// as calling execve.
 	//
-    static void        start_demo             (int demonum, int childindex, bool native);
+    static void        start_demo             (int demonum, int variantindex, bool native);
 
 	// 
 	// Starts a QEMU-user variant, using the qemu-user loader for the specified
@@ -688,9 +688,9 @@ private:
     // list of monitors to be garbage collected
     static std::vector<monitor*>                monitor_gclist;
 
-    // maps every replica pid onto the set of pids it's part of
+    // maps every variant pid onto the set of pids it's part of
     // i.e. this would contain M[A] -> {M[A], S[A]} and also S[A] -> {M[A], S[A]}
-    static std::map<pid_t, std::vector<pid_t> > replica_pid_mapping;
+    static std::map<pid_t, std::vector<pid_t> > variant_pid_mapping;
 
     // maps every monitor id onto its monitor object
     static std::map<int, monitor*>              monitor_id_mapping;
@@ -698,8 +698,8 @@ private:
     // monitor id to be used by the next monitor we spawn
     static int                                  next_monitorid;
 
-    // replica threads that are in the process of being transferred from one monitor to the other
-    static std::vector<detachedchild*>          detachlist;
+    // variant threads that are in the process of being transferred from one monitor to the other
+    static std::vector<detachedvariant*>        detachlist;
 
     //
     // OS/Environment configuration

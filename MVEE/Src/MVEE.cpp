@@ -89,10 +89,10 @@ std::map<std::string, std::weak_ptr<dwarf_info> >
                                        mvee::dwarf_cache;
 bool                                   mvee::should_garbage_collect              = false;
 std::vector<monitor*>                  mvee::monitor_gclist;
-std::map<pid_t, std::vector<pid_t> >   mvee::replica_pid_mapping;
+std::map<pid_t, std::vector<pid_t> >   mvee::variant_pid_mapping;
 std::map<int, monitor*>                mvee::monitor_id_mapping;
 int                                    mvee::next_monitorid                      = 0;
-std::vector<detachedchild*>            mvee::detachlist;
+std::vector<detachedvariant*>            mvee::detachlist;
 std::string                            mvee::orig_working_dir;
 std::string                            mvee::mvee_root_dir;
 unsigned int                           mvee::stack_limit                         = 0;
@@ -211,8 +211,8 @@ bool mvee::map_master_to_slave_pids(pid_t master_pid, std::vector<pid_t>& slave_
     MutexLock                                      lock(&mvee::global_lock);
 
     std::map<pid_t, std::vector<pid_t> >::iterator it
-        = mvee::replica_pid_mapping.find(master_pid);
-    if (it == mvee::replica_pid_mapping.end())
+        = mvee::variant_pid_mapping.find(master_pid);
+    if (it == mvee::variant_pid_mapping.end())
     {
         debugf("no suitable mapping found for pid %d\n", master_pid);
         return false;
@@ -220,7 +220,7 @@ bool mvee::map_master_to_slave_pids(pid_t master_pid, std::vector<pid_t>& slave_
 
     for (int i = 0; i < mvee::numvariants; ++i)
     {
-        debugf("mapped master_pid %d to pid %d for child %d\n", master_pid, it->second[i], i);
+        debugf("mapped master_pid %d to pid %d for variant %d\n", master_pid, it->second[i], i);
         slave_pids[i] = it->second[i];
     }
 
@@ -375,7 +375,7 @@ void mvee::os_check_ptrace_scope()
     {
         printf("============================================================================================================================\n");
         printf("It seems that you are running Ubuntu with the Yama Linux Security Module and Yama's ptrace scope set to SCOPE_RELATIONAL.\n");
-        printf("In the current Yama implementation, SCOPE_RELATIONAL causes problems for multi-process replicae.\n");
+        printf("In the current Yama implementation, SCOPE_RELATIONAL causes problems for multi-process variants.\n");
         printf("GHUMVEE will therefore try to disable yama's ptrace introspection using:\n\n");
         printf("sudo sysctl -w kernel.yama.ptrace_scope=0\n\n");
         printf("You can read more about this bug on the Linux Kernel Mailing list in the following thread:\n");
@@ -505,6 +505,8 @@ VariantArch mvee::os_identify_arch(std::string& file)
     std::string cmd       = "/usr/bin/file -L " + file + " | grep -v ERROR";
     std::string file_type = mvee::log_read_from_proc_pipe(cmd.c_str(), NULL);
 
+//	warnf("Determinining arch for file: %s\n", file.c_str());
+
     if (file_type == "")
         return ARCH_HOST;
 
@@ -533,6 +535,8 @@ VariantArch mvee::os_identify_arch(std::string& file)
 
 bool mvee::os_add_interp_for_file(std::deque<char*>& add_to_queue, std::string& file, VariantArch arch)
 {
+//	warnf("Determining Interp for file: %s - ARCH: %s\n", file.c_str(), getTextualISA(arch));
+
 	if (arch != ARCH_HOST)
 	{
 		std::string qemu_user_basename, qemu_user_path = 
@@ -890,7 +894,7 @@ void mvee::request_shutdown(bool should_backtrace)
     delivered) and this will be ignored if it's a normal shutdown
 
     @param should_backtrace if 1, every monitorthread will log a callstack for
-    all of the childs it's tracing, prior to shutting down
+    all of the variants it's tracing, prior to shutting down
 -----------------------------------------------------------------------------*/
 void mvee::shutdown(int sig, int should_backtrace)
 {
@@ -905,7 +909,7 @@ void mvee::shutdown(int sig, int should_backtrace)
     to unblock monitors that are waitpid'ing UNLESS we trigger an event that
     causes the waitpid to return
 
-    => we send a SIGALRM to one of the childs
+    => we send a SIGALRM to one of the variants
      */
     mvee::lock();
     for (std::map<int, monitor*>::iterator it
@@ -1061,29 +1065,29 @@ bool mvee::get_should_generate_backtraces()
 }
 
 /*-----------------------------------------------------------------------------
-    add_detached_child
+    add_detached_variant
 -----------------------------------------------------------------------------*/
-void mvee::add_detached_child(detachedchild* child)
+void mvee::add_detached_variant(detachedvariant* variant)
 {
     MutexLock lock(&mvee::global_lock);
-    mvee::detachlist.push_back(child);
+    mvee::detachlist.push_back(variant);
 }
 
 /*-----------------------------------------------------------------------------
-    remove_detached_child - returns the child that was removed
+    remove_detached_variant - returns the variant that was removed
 -----------------------------------------------------------------------------*/
-detachedchild* mvee::remove_detached_child(pid_t childpid)
+detachedvariant* mvee::remove_detached_variant(pid_t variantpid)
 {
     MutexLock lock(&mvee::global_lock);
 
-    for (std::vector<detachedchild*>::iterator it = mvee::detachlist.begin();
+    for (std::vector<detachedvariant*>::iterator it = mvee::detachlist.begin();
          it != mvee::detachlist.end(); ++it)
     {
-        if ((*it)->childpid == childpid)
+        if ((*it)->variantpid == variantpid)
         {
-            detachedchild* child = *it;
+            detachedvariant* variant = *it;
             mvee::detachlist.erase(it);
-            return child;
+            return variant;
         }
     }
 
@@ -1091,14 +1095,14 @@ detachedchild* mvee::remove_detached_child(pid_t childpid)
 }
 
 /*-----------------------------------------------------------------------------
-    have_detached_childs - checks whether the specified monitor has detached
+    have_detached_variants - checks whether the specified monitor has detached
     from processes that have not been attached to another monitor yet
 -----------------------------------------------------------------------------*/
-bool mvee::have_detached_childs(monitor* mon)
+bool mvee::have_detached_variants(monitor* mon)
 {
     MutexLock lock(&mvee::global_lock);
 
-    for (std::vector<detachedchild*>::iterator it = mvee::detachlist.begin();
+    for (std::vector<detachedvariant*>::iterator it = mvee::detachlist.begin();
          it != mvee::detachlist.end(); ++it)
     {
         if ((*it)->parentmonitorid == mon->monitorid)
@@ -1109,16 +1113,16 @@ bool mvee::have_detached_childs(monitor* mon)
 }
 
 /*-----------------------------------------------------------------------------
-    have_pending_childs - counts the number of childs that are waiting to
+    have_pending_variants - counts the number of variants that are waiting to
     be attached to the specified monitor
 -----------------------------------------------------------------------------*/
-int mvee::have_pending_childs(monitor* mon)
+int mvee::have_pending_variants(monitor* mon)
 {
     int       cnt = 0;
 
     MutexLock lock(&mvee::global_lock);
 
-    for (std::vector<detachedchild*>::iterator it = mvee::detachlist.begin();
+    for (std::vector<detachedvariant*>::iterator it = mvee::detachlist.begin();
          it != mvee::detachlist.end(); ++it)
     {
         if ((*it)->parent_has_detached && (*it)->new_monitor == mon)
@@ -1149,8 +1153,8 @@ void mvee::register_variants(std::vector<pid_t>& pids)
 
     for (int i = 0; i < mvee::numvariants; ++i)
     {
-        mvee::replica_pid_mapping.erase(pids[i]);
-        mvee::replica_pid_mapping.insert(std::pair<pid_t, std::vector<pid_t> >(pids[i], pids));
+        mvee::variant_pid_mapping.erase(pids[i]);
+        mvee::variant_pid_mapping.insert(std::pair<pid_t, std::vector<pid_t> >(pids[i], pids));
     }
 }
 
@@ -1490,9 +1494,9 @@ void mvee::start_variant_qemu(VariantArch arch, const char* binary, ...)
 }
 
 /*-----------------------------------------------------------------------------
-    start_unmonitored - Just forks off <mvee::numvariants> childs, starts them
+    start_unmonitored - Just forks off <mvee::numvariants> variants, starts them
     and immediately stops them with SIGSTOP. The monitor then starts the timer
-    and immediately resumes all childs
+    and immediately resumes all variants
 -----------------------------------------------------------------------------*/
 void mvee::start_unmonitored()
 {
@@ -1532,7 +1536,7 @@ void mvee::start_unmonitored()
         // In benchmark mode, initlogging just starts the timer...
         mvee::log_init();
 
-        // Resume all childs
+        // Resume all variants
         while (!all_resumed)
         {
             int tmp = wait4(-1, &status, WUNTRACED, NULL);
@@ -1557,7 +1561,7 @@ void mvee::start_unmonitored()
             resumed[i] = 0;
         all_resumed = false;
 
-        // Now wait for all childs to terminate...
+        // Now wait for all variants to terminate...
         while (!all_terminated)
         {
             int tmp = wait4(-1, &status, WUNTRACED, NULL);
@@ -1635,7 +1639,7 @@ void mvee::start_monitored()
         logf("                                                      \n");
         logf("(c) 2009-2015 Stijn Volckaert (svolckae@elis.ugent.be)\n");
         logf("======================================================\n");
-        logf("\nTracing %d semantically equivalent child processes...\n\n", mvee::numvariants);
+        logf("\nTracing %d semantically equivalent variant processes...\n\n", mvee::numvariants);
 
         sigset_t  set;
         sigemptyset(&set);
@@ -1664,7 +1668,7 @@ void mvee::start_monitored()
         for (i = 0; i < mvee::numvariants; ++i)
         {
             sprintf(cmd, "ls -al /proc/%d/fd", procs[i]);
-            logf("fd list for child %d: \n", procs[i]);
+            logf("fd list for variant %d: \n", procs[i]);
             std::string str = mvee::log_read_from_proc_pipe(cmd, NULL);
             logf("%s\n",                     str.c_str());
         }
@@ -1706,7 +1710,7 @@ void mvee::start_monitored()
                 mvee::garbage_collect();
         }
     }
-    // If the process is a child, prepare it for tracing
+    // If the process is a variant, prepare it for tracing
     else
     {
         mvee::setup_env(mvee::demo_num, false);
@@ -1725,8 +1729,8 @@ void mvee::start_monitored()
 #endif
 
 
-        // Place the new child under supervision
-        // Not that this does not stop the child.
+        // Place the new variant under supervision
+        // Not that this does not stop the variant.
         // We will raise a SIGSTOP so the parent can set ptrace options
         // and can issue a PTRACE_SYSCALL request
         mvee_wrap_ptrace(PTRACE_TRACEME, 0, 0, NULL);
@@ -1775,7 +1779,7 @@ int main(int argc, char *argv[])
         printf("\n");
         printf("> MVEE Options:\n");
         printf("> -s : log to stdout. All logfile output is also printed to stdout.\n");
-        printf("> -n : no monitoring. Child processes are executed without supervision. Useful for benchmarking.\n");
+        printf("> -n : no monitoring. Variant processes are executed without supervision. Useful for benchmarking.\n");
 #ifdef MVEE_ALLOW_PERF
         printf("> -p : use performance counters to track cache and synchronization behavior of the variants.\n");
 #endif

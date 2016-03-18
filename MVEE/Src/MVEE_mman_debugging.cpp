@@ -38,7 +38,7 @@
 /*-----------------------------------------------------------------------------
     mmap_addr2line_proc class
 -----------------------------------------------------------------------------*/
-mmap_addr2line_proc::mmap_addr2line_proc(std::string& file, int childnum, pid_t childpid, unsigned long region_address, unsigned long region_size)
+mmap_addr2line_proc::mmap_addr2line_proc(std::string& file, int variantnum, pid_t variantpid, unsigned long region_address, unsigned long region_size)
     : addr2line_file(file),
     addr2line_pid(0),
     addr2line_status(ADDR2LINE_FILE_STATUS_UNKNOWN)
@@ -60,11 +60,11 @@ mmap_addr2line_proc::mmap_addr2line_proc(std::string& file, int childnum, pid_t 
                 addr2line_status = ADDR2LINE_FILE_NO_DEBUG_SYMS;
                 return;
             }
-            unsigned char* vdso_data = mvee_rw_read_data(childpid, region_address,
+            unsigned char* vdso_data = mvee_rw_read_data(variantpid, region_address,
                                                          region_size, 0);
             if (!vdso_data)
             {
-                warnf("couldn't read vdso binary from master replica\n");
+                warnf("couldn't read vdso binary from master variant\n");
 
                 addr2line_status = ADDR2LINE_FILE_NO_DEBUG_SYMS;
                 return;
@@ -147,7 +147,7 @@ std::string mmap_addr2line_proc::read_internal(const std::string& cmd)
 /*-----------------------------------------------------------------------------
     mmap_addr2line_proc::read_from_addr2line_pipe
 -----------------------------------------------------------------------------*/
-std::string mmap_addr2line_proc::read_from_addr2line_pipe(const std::string& cmd, int childnum)
+std::string mmap_addr2line_proc::read_from_addr2line_pipe(const std::string& cmd, int variantnum)
 {
     std::stringstream ss;
     size_t            size;
@@ -255,23 +255,23 @@ void mmap_addr2line_proc::pipe_func (unsigned int rfd, unsigned int wfd, const s
 void mmap_addr2line_proc::pipe_create(const std::string& lib_name)
 {
     /* Spawn a process from pfunc, returning it's pid. The fds array passed will
-     * be filled with two descriptors: fds[0] will read from the child process,
+     * be filled with two descriptors: fds[0] will read from the variant process,
      * and fds[1] will write to it.
-     * Similarly, the child process will receive a reading/writing fd set (in
+     * Similarly, the variant process will receive a reading/writing fd set (in
      * that same order) as arguments.
     */
     int pipes[4];
 
-    /* Parent read/child write pipe */
+    /* Parent read/variant write pipe */
     if (pipe(&pipes[0]))
     {
-        warnf("failed to create parent read/child write pipe - %s\n", strerror(errno));
+        warnf("failed to create parent read/variant write pipe - %s\n", strerror(errno));
         return;
     }
     /* Child read/parent write pipe */
     if (pipe(&pipes[2]))
     {
-        warnf("failed to create child read/parent write pipe - %s\n", strerror(errno));
+        warnf("failed to create variant read/parent write pipe - %s\n", strerror(errno));
         return;
     }
 
@@ -302,10 +302,10 @@ void mmap_addr2line_proc::pipe_create(const std::string& lib_name)
 /*-----------------------------------------------------------------------------
     mvee_mman_dwarf_context_init
 -----------------------------------------------------------------------------*/
-mvee_dwarf_context::mvee_dwarf_context (pid_t childpid)
+mvee_dwarf_context::mvee_dwarf_context (pid_t variantpid)
 {
     // get initial context
-    mvee_wrap_ptrace(PTRACE_GETREGS, childpid, 0, (void*)&regs);
+    mvee_wrap_ptrace(PTRACE_GETREGS, variantpid, 0, (void*)&regs);
     cfa = 0;
 }
 
@@ -325,7 +325,7 @@ resolved_instruction::resolved_instruction()
     Since we only touch Dwarf_Debug in the constructor, we don't need locking
     for a dwarf_info object
 -----------------------------------------------------------------------------*/
-dwarf_info::dwarf_info(std::string& file, int childnum, pid_t childpid, mmap_region_info* region_info)
+dwarf_info::dwarf_info(std::string& file, int variantnum, pid_t variantpid, mmap_region_info* region_info)
     : dwarf_in_memory(false),
     info_valid(true),
     dwarf_elf(NULL),
@@ -346,7 +346,7 @@ dwarf_info::dwarf_info(std::string& file, int childnum, pid_t childpid, mmap_reg
     if (dwarf_in_memory)
     {
         dwarf_data.dwarf_buffer =
-            mvee_rw_read_data(childpid, region_info->region_base_address, region_info->region_size, true);
+            mvee_rw_read_data(variantpid, region_info->region_base_address, region_info->region_size, true);
 
         if (dwarf_data.dwarf_buffer)
             dwarf_elf = elf_memory((char*)dwarf_data.dwarf_buffer, region_info->region_size);
@@ -441,9 +441,9 @@ dwarf_info::~dwarf_info()
     map_memory_pc_to_file_pc - calculates the value the pc would've
     had, had the library been loaded at its preferred address
 -----------------------------------------------------------------------------*/
-unsigned long mmap_region_info::map_memory_pc_to_file_pc (int childnum, pid_t childpid, unsigned long rva)
+unsigned long mmap_region_info::map_memory_pc_to_file_pc (int variantnum, pid_t variantpid, unsigned long rva)
 {
-    dwarf_info*   dwarf_info        = get_dwarf_info(childnum, childpid);
+    dwarf_info*   dwarf_info        = get_dwarf_info(variantnum, variantpid);
     if (!dwarf_info)
         return 0;
 
@@ -567,7 +567,7 @@ unsigned long long mmap_table::read_uleb128(unsigned char** ptr, unsigned char* 
 /*-----------------------------------------------------------------------------
     dwarf_step
 -----------------------------------------------------------------------------*/
-int mmap_table::dwarf_step (int childnum, pid_t childpid, mvee_dwarf_context* context)
+int mmap_table::dwarf_step (int variantnum, pid_t variantpid, mvee_dwarf_context* context)
 {
     int               success      = 0;
     mmap_region_info* found_region = NULL;
@@ -581,23 +581,23 @@ int mmap_table::dwarf_step (int childnum, pid_t childpid, mvee_dwarf_context* co
     regtable.rt3_rules = NULL;
 
 #ifdef MVEE_DWARF_DEBUG
-    debugf("DWARF: stepping to the previous frame - childnum: %d\n", childnum);
+    debugf("DWARF: stepping to the previous frame - variantnum: %d\n", variantnum);
 #endif
 
     // map EIP to a region
-    found_region       = get_region_info(childnum, IP(context->regs));
+    found_region       = get_region_info(variantnum, IP(context->regs));
     if (!found_region)
     {
-        warnf("DWARF: couldn't map EIP " PTRSTR " to a known region for child: %d (pid: %d)\n",
-                    IP(context->regs), childnum, childpid);
+        warnf("DWARF: couldn't map EIP " PTRSTR " to a known region for variant: %d (pid: %d)\n",
+                    IP(context->regs), variantnum, variantpid);
         goto out;
     }
 
     // fetch the FDE that describes the frame at the specified address
-    pc                 = found_region->map_memory_pc_to_file_pc(childnum, childpid, IP(context->regs) - found_region->region_base_address);
+    pc                 = found_region->map_memory_pc_to_file_pc(variantnum, variantpid, IP(context->regs) - found_region->region_base_address);
 
     // now make sure that we get a valid dwarf info
-    info               = found_region->get_dwarf_info(childnum, childpid);
+    info               = found_region->get_dwarf_info(variantnum, variantpid);
 
     if (!info)
     {
@@ -677,7 +677,7 @@ int mmap_table::dwarf_step (int childnum, pid_t childpid, mvee_dwarf_context* co
                 long          old_val = *reg;
 #endif
                 unsigned long addr    = (unsigned long)(context->cfa + (long)regtable.rt3_rules[i].dw_offset_or_block_len);
-                *reg = mvee_wrap_ptrace(PTRACE_PEEKDATA, childpid, addr, NULL);
+                *reg = mvee_wrap_ptrace(PTRACE_PEEKDATA, variantpid, addr, NULL);
 #ifdef MVEE_DWARF_DEBUG
                 long          new_val = *reg;
                 debugf("DWARF: updated val: %s - " PTRSTR " => " PTRSTR " -- val was at addr: " PTRSTR "\n", getTextualDWARFReg(i), old_val, new_val, addr);
@@ -803,21 +803,21 @@ std::string mmap_table::get_textual_prot_flags(unsigned int prot_flags)
 }
 
 /*-----------------------------------------------------------------------------
-    refresh_child_maps - refreshes the cached_map table - this
+    refresh_variant_maps - refreshes the cached_map table - this
     function is slow!
 -----------------------------------------------------------------------------*/
-void mmap_table::refresh_child_maps(int childnum, pid_t childpid)
+void mmap_table::refresh_variant_maps(int variantnum, pid_t variantpid)
 {
     char              str[100];
     size_t            size;
-    sprintf(str, "cat /proc/%d/maps", childpid);
+    sprintf(str, "cat /proc/%d/maps", variantpid);
 
     std::string       ln;
     std::stringstream buf(mvee::log_read_from_proc_pipe(str, &size));
 
 #ifdef MVEE_MMAN_DEBUG
     debugf("Refreshed maps for pid: %d using cmdline process: %s\n>>> RESULT:\n%s\n",
-               childpid, str, buf.str().c_str());
+               variantpid, str, buf.str().c_str());
 #endif
 
 
@@ -835,7 +835,7 @@ void mmap_table::refresh_child_maps(int childnum, pid_t childpid)
 
         if (matched == 4 && name[0] == '\0')
         {
-            map_range(childnum, region_start, region_end-region_start, MAP_ANONYMOUS, get_numerical_prot_flags(flags), NULL, region_file_offset);
+            map_range(variantnum, region_start, region_end-region_start, MAP_ANONYMOUS, get_numerical_prot_flags(flags), NULL, region_file_offset);
         }
         else if (matched != 5 || strstr(name, "/SYSV000"))
         {
@@ -845,7 +845,7 @@ void mmap_table::refresh_child_maps(int childnum, pid_t childpid)
         {
             info.path               = name;
             info.access_flags       = 0; // unknown access flags
-            info.fds[childnum]      = MVEE_UNKNOWN_FD;
+            info.fds[variantnum]      = MVEE_UNKNOWN_FD;
             info.original_file_size = 0;
             region_map_flags        = 0;
 
@@ -857,7 +857,7 @@ void mmap_table::refresh_child_maps(int childnum, pid_t childpid)
             else
                 region_map_flags |= MAP_SHARED;
 
-            map_range(childnum, region_start, region_end-region_start, region_map_flags, get_numerical_prot_flags(flags), &info, region_file_offset);
+            map_range(variantnum, region_start, region_end-region_start, region_map_flags, get_numerical_prot_flags(flags), &info, region_file_offset);
         }
     }
 }
@@ -865,9 +865,9 @@ void mmap_table::refresh_child_maps(int childnum, pid_t childpid)
 /*-----------------------------------------------------------------------------
     get_stack_base
 -----------------------------------------------------------------------------*/
-unsigned long mmap_table::get_stack_base(int childnum)
+unsigned long mmap_table::get_stack_base(int variantnum)
 {
-    for (auto it = full_map[childnum].begin(); it != full_map[childnum].end(); ++it)
+    for (auto it = full_map[variantnum].begin(); it != full_map[variantnum].end(); ++it)
         if ((*it)->region_backing_file_path == "[stack]")
             return (*it)->region_size + (*it)->region_base_address;
 
@@ -879,8 +879,8 @@ unsigned long mmap_table::get_stack_base(int childnum)
 -----------------------------------------------------------------------------*/
 std::string mmap_table::get_caller_info
 (
-    int           childnum,
-    pid_t         childpid,
+    int           variantnum,
+    pid_t         variantpid,
     unsigned long address,
     int           calculate_file_offsets
 )
@@ -900,11 +900,11 @@ std::string mmap_table::get_caller_info
     }
 
     // see if we've already cached this lookup...
-    // need the fd lock here because we might refresh child maps
+    // need the fd lock here because we might refresh variant maps
     grab_lock();
     std::map<unsigned long, resolved_instruction>::iterator instrs_iterator
-        = cached_instrs[childnum].find(address);
-    if (instrs_iterator != cached_instrs[childnum].end())
+        = cached_instrs[variantnum].find(address);
+    if (instrs_iterator != cached_instrs[variantnum].end())
         instr = instrs_iterator->second;
 
     // couldn't find the lookup...
@@ -915,7 +915,7 @@ std::string mmap_table::get_caller_info
         update_instr_cache            = 1;
         instr.instruction_address     = address;
 
-        found_region                  = get_region_info(childnum, address, 0);
+        found_region                  = get_region_info(variantnum, address, 0);
 
         if (!found_region)
         {
@@ -926,13 +926,13 @@ std::string mmap_table::get_caller_info
 
         // Now perform the lookup. We don't need to calculate the offsets yet
         unsigned long lib_start_address = found_region->region_base_address;
-        unsigned long file_pc           = found_region->map_memory_pc_to_file_pc(childnum, childpid, address - found_region->region_base_address);
+        unsigned long file_pc           = found_region->map_memory_pc_to_file_pc(variantnum, variantpid, address - found_region->region_base_address);
 
         //warnf("found region => %s => 0x%08x\n", found_region->region_backing_file_path, found_region->region_base_address);
 
-        addr2line_proc                = found_region->get_addr2line_proc(childnum, childpid);
+        addr2line_proc                = found_region->get_addr2line_proc(variantnum, variantpid);
         ss << STDPTRSTR(file_pc);
-        caller_info                   = addr2line_proc->read_from_addr2line_pipe(ss.str(), childnum);
+        caller_info                   = addr2line_proc->read_from_addr2line_pipe(ss.str(), variantnum);
 
         ss.str(std::string());
         ss.clear();
@@ -940,7 +940,7 @@ std::string mmap_table::get_caller_info
         if (caller_info.find("couldn't get") == 0
             && found_region->region_backing_file_path == "[vdso]")
         {
-            FETCH_SYSCALL_NO_PID(childpid, eax);
+            FETCH_SYSCALL_NO_PID(variantpid, eax);
             update_instr_cache = 0;
             ss << "vdso - syscall: " << eax << " (" << getTextualSyscall(eax) << ") - addr: " << STDPTRSTR(address - lib_start_address);
         }
@@ -968,10 +968,10 @@ std::string mmap_table::get_caller_info
         if (!file_offset)
         {
             // try to resolve the region again...
-            found_region = get_region_info(childnum, instr.instruction_address, 0);
+            found_region = get_region_info(variantnum, instr.instruction_address, 0);
             if (found_region && found_region->region_backing_file_path[0] != '[')
             {
-                file_offset                   = found_region->map_memory_pc_to_file_pc(childnum, childpid, address - found_region->region_base_address);
+                file_offset                   = found_region->map_memory_pc_to_file_pc(variantnum, variantpid, address - found_region->region_base_address);
                 instr.instruction_file_offset = file_offset;
             }
         }
@@ -982,7 +982,7 @@ std::string mmap_table::get_caller_info
 
     if (update_instr_cache)
     {
-        cached_instrs[childnum].insert(
+        cached_instrs[variantnum].insert(
             std::pair<unsigned long, resolved_instruction>(address, instr));
     }
 
@@ -993,18 +993,18 @@ std::string mmap_table::get_caller_info
 /*-----------------------------------------------------------------------------
     resolve_symbol
 -----------------------------------------------------------------------------*/
-unsigned long mmap_table::resolve_symbol (int childnum, const char* sym, const char* lib_name)
+unsigned long mmap_table::resolve_symbol (int variantnum, const char* sym, const char* lib_name)
 {
     std::set<mmap_region_info*, region_sort>::iterator                     region_iterator;
 
     // map lib_name to a resolved region
     // we need this for 2 reasons:
     // 1) the region_file_path is the index into the cached symbol table
-    // 2) every child might have a different base address for the specified region
+    // 2) every variant might have a different base address for the specified region
 
     grab_lock();
-    for (region_iterator = full_map[childnum].begin();
-         region_iterator != full_map[childnum].end();
+    for (region_iterator = full_map[variantnum].begin();
+         region_iterator != full_map[variantnum].end();
          region_iterator++)
     {
         if ((*region_iterator)->region_backing_file_path == lib_name)
@@ -1013,7 +1013,7 @@ unsigned long mmap_table::resolve_symbol (int childnum, const char* sym, const c
         }
     }
 
-    if (region_iterator == full_map[childnum].end())
+    if (region_iterator == full_map[variantnum].end())
     {
         release_lock();
         return 0;
@@ -1074,16 +1074,16 @@ unsigned long mmap_table::resolve_symbol (int childnum, const char* sym, const c
     get_normalized_map_dump - this generates a /proc/maps style dump of
     the memory map and merges adjacent regions where possible
 -----------------------------------------------------------------------------*/
-std::string mmap_table::get_normalized_map_dump (int childnum)
+std::string mmap_table::get_normalized_map_dump (int variantnum)
 {
     mmap_region_info* merged_region = NULL;
     std::stringstream ss;
 
-    // make a /proc/maps style dump of the memory map for this child
-    for (auto it = full_map[childnum].begin();; it++)
+    // make a /proc/maps style dump of the memory map for this variant
+    for (auto it = full_map[variantnum].begin();; it++)
     {
         // check if we can merge this region with merged_region
-        if ((it == full_map[childnum].end() || !merge_regions(childnum, merged_region, *it, true))
+        if ((it == full_map[variantnum].end() || !merge_regions(variantnum, merged_region, *it, true))
             && merged_region)
         {
             // we're at the end of the table OR we have encountered a new region
@@ -1107,10 +1107,10 @@ std::string mmap_table::get_normalized_map_dump (int childnum)
 
         }
 
-        if (!merged_region && it != full_map[childnum].end())
+        if (!merged_region && it != full_map[variantnum].end())
             merged_region = new mmap_region_info(**it);
 
-        if (it == full_map[childnum].end())
+        if (it == full_map[variantnum].end())
             break;
     }
 
@@ -1120,14 +1120,14 @@ std::string mmap_table::get_normalized_map_dump (int childnum)
 
 /*-----------------------------------------------------------------------------
     get_normalized_maps_output - reads the memory map from
-    /proc/<childpid>/maps but merges adjacent regions where possible.
+    /proc/<variantpid>/maps but merges adjacent regions where possible.
     The kernel won't always do this...
 
     This function discards deleted regions, inode numbers, device numbers
     the private/shared flag and it will treat /dev/zero as a regular anonymous
     region
 -----------------------------------------------------------------------------*/
-char* mmap_table::get_normalized_maps_output (int childnum, pid_t childpid)
+char* mmap_table::get_normalized_maps_output (int variantnum, pid_t variantpid)
 {
     char              cmd[512];
     size_t            orig_size;
@@ -1139,7 +1139,7 @@ char* mmap_table::get_normalized_maps_output (int childnum, pid_t childpid)
     char              name[500], prev_name[500];
 
     sprintf(cmd, "cat /proc/%d/maps | sed 's/\\([0-F]*-[0-F]* .... [0-F]* \\)[0-F]*:[0-F]* [0-F]* *\\(.*\\)/\\1\\2/' | grep -v /SYSV | sed 's/\\/dev\\/zero//' | sed 's/(deleted)//' | sed 's/   *$/ /'",
-            childpid);
+            variantpid);
 
     std::stringstream maps(mvee::log_read_from_proc_pipe(cmd, &orig_size));
 
@@ -1200,7 +1200,7 @@ char* mmap_table::get_normalized_maps_output (int childnum, pid_t childpid)
     mvee_mman_verify_mman_table - compares the mman table with the info
     read from /proc/<pid>/maps
 -----------------------------------------------------------------------------*/
-void mmap_table::verify_mman_table (int childnum, pid_t childpid)
+void mmap_table::verify_mman_table (int variantnum, pid_t variantpid)
 {
 //#if 0
 
@@ -1209,17 +1209,17 @@ void mmap_table::verify_mman_table (int childnum, pid_t childpid)
 
 //#ifdef MVEE_MMAN_DEBUG
 #if 0
-    char*       maps            = get_normalized_maps_output(childnum, childpid);
-    std::string normalized_dump = get_normalized_map_dump(childnum);
+    char*       maps            = get_normalized_maps_output(variantnum, variantpid);
+    std::string normalized_dump = get_normalized_map_dump(variantnum);
 
     if (normalized_dump != maps)
     {
-        warnf("MMAN TABLE MISMATCH - CHILD: %d!!!\n",      childnum);
+        warnf("MMAN TABLE MISMATCH - VARIANT: %d!!!\n",      variantnum);
         warnf("maps output:\n%s\n\n\nour output:\n%s\n\n", maps, normalized_dump.c_str());
 
         char        cmd[100];
         sprintf(cmd, "cat /proc/%d/smaps",
-                childpid);
+                variantpid);
         std::string smaps = mvee::log_read_from_proc_pipe(cmd, NULL);
         warnf("smaps output:\n%s\n", smaps.c_str());
 

@@ -54,8 +54,8 @@ typedef long (monitor:: *mvee_syscall_handler)(int);
 -----------------------------------------------------------------------------*/
 enum MonitorState
 {
-    STATE_WAITING_ATTACH,                                           // Waiting to attach to the newly created childs
-    STATE_WAITING_RESUME,                                           // We use PTRACE_O_TRACE[FORK|VFORK|CLONE] so new childs are started with SIGSTOP
+    STATE_WAITING_ATTACH,                                           // Waiting to attach to the newly created variants
+    STATE_WAITING_RESUME,                                           // We use PTRACE_O_TRACE[FORK|VFORK|CLONE] so new variants are started with SIGSTOP
     STATE_NORMAL,                                                   // Normal operation
     STATE_IN_SYSCALL,                                               // Waiting for syscall to return
     STATE_IN_FORKCALL,                                              // Waiting for forkcall to return
@@ -100,14 +100,15 @@ class mvee_pending_signal
 public:
     // could also be read from sig_info
     unsigned short sig_no;
-    // keeps track of which childs have received the signal (signals originating
-    // from within the process need to be received by EVERY child before they can be delivered)
+    // keeps track of which variants have received the signal (signals
+    // originating from within the process need to be received by EVERY variant
+    // before they can be delivered)
     unsigned short sig_recv_mask;
-    // exact copy of the siginfo_t the child would have received natively
+    // exact copy of the siginfo_t the variant would have received natively
     siginfo_t      sig_info;
 };
 
-class child_arg
+class syscall_arg
 {
 public:
     ArgType     type;
@@ -116,8 +117,8 @@ public:
     std::string str;
     bool        valid;
 
-    child_arg();
-    ~child_arg();
+    syscall_arg();
+    ~syscall_arg();
     void reset();
     void set_buf(void* b);
     void set_cstr(char* c);
@@ -126,17 +127,17 @@ public:
 
 // might have to optimize the layout even further for better cache performance
 // the user_regs struct is quite large, especially on AMD64...
-class childstate
+class variantstate
 {
 public:
 	VariantArch   arch;                                             // Which instruction set architecture is this variant using (this is only relevant for QEMU variants)
-    pid_t         childpid;                                         // Process ID of this child
-    long          prevcallnum;                                      // Previous system call executed by the child. Set when the call returns.
-    long          callnum;                                          // System call number being executed by this child.
+    pid_t         variantpid;                                       // Process ID of this variant
+    long          prevcallnum;                                      // Previous system call executed by the variant. Set when the call returns.
+    long          callnum;                                          // System call number being executed by this variant.
     int           call_flags;                                       // Result of the call handler
     struct user_regs_struct
-                  regs;                                             // Arguments for the syscall are copied into the childstate just before entering the call
-    child_arg     args[7];                                          // Cached arguments
+                  regs;                                             // Arguments for the syscall are copied into the variantstate just before entering the call
+    syscall_arg   args[7];                                          // Cached syscall arguments (Optional, rarely used)
     long          return_value;                                     // Return of the current syscall. Retrieved using PTRACE_PEEKUSER
     long          extended_value;                                   // Extended value to be returned through the EAX register.
 
@@ -144,12 +145,12 @@ public:
     bool          call_dispatched;                                  // has the current call been dispatched yet?
     bool          regs_valid;                                       // Are the regs up to date?
     bool          return_valid;                                     // Is the return value up to date?
-    bool          restarted_syscall;                                // Did we restart the current syscall? Might happen if a signal has arrived while the child was in the middle of a blocking syscall
+    bool          restarted_syscall;                                // Did we restart the current syscall? Might happen if a signal has arrived while the variant was in the middle of a blocking syscall
     bool          restarting_syscall;
-    bool          child_terminated;                                 // Was the child terminated?
-    bool          child_pending;                                    // child is waiting to be resumed just after fork/vfork/clone
-    bool          child_attached;                                   // has the target monitor attached to this child yet?
-    bool          child_resumed;                                    // child is waiting for a resume after attach
+    bool          variant_terminated;                               // Was the variant terminated?
+    bool          variant_pending;                                  // variant is waiting to be resumed just after fork/vfork/clone
+    bool          variant_attached;                                 // has the target monitor attached to this variant yet?
+    bool          variant_resumed;                                  // variant is waiting for a resume after attach
     bool          current_signal_ready;
 
     // ptmalloc2 heap allocation hacks
@@ -178,14 +179,14 @@ public:
 
 	// Hidden buffer support
 	int           hidden_buffer_array_id;                           // SysV shm id for the hidden buffer array
-	unsigned long hidden_buffer_array_base;                         // base address at which the hidden buffer array is mapped in this child
+	unsigned long hidden_buffer_array_base;                         // base address at which the hidden buffer array is mapped in this variant
 	void*         hidden_buffer_array;                              // pointer to the monitor mapped version of the hidden buffer array
 
     // somehow, the sigset gets corrupted across sigprocmask calls...
     sigset_t      last_sigset;
 
     // Occasionally used vars...
-    pid_t         childtgid;                                        // Thread Group ID of this child
+    pid_t         varianttgid;                                      // Thread Group ID of this variant
     pid_t         pendingpid;                                       // Process ID of the newly created process/thread
     unsigned long infinite_loop_ptr;                                // pointer to the sys_pause loop
     unsigned long should_sync_ptr;                                  // pointer to the should_sync flag
@@ -200,14 +201,14 @@ public:
     unsigned long orig_arg1;                                        // for sys_socketcall
 #endif
 #ifdef MVEE_CHECK_SYNC_PRIMITIVES
-    int           sync_primitives_bitmask;                          // copied over from the child using sync_primitives_ptr
+    int           sync_primitives_bitmask;                          // copied over from the variant's address space using sync_primitives_ptr
     void*         sync_primitives_ptr;                              //
 #endif
 #ifdef MVEE_ALLOW_PERF
     std::string   perf_out;                                         //
 #endif
 
-    childstate();
+    variantstate();
 };
 
 //
@@ -307,8 +308,8 @@ public:
 	// Dummy functions called when we don't have a handler for a specific
 	// syscall
 	//
-    long handle_donthave                     (int childnum);
-    long handle_dontneed                     (int childnum);
+    long handle_donthave                     (int variantnum);
+    long handle_dontneed                     (int variantnum);
 
 	//
 	// Include an automatically generated syscall handler table. All of these
@@ -347,9 +348,9 @@ private:
 
 	// 
 	// Check if our cached regs variable is still up to date for variant
-	// @childnum, possibly refreshing it if necessary 
+	// @variantnum, possibly refreshing it if necessary 
 	//
-    void             call_check_regs                     (int childnum);
+    void             call_check_regs                     (int variantnum);
 
 	// 
 	// Returns true if the specified syscall result indicates an error
@@ -362,14 +363,14 @@ private:
     bool             call_postcall_all_syscalls_succeeded();
 
 	// 
-	// Returns the syscall result for variant @childnum
+	// Returns the syscall result for variant @variantnum
 	//
-    long             call_postcall_get_child_result      (int childnum);
+    long             call_postcall_get_variant_result      (int variantnum);
 
 	// 
-	// Overwrite the syscall result for variant @childnum
+	// Overwrite the syscall result for variant @variantnum
 	//
-    void             call_postcall_set_child_result      (int childnum, unsigned long result);
+    void             call_postcall_set_variant_result      (int variantnum, unsigned long result);
 
 	//
 	// Returns a vector containing the syscall results for all variants
@@ -382,8 +383,8 @@ private:
 	// accept a pointer to a data structure for each variant. If the data
 	// matches, the comparison function returns true.
 	// 
-    bool             call_compare_child_strings          (std::vector<unsigned long>& stringptrs, size_t maxlength=0);
-    bool             call_compare_child_buffers          (std::vector<unsigned long>& bufferptrs, size_t size);
+    bool             call_compare_variant_strings          (std::vector<unsigned long>& stringptrs, size_t maxlength=0);
+    bool             call_compare_variant_buffers          (std::vector<unsigned long>& bufferptrs, size_t size);
     bool             call_compare_wait_pids              (std::vector<pid_t>& pids);
     bool             call_compare_signal_handlers        (std::vector<unsigned long>& handlers);
     bool             call_compare_sigactions             (std::vector<unsigned long>& handlers, std::vector<unsigned long>& sa_flags);
@@ -397,9 +398,9 @@ private:
 	// Serialization Functions. These are helper functions for the syscall
 	// logging handlers in MVEE_syscall_handlers.cpp
 	// 
-    std::string      call_serialize_io_vector            (int childnum, struct iovec* vec, unsigned int vecsz);
-    std::string      call_serialize_msgvector            (int childnum, struct msghdr* msg);
-    std::string      call_serialize_io_buffer            (int childnum, unsigned long buf, unsigned long buflen);
+    std::string      call_serialize_io_vector            (int variantnum, struct iovec* vec, unsigned int vecsz);
+    std::string      call_serialize_msgvector            (int variantnum, struct msghdr* msg);
+    std::string      call_serialize_io_buffer            (int variantnum, unsigned long buf, unsigned long buflen);
 
 	// 
 	// Replication functions. These accept a pointer to a data structure for
@@ -416,9 +417,9 @@ private:
 	// getter functions. These accept pointers to a specific data structure and
 	// do a deep copy to a local data structure.
 	//
-    sigset_t         call_get_sigset                     (int childnum, unsigned long sigset_ptr, bool is_old_call);
-    struct sigaction call_get_sigaction                  (int childnum, unsigned long sigaction_ptr, bool is_old_call);
-    struct sockaddr* call_get_sockaddr                   (int childnum, unsigned long ptr, socklen_t addr_len);
+    sigset_t         call_get_sigset                     (int variantnum, unsigned long sigset_ptr, bool is_old_call);
+    struct sigaction call_get_sigaction                  (int variantnum, unsigned long sigaction_ptr, bool is_old_call);
+    struct sockaddr* call_get_sockaddr                   (int variantnum, unsigned long ptr, socklen_t addr_len);
 
 	// *************************************************************************
     // Specific Syscall handlers (these are all in MVEE_syscalls_handlers.cpp)
@@ -441,7 +442,7 @@ private:
 	// Fetching the arguments for an execve call is complicated and slow.
 	// We therefore use a specialized function that caches the results.
 	// 
-    void        handle_execve_get_args              (int childnum);
+    void        handle_execve_get_args              (int variantnum);
 
 	// 
 	// callback function for the iterator function that iterates over regions
@@ -479,13 +480,13 @@ private:
 
 	// 
 	// Determines if syscall @callnum should be executed in lockstep for variant
-	// @childnum
+	// @variantnum
 	// 
 	// For standard syscalls, this is a wrapper around the get_call_type handle
 	// functions for the syscall that is currently being executed by variant
-	// @childnum
+	// @variantnum
 	//
-    unsigned char call_precall_get_call_type          (int childnum, long callnum);
+    unsigned char call_precall_get_call_type          (int variantnum, long callnum);
 
 	//
 	// Runs all of the early precall handling (i.e. comparing the syscall
@@ -503,9 +504,9 @@ private:
 	// necessary) for syscalls that are not subject to lockstepping
 	// 
 	// For standard syscalls, this is a wrapper around the call handler function
-	// for the syscall that is currently being executed by variant @childnum
+	// for the syscall that is currently being executed by variant @variantnum
 	// 
-    long          call_call_dispatch_unsynced         (int childnum);
+    long          call_call_dispatch_unsynced         (int variantnum);
 
 	//
 	// Runs the late precall handling (i.e. overwriting syscall results if
@@ -522,9 +523,9 @@ private:
 	// 
 	// For standard syscalls, this is a wrapper around the postcall handler
 	// function for the syscall that is currently being executed by variant
-	// @childnum
+	// @variantnum
 	// 
-    long          call_postcall_return_unsynced       (int childnum);
+    long          call_postcall_return_unsynced       (int variantnum);
 
 	//
 	// Runs the postcall handling for syscalls that are subject to lockstepping
@@ -535,7 +536,7 @@ private:
     long          call_postcall_return                ();
 
 	//
-	// Shifts the syscall arguments for variant @childnum by @cnt arguments.
+	// Shifts the syscall arguments for variant @variantnum by @cnt arguments.
 	//
 	// Example: shifting the arguments by 1 would cause ARG2 to be copied into
 	// ARG1, ARG3 into ARG2, ...  
@@ -546,7 +547,7 @@ private:
 	// Note: We only shift our locally cached copies of the syscall arguments,
 	// not the actual in-process arguments
 	// 
-    void          call_shift_args                     (int childnum, int cnt);
+    void          call_shift_args                     (int variantnum, int cnt);
 
 	// 
 	// Locks the specified set of locks. We use these locks to prevent
@@ -562,8 +563,8 @@ private:
 	// 
 	// Helper functions for syslock locking
 	//
-    void          call_grab_syslocks                  (int childnum, unsigned long callnum, unsigned char which);
-    void          call_release_syslocks               (int childnum, unsigned long callnum, unsigned char which);
+    void          call_grab_syslocks                  (int variantnum, unsigned long callnum, unsigned char which);
+    void          call_release_syslocks               (int variantnum, unsigned long callnum, unsigned char which);
 
 	//
 	// Wait for all variants to be stopped
@@ -649,12 +650,12 @@ private:
 	//
 	// Handles an event from a variant we are not currently attached to
 	//
-    void handle_detach_event                 (pid_t childpid, int status);
+    void handle_detach_event                 (pid_t variantpid, int status);
 
 	// 
 	// Entrypoint for all event handling
 	//
-    void handle_event                        (pid_t childpid, int status);
+    void handle_event                        (pid_t variantpid, int status);
 
 	// *************************************************************************
     // Signal specific event handling
@@ -706,7 +707,7 @@ private:
 	// Handle ERESTART_* errors resulting from signal deliveries during blocking
 	// syscalls.
 	//
-    void                                       sig_restart_syscall                 (int childnum);
+    void                                       sig_restart_syscall                 (int variantnum);
     void                                       sig_restart_partially_interrupted_syscall();
 
 	// 
@@ -716,34 +717,34 @@ private:
 	void                                       sig_set_pending_signals             (bool pending_signals);
 
 	// 
-	// Returns true if variant @childnum's instruction pointer points to the
+	// Returns true if variant @variantnum's instruction pointer points to the
 	// IP-MON executable code
 	//
-	bool                                       in_ipmon                            (int childnum, unsigned long ip);
+	bool                                       in_ipmon                            (int variantnum, unsigned long ip);
 
 	//
-	// Returns true if variant @childnum's instruction pointer points to a
+	// Returns true if variant @variantnum's instruction pointer points to a
 	// syscall instruction inside IP-MON's executable code
 	//
-	bool                                       in_ipmon_syscall                    (int childnum, unsigned long ip);
+	bool                                       in_ipmon_syscall                    (int variantnum, unsigned long ip);
 
 	// *************************************************************************
     // Hardware breakpoint support
 	// *************************************************************************
 
 	// 
-	// Update variant @childnum's debug registers after we have set or unset a
+	// Update variant @variantnum's debug registers after we have set or unset a
 	// hardware breakpoint
 	// 
-    void hwbp_refresh_regs              (int childnum);
+    void hwbp_refresh_regs              (int variantnum);
 
 	//
 	// Set or remove a hardware breakpoint at address @addr in variant
-	// @childnum. Refer to MVEE_monitor.h for a list of possible breakpoint
+	// @variantnum. Refer to MVEE_monitor.h for a list of possible breakpoint
 	// types
 	//
-    bool hwbp_set_watch                 (int childnum, unsigned long addr, unsigned char bp_type);
-    bool hwbp_unset_watch               (int childnum, unsigned long addr);
+    bool hwbp_set_watch                 (int variantnum, unsigned long addr, unsigned char bp_type);
+    bool hwbp_unset_watch               (int variantnum, unsigned long addr);
 
 	// *************************************************************************
     // Logging/Backtracing functions - These are implemented in MVEE_logging.cpp
@@ -760,15 +761,15 @@ private:
     void log_fini                        ();
 
 	//
-	// Logs a stack trace for variant @childnum
+	// Logs a stack trace for variant @variantnum
 	//
-    void log_child_backtrace             (int childnum, int max_depth=0, int calculate_file_offsets=0, int is_segfault=0);
+    void log_variant_backtrace             (int variantnum, int max_depth=0, int calculate_file_offsets=0, int is_segfault=0);
 
 	// 
 	// Logs source line information for the instruction found at address
-	// @address in variant @childnum
+	// @address in variant @variantnum
 	// 
-    void log_caller_info                 (int childnum, int level, unsigned long address, int calculate_file_offsets=0, void (*logfunc)(const char*, ...)=NULL);
+    void log_caller_info                 (int variantnum, int level, unsigned long address, int calculate_file_offsets=0, void (*logfunc)(const char*, ...)=NULL);
 
 	//
 	// Log the extended state of this monitor and its variants
@@ -793,8 +794,8 @@ private:
     void log_unhandled_sig               (int status, int index);
     void log_call_mismatch               (int index1, int index2);
     void log_callargs_mismatch           ();
-    void log_segfault                    (int childnum);
-    void log_hw_bp_event                 (int childnum, siginfo_t* sig);
+    void log_segfault                    (int variantnum);
+    void log_hw_bp_event                 (int variantnum, siginfo_t* sig);
 
 	//
 	// Visualizes the contents of IP-MON's Replication Buffer
@@ -809,9 +810,9 @@ private:
 	
 	//
 	// Log the contents of the stack around the current stack pointer in variant
-	// @childnum
+	// @variantnum
 	//
-	void log_stack                       (int childnum);
+	void log_stack                       (int variantnum);
 
 	//
 	// Write messages into the mismatch info stream.  These messages may or may
@@ -837,24 +838,24 @@ private:
 	//
 	// Set PTRACE options for a newly attached variant
 	//
-    int         init_ptrace_options             (int childnum);
+    int         init_ptrace_options             (int variantnum);
 
 	//
-	// Initialize the childstate struct for variant @childnum
+	// Initialize the variantstate struct for variant @variantnum
 	//
-    void        init_child                      (int childnum, pid_t childpid, pid_t childtgid);
+    void        init_variant                    (int variantnum, pid_t variantpid, pid_t varianttgid);
 
 	//
-	// Restart variant @childnum to its initial state by injecting a sys_execve
+	// Restart variant @variantnum to its initial state by injecting a sys_execve
 	// call with the original arguments
 	//
-    bool        restart_child                   (int childnum);
+    bool        restart_variant                 (int variantnum);
 
 	//
 	// Writes new execve arguments to inject the
 	// MVEE_LD_Loader/interpreter/library path/qemu-user binary etc/...
 	//
-	void        rewrite_execve_args             (int childnum, VariantArch arch, bool write_to_stack=true, bool rewrite_envp=false);
+	void        rewrite_execve_args             (int variantnum, VariantArch arch, bool write_to_stack=true, bool rewrite_envp=false);
 
 	//
 	// Serializes a deque by writing a raw serialized buffer and a raw pointer
@@ -868,7 +869,7 @@ private:
 	// Get the original execve arguments array for the specified variant
 	//
     std::deque<char*>
-                get_original_argv               (int childnum);
+                get_original_argv               (int variantnum);
 
 	// *************************************************************************
     // Monitor startup/shutdown
@@ -953,8 +954,8 @@ private:
                                       set_sighand_table;      //
     std::vector<writeback_info>
                                       writeback_infos;        // temporary buffers for munmap
-    std::vector<pid_t>                local_detachlist;       // pids of childs that we haven't detached from yet...
-    std::vector<pid_t>                unknown_childs;         // pids of childs we've received events from but don't know yet
+    std::vector<pid_t>                local_detachlist;       // pids of variants that we haven't detached from yet...
+    std::vector<pid_t>                unknown_variants;       // pids of variants we've received events from but don't know yet
     _shm_info*                        atomic_buffer;          // thread-local atomic buffer
     std::vector<void*>                atomic_counters;
     std::vector<void*>                atomic_queue_pos;
@@ -968,8 +969,8 @@ private:
     siginfo_t*                        current_signal_info;    // siginfo for the signal we're currently delivering
     std::vector<mvee_pending_signal>
                                       pending_signals;
-    std::vector<childstate>
-                                      childs;                 // State for all child processes being traced by this monitor
+    std::vector<variantstate>
+                                      variants;               // State for all variant processes being traced by this monitor
 #ifdef MVEE_ALLOW_PERF
     bool                              perf;                   // is this monitor tracking the perf process
 #endif
@@ -989,17 +990,17 @@ private:
 	std::stringstream mismatch_info;                          // cached mismatch info
 };
 
-class detachedchild
+class detachedvariant
 {
 public:
-    pid_t         childpid;                                   //
-    monitor*      new_monitor;                                //
-    int           parentmonitorid;                            // id of the monitor this child was detached from
-    int           parent_has_detached;                        //
+    pid_t         variantpid;                                 //
+    monitor*      new_monitor;                                // monitor the variant should be transferred to
+    int           parentmonitorid;                            // id of the monitor this variant was detached from
+    int           parent_has_detached;                        // set to true when the original monitor, under whose control this variant was spawned, has detached
     struct user_regs_struct
                   original_regs;                              // original contents of the registers
     unsigned long transfer_func;                              // pointer to the sys_pause loop
-    void*         tid_address[2];                             // set if we should tell the child what its thread id is (e.g. if the child was created by clone(CLONE_CHILD_SETTID)
+    void*         tid_address[2];                             // set if we should tell the variant what its thread id is (e.g. if the variant was created by clone(CLONE_CHILD_SETTID)
 };
 
 // Passed to sys_ptrace through the data field
@@ -1021,7 +1022,7 @@ struct pt_copystring
     unsigned long out_string_size;                            // The kernel will write the string size here
 };
 
-// If our glibc is compiled with MVEE_DEBUG_MALLOC, slave replicae will pass an mvee_malloc_error
+// If our glibc is compiled with MVEE_DEBUG_MALLOC, slave variants will pass an mvee_malloc_error
 // struct to the monitor whenever they detect a divergence in malloc behavior
 struct mvee_malloc_error
 {

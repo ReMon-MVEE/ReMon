@@ -305,7 +305,7 @@ void fd_table::print_fd_table_proc(pid_t pid)
     char        cmd[500];
     sprintf(cmd, "ls -al /proc/%d/fd", pid);
 
-    debugf("fd list for child %d: \n", pid);
+    debugf("fd list for variant %d: \n", pid);
     std::string str = mvee::log_read_from_proc_pipe(cmd, NULL);
     debugf("%s\n",                     str.c_str());
 }
@@ -369,7 +369,7 @@ void fd_table::verify_fd_table(std::vector<pid_t> pids)
 
             if (info && !verify_path(info->path, path))
             {
-                warnf("FD TABLE VERIFICATION FAILED - /PROC => INTERNAL - child: %d (PID: %d)\n", i,  pids[i]);
+                warnf("FD TABLE VERIFICATION FAILED - /PROC => INTERNAL - variant: %d (PID: %d)\n", i,  pids[i]);
                 warnf("> fd read from proc: %d - %s\n",                                           fd, path);
                 warnf("> fd in internal set_fd_table: %d - %s\n",                                 info ? info->fds[i] : 0,
                             info ? info->path.c_str() : "<not found>");
@@ -388,7 +388,7 @@ void fd_table::verify_fd_table(std::vector<pid_t> pids)
 
                 if (proc == fds.end() || !verify_path(it->second.path, proc->second.c_str()))
                 {
-                    warnf("FD TABLE VERIFICATION FAILED - INTERNAL => /PROC - child: %d (PID: %d)\n", i, pids[i]);
+                    warnf("FD TABLE VERIFICATION FAILED - INTERNAL => /PROC - variant: %d (PID: %d)\n", i, pids[i]);
                     warnf("> fd read from proc: %d - %s\n",
                                 proc == fds.end() ? 0 : proc->first,
                                 proc == fds.end() ? "<not found>" : proc->second.c_str());
@@ -407,21 +407,21 @@ void fd_table::verify_fd_table(std::vector<pid_t> pids)
 /*-----------------------------------------------------------------------------
     get_fd_info -
 -----------------------------------------------------------------------------*/
-fd_info* fd_table::get_fd_info (unsigned long fd, int childnum)
+fd_info* fd_table::get_fd_info (unsigned long fd, int variantnum)
 {
-    if (childnum == 0)
+    if (variantnum == 0)
     {
         std::map<unsigned long, fd_info>::iterator it = table.find(fd);
         if (it != table.end())
             return &it->second;
     }
-    else if (childnum < mvee::numvariants && childnum > 0)
+    else if (variantnum < mvee::numvariants && variantnum > 0)
     {
         for (std::map<unsigned long, fd_info>::iterator it = table.begin();
              it != table.end();
              it++)
         {
-            if (it->second.fds[childnum] == fd && !it->second.master_file)
+            if (it->second.fds[variantnum] == fd && !it->second.master_file)
                 return &it->second;
         }
     }
@@ -452,12 +452,12 @@ fd_info* fd_table::get_fd_info_by_path(const char* path)
     get_full_path - this function also supports the [syscall]at family
     but it can resolve normal paths as well (if master_dirfd == AT_FDCWD)
 -----------------------------------------------------------------------------*/
-std::string fd_table::get_full_path (pid_t childpid, unsigned long master_dirfd, void* master_path_ptr)
+std::string fd_table::get_full_path (pid_t variantpid, unsigned long master_dirfd, void* master_path_ptr)
 {
     std::stringstream ss;
 
     // fetch the path and check if it's absolute...
-    char*             tmp_path = mvee_rw_read_string(childpid, (unsigned long)master_path_ptr, 0);
+    char*             tmp_path = mvee_rw_read_string(variantpid, (unsigned long)master_path_ptr, 0);
     if (!tmp_path)
     {
         warnf("couldn't get full path\n");
@@ -466,7 +466,7 @@ std::string fd_table::get_full_path (pid_t childpid, unsigned long master_dirfd,
 
     if (strstr(tmp_path, "/proc/self/") == tmp_path)
     {
-        ss << "/proc/" << childpid << "/" << (tmp_path + strlen("/proc/self/"));
+        ss << "/proc/" << variantpid << "/" << (tmp_path + strlen("/proc/self/"));
     }
     else if (tmp_path[0] == '/')
     {
@@ -582,26 +582,26 @@ std::vector<unsigned long> fd_table::epoll_id_map(unsigned long epfd, unsigned l
 }
 
 /*-----------------------------------------------------------------------------
-    mvee_fd_get_free_fd - get an available fd for this child
+    mvee_fd_get_free_fd - get an available fd for this variant
 
     This function won't be used very often. At this moment it is only used
     for DUP2 and DUP3 in case the master replica tries to create an fd
     that is not in use yet.
 -----------------------------------------------------------------------------*/
-unsigned long fd_table::get_free_fd (int childnum, unsigned long bias)
+unsigned long fd_table::get_free_fd (int variantnum, unsigned long bias)
 {
     unsigned long                              lowest_available = 0;
-    std::set<unsigned long>                    child_fds;
+    std::set<unsigned long>                    variant_fds;
 
-    if (bias != (unsigned long)-1 && !get_fd_info(bias, childnum))
+    if (bias != (unsigned long)-1 && !get_fd_info(bias, variantnum))
         return bias;
 
     std::map<unsigned long, fd_info>::iterator it;
     for (it = table.begin(); it != table.end(); ++it)
-        child_fds.insert(it->second.fds[childnum]);
+        variant_fds.insert(it->second.fds[variantnum]);
 
     // now find the first element that's not in the set
-    for (std::set<unsigned long>::iterator it2 = child_fds.begin(); it2 != child_fds.end(); ++it2)
+    for (std::set<unsigned long>::iterator it2 = variant_fds.begin(); it2 != variant_fds.end(); ++it2)
     {
         if (*it2 > lowest_available)
             break;
@@ -615,9 +615,9 @@ unsigned long fd_table::get_free_fd (int childnum, unsigned long bias)
 /*-----------------------------------------------------------------------------
     is_fd_unsynced
 -----------------------------------------------------------------------------*/
-bool fd_table::is_fd_unsynced(unsigned long fd, int childnum)
+bool fd_table::is_fd_unsynced(unsigned long fd, int variantnum)
 {
-    fd_info* fd_info = get_fd_info(fd, childnum);
+    fd_info* fd_info = get_fd_info(fd, variantnum);
 
     if (fd_info && fd_info->unsynced_reads)
         return true;
@@ -627,9 +627,9 @@ bool fd_table::is_fd_unsynced(unsigned long fd, int childnum)
 /*-----------------------------------------------------------------------------
     is_fd_master_file
 -----------------------------------------------------------------------------*/
-bool fd_table::is_fd_master_file(unsigned long fd, int childnum)
+bool fd_table::is_fd_master_file(unsigned long fd, int variantnum)
 {
-    fd_info* fd_info = get_fd_info(fd, childnum);
+    fd_info* fd_info = get_fd_info(fd, variantnum);
 
     if (fd_info && fd_info->master_file)
         return true;
@@ -640,16 +640,16 @@ bool fd_table::is_fd_master_file(unsigned long fd, int childnum)
     master_fd_set_to_non_master_fd_sets - Creates non-master file descriptor sets
     given a master file descriptor set, using the mapping.
 
-    @param master_fd_set    The file descriptor set for the master child
+    @param master_fd_set    The file descriptor set for the master variant
     @param nfds Highest-numbered file descriptor in master_fd_set, plus one
-    @param child_fd_set Array of file descriptor sets for non-master children, to be filled in
+    @param variant_fd_set Array of file descriptor sets for non-master variants, to be filled in
 -----------------------------------------------------------------------------*/
 void fd_table::master_fd_set_to_non_master_fd_sets(fd_set *master_fd_set, int nfds,
-                                                   std::vector<fd_set>& child_fd_sets)
+                                                   std::vector<fd_set>& variant_fd_sets)
 {
     // initialize non-master file descriptor sets
     for (int i = 0; i < mvee::numvariants - 1; ++i)
-        FD_ZERO(&child_fd_sets[i]);
+        FD_ZERO(&variant_fd_sets[i]);
 
     fd_info* found_info;
 
@@ -663,7 +663,7 @@ void fd_table::master_fd_set_to_non_master_fd_sets(fd_set *master_fd_set, int nf
             {
                 // put the corresponding non-master file descriptors in the sets
                 for (int i = 1; i < mvee::numvariants; ++i)
-                    FD_SET(found_info->fds[i], &child_fd_sets[i-1]);
+                    FD_SET(found_info->fds[i], &variant_fd_sets[i-1]);
             }
         }
     }

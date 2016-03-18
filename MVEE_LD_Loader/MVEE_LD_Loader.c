@@ -35,7 +35,7 @@ char           initial_stack[8192] = { 1 };
 unsigned long  initial_stack_depth = 0;
 unsigned long  new_sp              = 1;
 unsigned long  new_entry           = 1;
-unsigned short __child_num         = 1;
+unsigned short __variant_num       = 1;
 
 unsigned long  mvee_write_stack_data(const void* data, int datalen, int padbytes)
 {    
@@ -136,9 +136,9 @@ void  mvee_build_initial_stack(unsigned long* new_sp, unsigned long stack_base, 
     // we use a very long name for this binary so that our new stack will be smaller
     // with a smaller stack, we can insert padding to place both the envp string and argv string array
     // at their original positions
-    syscall(0x6FFFFFFF + 10, (unsigned long)&__child_num);
+    syscall(0x6FFFFFFF + 10, (unsigned long)&__variant_num);
     char          new_proc_name[40];
-    sprintf(new_proc_name, INTERP_SHORT, __child_num);
+    sprintf(new_proc_name, INTERP_SHORT, __variant_num);
 
     // look for envp
     int           argc          = *(unsigned long*)(*new_sp);

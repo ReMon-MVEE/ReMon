@@ -27,7 +27,7 @@
 
         3. The precall handler: if registered, the handler is called at every
         syscall-entrance synchronization point. At the time of calling,
-        childs[x].callnum and childs[x].regs are valid. This handler determines
+        variants[x].callnum and variants[x].regs are valid. This handler determines
         whether or not the call arguments match and how the call should be
         dispatched (normal vs master vs fork). The monitor is responsible for
         actually dispatching the call.
@@ -50,8 +50,8 @@
         call has returned. If the call was unsynced, the postcall handler is
         called immediately after the monitor sees the syscall exit. If the call
         was synced, the postcall handler is called at the syscall-exit
-        synchronization point. At the time of calling, childs[x].callnum is no
-        longer valid (but childs[x].prevcallnum is). Childs[x].regs IS still valid.
+        synchronization point. At the time of calling, variants[x].callnum is no
+        longer valid (but variants[x].prevcallnum is). Childs[x].regs IS still valid.
         If the call was synced, the succeeded flag is valid as well.
 
         These handlers are used to read syscall returns and sync them in case of

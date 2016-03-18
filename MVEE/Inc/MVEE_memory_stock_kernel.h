@@ -173,10 +173,10 @@ bool mvee_rw_copy_string (pid_t source_pid, unsigned long source_addr, pid_t des
 }
 
 /*-----------------------------------------------------------------------------
-    mvee_rw_write_data - write databuf to target child - we probably don't
-    need PTRACE_EXT_COPYMEM for good performance here
+    mvee_rw_write_data - write databuf to target variant's address space - we
+    probably don't need PTRACE_EXT_COPYMEM for good performance here
 -----------------------------------------------------------------------------*/
-bool mvee_rw_write_data (pid_t childpid, unsigned long addr, ssize_t datalength, unsigned char* databuf)
+bool mvee_rw_write_data (pid_t variantpid, unsigned long addr, ssize_t datalength, unsigned char* databuf)
 {
     struct iovec local[1];
     struct iovec remote[1];
@@ -186,7 +186,7 @@ bool mvee_rw_write_data (pid_t childpid, unsigned long addr, ssize_t datalength,
     remote[0].iov_base = (void*)addr;
     remote[0].iov_len  = datalength;
 
-    ssize_t      nwritten = process_vm_writev(childpid, local, 1, remote, 1, 0);
+    ssize_t      nwritten = process_vm_writev(variantpid, local, 1, remote, 1, 0);
 
 #ifdef MVEE_GENERATE_EXTRA_STATS
     if (!mvee::in_logging_handler)
@@ -206,7 +206,7 @@ bool mvee_rw_write_data (pid_t childpid, unsigned long addr, ssize_t datalength,
     mvee_rw_read_data - same as above. This should be pretty fast with the
     stock 3.2+ kernel
 -----------------------------------------------------------------------------*/
-unsigned char* mvee_rw_read_data (pid_t childpid, unsigned long addr, ssize_t datalength, int append_zero_byte)
+unsigned char* mvee_rw_read_data (pid_t variantpid, unsigned long addr, ssize_t datalength, int append_zero_byte)
 {
     if (datalength <= 0)
         return NULL;
@@ -226,7 +226,7 @@ unsigned char* mvee_rw_read_data (pid_t childpid, unsigned long addr, ssize_t da
     remote[0].iov_base = (void*)addr;
     remote[0].iov_len  = datalength;
 
-    ssize_t        nread = process_vm_readv(childpid, local, 1, remote, 1, 0);
+    ssize_t        nread = process_vm_readv(variantpid, local, 1, remote, 1, 0);
     if (nread != datalength)
     {
         SAFEDELETEARRAY(buf);
@@ -248,13 +248,13 @@ unsigned char* mvee_rw_read_data (pid_t childpid, unsigned long addr, ssize_t da
     If we don't know the size of the string, we have to copy it word
     by word...
 -----------------------------------------------------------------------------*/
-char* mvee_rw_read_string (pid_t childpid, unsigned long addr, ssize_t maxlength)
+char* mvee_rw_read_string (pid_t variantpid, unsigned long addr, ssize_t maxlength)
 {
     char* result = NULL;
 
     if (maxlength != 0)
     {
-        result            = (char*)mvee_rw_read_data(childpid, addr, maxlength + 1);
+        result            = (char*)mvee_rw_read_data(variantpid, addr, maxlength + 1);
         result[maxlength] = '\0';
     }
     else
@@ -266,7 +266,7 @@ char* mvee_rw_read_string (pid_t childpid, unsigned long addr, ssize_t maxlength
         while(true)
         {
             long tmp = mvee_wrap_ptrace(PTRACE_PEEKDATA,
-                                        childpid, addr + (pos++) * sizeof(long), NULL);
+                                        variantpid, addr + (pos++) * sizeof(long), NULL);
 
 #ifdef MVEE_GENERATE_EXTRA_STATS
             if (!mvee::in_logging_handler)
@@ -298,7 +298,7 @@ char* mvee_rw_read_string (pid_t childpid, unsigned long addr, ssize_t maxlength
 /*-----------------------------------------------------------------------------
     mvee_rw_read_struct - read directly into buf
 -----------------------------------------------------------------------------*/
-bool mvee_rw_read_struct (pid_t childpid, unsigned long addr, ssize_t datalength, void* buf)
+bool mvee_rw_read_struct (pid_t variantpid, unsigned long addr, ssize_t datalength, void* buf)
 {
     struct iovec local[1];
     struct iovec remote[1];
@@ -311,7 +311,7 @@ bool mvee_rw_read_struct (pid_t childpid, unsigned long addr, ssize_t datalength
     remote[0].iov_base = (void*)addr;
     remote[0].iov_len  = datalength;
 
-    ssize_t      nread = process_vm_readv(childpid, local, 1, remote, 1, 0);
+    ssize_t      nread = process_vm_readv(variantpid, local, 1, remote, 1, 0);
 
 #ifdef MVEE_GENERATE_EXTRA_STATS
     if (!mvee::in_logging_handler)
