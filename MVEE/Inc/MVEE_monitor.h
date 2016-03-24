@@ -383,8 +383,8 @@ private:
 	// accept a pointer to a data structure for each variant. If the data
 	// matches, the comparison function returns true.
 	// 
-    bool             call_compare_variant_strings          (std::vector<unsigned long>& stringptrs, size_t maxlength=0);
-    bool             call_compare_variant_buffers          (std::vector<unsigned long>& bufferptrs, size_t size);
+    bool             call_compare_variant_strings        (std::vector<unsigned long>& stringptrs, size_t maxlength=0);
+    bool             call_compare_variant_buffers        (std::vector<unsigned long>& bufferptrs, size_t size);
     bool             call_compare_wait_pids              (std::vector<pid_t>& pids);
     bool             call_compare_signal_handlers        (std::vector<unsigned long>& handlers);
     bool             call_compare_sigactions             (std::vector<unsigned long>& handlers, std::vector<unsigned long>& sa_flags);

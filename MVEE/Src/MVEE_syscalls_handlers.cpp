@@ -144,26 +144,46 @@ struct mmap_arg_struct
 /*-----------------------------------------------------------------------------
   Macros
 -----------------------------------------------------------------------------*/
-#define MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)           \
-    int start, lim;                                              \
-                                                                 \
-    start = (variantnum == -1) ? 0 : variantnum;                     \
-    lim   = (variantnum == -1) ? mvee::numvariants : variantnum + 1; \
-                                                                 \
-    if (variantnum != -1)                                          \
+//
+// if true, the call we're looking at was not subject to lockstepping
+//
+#define IS_UNSYNCED_CALL						\
+	(variantnum != -1)
+
+//
+// similarly, if this is true, we're looking at a call that is subject to
+// lockstepping
+//
+#define IS_SYNCED_CALL							\
+	(variantnum == -1)
+
+
+//
+// Prologue for our syscall arguments logging functions
+//
+#define MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)			\
+    int start, lim;													\
+																	\
+    start = IS_SYNCED_CALL ? 0 : variantnum;						\
+    lim   = IS_SYNCED_CALL ? mvee::numvariants : variantnum + 1;	\
+																	\
+	/* manually update the register context */						\
+    if (IS_UNSYNCED_CALL)											\
         call_check_regs(variantnum);
 
-#define MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, results)                                     \
-    int start, lim;                                                                                   \
-                                                                                                      \
-    start = (variantnum == -1) ? 0 : variantnum;                                                          \
-    lim   = (variantnum == -1) ? (state == STATE_IN_MASTERCALL ? 1 : mvee::numvariants) : variantnum + 1; \
-    std::vector<unsigned long> results(mvee::numvariants);                                            \
-    if (variantnum == -1)                                                                               \
-        results = call_postcall_get_result_vector();                                                  \
-    else                                                                                              \
-        for (int i = start; i < lim; ++i)                                                             \
-            results[i] = call_postcall_get_variant_result(i);
+//
+// Prologue for our syscall return logging functions
+//
+#define MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, results)		\
+    int start, lim;														\
+																		\
+    start = IS_SYNCED_CALL ? 0 : variantnum;							\
+    lim   = IS_SYNCED_CALL ? (state == STATE_IN_MASTERCALL ? 1 : mvee::numvariants) : variantnum + 1; \
+    std::vector<unsigned long> results(mvee::numvariants);				\
+    if (IS_SYNCED_CALL)													\
+        results = call_postcall_get_result_vector();					\
+    else																\
+		results[variantnum] = call_postcall_get_variant_result(variantnum);
 
 /*-----------------------------------------------------------------------------
   pseudo handlers
@@ -892,7 +912,7 @@ long monitor::handle_unlink_precall(int variantnum)
 long monitor::handle_unlink_postcall(int variantnum)
 {
 #ifdef MVEE_ENABLE_VALGRIND_HACKS
-    if (variantnum != -1)
+    if (IS_UNSYNCED_CALL)
     {
         char* unlink_fd = mvee_rw_read_string(variants[variantnum].variantpid, ARG1(variantnum));
         if (unlink_fd && strstr(unlink_fd, "/tmp/vgdb-pipe") == unlink_fd)
@@ -1018,7 +1038,7 @@ long monitor::handle_execve_precall(int variantnum)
 
 long monitor::handle_execve_call(int variantnum)
 {
-	if (variantnum != -1)
+	if (IS_UNSYNCED_CALL)
 	{
 		warnf("unsynced execve dispatch - was this intentional?\n");
 		return MVEE_CALL_ALLOW;
@@ -1612,9 +1632,6 @@ long monitor::handle_dup_call(int variantnum)
 
 long monitor::handle_dup_log_return(int variantnum)
 {
-    if (variantnum == -1 && state == STATE_IN_MASTERCALL)
-        variantnum = 0;
-
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, fds)
 
     for (int i = start; i < lim; ++i)
@@ -2249,9 +2266,6 @@ long monitor::handle_dup2_call(int variantnum)
 
 long monitor::handle_dup2_log_return(int variantnum)
 {
-    if (variantnum == -1 && state == STATE_IN_MASTERCALL)
-        variantnum = 0;
-
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, fds)
 
     for (int i = start; i < lim; ++i)
@@ -2816,19 +2830,11 @@ bool monitor::handle_munmap_precall_callback(mmap_table* table, std::vector<mmap
 
 long monitor::handle_munmap_precall(int variantnum)
 {
-    /*  if (variantnum != -1)
-    mvee_log_variant_backtrace(variantnum);
-    else
-    {
-    for (int i = 0; i < mvee::numvariants; ++i)
-    mvee_log_variant_backtrace(i);
-    }    */
-
     // We ONLY allow unsynced munmaps for the unmapping
     // of the region below the newly allocated heap.
     // Check the comments about ptmalloc in MVEE_private.h
     // for further information
-    if (variantnum != -1)
+    if (IS_UNSYNCED_CALL)
         return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 
     if (in_new_heap_allocation)
@@ -2863,7 +2869,7 @@ long monitor::handle_munmap_postcall(int variantnum)
     int release_locks = 0;
 
     // lower region munmap
-    if (variantnum != -1)
+    if (IS_UNSYNCED_CALL)
     {
         if (call_postcall_get_variant_result(variantnum) == 0)
             set_mmap_table->munmap_range(variantnum, ARG1(variantnum), ARG2(variantnum));
@@ -2911,7 +2917,7 @@ long monitor::handle_munmap_postcall(int variantnum)
         release_locks          = 1;
     }
 
-    if (variantnum != -1)
+    if (IS_UNSYNCED_CALL)
         set_mmap_table->verify_mman_table(variantnum, variants[variantnum].variantpid);
     else
         for (int i = 0; i < mvee::numvariants; ++i)
@@ -5179,17 +5185,6 @@ static int first_mmap2_call = 1;
 
 long monitor::handle_mmap_precall(int variantnum)
 {
-    /*  if (variantnum != -1)
-    mvee_log_variant_backtrace(variantnum);
-    else
-    {
-    for (int i = 0; i < mvee::numvariants; ++i)
-    mvee_log_variant_backtrace(i);
-    }    */
-
-//	if (ARG2(0) == 4295237632)
-//		log_variant_backtrace(0);
-
 #ifdef MVEE_ENABLE_VALGRIND_HACKS
     if (first_mmap2_call)
     {
@@ -5886,9 +5881,9 @@ long monitor::handle_gettid_precall(int variantnum)
 long monitor::handle_gettid_call(int variantnum)
 {
 #if !defined(MVEE_BENCHMARK) || defined(MVEE_FORCE_ENABLE_BACKTRACING)
-    if (variantnum != -1 && ARG1(variantnum) == 1337 && ARG2(variantnum) == 10000001 && ARG3(variantnum) == 71)
+    if (IS_UNSYNCED_CALL && ARG1(variantnum) == 1337 && ARG2(variantnum) == 10000001 && ARG3(variantnum) == 71)
         log_variant_backtrace(variantnum);
-    if (variantnum != -1)
+    if (IS_UNSYNCED_CALL)
     {
         int i = variantnum;
         if (ARG1(i) == 1337 && ARG2(i) == 10000001)
@@ -7376,9 +7371,6 @@ long monitor::handle_timerfd_create_precall(int variantnum)
 
 long monitor::handle_timerfd_create_log_return(int variantnum)
 {
-    if (variantnum == -1 && state == STATE_IN_MASTERCALL)
-        variantnum = 0;
-
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, fds)
 
     for (int i = start; i < lim; ++i)
@@ -7493,9 +7485,6 @@ long monitor::handle_dup3_call(int variantnum)
 
 long monitor::handle_dup3_log_return(int variantnum)
 {
-    if (variantnum == -1 && state == STATE_IN_MASTERCALL)
-        variantnum = 0;
-
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, fds)
 
     for (int i = start; i < lim; ++i)
