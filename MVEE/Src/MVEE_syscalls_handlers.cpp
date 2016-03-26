@@ -172,13 +172,19 @@ struct mmap_arg_struct
         call_check_regs(variantnum);
 
 //
+// Prologue for postcall handlers
+//
+#define MVEE_HANDLER_POSTCALL(variantnum, start, lim)					\
+	int start, lim;														\
+																		\
+    start = IS_SYNCED_CALL ? 0 : variantnum;							\
+    lim   = IS_SYNCED_CALL ? (state == STATE_IN_MASTERCALL ? 1 : mvee::numvariants) : variantnum + 1;
+
+//
 // Prologue for our syscall return logging functions
 //
 #define MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, results)		\
-    int start, lim;														\
-																		\
-    start = IS_SYNCED_CALL ? 0 : variantnum;							\
-    lim   = IS_SYNCED_CALL ? (state == STATE_IN_MASTERCALL ? 1 : mvee::numvariants) : variantnum + 1; \
+	MVEE_HANDLER_POSTCALL(variantnum, start, lim);						\
     std::vector<unsigned long> results(mvee::numvariants);				\
     if (IS_SYNCED_CALL)													\
         results = call_postcall_get_result_vector();					\
@@ -211,12 +217,9 @@ bool monitor::handle_is_known_false_positive(const char* program_name, long call
 
     bool               result = false;
 
-	// progran_name is not set until the first variant has called execve
+	// Mismatches during early initialization are allowed
 	if (!program_name)
-	{
-		debugf("Mismatch allowed because it happened during MVEE initialization\n");
 		return true;
-	}
 
     // check the program name first
     if (callnum == __NR_write && program_name && strstr(program_name, "416.gamess"))
@@ -361,10 +364,18 @@ bool monitor::handle_is_known_false_positive(const char* program_name, long call
 		
 		return false;			
 	}
-	// allow mmap mismatch due to mmap of unsynced file
-    else if (callnum == __NR_mmap && MVEE_PRECALL_MISMATCHING_ARG((*precall_flags)) == 2)
+	else if (callnum == __NR_openat && MVEE_PRECALL_MISMATCHING_ARG((*precall_flags)) == 2)
 	{
-		// TODO
+		for (int i = 0; i < mvee::numvariants; ++i)
+		{
+			char* str = mvee_rw_read_string(variants[i].variantpid, ARG2(i));
+
+			if (!str || strstr(str, "/usr/gnemul/qemu-") != str)
+				return false;
+
+			SAFEDELETEARRAY(str);
+		}
+
 		return true;
 	}
 
@@ -538,14 +549,21 @@ long monitor::handle_read_log_return(int variantnum)
 
 long monitor::handle_read_postcall(int variantnum)
 {
-    if (state == STATE_IN_MASTERCALL)
-    {
-        REPLICATEBUFFER(2);
-    }
-    else
-    {
-        UNMAPFDS(1);
-    }
+	if (IS_SYNCED_CALL)
+	{
+		if (state == STATE_IN_MASTERCALL)
+		{
+			REPLICATEBUFFER(2);
+		}
+		else
+		{
+			UNMAPFDS(1);
+		}
+	}
+	else
+	{
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
     return 0;
 }
 
@@ -637,7 +655,7 @@ long monitor::handle_open_precall(int variantnum)
     CHECKPOINTER(1);
     CHECKSTRING(1);
 
-    std::string full_path = set_fd_table->get_full_path(variants[0].variantpid, AT_FDCWD, (void*)ARG1(0));
+    std::string full_path = set_fd_table->get_full_path(0, variants[0].variantpid, AT_FDCWD, (void*)ARG1(0));
     if (full_path == "")
         return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
 
@@ -662,6 +680,9 @@ long monitor::handle_open_precall(int variantnum)
 
 long monitor::handle_open_call(int variantnum)
 {
+	if (IS_UNSYNCED_CALL)
+		return MVEE_CALL_ALLOW | MVEE_CALL_HANDLED_UNSYNCED_CALL;
+
     int         i, result, old_flags, flags;
     std::string str1 = STRINGARG(0, 1);
 
@@ -698,63 +719,55 @@ long monitor::handle_open_log_return(int variantnum)
     return 0;
 }
 
-void switch_pid(char* resolved_path, char* path, pid_t old_id, pid_t new_id) // Copies path in resolved_path while replacing old_id with new_id
-{
-    char *variantpid   =(char *)malloc(sizeof(int));
-    int   variantpidlen=sprintf(variantpid, "%d", old_id);
-    char *ptr        =strstr(path, variantpid);                                /* Ptr points to the occurence of variantpid */
-    if (ptr!=NULL)
-    {
-        int len      = ptr-path;
-        snprintf(resolved_path, len+1, "%s", path);                          /* Copies path into resolved_path until the occurence of chilpid */
-        int new_idlen=sprintf(resolved_path+len, "%d", new_id);              /* Copies the new pid*/
-        sprintf(resolved_path+(len+new_idlen), "%s", ptr+variantpidlen);       /*copies the end of path */
-    }
-    free(variantpid);
-}
-
 long monitor::handle_open_postcall(int variantnum)
 {
-    unsigned char              unsynced = 0;
+	if (!call_succeeded)
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 
-    std::vector<unsigned long> fds      = call_postcall_get_result_vector();
-    REPLICATEFDRESULT();
+	if (IS_SYNCED_CALL)
+	{
+		unsigned char              unsynced = 0;
+		std::vector<unsigned long> fds      = call_postcall_get_result_vector();
+		char* resolved_path       = NULL;
+		std::string tmp_path      = STRINGARG(0, 1);
 
-    if (call_succeeded)
-    {
-        // get full path and add new file descriptor mapping for the
-        // opened file if the call hasn't been denied
-        char*       resolved_path = NULL;
-        std::string tmp_path      = STRINGARG(0, 1);
 		if (tmp_path.length() == 0)
-			tmp_path = set_fd_table->get_full_path(variants[0].variantpid, AT_FDCWD, (void*)ARG1(0));
+			tmp_path = set_fd_table->get_full_path(0, variants[0].variantpid, AT_FDCWD, (void*)ARG1(0));
 
-        if (tmp_path.find("/proc/") == 0)
-        {
-            char maps[30];
-            sprintf(maps, "/proc/%d/maps", variants[0].variantpid);
+		if (tmp_path.find("/proc/") == 0)
+		{
+			char maps[30];
+			sprintf(maps, "/proc/%d/maps", variants[0].variantpid);
 
-            if (tmp_path.compare(maps) == 0)
-                unsynced = 1;
+			if (tmp_path.compare(maps) == 0)
+				unsynced = 1;
 			else if (tmp_path.compare("/proc/self/maps") == 0)
 				unsynced = 1;
-        }
+		}
 		else if (tmp_path.compare(set_mmap_table->mmap_startup_info[0].real_image) == 0)
 		{
 			warnf("Unsynced access to img: %s\n", set_mmap_table->mmap_startup_info[0].real_image.c_str());
 			unsynced = 1;
 		}
 
-        resolved_path = realpath(tmp_path.c_str(), NULL);
+		resolved_path = realpath(tmp_path.c_str(), NULL);
 
 		FileType type = (unsynced == 0) ? FT_REGULAR : FT_SPECIAL;
-        set_fd_table->create_fd_info(type, fds, resolved_path, ARG2(0), ARG2(0) & O_CLOEXEC, state == STATE_IN_MASTERCALL, unsynced);
+		set_fd_table->create_fd_info(type, fds, resolved_path, ARG2(0), ARG2(0) & O_CLOEXEC, state == STATE_IN_MASTERCALL, unsynced);
+		set_fd_table->verify_fd_table(getpids());
 
-#ifdef MVEE_FD_DEBUG
-        set_fd_table->verify_fd_table(getpids());
-#endif
-        free(resolved_path);
-    }
+		free(resolved_path);
+		REPLICATEFDRESULT();
+	}
+	else
+	{
+		std::string path = set_fd_table->get_full_path(variantnum, variants[variantnum].variantpid, AT_FDCWD, (void*)ARG1(variantnum));
+		char* resolved_path = realpath(path.c_str(), NULL);
+
+		set_fd_table->create_temporary_fd_info(variantnum, call_postcall_get_variant_result(variantnum), resolved_path, ARG2(variantnum), ARG2(variantnum) & O_CLOEXEC);
+
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
 
     return 0;
 }
@@ -795,23 +808,24 @@ long monitor::handle_close_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-long monitor::handle_close_call(int variantnum)
-{
-    return MVEE_CALL_ALLOW;
-}
-
 long monitor::handle_close_postcall(int variantnum)
 {
-    if (call_succeeded)
-    {
-        set_fd_table->free_fd_info(ARG1(0));
-#ifdef MVEE_FD_DEBUG
-        set_fd_table->verify_fd_table(getpids());
-#endif
-    }
-    if (state != STATE_IN_MASTERCALL)
-        UNMAPFDS(1);
-    return 0;
+	if (IS_SYNCED_CALL)
+	{
+		if (state != STATE_IN_MASTERCALL)
+			UNMAPFDS(1);
+
+		if (call_succeeded)
+			set_fd_table->free_fd_info(ARG1(0));
+		set_fd_table->verify_fd_table(getpids());
+	}
+	else
+	{
+		if (call_succeeded)
+			set_fd_table->free_temporary_fd_info(variantnum, ARG1(variantnum));
+	}
+
+    return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -971,8 +985,8 @@ void monitor::handle_execve_get_args(int variantnum)
     }
 
     set_mmap_table->mmap_startup_info[variantnum].image = 
-		set_fd_table->get_full_path(variants[variantnum].variantpid, AT_FDCWD, (void*)ARG1(variantnum));
-    set_mmap_table->mmap_startup_info[variantnum].serialized_argv  = args.str();
+		mvee::os_normalize_path_name(set_fd_table->get_full_path(variantnum, variants[variantnum].variantpid, AT_FDCWD, (void*)ARG1(variantnum)));
+    set_mmap_table->mmap_startup_info[variantnum].serialized_argv = args.str();
 
 #if defined(MVEE_FILTER_LOGGING) && !defined(MVEE_BENCHMARK)
     if (set_mmap_table->mmap_startup_info[variantnum].image.find("parsec-2.1") != std::string::npos
@@ -1011,13 +1025,19 @@ long monitor::handle_execve_precall(int variantnum)
     handle_execve_get_args(0);
 
 	if (mvee::is_qemu_executable(set_mmap_table->mmap_startup_info[0].image, arch))
+	{
 		warnf("Variant %d is switching to ISA: %s\n", 0, getTextualISA(arch));
+		variants[0].arch = arch;
+	}
 
     for (int i = 1; i < mvee::numvariants; ++i)
     {
         handle_execve_get_args(i);
 		if (mvee::is_qemu_executable(set_mmap_table->mmap_startup_info[i].image, arch))
+		{
 			warnf("Variant %d is switching to ISA: %s\n", i, getTextualISA(arch));
+			variants[i].arch = arch;
+		}
 
         if (set_mmap_table->mmap_startup_info[i].image.compare(
 				set_mmap_table->mmap_startup_info[0].image))
@@ -1194,6 +1214,30 @@ long monitor::handle_execve_postcall(int variantnum)
                 }
             }
         }
+
+		// enable fast forwarding for QEMU
+		for (int i = 0; i < mvee::numvariants; ++i)
+		{
+			warnf("Variant %d is running architecture %s\n", i, getTextualISA(variants[i].arch));
+			
+			if (variants[i].arch != ARCH_HOST)
+			{
+				std::string qemu_image = (set_mmap_table->mmap_startup_info[i].real_image.length() > 0) ? 
+					set_mmap_table->mmap_startup_info[i].real_image :
+					set_mmap_table->mmap_startup_info[i].image;
+
+				warnf("Variant %d is not running natively - qemu-user binary used: %s\n", i, 
+					  qemu_image.c_str());
+
+				variants[i].entry_point_address = mvee::os_get_entry_point_address(
+					qemu_image);
+
+				warnf("> (Relative) Entry Point Address is 0x%016lx\n", 
+					  variants[i].entry_point_address);
+
+				variants[i].fast_forward_to_entry_point = true;				
+			}
+		}
     }
 	else
 	{		
@@ -1205,9 +1249,6 @@ long monitor::handle_execve_postcall(int variantnum)
 #ifdef MVEE_FD_DEBUG
     for (int i = 0; i < mvee::numvariants; ++i)
         set_fd_table->print_fd_table_proc(variants[i].variantpid);
-#endif
-
-#ifdef MVEE_FD_DEBUG
     set_fd_table->verify_fd_table(getpids());
 #endif
 
@@ -1420,34 +1461,44 @@ long monitor::handle_rt_sigsuspend_precall(int variantnum)
 {
     CHECKPOINTER(1);
     CHECKSIGSET(1, OLDCALLIFNOT(__NR_rt_sigsuspend));
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+}
 
-    memcpy(&old_blocked_signals, &blocked_signals, sizeof(sigset_t));
-    sigemptyset(&blocked_signals);
+long monitor::handle_rt_sigsuspend_call (int variantnum)
+{
+	if (IS_SYNCED_CALL)
+		variantnum = 0;
 
-    if (ARG1(0))
+	memcpy(&old_blocked_signals[variantnum], &blocked_signals[variantnum], sizeof(sigset_t));
+    sigemptyset(&blocked_signals[variantnum]);
+
+    if (ARG1(variantnum))
     {
-        sigset_t _set = call_get_sigset(0, ARG1(0), OLDCALLIFNOT(__NR_rt_sigsuspend));
+        sigset_t _set = call_get_sigset(variantnum, ARG1(variantnum), OLDCALLIFNOT(__NR_rt_sigsuspend));
 
         for (int i = SIGINT; i < __SIGRTMAX; ++i)
             if (sigismember(&_set, i))
-                sigaddset(&blocked_signals, i);
+                sigaddset(&blocked_signals[variantnum], i);
     }
 
     debugf("> SIGSUSPEND ENTRY - blocked signals are now: %s\n",
-               getTextualSigSet(blocked_signals).c_str());
+               getTextualSigSet(blocked_signals[variantnum]).c_str());
 
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	return MVEE_CALL_ALLOW;
 }
 
 long monitor::handle_rt_sigsuspend_postcall(int variantnum)
 {
-    memcpy(&blocked_signals, &old_blocked_signals, sizeof(sigset_t));
-    sigemptyset(&old_blocked_signals);
+	if (IS_SYNCED_CALL)
+		variantnum = 0;
+
+    memcpy(&blocked_signals[variantnum], &old_blocked_signals[variantnum], sizeof(sigset_t));
+    sigemptyset(&old_blocked_signals[variantnum]);
 
     debugf("> SIGSUSPEND EXIT - blocked signals are now: %s\n",
-               getTextualSigSet(blocked_signals).c_str());
+               getTextualSigSet(blocked_signals[variantnum]).c_str());
 
-    return 0;
+    return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1589,10 +1640,7 @@ long monitor::handle_creat_postcall(int variantnum)
         char*                      str = mvee_rw_read_string(variants[0].variantpid, ARG1(0));
 
         set_fd_table->create_fd_info(FT_REGULAR, fds, str, O_WRONLY, false, false, false, 0);
-#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
-#endif
-
         SAFEDELETEARRAY(str);
     }
 
@@ -1668,10 +1716,7 @@ long monitor::handle_dup_postcall(int variantnum)
             return 0;
         }
         set_fd_table->create_fd_info(fd_info->file_type, fds, fd_info->path.c_str(), fd_info->access_flags, false, master_file, fd_info->unsynced_reads, fd_info->original_file_size);
-#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
-#endif
-
     }
 
     return 0;
@@ -1713,10 +1758,7 @@ long monitor::handle_pipe_postcall(int variantnum)
         // add new file descriptor mappings for the created pipe
         set_fd_table->create_fd_info(FT_PIPE_BLOCKING, read_fds,  "pipe:read",  O_RDONLY, false, true);
         set_fd_table->create_fd_info(FT_PIPE_BLOCKING, write_fds, "pipe:write", O_WRONLY, false, true);
-
-#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
-#endif
     }
 
     return 0;
@@ -1740,12 +1782,6 @@ long monitor::handle_times_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_brk
 -----------------------------------------------------------------------------*/
-long monitor::handle_brk_call(int variantnum)
-{
-    //mvee_log_variant_backtrace(0);
-    return MVEE_CALL_ALLOW;
-}
-
 long monitor::handle_brk_log_return(int variantnum)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, addrs);
@@ -1758,65 +1794,67 @@ long monitor::handle_brk_log_return(int variantnum)
 }
 
 long monitor::handle_brk_postcall(int variantnum)
-{
-    for (int i = 0; i < mvee::numvariants; ++i)
-    {
-        long              result      = call_postcall_get_variant_result(i);
-        mmap_region_info* heap_region = set_mmap_table->get_heap_region(i);
-        fd_info           backing_file;
+{	
+	if (IS_SYNCED_CALL)
+	{
+		for (int i = 0; i < mvee::numvariants; ++i)
+		{
+			long              result      = call_postcall_get_variant_result(i);
+			mmap_region_info* heap_region = set_mmap_table->get_heap_region(i);
+			fd_info           backing_file;
 
-        // BRK only returns the current end of the heap, not the start.
-        // consequently, if we do not have the heap region in our maps yet, we have no choice
-        // but to read it from /proc/%d/maps
-        //
-        // Do note that a heap MAY not be allocated until the first BRK call with a non-NULL arg
-        //
-        // In the old days we could've assumed that the heap started right after the last
-        // mapped region of the current program (i.e., its last bss section). Thanks
-        // to ASLR that is no longer true though.
-        //
-        // We could technically also read the __currbrk syms from the program's GOT..
-        if (!heap_region)
-        {
-            char          cmd[512];
-            std::string   output;
-            unsigned long heap_start;
-            unsigned long heap_end;
+			// BRK only returns the current end of the heap, not the start.
+			// consequently, if we do not have the heap region in our maps yet, we have no choice
+			// but to read it from /proc/%d/maps
+			//
+			// Do note that a heap MAY not be allocated until the first BRK call with a non-NULL arg
+			//
+			// In the old days we could've assumed that the heap started right after the last
+			// mapped region of the current program (i.e., its last bss section). Thanks
+			// to ASLR that is no longer true though.
+			//
+			// We could technically also read the __currbrk syms from the program's GOT..
+			if (!heap_region)
+			{
+				char          cmd[512];
+				std::string   output;
+				unsigned long heap_start;
+				unsigned long heap_end;
 
-            /*
-               warnf("VDSO BACKTRACE TEST!!!\n");
-               mvee_log_variant_backtrace(i);
-             */
+				sprintf(cmd, "cat /proc/%d/maps | grep \"\\[heap\\]\"", variants[i].variantpid);
+				output                          = mvee::log_read_from_proc_pipe(cmd, NULL);
 
-            sprintf(cmd, "cat /proc/%d/maps | grep \"\\[heap\\]\"", variants[i].variantpid);
-            output                          = mvee::log_read_from_proc_pipe(cmd, NULL);
+				if (output == "" || sscanf(output.c_str(), LONGPTRSTR "-" LONGPTRSTR " %*s %*08x %*s %*s %*s", &heap_start, &heap_end) != 2)
+				{
+					// There is no heap yet...
+					set_mmap_table->verify_mman_table(i, variants[i].variantpid);
+					return 0;
+				}
 
-            if (output == "" || sscanf(output.c_str(), LONGPTRSTR "-" LONGPTRSTR " %*s %*08x %*s %*s %*s", &heap_start, &heap_end) != 2)
-            {
-                // There is no heap yet...
-                set_mmap_table->verify_mman_table(i, variants[i].variantpid);
-                return 0;
-            }
+				backing_file.fds.resize(mvee::numvariants);
+				backing_file.fds[i]             = MVEE_UNKNOWN_FD;
+				backing_file.path               = "[heap]";
+				backing_file.access_flags       = 0;
+				backing_file.original_file_size = 0;
 
-            backing_file.fds.resize(mvee::numvariants);
-            backing_file.fds[i]             = MVEE_UNKNOWN_FD;
-            backing_file.path               = "[heap]";
-            backing_file.access_flags       = 0;
-            backing_file.original_file_size = 0;
+				set_mmap_table->map_range(i, heap_start, result-heap_start, MAP_ANONYMOUS | MAP_PRIVATE, PROT_READ | PROT_WRITE, &backing_file, 0);
+			}
+			else
+			{
+				// the kernel will not allow us to:
+				// a) change the base of the heap
+				// b) request a new size that would cause overlaps with existing vma's (mapped regions)
+				// it is therefore safe to just update the heap_region's size here
+				heap_region->region_size = ROUND_UP(result - heap_region->region_base_address, 4096);
+			}
 
-            set_mmap_table->map_range(i, heap_start, result-heap_start, MAP_ANONYMOUS | MAP_PRIVATE, PROT_READ | PROT_WRITE, &backing_file, 0);
-        }
-        else
-        {
-            // the kernel will not allow us to:
-            // a) change the base of the heap
-            // b) request a new size that would cause overlaps with existing vma's (mapped regions)
-            // it is therefore safe to just update the heap_region's size here
-            heap_region->region_size = ROUND_UP(result - heap_region->region_base_address, 4096);
-        }
-
-        set_mmap_table->verify_mman_table(i, variants[i].variantpid);
-    }
+			set_mmap_table->verify_mman_table(i, variants[i].variantpid);
+		}
+	}
+	else
+	{
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
 
     return 0;
 }
@@ -2160,10 +2198,7 @@ long monitor::handle_fcntl_postcall(int variantnum)
                 }
 
                 set_fd_table->create_fd_info(fd_info->file_type, fds, fd_info->path.c_str(), fd_info->access_flags, (ARG2(0) == F_DUPFD_CLOEXEC) ? true : fd_info->close_on_exec, state == STATE_IN_MASTERCALL, fd_info->unsynced_reads, fd_info->original_file_size);
-
-#ifdef MVEE_FD_DEBUG
                 set_fd_table->verify_fd_table(getpids());
-#endif
             }
 			else if (ARG2(0) == F_SETFL)
 			{
@@ -2313,9 +2348,7 @@ long monitor::handle_dup2_postcall(int variantnum)
             }
 
             set_fd_table->create_fd_info(fd_info->file_type, fds, fd_info->path.c_str(), fd_info->access_flags, false, fd_info->master_file, fd_info->unsynced_reads, fd_info->original_file_size);
-#ifdef MVEE_FD_DEBUG
             set_fd_table->verify_fd_table(getpids());
-#endif
         }
     }
 
@@ -2540,6 +2573,11 @@ long monitor::handle_rt_sigaction_precall(int variantnum)
 
 long monitor::handle_rt_sigaction_postcall(int variantnum)
 {
+	// TODO/FIXME - stijn: We might see mismatches by not tracking sigactions
+	// while fast forwarding at some point
+	if (IS_UNSYNCED_CALL)
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     if (call_succeeded && ARG2(0))
     {
         struct sigaction action = call_get_sigaction(0, ARG2(0), OLDCALLIFNOT(__NR_rt_sigaction));
@@ -2550,18 +2588,14 @@ long monitor::handle_rt_sigaction_postcall(int variantnum)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_arch_prctl - (int code, unsigned long addr)
+    sys_arch_prctl - (int code, unsigned long addr)
+
+	This is used to get/set the FS/GS base on x86
 -----------------------------------------------------------------------------*/
 long monitor::handle_arch_prctl_precall(int variantnum)
 {
     CHECKARG(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
-}
-
-long monitor::handle_arch_prctl_postcall(int variantnum)
-{
-    //	log_variant_backtrace(0);
-    return 0;
 }
 
 /*-----------------------------------------------------------------------------
@@ -2672,13 +2706,6 @@ long monitor::handle_getrlimit_precall(int variantnum)
     CHECKPOINTER(2);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
-
-long monitor::handle_getrlimit_postcall(int variantnum)
-{
-    //    REPLICATEBUFFERFIXEDLEN(2, sizeof(struct rlimit));
-    return 0;
-}
-
 
 /*-----------------------------------------------------------------------------
   sys_symlink - (const char  *  oldname, const char  *  newname)
@@ -2868,68 +2895,68 @@ long monitor::handle_munmap_postcall(int variantnum)
 {
     int release_locks = 0;
 
-    // lower region munmap
-    if (IS_UNSYNCED_CALL)
-    {
-        if (call_postcall_get_variant_result(variantnum) == 0)
-            set_mmap_table->munmap_range(variantnum, ARG1(variantnum), ARG2(variantnum));
-        return 0;
-    }
-
     if (call_succeeded)
     {
-        // perform the writebacks
-        for (std::vector<writeback_info>::iterator it = writeback_infos.begin();
-             it != writeback_infos.end(); ++it)
-        {
-            warnf("writing back private mapping - FILE: %s\n", it->writeback_regions[0]->region_backing_file_path.c_str());
-            FILE* fp = fopen(it->writeback_regions[0]->region_backing_file_path.c_str(), "wb+");
+		if (IS_UNSYNCED_CALL)
+		{
+			set_mmap_table->munmap_range(variantnum, ARG1(variantnum), ARG2(variantnum));
+			set_mmap_table->verify_mman_table(variantnum, variants[variantnum].variantpid);
+		}
+		else
+		{
+			// perform the writebacks
+			for (auto it = writeback_infos.begin(); it != writeback_infos.end(); ++it)
+			{
+				warnf("writing back private mapping - FILE: %s\n", it->writeback_regions[0]->region_backing_file_path.c_str());
+				FILE* fp = fopen(it->writeback_regions[0]->region_backing_file_path.c_str(), "wb+");
 
-            if (!fp)
-                warnf("can't open writeback file!\n");
-            else
-            {
-                if (it->writeback_buffer_offset)
-                    fseek(fp, it->writeback_buffer_offset, SEEK_SET);
-                fwrite(it->writeback_buffer, 1, it->writeback_buffer_size, fp);
-                fclose(fp);
-                warnf("finished writing back to file!\n");
-            }
-        }
+				if (!fp)
+					warnf("can't open writeback file!\n");
+				else
+				{
+					if (it->writeback_buffer_offset)
+						fseek(fp, it->writeback_buffer_offset, SEEK_SET);
+					fwrite(it->writeback_buffer, 1, it->writeback_buffer_size, fp);
+					fclose(fp);
+					warnf("finished writing back to file!\n");
+				}
+			}
 
-        for (int i = 0; i < mvee::numvariants; ++i)
-            set_mmap_table->munmap_range(i, ARG1(i), ARG2(i));
-    }
+			for (int i = 0; i < mvee::numvariants; ++i)
+				set_mmap_table->munmap_range(i, ARG1(i), ARG2(i));
 
-    while (writeback_infos.size() > 0)
-    {
-        writeback_info info = writeback_infos.back();
-        SAFEDELETEARRAY(info.writeback_regions);
-        SAFEDELETEARRAY(info.writeback_buffer);
-        writeback_infos.pop_back();
-    }
+			while (writeback_infos.size() > 0)
+			{
+				writeback_info info = writeback_infos.back();
+				SAFEDELETEARRAY(info.writeback_regions);
+				SAFEDELETEARRAY(info.writeback_buffer);
+				writeback_infos.pop_back();
+			}
 
-    // this is the unmap of the upper region!!! we need to release those
-    // extra locks we took in mmap here
-    if (in_new_heap_allocation)
-    {
-        in_new_heap_allocation = false;
-        release_locks          = 1;
-    }
+			//
+			// this is the unmap of the upper region!!! we need to release those
+			// extra locks we took in mmap here. See MVEE_monitor.h for further
+			// comments on ptmalloc2 handling
+			// 
+			if (in_new_heap_allocation)
+			{
+				in_new_heap_allocation = false;
+				release_locks          = 1;
+			}
 
-    if (IS_UNSYNCED_CALL)
-        set_mmap_table->verify_mman_table(variantnum, variants[variantnum].variantpid);
-    else
-        for (int i = 0; i < mvee::numvariants; ++i)
-            set_mmap_table->verify_mman_table(i, variants[i].variantpid);
+			for (int i = 0; i < mvee::numvariants; ++i)
+				set_mmap_table->verify_mman_table(i, variants[i].variantpid);
 
 #ifdef MVEE_MMAN_DEBUG
-    set_mmap_table->print_mmap_table();
+			set_mmap_table->print_mmap_table();
 #endif
-    if (release_locks)
-        call_release_locks(MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN);
+			if (release_locks)
+				call_release_locks(MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN);
 
-    return 0;
+		}
+    }
+
+    return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -3096,11 +3123,7 @@ long monitor::handle_socket_postcall(int variantnum)
 		
 		FileType type = (ARG2(0) & SOCK_NONBLOCK) ? FT_SOCKET_NON_BLOCKING : FT_SOCKET_BLOCKING;
         set_fd_table->create_fd_info(type, fds, "sock:unnamed", 0, (ARG2(0) & SOCK_CLOEXEC) ? true : false, true);
-
-#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
-#endif
-
     }
     return 0;
 }
@@ -3333,10 +3356,7 @@ long monitor::handle_socketpair_postcall(int variantnum)
 		FileType type = (ARG2(0) & SOCK_NONBLOCK) ? FT_SOCKET_NON_BLOCKING : FT_SOCKET_BLOCKING;
         set_fd_table->create_fd_info(type, fds,  "sock:unnamed", 0, (ARG2(0) & SOCK_CLOEXEC) ? true : false, true);
         set_fd_table->create_fd_info(type, fds2, "sock:unnamed", 0, (ARG2(0) & SOCK_CLOEXEC) ? true : false, true);
-
-#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
-#endif
 
         for (int i = 1; i < mvee::numvariants; ++i)
         {
@@ -3732,18 +3752,13 @@ long monitor::handle_accept4_postcall(int variantnum)
 
 			FileType type = (ARG4(0) & SOCK_NONBLOCK) ? FT_SOCKET_NON_BLOCKING : FT_SOCKET_BLOCKING;
             set_fd_table->create_fd_info(type, fds, text_addr, 0, (ARG4(0) & SOCK_CLOEXEC) ? true : false, true, 0);
-
-#ifdef MVEE_FD_DEBUG
             set_fd_table->verify_fd_table(getpids());
-#endif
         }
         else
         {
 			FileType type = (ARG4(0) & SOCK_NONBLOCK) ? FT_SOCKET_NON_BLOCKING : FT_SOCKET_BLOCKING;
             set_fd_table->create_fd_info(type, fds, "sock:unknown", 0, (ARG4(0) & SOCK_CLOEXEC) ? true : false, true);
-#ifdef MVEE_FD_DEBUG
             set_fd_table->verify_fd_table(getpids());
-#endif
         }
     }
     return 0;
@@ -3788,9 +3803,7 @@ long monitor::handle_eventfd2_postcall(int variantnum)
 
 		FileType type = (ARG2(0) & EFD_NONBLOCK) ? FT_POLL_NON_BLOCKING : FT_POLL_BLOCKING;
         set_fd_table->create_fd_info(type, fds, "eventfd", 0, (ARG2(0) & EFD_CLOEXEC) ? true : false, true);
-#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
-#endif
     }
     return 0;
 }
@@ -3832,9 +3845,7 @@ long monitor::handle_epoll_create1_postcall(int variantnum)
         std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
 
         set_fd_table->create_fd_info(FT_POLL_BLOCKING, fds, "epoll_sock", 0, (ARG1(0) & EPOLL_CLOEXEC) ? true : false, true);
-#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
-#endif
     }
     return 0;
 }
@@ -4404,12 +4415,8 @@ long monitor::handle_clone_postcall(int variantnum)
         {
             debugf("setting TID of the newly created thread in the address space of the parent\n");
             for (int i = 1; i < mvee::numvariants; ++i)
-            {
-                mvee_word word;
-                word._long = mvee_wrap_ptrace(PTRACE_PEEKDATA, variants[i].variantpid, ARG3(i), NULL);
-                word._pid  = (pid_t)call_postcall_get_variant_result(0);
-                mvee_wrap_ptrace(PTRACE_POKEDATA, variants[i].variantpid, ARG3(i), (void*)word._long);
-            }
+				mvee_rw_write_pid(variants[i].variantpid, ARG3(i), 
+								  (pid_t)call_postcall_get_variant_result(0));
         }
 
         // update stack regions (if applicable)
@@ -4482,12 +4489,19 @@ long monitor::handle_mprotect_log_return(int variantnum)
 
 long monitor::handle_mprotect_postcall(int variantnum)
 {
-    if (call_succeeded)
-        for (int i = 0; i < mvee::numvariants; ++i)
-            set_mmap_table->mprotect_range(i, ARG1(i), ARG2(i), ARG3(i));
+	if (IS_SYNCED_CALL)
+	{
+		if (call_succeeded)
+			for (int i = 0; i < mvee::numvariants; ++i)
+				set_mmap_table->mprotect_range(i, ARG1(i), ARG2(i), ARG3(i));
 
-    for (int i = 0; i < mvee::numvariants; ++i)
-        set_mmap_table->verify_mman_table(i, variants[i].variantpid);
+		for (int i = 0; i < mvee::numvariants; ++i)
+			set_mmap_table->verify_mman_table(i, variants[i].variantpid);
+	}
+	else
+	{
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
 
     return 0;
 }
@@ -5015,25 +5029,36 @@ long monitor::handle_rt_sigprocmask_precall(int variantnum)
     CHECKARG(1);
     CHECKPOINTER(2);
     CHECKSIGSET(2, OLDCALLIFNOT(__NR_rt_sigprocmask));
-    CHECKPOINTER(3);
-    variants[0].last_sigset = call_get_sigset(0, ARG2(0), OLDCALLIFNOT(__NR_rt_sigprocmask));
+    CHECKPOINTER(3);    
     //	log_variant_backtrace(0);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
+long monitor::handle_rt_sigprocmask_call(int variantnum)
+{
+	if (IS_SYNCED_CALL)
+		variantnum = 0;
+
+	variants[variantnum].last_sigset = call_get_sigset(variantnum, ARG2(variantnum), OLDCALLIFNOT(__NR_rt_sigprocmask));
+	return MVEE_CALL_ALLOW | MVEE_CALL_HANDLED_UNSYNCED_CALL;
+}
+
 long monitor::handle_rt_sigprocmask_postcall(int variantnum)
 {
-    if (call_succeeded && ARG2(0))
-    {
-        sigset_t _set = variants[0].last_sigset;
+	if (IS_SYNCED_CALL)
+		variantnum = 0;
 
-        switch (ARG1(0))
+    if (call_succeeded && ARG2(variantnum))
+    {
+        sigset_t _set = variants[variantnum].last_sigset;
+
+        switch (ARG1(variantnum))
         {
             case SIG_BLOCK:
             {
                 for (int i = 1; i < SIGRTMAX+1; ++i)
                     if (sigismember(&_set, i))
-                        sigaddset(&blocked_signals, i);
+                        sigaddset(&blocked_signals[variantnum], i);
                 break;
             }
             case SIG_UNBLOCK:
@@ -5041,22 +5066,22 @@ long monitor::handle_rt_sigprocmask_postcall(int variantnum)
                 for (int i = 1; i < SIGRTMAX+1; ++i)
                 {
                     if (sigismember(&_set, i))
-                        sigdelset(&blocked_signals, i);
+                        sigdelset(&blocked_signals[variantnum], i);
                 }
                 break;
             }
             case SIG_SETMASK:
             {
-                sigemptyset(&blocked_signals);
+                sigemptyset(&blocked_signals[variantnum]);
                 for (int i = 1; i < SIGRTMAX+1; ++i)
                     if (sigismember(&_set, i))
-                        sigaddset(&blocked_signals, i);
+                        sigaddset(&blocked_signals[variantnum], i);
                 break;
             }
         }
     }
 
-    return 0;
+    return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -5209,6 +5234,9 @@ long monitor::handle_mmap_precall(int variantnum)
 
 long monitor::handle_mmap_call(int variantnum)
 {
+	if (IS_UNSYNCED_CALL)
+		return MVEE_CALL_ALLOW | MVEE_CALL_HANDLED_UNSYNCED_CALL;
+
     for (int i = 0; i < mvee::numvariants; ++i)
         variants[i].last_mmap_result = 0;
 
@@ -5309,96 +5337,166 @@ long monitor::handle_mmap_call(int variantnum)
 
 long monitor::handle_mmap_postcall(int variantnum)
 {
-    UNMAPFDS(5);
-    if (call_succeeded)
-    {
-        fd_info*                   info      = NULL;
-        int                        free_info = 0;
-        std::vector<unsigned long> results   = call_postcall_get_result_vector();
+	if (!call_succeeded)
+	{
+		if (IS_SYNCED_CALL)
+			UNMAPFDS(5);
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}	
 
-        for (int i = 0; i < mvee::numvariants; ++i)
-            variants[i].last_mmap_result = results[i];
+	if (IS_SYNCED_CALL)
+	{
+		fd_info*                   info      = NULL;
+		int                        free_info = 0;
+		std::vector<unsigned long> results   = call_postcall_get_result_vector();
 
-        if (ARG5(0) && (int)ARG5(0) != -1)
-        {
-            info = set_fd_table->get_fd_info(ARG5(0));
-            if (!info)
-            {
-                warnf("mmap2 request with backing file but backing file info not found!\n");
-                shutdown(false);
-                return 0;
-            }
-            if (ARG4(0) & MAP_MVEE_WASSHARED)
-            {
-                /* from mmap2 manpages:
-                 * A file is mapped in multiples of the page size.  For a file that is
-                 not a multiple of the page size, the remaining memory is zeroed when
-                 mapped, and writes to that region are not written out to the file.
-                 The effect of changing the size of the underlying file of a mapping
-                 on the pages that correspond to added or removed regions of the file
-                 is unspecified.
+		for (int i = 0; i < mvee::numvariants; ++i)
+			variants[i].last_mmap_result = results[i];
 
-                 => i.e., you CAN map x pages backed by a y byte file. If x > y however,
-                 only the pages containing the y bytes will be valid. When munmapping,
-                 only y bytes will be written back
-                 */
-                struct stat _st;
-                if (stat(info->path.c_str(), &_st))
-                {
-                    warnf("couldn't get the original file size for: %s\n", info->path.c_str());
-                    shutdown(false);
-                    return 0;
-                }
+		if (ARG5(0) && (int)ARG5(0) != -1)
+		{
+			info = set_fd_table->get_fd_info(ARG5(0));
+			if (!info)
+			{
+				warnf("mmap2 request with backing file but backing file info not found!\n");
+				shutdown(false);
+				return 0;
+			}
+			if (ARG4(0) & MAP_MVEE_WASSHARED)
+			{
+				/* from mmap2 manpages:
+				 * A file is mapped in multiples of the page size.  For a file that is
+				 not a multiple of the page size, the remaining memory is zeroed when
+				 mapped, and writes to that region are not written out to the file.
+				 The effect of changing the size of the underlying file of a mapping
+				 on the pages that correspond to added or removed regions of the file
+				 is unspecified.
 
-                info->original_file_size = _st.st_size;
-                warnf("size for: %s - %d bytes\n", info->path.c_str(), _st.st_size);
-            }
-        }
+				 => i.e., you CAN map x pages backed by a y byte file. If x > y however,
+				 only the pages containing the y bytes will be valid. When munmapping,
+				 only y bytes will be written back
+				*/
+				struct stat _st;
+				if (stat(info->path.c_str(), &_st))
+				{
+					warnf("couldn't get the original file size for: %s\n", info->path.c_str());
+					shutdown(false);
+					return 0;
+				}
 
-        for (int i = 0; i < mvee::numvariants; ++i)
-        {
-            unsigned int actual_offset = ARG6(0);
+				info->original_file_size = _st.st_size;
+				warnf("size for: %s - %d bytes\n", info->path.c_str(), _st.st_size);
+			}
+		}
+
+		for (int i = 0; i < mvee::numvariants; ++i)
+		{
+			unsigned int actual_offset = ARG6(0);
 #ifdef __NR_mmap2
-            if (variants[0].prevcallnum == __NR_mmap2)
-                actual_offset *= 4096;
+			if (variants[0].prevcallnum == __NR_mmap2)
+				actual_offset *= 4096;
 #endif
-            set_mmap_table->map_range(i, results[i], ARG2(0), ARG4(0), ARG3(0), info, actual_offset);
-        }
+			set_mmap_table->map_range(i, results[i], ARG2(0), ARG4(0), ARG3(0), info, actual_offset);
+		}
 
-        // 2 * 2 * (4 * 1024 * 1024 * sizeof(long))
-        // check if this was a new heap allocation by ptmalloc
-        if (ARG1(0) == 0                                                // no base address
-            && ARG2(0) == 2 * HEAP_MAX_SIZE                             // size = 2*HEAP_MAX_SIZE
-            && ARG3(0) == PROT_NONE                                     // no protection flags yet
-            && ARG4(0) == (MAP_PRIVATE | MAP_NORESERVE | MAP_ANONYMOUS) //
-            && (int)ARG5(0) == -1)                                      // backed by /dev/zero
-        {
-            in_new_heap_allocation = true;
+		// 2 * 2 * (4 * 1024 * 1024 * sizeof(long))
+		// check if this was a new heap allocation by ptmalloc
+		if (ARG1(0) == 0                                                // no base address
+			&& ARG2(0) == 2 * HEAP_MAX_SIZE                             // size = 2*HEAP_MAX_SIZE
+			&& ARG3(0) == PROT_NONE                                     // no protection flags yet
+			&& ARG4(0) == (MAP_PRIVATE | MAP_NORESERVE | MAP_ANONYMOUS) //
+			&& (int)ARG5(0) == -1)                                      // backed by /dev/zero
+		{
+			in_new_heap_allocation = true;
 
-            debugf("this seems to be a heap allocation by ptmalloc\n");
+			debugf("this seems to be a heap allocation by ptmalloc\n");
 
-            // bump the lock counter for the fd/mman locks - we'll unlock when we see the last munmap
-            call_grab_locks(MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN);
+			// bump the lock counter for the fd/mman locks - we'll unlock when we see the last munmap
+			call_grab_locks(MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN);
 
-            // pre-calculate the parameters for the next munmap calls
-            for (int i = 0; i < mvee::numvariants; ++i)
-            {
-                unsigned long start_of_heap = (results[i] + (HEAP_MAX_SIZE - 1)) & ~(HEAP_MAX_SIZE - 1);
-                variants[i].last_lower_region_start = results[i];
-                variants[i].last_lower_region_size  = start_of_heap - results[i];
-                variants[i].last_upper_region_start = start_of_heap + HEAP_MAX_SIZE;
-                variants[i].last_upper_region_size  = results[i] + HEAP_MAX_SIZE - start_of_heap;
-            }
-        }
+			// pre-calculate the parameters for the next munmap calls
+			for (int i = 0; i < mvee::numvariants; ++i)
+			{
+				unsigned long start_of_heap = (results[i] + (HEAP_MAX_SIZE - 1)) & ~(HEAP_MAX_SIZE - 1);
+				variants[i].last_lower_region_start = results[i];
+				variants[i].last_lower_region_size  = start_of_heap - results[i];
+				variants[i].last_upper_region_start = start_of_heap + HEAP_MAX_SIZE;
+				variants[i].last_upper_region_size  = results[i] + HEAP_MAX_SIZE - start_of_heap;
+			}
+		}
 
-        if (free_info)
-        {
-            SAFEDELETE(info);
-        }
-    }
+		if (free_info)
+			SAFEDELETE(info);
 
-    for (int i = 0; i < mvee::numvariants; ++i)
-        set_mmap_table->verify_mman_table(i, variants[i].variantpid);
+		for (int i = 0; i < mvee::numvariants; ++i)
+			set_mmap_table->verify_mman_table(i, variants[i].variantpid);
+	}
+	else
+	{
+		fd_info*      info      = NULL;
+		unsigned long result = call_postcall_get_variant_result(variantnum);
+
+		if (ARG5(variantnum) && (int)ARG5(variantnum) != -1)
+		{
+			info = set_fd_table->get_fd_info(ARG5(variantnum), variantnum);
+			if (!info)
+			{
+				warnf("mmap2 request with backing file but backing file info not found!\n");
+				shutdown(false);
+				return 0;
+			}
+		}
+
+		unsigned int actual_offset = ARG6(variantnum);
+#ifdef __NR_mmap2
+		if (variants[variantnum].prevcallnum == __NR_mmap2)
+			actual_offset *= 4096;
+#endif
+		set_mmap_table->map_range(variantnum, result, ARG2(variantnum), ARG4(variantnum), ARG3(variantnum), info, actual_offset);
+		set_mmap_table->verify_mman_table(variantnum, variants[variantnum].variantpid);
+
+		// Check if we mapped the main binary
+		if (info &&
+			variants[variantnum].fast_forward_to_entry_point &&
+			!variants[variantnum].entry_point_bp_set)
+		{
+			std::string& qemu_image = (set_mmap_table->mmap_startup_info[variantnum].real_image.length() > 0) ? 
+				set_mmap_table->mmap_startup_info[variantnum].real_image :
+				set_mmap_table->mmap_startup_info[variantnum].image;
+
+//			warnf("Mapping %s\n", info->path.c_str());
+
+			if ((ARG3(variantnum) & PROT_EXEC) &&
+				info->path.compare(qemu_image) == 0)
+			{
+				// see if we can get a handle to the executable region that
+				// contains the entry point
+				unsigned long region_base = set_mmap_table->find_image_base(variantnum, info->path);
+
+				if (region_base)
+				{
+					mmap_region_info* region_info = 
+						set_mmap_table->get_region_info(variantnum, 
+														region_base + variants[variantnum].entry_point_address);
+
+					// Set hardware breakpoint on the entry point
+					if (region_info)
+					{
+						// Update the address so it becomes an EFFECTIVE (rather
+						// than RELATIVE) address
+						variants[variantnum].entry_point_address = 
+							region_base + variants[variantnum].entry_point_address;
+						hwbp_set_watch(variantnum, variants[variantnum].entry_point_address, MVEE_BP_EXEC_ONLY);
+						variants[variantnum].entry_point_bp_set = true;
+
+						warnf("The region containing the main program entry point has been mapped in variant %d - Set hardware breakpoint!\n", variantnum);
+					}
+				}
+			}
+		}
+
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
 
     return 0;
 }
@@ -5467,8 +5565,9 @@ long monitor::handle_stat_precall(int variantnum)
 
 long monitor::handle_stat_postcall(int variantnum)
 {
-    REPLICATEBUFFERFIXEDLEN(2, sizeof(struct stat));
-    return 0;
+	if (IS_SYNCED_CALL)
+		REPLICATEBUFFERFIXEDLEN(2, sizeof(struct stat));
+    return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
 
 long monitor::handle_stat64_log_args(int variantnum)
@@ -5661,9 +5760,16 @@ long monitor::handle_fstat_log_return(int variantnum)
 
 long monitor::handle_fstat_postcall(int variantnum)
 {
-    REPLICATEBUFFERFIXEDLEN(2, sizeof(struct stat));
-    if (state != STATE_IN_MASTERCALL)
-        UNMAPFDS(1);
+	if (IS_SYNCED_CALL)
+	{
+		REPLICATEBUFFERFIXEDLEN(2, sizeof(struct stat));
+		if (state != STATE_IN_MASTERCALL)
+			UNMAPFDS(1);
+	}
+	else
+	{
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
     return 0;
 }
 
@@ -6129,18 +6235,16 @@ long monitor::handle_futex_precall(int variantnum)
 
 long monitor::handle_futex_call(int variantnum)
 {
+	if (IS_UNSYNCED_CALL)
+		return MVEE_CALL_ALLOW | MVEE_CALL_HANDLED_UNSYNCED_CALL;
+
 #ifndef MVEE_DISABLE_SYNCHRONIZATION_REPLICATION
-    mvee_word word;
     // tid was already cleared
     if (ARG2(0) == MVEE_FUTEX_WAIT_TID && ARG3(0) == 0)
     {
         // clear it for the slaves too and deny the call
         for (int i = 1; i < mvee::numvariants; ++i)
-        {
-            word._long = mvee_wrap_ptrace(PTRACE_PEEKDATA, variants[i].variantpid, ARG1(i), NULL);
-            word._uint = 0;
-            mvee_wrap_ptrace(PTRACE_POKEDATA, variants[i].variantpid, ARG1(i), (void*)word._long);
-        }
+			mvee_rw_write_uint(variants[i].variantpid, ARG1(i), 0);
         return MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
     }
 #endif
@@ -6167,21 +6271,24 @@ long monitor::handle_futex_log_return(int variantnum)
 long monitor::handle_futex_postcall(int variantnum)
 {
 #ifndef MVEE_DISABLE_SYNCHRONIZATION_REPLICATION
-    mvee_word master_word;
-    mvee_word slave_word;
-    // sync the tids
-    if (ARG2(0) == MVEE_FUTEX_WAIT_TID)
-    {
-        master_word._long = mvee_wrap_ptrace(PTRACE_PEEKDATA, variants[0].variantpid, ARG1(0), NULL);
-        for (int i = 1; i < mvee::numvariants; ++i)
-        {
-            slave_word._long = mvee_wrap_ptrace(PTRACE_PEEKDATA, variants[i].variantpid, ARG1(i), NULL);
-            slave_word._pid  = master_word._pid;
-            mvee_wrap_ptrace(PTRACE_POKEDATA, variants[i].variantpid, ARG1(i), (void*)slave_word._long);
-        }
-    }
+	if (IS_SYNCED_CALL)
+	{
+		mvee_word master_word;
+		mvee_word slave_word;
+		// sync the tids
+		if (ARG2(0) == MVEE_FUTEX_WAIT_TID)
+		{
+			master_word._long = mvee_wrap_ptrace(PTRACE_PEEKDATA, variants[0].variantpid, ARG1(0), NULL);
+			for (int i = 1; i < mvee::numvariants; ++i)
+			{
+				slave_word._long = mvee_wrap_ptrace(PTRACE_PEEKDATA, variants[i].variantpid, ARG1(i), NULL);
+				slave_word._pid  = master_word._pid;
+				mvee_wrap_ptrace(PTRACE_POKEDATA, variants[i].variantpid, ARG1(i), (void*)slave_word._long);
+			}
+		}
+	}
 #endif
-    return 0;
+    return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -6368,9 +6475,7 @@ long monitor::handle_epoll_create_postcall(int variantnum)
         std::vector<unsigned long> fds(mvee::numvariants);
         std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
         set_fd_table->create_fd_info(FT_POLL_BLOCKING, fds, "epoll_sock", 0, false, true);
-#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
-#endif
     }
     return 0;
 }
@@ -6443,14 +6548,16 @@ long monitor::handle_exit_group_call(int variantnum)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_set_tid_address
+    sys_set_tid_address - Always returns the caller's thread ID
 -----------------------------------------------------------------------------*/
 long monitor::handle_set_tid_address_postcall(int variantnum)
 {
-    unsigned long master_result = call_postcall_get_variant_result(0);
-    for (int i = 1; i < mvee::numvariants; ++i)
-        call_postcall_set_variant_result(i, master_result);
-    return 0;
+    MVEE_HANDLER_POSTCALL(variantnum, start, lim)
+
+	for (int i = start; i < lim; ++i)
+		call_postcall_set_variant_result(i, variants[0].variantpid);
+
+    return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -6895,9 +7002,7 @@ long monitor::handle_inotify_init_postcall(int variantnum)
         std::vector<unsigned long> fds(mvee::numvariants);
         std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
         set_fd_table->create_fd_info(FT_POLL_BLOCKING, fds, "inotify_init", 0, false, true);
-#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
-#endif
     }
 
     return 0;
@@ -6975,8 +7080,8 @@ long monitor::handle_openat_precall(int variantnum)
     if ((int)ARG1(0) > 0)
         MAPFDS(1);
 
-    std::string full_path = set_fd_table->get_full_path(variants[0].variantpid, (unsigned long)(int)ARG1(0), (void*)ARG2(0));
-    //	warnf("openat: %s\n", full_path.c_str());
+    std::string full_path = set_fd_table->get_full_path(0, variants[0].variantpid, (unsigned long)(int)ARG1(0), (void*)ARG2(0));
+//    warnf("openat: %s\n", full_path.c_str());
 
     if (full_path == "")
         return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
@@ -6992,7 +7097,7 @@ long monitor::handle_openat_precall(int variantnum)
 long monitor::handle_openat_call(int variantnum)
 {
     int         i, result, old_flags, flags;
-    std::string str1 = set_fd_table->get_full_path(variants[0].variantpid, (unsigned long)(int)ARG1(0), (void*)ARG2(0));
+    std::string str1 = set_fd_table->get_full_path(0, variants[0].variantpid, (unsigned long)(int)ARG1(0), (void*)ARG2(0));
 
     flags  = old_flags = ARG3(0);
     result = handle_check_open_call(str1, &flags, ARG4(0));
@@ -7032,16 +7137,14 @@ long monitor::handle_openat_postcall(int variantnum)
     if (call_succeeded)
     {
         char*                      resolved_path = NULL;
-        std::string                tmp_path      = set_fd_table->get_full_path(variants[0].variantpid, (unsigned long)(int)ARG1(0), (void*)ARG2(0));
+        std::string                tmp_path      = set_fd_table->get_full_path(0, variants[0].variantpid, (unsigned long)(int)ARG1(0), (void*)ARG2(0));
 
         resolved_path = realpath(tmp_path.c_str(), NULL);
 
         std::vector<unsigned long> fds           = call_postcall_get_result_vector();
         REPLICATEFDRESULT();
         set_fd_table->create_fd_info(FT_REGULAR, fds, resolved_path, ARG3(0), ARG3(0) & O_CLOEXEC, state == STATE_IN_MASTERCALL, false);
-#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
-#endif
 
         free(resolved_path);
     }
@@ -7389,9 +7492,7 @@ long monitor::handle_timerfd_create_postcall(int variantnum)
     {
 		FileType type = (ARG2(0) & TFD_NONBLOCK) ? FT_POLL_NON_BLOCKING : FT_POLL_BLOCKING;
         set_fd_table->create_fd_info(type, fds, "timer", O_RDWR, (ARG2(0) & TFD_CLOEXEC) ? true : false, true);
-#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
-#endif
     }
 
     return 0;
@@ -7530,9 +7631,7 @@ long monitor::handle_dup3_postcall(int variantnum)
                 return 0;
             }			
             set_fd_table->create_fd_info(fd_info->file_type, fds, fd_info->path.c_str(), fd_info->access_flags, (ARG3(0) != 0) ? true : false, fd_info->master_file, fd_info->unsynced_reads, fd_info->original_file_size);
-#ifdef MVEE_FD_DEBUG
             set_fd_table->verify_fd_table(getpids());
-#endif
         }
     }
     return 0;
@@ -7576,9 +7675,7 @@ long monitor::handle_pipe2_postcall(int variantnum)
 		FileType type = (ARG2(0) & O_NONBLOCK) ? FT_PIPE_NON_BLOCKING : FT_PIPE_BLOCKING;
         set_fd_table->create_fd_info(type, read_fds,  "pipe2:read",  O_RDONLY, ARG2(0) & O_CLOEXEC, true);
         set_fd_table->create_fd_info(type, write_fds, "pipe2:write", O_WRONLY, ARG2(0) & O_CLOEXEC, true);
-#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
-#endif
     }
 
     return 0;
@@ -7607,9 +7704,7 @@ long monitor::handle_inotify_init1_postcall(int variantnum)
 
 		FileType type = (ARG1(0) & IN_NONBLOCK) ? FT_POLL_NON_BLOCKING : FT_POLL_BLOCKING;
         set_fd_table->create_fd_info(type, fds, "inotify_init1", 0, (ARG1(0) & IN_CLOEXEC) ? true : false, false);
-#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
-#endif
     }
 
     return 0;
@@ -7664,18 +7759,14 @@ long monitor::handle_perf_event_open_postcall(int variantnum)
             std::vector<unsigned long> fds = call_postcall_get_result_vector();
             REPLICATEFDRESULT();
             set_fd_table->create_fd_info(FT_SPECIAL, fds, "perf_event", 0, cloexec, false, true);
-#ifdef MVEE_FD_DEBUG
             set_fd_table->verify_fd_table(getpids());
-#endif
         }
         else
         {
             std::vector<unsigned long> fds(mvee::numvariants);
             std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
             set_fd_table->create_fd_info(FT_SPECIAL, fds, "perf_event", 0, cloexec, true, false);
-#ifdef MVEE_FD_DEBUG
             set_fd_table->verify_fd_table(getpids());
-#endif
         }
     }
 

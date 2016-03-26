@@ -434,10 +434,20 @@ public:
 	static std::string   os_get_rpath                (std::string& binary);
 
 	//
+	// Identifies the (relative) entry point address for the specified ELF @binary
+	//
+	static unsigned long os_get_entry_point_address  (std::string& binary);
+
+	//
 	// Returns the path to the qemu-user binary for the specified architecture 
 	// Also returns the basename of said binary
 	//
 	static std::string   os_get_qemu_user_for_arch   (VariantArch arch, std::string& basename);
+
+	//
+	// Normalizes @path by handling relative paths, double slashes, etc.
+	//
+	static std::string   os_normalize_path_name      (std::string path);
 
     // *************************************************************************
     // Miscellaneous Support Functions
@@ -515,7 +525,6 @@ public:
     // for logging...
     static __thread monitor*        active_monitor;
     static __thread int             active_monitorid;
-    static __thread unsigned long   most_recent_fd;
 
 	//
     // This is set when the mvee has been signalled for shutdown.

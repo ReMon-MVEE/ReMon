@@ -992,6 +992,20 @@ bool mmap_table::map_range (int variantnum, unsigned long address, unsigned long
 }
 
 /*-----------------------------------------------------------------------------
+    find_image_base - Kind of like win32 GetModuleHandle
+-----------------------------------------------------------------------------*/
+unsigned long mmap_table::find_image_base (int variantnum, std::string image_name)
+{
+	for (auto it : full_map[variantnum])
+	{
+		if (it->region_backing_file_path.compare(image_name) == 0)
+			return it->region_base_address;
+	}
+
+	return 0;
+}
+
+/*-----------------------------------------------------------------------------
     calculate_disjoint_bases - The monitor has seen a new mmap call
     that maps in code. We want to:
     1) force strong randomization => ASLR will only randomize the 16 higher

@@ -272,9 +272,10 @@ public:
     //
     static bool mman_mprotect_range_callback(mmap_table* table, mmap_region_info* region_info, void* callback_param);
     bool        mprotect_range              (int variantnum, unsigned long base, unsigned long size, unsigned int new_prot_flags);
-    static bool mman_munmap_range_callback(mmap_table* table, mmap_region_info* region_info, void* callback_param);
+    static bool mman_munmap_range_callback  (mmap_table* table, mmap_region_info* region_info, void* callback_param);
     bool        munmap_range                (int variantnum, unsigned long base, unsigned long size);
     bool        map_range                   (int variantnum, unsigned long address, unsigned long size, unsigned int map_flags, unsigned int prot_flags, fd_info* region_backing_file, unsigned int region_backing_file_offset);
+	unsigned long find_image_base           (int variantnum, std::string image_name);
 
     //
     // Disjoint Code Layouting support

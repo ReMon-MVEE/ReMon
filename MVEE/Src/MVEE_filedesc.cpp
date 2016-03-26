@@ -84,6 +84,7 @@ void fd_table::init()
     pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
     pthread_mutex_init(&lock, &attr);
 	file_map = NULL;
+	temporary_files.resize(mvee::numvariants);
 }
 
 fd_table::fd_table()
@@ -197,9 +198,9 @@ void fd_table::create_fd_info
     ssize_t                   original_file_size
 )
 {
-    fd_info                                    info(type, fds, path, access_flags, close_on_exec, master_file, unsynced_reads, original_file_size);
+    fd_info info(type, fds, path, access_flags, close_on_exec, master_file, unsynced_reads, original_file_size);
 
-    std::map<unsigned long, fd_info>::iterator it = table.find(fds[0]);
+    auto it = table.find(fds[0]);
     if (it != table.end())
     {
         warnf("fd override!!! FIXME\n");
@@ -212,10 +213,7 @@ void fd_table::create_fd_info
     info.print_fd_info();
 #endif
 
-
-    mvee::most_recent_fd = fds[0];
-    table.insert(std::pair<unsigned long, fd_info>(fds[0], info));
-
+    table.insert(std::make_pair(fds[0], info));
 	file_map_set(fds[0], type);
 }
 
@@ -225,7 +223,7 @@ void fd_table::create_fd_info
 -----------------------------------------------------------------------------*/
 void fd_table::free_fd_info (unsigned long fd)
 {
-    std::map<unsigned long, fd_info>::iterator                                               it       = table.find(fd);
+    auto it = table.find(fd);
     if (it != table.end())
     {
         debugf("removed fd: %d (%s)\n", fd, it->second.path.c_str());
@@ -233,7 +231,7 @@ void fd_table::free_fd_info (unsigned long fd)
     }
 
     // check if it's an epoll fd
-    std::map<unsigned long, std::map<unsigned long, std::vector<unsigned long> > >::iterator epoll_it = epoll_map.find(fd);
+    auto epoll_it = epoll_map.find(fd);
     if (epoll_it != epoll_map.end())
     {
         debugf("removed fd from epoll map: %d\n", fd);
@@ -258,8 +256,7 @@ void fd_table::free_fd_info (unsigned long fd)
 -----------------------------------------------------------------------------*/
 void fd_table::free_cloexec_fds ()
 {
-    for (std::map<unsigned long, fd_info>::iterator it = table.begin();
-         it != table.end(); it++)
+    for (auto it = table.begin(); it != table.end(); it++)
     {
         /*
          * POSIX.1-2001 says that if file
@@ -284,17 +281,76 @@ void fd_table::free_cloexec_fds ()
 }
 
 /*-----------------------------------------------------------------------------
+    create_temporary_fd_info
+-----------------------------------------------------------------------------*/
+void fd_table::create_temporary_fd_info
+(
+	int variantnum,
+	unsigned long fd,
+	std::string path,
+	unsigned long access_flags,
+	bool close_on_exec,
+	ssize_t original_file_size
+)
+{
+	std::vector<unsigned long> fds(mvee::numvariants);
+	std::fill(fds.begin(), fds.end(), MVEE_UNKNOWN_FD);
+	fds[variantnum] = fd;
+
+    fd_info info(FT_REGULAR, fds, path, access_flags, close_on_exec, false, true, original_file_size);
+
+	auto it = temporary_files[variantnum].find(fd);
+    if (it != temporary_files[variantnum].end())
+    {
+        warnf("temporary fd override!!! FIXME\n");
+        it->second.print_fd_info();
+        free_temporary_fd_info(variantnum, fd);
+    }
+
+#ifndef MVEE_BENCHMARK
+    debugf("created new temporary fd\n");
+    info.print_fd_info();
+#endif
+
+	temporary_files[variantnum].insert(std::make_pair(fd, info));
+}
+
+/*-----------------------------------------------------------------------------
+    free_temporary_fd_info
+-----------------------------------------------------------------------------*/
+void fd_table::free_temporary_fd_info (int variantnum, unsigned long fd)
+{
+	auto it = temporary_files[variantnum].find(fd);
+    if (it != temporary_files[variantnum].end())
+    {
+        debugf("removed fd: %d (%s)\n", fd, it->second.path.c_str());
+        temporary_files[variantnum].erase(it);
+    }
+}
+
+/*-----------------------------------------------------------------------------
+    flush_temporary_files
+-----------------------------------------------------------------------------*/
+void fd_table::flush_temporary_files (int variantnum)
+{
+	temporary_files[variantnum].clear();
+}
+
+/*-----------------------------------------------------------------------------
     print_fd_table
 -----------------------------------------------------------------------------*/
 void fd_table::print_fd_table ()
 {
-    std::map<unsigned long, fd_info>::iterator it;
-    for (it = table.begin();
-         it != table.end();
-         it++)
-    {
+	debugf("Normal FD table dump:\n");
+    for (auto it = table.begin(); it != table.end(); it++)
         it->second.print_fd_info();
-    }
+
+	for (int i = 0; i < mvee::numvariants; ++i)
+	{
+		debugf("Temporary FD table dump for variant %d:\n", i);
+		for (auto it = temporary_files[i].begin(); it != temporary_files[i].end(); ++it)
+			it->second.print_fd_info();
+	}
 }
 
 /*-----------------------------------------------------------------------------
@@ -340,6 +396,7 @@ bool fd_table::verify_path(std::string& mvee_path, const char* proc_path)
 
 void fd_table::verify_fd_table(std::vector<pid_t> pids)
 {
+#ifdef MVEE_FD_DEBUG
     for (int i = 0; i < mvee::numvariants; ++i)
     {
         char                                 cmd[500];
@@ -355,7 +412,7 @@ void fd_table::verify_fd_table(std::vector<pid_t> pids)
         {
             if (sscanf(line.c_str(), "%lu:%s", &fd, path) == 2)
             {
-                fds.insert(std::pair<unsigned long, std::string>(fd, std::string(path)));
+                fds.insert(std::make_pair(fd, std::string(path)));
             }
         }
 
@@ -402,6 +459,7 @@ void fd_table::verify_fd_table(std::vector<pid_t> pids)
             }
         }
     }
+#endif
 }
 
 /*-----------------------------------------------------------------------------
@@ -411,40 +469,24 @@ fd_info* fd_table::get_fd_info (unsigned long fd, int variantnum)
 {
     if (variantnum == 0)
     {
-        std::map<unsigned long, fd_info>::iterator it = table.find(fd);
+        auto it = table.find(fd);
         if (it != table.end())
             return &it->second;
     }
     else if (variantnum < mvee::numvariants && variantnum > 0)
     {
-        for (std::map<unsigned long, fd_info>::iterator it = table.begin();
-             it != table.end();
-             it++)
+        for (auto it = table.begin(); it != table.end(); it++)
         {
             if (it->second.fds[variantnum] == fd && !it->second.master_file)
                 return &it->second;
         }
     }
 
-    //warnf("WARNING: couldn't find fd %d\n", fd);
-    return NULL;
-}
+	auto it = temporary_files[variantnum].find(fd);
+	if (it != temporary_files[variantnum].end())
+		return &it->second;
 
-/*-----------------------------------------------------------------------------
-    get_fd_info_by_path - mainly here to support the [fileop]at family
-    of syscalls...
------------------------------------------------------------------------------*/
-fd_info* fd_table::get_fd_info_by_path(const char* path)
-{
-    for (std::map<unsigned long, fd_info>::iterator it = table.begin();
-         it != table.end();
-         it++)
-    {
-        if (it->second.path == path)
-            return &it->second;
-    }
-
-    //warnf("WARNING: couldn't find fd for path: %s\n", path);
+    warnf("WARNING: couldn't find fd %d\n", fd);
     return NULL;
 }
 
@@ -452,12 +494,12 @@ fd_info* fd_table::get_fd_info_by_path(const char* path)
     get_full_path - this function also supports the [syscall]at family
     but it can resolve normal paths as well (if master_dirfd == AT_FDCWD)
 -----------------------------------------------------------------------------*/
-std::string fd_table::get_full_path (pid_t variantpid, unsigned long master_dirfd, void* master_path_ptr)
+std::string fd_table::get_full_path (int variantnum, pid_t variantpid, unsigned long dirfd, void* path_ptr)
 {
     std::stringstream ss;
 
     // fetch the path and check if it's absolute...
-    char*             tmp_path = mvee_rw_read_string(variantpid, (unsigned long)master_path_ptr, 0);
+    char* tmp_path = mvee_rw_read_string(variantpid, (unsigned long)path_ptr, 0);
     if (!tmp_path)
     {
         warnf("couldn't get full path\n");
@@ -476,15 +518,13 @@ std::string fd_table::get_full_path (pid_t variantpid, unsigned long master_dirf
     else
     {
         // relative path... fetch the base path
-//		warnf("relative path: %s - dir fd: %llu - AT_FDCWD: %llu\n", tmp_path, master_dirfd, (unsigned long)AT_FDCWD);
-        if (master_dirfd == (unsigned long)AT_FDCWD)
+        if (dirfd == (unsigned long)AT_FDCWD)
         {
-//			warnf("AT CWD: %s\n", fd_cwd.c_str());
             ss << fd_cwd;
         }
         else
         {
-            fd_info* fd_info = get_fd_info(master_dirfd, 0);
+            fd_info* fd_info = get_fd_info(dirfd, variantnum);
             if (fd_info)
                 ss << fd_info->path;
         }
@@ -495,7 +535,7 @@ std::string fd_table::get_full_path (pid_t variantpid, unsigned long master_dirf
     }
 
     SAFEDELETEARRAY(tmp_path);
-    return ss.str();
+	return mvee::os_normalize_path_name(ss.str());
 }
 
 /*-----------------------------------------------------------------------------
@@ -529,19 +569,17 @@ void fd_table::full_release_lock()
 void fd_table::epoll_id_register(unsigned long epfd, unsigned long fd, std::vector<unsigned long> ids)
 {
     // check if we've already registered ids with this epfd
-    std::map<unsigned long, std::map<unsigned long, std::vector<unsigned long> > >::iterator it =
-        epoll_map.find(epfd);
-
+    auto it = epoll_map.find(epfd);
     if (it == epoll_map.end())
     {
         std::map<unsigned long, std::vector<unsigned long> > new_map;
-        new_map.insert(std::pair<unsigned long, std::vector<unsigned long> >(fd, ids));
-        epoll_map.insert(std::pair<unsigned long, std::map<unsigned long, std::vector<unsigned long> > >(epfd, new_map));
+        new_map.insert(std::make_pair(fd, ids));
+        epoll_map.insert(std::make_pair(epfd, new_map));
         return;
     }
 
     it->second.erase(fd);
-    it->second.insert(std::pair<unsigned long, std::vector<unsigned long> >(fd, ids));
+    it->second.insert(std::make_pair(fd, ids));
 }
 
 /*-----------------------------------------------------------------------------
@@ -549,8 +587,7 @@ void fd_table::epoll_id_register(unsigned long epfd, unsigned long fd, std::vect
 -----------------------------------------------------------------------------*/
 void fd_table::epoll_id_remove(unsigned long epfd, unsigned long fd)
 {
-    std::map<unsigned long, std::map<unsigned long, std::vector<unsigned long> > >::iterator it
-        = epoll_map.find(epfd);
+    auto it = epoll_map.find(epfd);
     if (it != epoll_map.end())
         it->second.erase(fd);
 }
@@ -560,13 +597,10 @@ void fd_table::epoll_id_remove(unsigned long epfd, unsigned long fd)
 -----------------------------------------------------------------------------*/
 std::vector<unsigned long> fd_table::epoll_id_map(unsigned long epfd, unsigned long master_id)
 {
-    std::map<unsigned long, std::map<unsigned long, std::vector<unsigned long> > >::iterator it
-        = epoll_map.find(epfd);
-
+    auto it = epoll_map.find(epfd);
     if (it != epoll_map.end())
     {
-        std::map<unsigned long, std::vector<unsigned long> >::iterator fd_it;
-        for (fd_it = it->second.begin(); fd_it != it->second.end(); ++fd_it)
+        for (auto fd_it = it->second.begin(); fd_it != it->second.end(); ++fd_it)
         {
             if (fd_it->second[0] == master_id)
                 return fd_it->second;
@@ -575,7 +609,7 @@ std::vector<unsigned long> fd_table::epoll_id_map(unsigned long epfd, unsigned l
 
     warnf("couldn't map master id 0x" PTRSTR " to slave ids for epoll fd: %d\n", master_id, epfd);
 
-    std::vector<unsigned long>                                                               result(mvee::numvariants);
+    std::vector<unsigned long> result(mvee::numvariants);
     for (int i = 0; i < mvee::numvariants; ++i)
         result[i] = 0;
     return result;
@@ -596,12 +630,11 @@ unsigned long fd_table::get_free_fd (int variantnum, unsigned long bias)
     if (bias != (unsigned long)-1 && !get_fd_info(bias, variantnum))
         return bias;
 
-    std::map<unsigned long, fd_info>::iterator it;
-    for (it = table.begin(); it != table.end(); ++it)
+    for (auto it = table.begin(); it != table.end(); ++it)
         variant_fds.insert(it->second.fds[variantnum]);
 
     // now find the first element that's not in the set
-    for (std::set<unsigned long>::iterator it2 = variant_fds.begin(); it2 != variant_fds.end(); ++it2)
+    for (auto it2 = variant_fds.begin(); it2 != variant_fds.end(); ++it2)
     {
         if (*it2 > lowest_available)
             break;

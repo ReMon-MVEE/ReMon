@@ -152,6 +152,8 @@ public:
     bool          variant_attached;                                 // has the target monitor attached to this variant yet?
     bool          variant_resumed;                                  // variant is waiting for a resume after attach
     bool          current_signal_ready;
+	bool          fast_forward_to_entry_point;                      // Are we dispatching all syscalls as unsynced calls until we reach the entry point?
+	bool          entry_point_bp_set;                               // Have we set the breakpoint on the program entry point?
 
     // ptmalloc2 heap allocation hacks
     //
@@ -173,6 +175,9 @@ public:
     unsigned long last_upper_region_start;
     unsigned long last_upper_region_size;
     unsigned long last_mmap_result;
+
+	// Fast forwarding support
+	unsigned long entry_point_address;                              // relative to the base address of the first PT_LOAD segment of the main program binary
 
 	// IP-MON information
 	mmap_region_info* ipmon_region;
@@ -980,10 +985,10 @@ private:
     // set of signals which are currently blocked for this thread set.
     // Blocked signals are added to the pending queue and must be delivered
     // when and if the signal is every unblocked. Duplicates must be discarded
-    sigset_t                          blocked_signals;
+	std::vector<sigset_t>             blocked_signals;
     // previous set of signals which were blocked. this is used for calls
     // that temporarily replace the signal mask (e.g. sigsuspend)
-    sigset_t                          old_blocked_signals;
+	std::vector<sigset_t>             old_blocked_signals;
 
 	int master_core;
 

@@ -34,7 +34,7 @@
 #include "hde.h"
 
 /*-----------------------------------------------------------------------------
-    syscall_arg class
+    syscall_arg class - We use this to cache data arguments
 -----------------------------------------------------------------------------*/
 syscall_arg::syscall_arg()
 {
@@ -122,11 +122,14 @@ variantstate::variantstate()
     variant_attached(false),
     variant_resumed(false),
     current_signal_ready(false),
+	  fast_forward_to_entry_point(false),
+	  entry_point_bp_set(false),
     last_lower_region_start(0),
     last_lower_region_size(0),
     last_upper_region_start(0),
     last_upper_region_size(0),
     last_mmap_result(0),
+	entry_point_address(0),
 	ipmon_region(NULL),
 	hidden_buffer_array_id(0),
 	hidden_buffer_array_base(0),
@@ -214,8 +217,13 @@ void monitor::init()
     monitor_tid                    = 0;
 	master_core                    = -1;
 
-    sigemptyset(&blocked_signals);
-    sigemptyset(&old_blocked_signals);
+	blocked_signals.resize(mvee::numvariants);
+	old_blocked_signals.resize(mvee::numvariants);
+	for (int i = 0; i < mvee::numvariants; ++i)
+	{
+		sigemptyset(&blocked_signals[i]);
+		sigemptyset(&old_blocked_signals[i]);
+	}
 
     variants.resize(mvee::numvariants);
     atomic_counters.resize(mvee::numvariants);
@@ -451,6 +459,8 @@ void monitor::rewrite_execve_args(int variantnum, VariantArch arch, bool write_t
 
 		if (qemu_user_path.length() > 0)
 			argv.push_front(mvee::strdup(qemu_user_path.c_str()));
+
+		variants[variantnum].arch = arch;
 	}
 	else
 	{
@@ -465,7 +475,8 @@ void monitor::rewrite_execve_args(int variantnum, VariantArch arch, bool write_t
 	// we added an interpreter. This is the real binary we're running
 	if (argv.size() > argv_size)
 	{
-		set_mmap_table->mmap_startup_info[variantnum].real_image = std::string(argv[0]);
+		set_mmap_table->mmap_startup_info[variantnum].real_image = 
+			std::string(argv[0]);
 	}
 
 	// insert custom library path
@@ -1092,6 +1103,25 @@ bool monitor::handle_rdtsc_event(int variantnum)
             debugf("Variant %d (PID: %d) is trying to execute the rdtsc instruction\n",
                        variantnum, variants[variantnum].variantpid);
 
+			if (variants[variantnum].fast_forward_to_entry_point)
+			{
+				debugf("Variant is fast forwarding. Allowing rdtsc\n");
+
+                unsigned int upper, lower;
+                asm volatile ("rdtsc\n" : "=a" (lower), "=d" (upper));
+
+				// write back result
+				WRITE_RDTSC_RESULT(variantnum, lower, upper);
+
+				// Move the instruction pointer just past the rdtsc instruction
+				FETCH_IP(variantnum, eip);
+				WRITE_IP(variantnum, eip + 2);
+				
+				// Now resume it
+				mvee_wrap_ptrace(PTRACE_SYSCALL, variants[variantnum].variantpid, 0, NULL);
+				return true;
+			}
+
             // set syscall number to fake syscall that indicates rdtsc
             variants[variantnum].callnum = MVEE_RDTSC_FAKE_SYSCALL;
 
@@ -1320,16 +1350,10 @@ void monitor::handle_resume_event(int index)
                     if (variants[i].tid_address[j])
                     {
                         debugf("setting master tid for variant: %d\n", variants[i].variantpid);
-                        mvee_word word;
-                        word._long = mvee_wrap_ptrace(PTRACE_PEEKDATA,
-                                                      variants[i].variantpid,
-                                                      (unsigned long)variants[i].tid_address[j],
-                                                      NULL);
-                        word._pid  = variants[0].variantpid;
-                        mvee_wrap_ptrace(PTRACE_POKEDATA,
-                                         variants[i].variantpid,
-                                         (unsigned long)variants[i].tid_address[j],
-                                         (void*)word._long);
+						
+						mvee_rw_write_pid(variants[i].variantpid, 
+										  (unsigned long)variants[i].tid_address[j], 
+										  variants[0].variantpid);
                     }
                 }
             }
@@ -1481,7 +1505,32 @@ void monitor::handle_trap_event(int index)
     mvee_wrap_ptrace(PTRACE_GETSIGINFO, variants[index].variantpid, 0, (void*)&siginfo);
 
     if (siginfo.si_code == MVEE_TRAP_HWBKPT)
-        log_hw_bp_event(index, &siginfo);
+	{
+		if (variants[index].fast_forward_to_entry_point)
+		{
+			unsigned long dr6 = mvee_wrap_ptrace(PTRACE_PEEKUSER, variants[index].variantpid,
+												 offsetof(user, u_debugreg) + 6*sizeof(long), NULL);
+
+			for (int i = 0; i < 4; ++i)
+			{
+				if (dr6 & (1 << i))
+				{
+					if (variants[index].hw_bps[i] == variants[index].entry_point_address)
+					{
+						warnf("Variant %d has reached its entry point - Switching to lock-step execution\n",
+							  index);
+						variants[index].fast_forward_to_entry_point = false;
+						hwbp_unset_watch(index, variants[index].entry_point_address);
+						break;
+					}
+				}
+			}
+		}
+		else
+		{
+			log_hw_bp_event(index, &siginfo);
+		}
+	}
 
     mvee_wrap_ptrace(PTRACE_SYSCALL, variants[index].variantpid, 0, NULL);
 }
@@ -1496,6 +1545,9 @@ void monitor::handle_syscall_entrance_event(int index)
 
     //    FETCH_SYSCALL_NO(index, callnum);
     // => we usually end up fetching all registers anyway, which would make the above a wasted ptrace call...
+
+	// TODO/FIXME - stijn: possibly deliver signals for fastforwarding variants
+	// here
 
     variants[index].regs_valid      = false;
     call_check_regs(index);
@@ -1734,6 +1786,7 @@ void monitor::handle_syscall_exit_event(int index)
             return;
         }
 
+		call_succeeded = call_check_result(variants[index].return_value);
         call_postcall_return_unsynced(index);
         mvee_wrap_ptrace(PTRACE_SYSCALL, variants[index].variantpid, 0, NULL);
         variants[index].call_type       = MVEE_CALL_TYPE_UNKNOWN;
@@ -2473,7 +2526,7 @@ bool monitor::sig_prepare_delivery ()
     while (it != pending_signals.end())
     {
         // check if the group is willing to accept the signal
-        if (sigismember(&blocked_signals, it->sig_no))
+        if (sigismember(&blocked_signals[0], it->sig_no))
         {
             bool dont_block = false;
 
@@ -2790,7 +2843,7 @@ void monitor::hwbp_refresh_regs(int variantnum)
     {
         if (variants[variantnum].hw_bps[i])
         {
-            warnf("setting debug reg %d\n", i);
+            debugf("setting debug reg %d\n", i);
             mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid,
                              offsetof(user, u_debugreg) + i*sizeof(unsigned long), (void*)variants[variantnum].hw_bps[i]);
         }
@@ -2810,13 +2863,14 @@ void monitor::hwbp_refresh_regs(int variantnum)
             dr7 |= 0x1 << i*2;
             // set read/write flag
             dr7 |= variants[variantnum].hw_bps_type[i] << (16 + i*4);
-            // set len flag (we always assume word length)
-            dr7 |= 0x3 << (18 + i*4);
+            // set len flag (we always assume word length) - len should be 0 for EXEC-only breakpoints
+			if (variants[variantnum].hw_bps_type[i] != MVEE_BP_EXEC_ONLY)
+				dr7 |= 0x3 << (18 + i*4);
             //dr7 |= 0x0 << (18 + i*4);
         }
     }
 
-    warnf("setting ctrl reg\n");
+    debugf("setting ctrl reg\n");
     mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid,
                      offsetof(user, u_debugreg) + 7*sizeof(long), (void*)dr7);
 }
@@ -2849,7 +2903,7 @@ bool monitor::hwbp_set_watch(int variantnum, unsigned long addr, unsigned char b
     variants[variantnum].hw_bps[i]      = addr;
     variants[variantnum].hw_bps_type[i] = bp_type;
     hwbp_refresh_regs(variantnum);
-    warnf("set hw bp: 0x" PTRSTR "\n", addr);
+    debugf("set hw bp: 0x" PTRSTR "\n", addr);
     return true;
 }
 

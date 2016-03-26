@@ -42,7 +42,7 @@
 //
 // MVEE_DISABLE_SYNCHRONIZATION_REPLICATION: if defined, no user-space sync will
 // be replicated from master to slave
-// #define MVEE_DISABLE_SYNCHRONIZATION_REPLICATION
+#define MVEE_DISABLE_SYNCHRONIZATION_REPLICATION
 
 // MVEE_FILTER_LOGGING: when defined, we will log only for the spec/parsec binaries.
 // this filter applies to regular logging (logf), warnings (warnf) and EXTRA_STATS

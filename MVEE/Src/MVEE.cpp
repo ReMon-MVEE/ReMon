@@ -11,6 +11,8 @@
 /*-----------------------------------------------------------------------------
     Includes
 -----------------------------------------------------------------------------*/
+#include <elf.h>
+#include <libelf.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/shm.h>
@@ -39,7 +41,6 @@
 /*-----------------------------------------------------------------------------
     Static Member Initialization
 -----------------------------------------------------------------------------*/
-__thread unsigned long                 mvee::most_recent_fd = 0;
 bool                                   mvee::no_monitoring  = false;
 std::vector<std::string>               mvee::demo_args;
 int                                    mvee::demo_num       = 0;
@@ -696,6 +697,95 @@ bool mvee::os_alloc_sysv_sharedmem(unsigned long alloc_size, int* id_ptr, int* s
 }
 
 /*-----------------------------------------------------------------------------
+    os_get_entry_point_address - get the relative entry point address for the
+	specified ELF binary
+-----------------------------------------------------------------------------*/
+unsigned long mvee::os_get_entry_point_address(std::string& binary)
+{
+	unsigned long result = 0;
+	Elf* elf = NULL;
+	bool is_pie = false;
+	int fd = open(binary.c_str(), O_RDONLY, 0);
+	char* ident = NULL;
+
+	elf_version(EV_CURRENT);
+
+	if (fd > 0)
+		elf = elf_begin(fd, ELF_C_READ_MMAP, NULL);
+
+	if (fd < 0 || !elf)
+	{
+		warnf("Can't open file: %s - fd is %d\n", binary.c_str(), fd);
+		goto error;
+	}
+
+	// Identify the architecture
+	ident = elf_getident(elf, NULL);
+	if (!ident)
+		goto error;
+
+	if (ident[4] == ELFCLASS64)
+	{
+		Elf64_Ehdr* ehdr = elf64_getehdr(elf);
+		if (ehdr && ehdr->e_type == ET_DYN)
+			is_pie = true;
+
+		result = ehdr->e_entry;
+
+        // find in-memory base address for this binary
+		if (!is_pie)
+		{
+			Elf64_Phdr* phdr = elf64_getphdr(elf);
+			size_t phdr_cnt;
+			unsigned long image_base = 0xFFFFFFFFFFFFFFFF;
+			
+			if (!phdr || elf_getphdrnum(elf, &phdr_cnt) == -1)
+				goto error;
+
+			for (int i = 0; i < phdr_cnt; ++i)
+				if (phdr[i].p_type == PT_LOAD)
+					if (phdr[i].p_vaddr < image_base)
+						image_base = phdr[i].p_vaddr;
+
+			result -= image_base;
+		}
+	}
+	else
+	{
+		Elf32_Ehdr* ehdr = elf32_getehdr(elf);
+		if (ehdr && ehdr->e_type == ET_DYN)
+			is_pie = true;
+
+		result = ehdr->e_entry;
+
+        // find in-memory base address for this binary
+		if (!is_pie)
+		{
+			Elf32_Phdr* phdr = elf32_getphdr(elf);
+			size_t phdr_cnt;
+			unsigned long image_base = 0x00000000FFFFFFFF;
+			
+			if (!phdr || elf_getphdrnum(elf, &phdr_cnt) == -1)
+				goto error;
+
+			for (int i = 0; i < phdr_cnt; ++i)
+				if (phdr[i].p_type == PT_LOAD)
+					if (phdr[i].p_vaddr < image_base)
+						image_base = phdr[i].p_vaddr;
+
+			result -= image_base;
+		}
+	}
+
+error:	
+	if (elf)
+		elf_end(elf);
+	if (fd > 0)
+		close(fd);
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
     os_get_rpath - get the relative library path for the specified binary
 -----------------------------------------------------------------------------*/
 std::string mvee::os_get_rpath(std::string& binary)
@@ -760,9 +850,30 @@ std::string mvee::os_get_qemu_user_for_arch(VariantArch arch, std::string& basen
 			break;			
 		default:
 			return std::string("");			
-	}
+	}	
 
-	return qemupath.str();
+	return os_normalize_path_name(qemupath.str());
+}
+
+/*-----------------------------------------------------------------------------
+    os_normalize_path_name
+-----------------------------------------------------------------------------*/
+std::string mvee::os_normalize_path_name(std::string path)
+{
+	char* tmp = realpath(path.c_str(), NULL);
+
+	if (!tmp)
+	{
+		if (errno == ENOENT)
+			return path;
+		else
+			return std::string("");
+	}
+	{
+		std::string result(tmp);
+		free(tmp);
+		return result;
+	}
 }
 
 /*-----------------------------------------------------------------------------

@@ -184,6 +184,7 @@
 // Possible return values of the CALL system call handler
 #define MVEE_CALL_ALLOW                   0x0001                    // Allow the variant(s) to be resumed from the syscall entry site, without modifying their syscall number or arguments
 #define MVEE_CALL_DENY                    0x0002                    // Allow the variant(s) to be resumed from the syscall entry site, but replace their syscall number by __NR_getpid
+#define MVEE_CALL_HANDLED_UNSYNCED_CALL   0x0004                    // Debugging aid
 #define MVEE_CALL_ERROR                   0x0004                    
 #define MVEE_CALL_VALUE                   0x0008
 #define MVEE_CALL_RETURN_ERROR(a) (0x0004 | (a << 6))               // Used in conjunction with MVEE_CALL_DENY. Return error <a> from the denied syscall (this is equivalent to MVEE_CALL_RETURN_VALUE(-a))
@@ -193,6 +194,7 @@
 // Possible return values of the POSTCALL system call handler
 #define MVEE_POSTCALL_RESUME              0x0000                    // Default return value for postcall handlers. Resume the variant(s) from the syscall exit site
 #define MVEE_POSTCALL_DONTRESUME          0x0001                    // Don't resume the variant(s) from the syscall exit site (used for sigreturn and friends)
+#define MVEE_POSTCALL_HANDLED_UNSYNCED_CALL 0x0002
 
 #define MVEE_HANDLER_DONTHAVE             (&monitor::handle_donthave)
 #define MVEE_HANDLER_DONTNEED             (&monitor::handle_dontneed)
