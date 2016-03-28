@@ -1218,7 +1218,8 @@ long monitor::handle_execve_postcall(int variantnum)
 		// enable fast forwarding for QEMU
 		for (int i = 0; i < mvee::numvariants; ++i)
 		{
-			warnf("Variant %d is running architecture %s\n", i, getTextualISA(variants[i].arch));
+			if (variants[i].arch != ARCH_HOST)
+				warnf("Variant %d is running architecture %s\n", i, getTextualISA(variants[i].arch));
 			
 			if (variants[i].arch != ARCH_HOST)
 			{

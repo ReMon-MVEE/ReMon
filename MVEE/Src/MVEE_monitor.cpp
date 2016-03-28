@@ -105,7 +105,8 @@ void syscall_arg::set_str(std::string& s)
     variantstate class
 -----------------------------------------------------------------------------*/
 variantstate::variantstate()
-    : variantpid(0),
+    : arch(ARCH_HOST),
+	  variantpid(0),
     prevcallnum(0),
     callnum(0),
     call_flags(0),
