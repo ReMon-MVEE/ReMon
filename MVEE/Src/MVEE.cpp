@@ -30,6 +30,7 @@
 #include <sstream>
 #include <algorithm>
 #include <libgen.h>
+#include <stdarg.h>
 #include "MVEE.h"
 #include "MVEE_monitor.h"
 #include "MVEE_memory.h"
@@ -742,7 +743,7 @@ unsigned long mvee::os_get_entry_point_address(std::string& binary)
 			if (!phdr || elf_getphdrnum(elf, &phdr_cnt) == -1)
 				goto error;
 
-			for (int i = 0; i < phdr_cnt; ++i)
+			for (size_t i = 0; i < phdr_cnt; ++i)
 				if (phdr[i].p_type == PT_LOAD)
 					if (phdr[i].p_vaddr < image_base)
 						image_base = phdr[i].p_vaddr;
@@ -768,7 +769,7 @@ unsigned long mvee::os_get_entry_point_address(std::string& binary)
 			if (!phdr || elf_getphdrnum(elf, &phdr_cnt) == -1)
 				goto error;
 
-			for (int i = 0; i < phdr_cnt; ++i)
+			for (size_t i = 0; i < phdr_cnt; ++i)
 				if (phdr[i].p_type == PT_LOAD)
 					if (phdr[i].p_vaddr < image_base)
 						image_base = phdr[i].p_vaddr;
