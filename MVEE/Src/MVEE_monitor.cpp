@@ -452,7 +452,7 @@ void monitor::rewrite_execve_args(int variantnum, VariantArch arch, bool write_t
     argv.push_front(mvee::strdup(image.c_str()));
 
 	// if we're not running natively, insert the qemu-user binary here
-	int argv_size = argv.size();
+	size_t argv_size = argv.size();
 	if (arch != ARCH_HOST)
 	{
 		std::string qemu_user_basename, qemu_user_path = 

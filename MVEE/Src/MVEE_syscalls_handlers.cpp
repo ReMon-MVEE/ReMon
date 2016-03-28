@@ -746,7 +746,7 @@ long monitor::handle_open_postcall(int variantnum)
 		}
 		else if (tmp_path.compare(set_mmap_table->mmap_startup_info[0].real_image) == 0)
 		{
-			warnf("Unsynced access to img: %s\n", set_mmap_table->mmap_startup_info[0].real_image.c_str());
+			debugf("Granting unsynced access to img: %s\n", set_mmap_table->mmap_startup_info[0].real_image.c_str());
 			unsynced = 1;
 		}
 

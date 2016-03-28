@@ -486,7 +486,7 @@ fd_info* fd_table::get_fd_info (unsigned long fd, int variantnum)
 	if (it != temporary_files[variantnum].end())
 		return &it->second;
 
-    warnf("WARNING: couldn't find fd %d\n", fd);
+//    warnf("WARNING: couldn't find fd %d\n", fd);
     return NULL;
 }
 
