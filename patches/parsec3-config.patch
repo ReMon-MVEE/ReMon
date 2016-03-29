@@ -1,0 +1,13 @@
+--- parsec-3.0/config/gcc.bldconf	2016-03-29 15:40:55.915720986 -0700
++++ parsec-3.0-patched/config/gcc.bldconf	2016-03-29 15:44:22.875719814 -0700
+@@ -71,8 +71,8 @@
+ PORTABILITY_FLAGS="-static-libgcc -Wl,--hash-style=both,--as-needed"
+ 
+ # Arguments to use
+-export CFLAGS=" -O3 -g -funroll-loops -fprefetch-loop-arrays ${PORTABILITY_FLAGS}"
+-export CXXFLAGS="-O3 -g -funroll-loops -fprefetch-loop-arrays -fpermissive -fno-exceptions ${PORTABILITY_FLAGS}"
++export CFLAGS=" -O3 -g -funroll-loops -fprefetch-loop-arrays ${PORTABILITY_FLAGS} -DNODATARACE"
++export CXXFLAGS="-O3 -g -funroll-loops -fprefetch-loop-arrays -fpermissive -fno-exceptions ${PORTABILITY_FLAGS}  -DNODATARACE"
+ export CPPFLAGS=""
+ export CXXCPPFLAGS=""
+ export LDFLAGS="-L${CC_HOME}/lib64 -L${CC_HOME}/lib"

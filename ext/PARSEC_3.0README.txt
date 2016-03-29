@@ -1,0 +1,18 @@
+Prerequisites: libxext-dev libxmu-dev libxmu-headers libxi-dev libgl1-mesa-dev libglu1-mesa-dev (install using apt-get install)
+
+1) Download and unpack PARSEC 3.0 (in the ext/ folder)
+
+$ wget http://parsec.cs.princeton.edu/download/3.0/parsec-3.0.tar.gz
+$ tar xzf parsec-3.0.tar.gz
+
+2) Apply the data races patches
+
+$ cd parsec-3.0
+$ patch -p1 < /path/to/ReMon/\!\!private\!\!/race-free-parsec/parsec-3.0-drf.patch
+$ patch -p1 < /path/to/ReMon/patches/parsec3-config.patch
+$ patch -p1 < /path/to/ReMon/patches/parsec3-volrend.patch
+
+3) Build PARSEC
+
+$ bin/parsecmgmt -a build -c gcc-pthreads -p facesim ferret splash2x
+
