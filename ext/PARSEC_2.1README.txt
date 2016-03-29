@@ -15,6 +15,7 @@ $ patch -p1 < /path/to/ReMon/patches/parsec-freqmine.patch
 $ patch -p1 < /path/to/ReMon/patches/parsec-imagick.patch
 $ patch -p1 < /path/to/ReMon/patches/parsec-raytrace.patch
 $ patch -p1 < /path/to/ReMon/patches/parsec-openssl.patch
+$ patch -p1 < /path/to/ReMon/patches/parsec-libxml2.patch
 
 3) Build PARSEC
 
