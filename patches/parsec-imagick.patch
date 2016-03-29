@@ -1,6 +1,6 @@
-diff -r --unified /home/stijn/parsec-2.1-mirror/pkgs/libs/imagick/src/magick/memory.c /home/stijn/parsec-2.1/pkgs/libs/imagick/src/magick/memory.c
---- /home/stijn/parsec-2.1-mirror/pkgs/libs/imagick/src/magick/memory.c	2013-11-08 17:15:05.435716212 +0100
-+++ /home/stijn/parsec-2.1/pkgs/libs/imagick/src/magick/memory.c	2013-12-13 08:43:50.946793679 +0100
+diff -r --unified parsec-2.1/pkgs/libs/imagick/src/magick/memory.c parsec-2.1-patched/pkgs/libs/imagick/src/magick/memory.c
+--- parsec-2.1/pkgs/libs/imagick/src/magick/memory.c	2007-09-11 06:59:02.000000000 -0700
++++ parsec-2.1-patched/pkgs/libs/imagick/src/magick/memory.c	2016-03-29 12:34:54.715784154 -0700
 @@ -320,8 +320,9 @@
  #if !defined(UseEmbeddableMagick)
    memory=malloc(size == 0 ? 1UL : size);

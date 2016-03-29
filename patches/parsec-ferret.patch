@@ -1,7 +1,6 @@
-Only in /home/stijn/parsec-2.1/pkgs/apps/ferret/src/benchmark: #ferret-parallel.c#
-diff -r --unified /home/stijn/parsec-2.1-mirror/pkgs/apps/ferret/src/benchmark/ferret-parallel.c /home/stijn/parsec-2.1/pkgs/apps/ferret/src/benchmark/ferret-parallel.c
---- /home/stijn/parsec-2.1-mirror/pkgs/apps/ferret/src/benchmark/ferret-parallel.c	2013-11-08 17:15:11.817716523 +0100
-+++ /home/stijn/parsec-2.1/pkgs/apps/ferret/src/benchmark/ferret-parallel.c	2013-11-15 19:18:12.825448795 +0100
+diff -r --unified parsec-2.1/pkgs/apps/ferret/src/benchmark/ferret-parallel.c parsec-2.1-patched/pkgs/apps/ferret/src/benchmark/ferret-parallel.c
+--- parsec-2.1/pkgs/apps/ferret/src/benchmark/ferret-parallel.c	2009-06-26 20:19:12.000000000 -0700
++++ parsec-2.1-patched/pkgs/apps/ferret/src/benchmark/ferret-parallel.c	2016-03-29 12:34:45.111784208 -0700
 @@ -60,6 +60,7 @@
  int input_end, output_end;
  pthread_cond_t done;
