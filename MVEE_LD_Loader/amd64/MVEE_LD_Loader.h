@@ -1,7 +1,7 @@
 #include "/usr/include/x86_64-linux-gnu/asm/unistd_64.h"
 
 #define INTERP              "/lib64/ld-linux-x86-64.so.2"
-#define INTERP_SHORT        "MVEE Child %d >"
+#define INTERP_SHORT        "MVEE Variant %d >"
 
 // MVEE_HIDE_DSO: if this is defined, the MVEE loader will hide the VDSO
 // this is important on AMD64, where the DSO contains fast versions of timing funcs

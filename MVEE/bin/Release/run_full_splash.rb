@@ -1,44 +1,55 @@
 #!/usr/bin/env ruby
 
-@results = Hash.new
-@inputset  = "native"
-#@workers   = (1..8)
+require 'pty'
+
+@results   = Hash.new
+@inputset  = "test"
 @workers   = [4]
-#@replicae  = (2..4)
-@replicae  = [2]
-@splash    = (158..171)
-@runs      = 5
+@variants  = [2]
+@splash    = (43..56)
+@runs      = 1
 
 def get_bench_name(benchnum)
-  benchname=`grep "case #{benchnum}:" -A8 ../../Src/MVEE_demos.cpp | grep splash\_bench | head -n1`.split("\"")[1]
+  _benchname=`grep "REGISTER.*(#{benchnum}," ../../Src/MVEE_demos.cpp`.split('"')[1]
+  return _benchname if _benchname
+  "dunno"
 end
 
-def add_result(benchname, replicae, threads, results, seconds)
-  results[threads] = Hash.new if not results[threads]
-  results[threads][benchname] = Hash.new if not results[threads][benchname]
-  results[threads][benchname][replicae] = Array.new if not results[threads][benchname][replicae]
-  results[threads][benchname][replicae] << seconds
-end
 
-def run_bench(benchnum, replicae, threads, input, results, native)
+def run_bench(benchnum, variants, threads, input, results, native)
   benchname=get_bench_name(benchnum)
-
-  # if native
-  #   add_result(benchname, 0, threads, results, 0.0)
-  #   return
-  # end
-
-  `./MVEE #{benchnum} #{replicae} #{threads} #{input} #{"-n" if native} 2>&1`.each_line { |ln|
-    if ln.match(/real\t/)
-      time = ln.split("\t")[1].chop 
-      seconds = Float(time.split("m")[0].to_i * 60) + Float(time.split("m")[1].chop)
-
-      replicae = 0 if native
-      add_result(benchname, replicae, threads, results, seconds)
-
-      print("        #{seconds.to_s.gsub(".", ",")}\n")
+  if native
+      results[threads] = Hash.new if not results[threads]
+      results[threads][benchname] = Hash.new if not results[threads][benchname]
+      results[threads][benchname][0] = Array.new if not results[threads][benchname][0]
+      results[threads][benchname][0] << 0.0
+    return
+  end
+    
+  PTY.spawn("./MVEE #{benchnum} #{variants} #{threads} #{input} #{'-n' if native} 2>&1") do |stdout, stdin, pid|
+    begin
+      stdout.each { |ln|
+        if ln.match(/real\t/)
+          time = ln.split("\t")[1].chop 
+          seconds = Float(time.split("m")[0].to_i * 60) + Float(time.split("m")[1].chop)
+          
+          variants = 0 if native
+          results[threads] = Hash.new if not results[threads]
+          results[threads][benchname] = Hash.new if not results[threads][benchname]
+          results[threads][benchname][variants] = Array.new if not results[threads][benchname][variants]
+          results[threads][benchname][variants] << seconds
+          
+          print("        #{seconds.to_s.gsub(".", ",")}\n")
+        else 
+          if ln.match(/ERROR/)
+            print("ERROR: #{ln}\n")
+            `killall -9 MVEE MVEE_LD_Loader_`
+          end
+        end
+      }
+    rescue Errno::EIO
     end
-  }
+  end
 end
 
 def print_spreadsheet(file, str)
@@ -46,15 +57,15 @@ def print_spreadsheet(file, str)
   print(str)
 end
 
-def dump_spreadsheet(results, threads)
+def dump_spreadsheet(results, prefix, threads)
   return if not results[threads]
 
   print("Spreadsheet for #{threads} worker threads:\n\n")
 
-  File.open("splash2x_#{threads}_workers.csv", "w") { |file|
+  File.open("splash_#{prefix}_#{threads}_workers.csv", "w") { |file|
     columns="Benchmark;Native;"
-    @replicae.each { |replicae|
-      columns << "GHUMVEE (#{replicae} Replicae);"
+    @variants.each { |variants|
+      columns << "GHUMVEE (#{variants} Variants);"
     }
     print_spreadsheet(file, columns + "\n")
 
@@ -77,7 +88,7 @@ end
 
 @workers.each { |threads|
   print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n")
-  print("@" + "SPLASH2x - #{threads} WORKER THREADS".center(78) + "@\n")
+  print("@" + "SPLASH-2x - #{threads} WORKER THREADS".center(78) + "@\n")
   print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n\n")
 
   print("Native:\n")
@@ -89,11 +100,11 @@ end
 
   print("\n")
 
-  @replicae.each { |replicae|
-    print("#{replicae} replicae:\n")
+  @variants.each { |variants|
+    print("#{variants} variants:\n")
     @splash.each { |num| 
       print("    running benchmark: #{get_bench_name(num)}\n")
-      (1..@runs).each { run_bench(num, replicae, threads, @inputset, @results, false) }
+      (1..@runs).each { run_bench(num, variants, threads, @inputset, @results, false) }
     }
 
     print("\n")
@@ -103,5 +114,5 @@ end
 }
 
 @workers.each { |threads|
-  dump_spreadsheet(@results, threads)
+  dump_spreadsheet(@results, "splashresults", threads)
 }

@@ -1,7 +1,30 @@
-Only in /home/stijn/parsec-2.1-mirror/pkgs/apps/raytrace/src/RTTL/common: MapOptions.hxx~
-diff -r --unified /home/stijn/parsec-2.1-mirror/pkgs/apps/raytrace/src/RTTL/common/RTThread.hxx /home/stijn/parsec-2.1/pkgs/apps/raytrace/src/RTTL/common/RTThread.hxx
---- /home/stijn/parsec-2.1-mirror/pkgs/apps/raytrace/src/RTTL/common/RTThread.hxx	2014-01-16 17:52:49.230919015 +0100
-+++ /home/stijn/parsec-2.1/pkgs/apps/raytrace/src/RTTL/common/RTThread.hxx	2014-01-16 17:52:07.668916150 +0100
+diff -r --unified parsec-2.1/pkgs/apps/raytrace/parsec/gcc-pthreads.bldconf parsec-2.1-patched/pkgs/apps/raytrace/parsec/gcc-pthreads.bldconf
+--- parsec-2.1/pkgs/apps/raytrace/parsec/gcc-pthreads.bldconf	2009-02-09 20:06:47.000000000 -0800
++++ parsec-2.1-patched/pkgs/apps/raytrace/parsec/gcc-pthreads.bldconf	2016-03-29 13:29:29.831765618 -0700
+@@ -21,7 +21,7 @@
+ # NOTE: By default PARSEC links raytrace to mesa with Xlib driver so that all
+ #       computations are done by the CPU. This requires to also link to the X
+ #       libraries and the pthreads library.
+-build_env="CXXFLAGS=\"-I${PARSECDIR}/pkgs/libs/mesa/inst/${PARSECPLAT}/include ${CXXFLAGS} -fexceptions -fno-strict-aliasing -fno-align-labels -DNDEBUG -D_MM_NO_ALIGN_CHECK\" LDFLAGS=\"-L${PARSECDIR}/pkgs/libs/mesa/inst/${PARSECPLAT}/lib ${LDFLAGS}\" LIBS=\"${LIBS} -lXmu -lX11 -lGL -lGLU -lpthread\""
++build_env="CXXFLAGS=\"-I${PARSECDIR}/pkgs/libs/mesa/inst/${PARSECPLAT}/include ${CXXFLAGS} -fno-threadsafe-statics -fexceptions -fno-strict-aliasing -fno-align-labels -DNDEBUG -D_MM_NO_ALIGN_CHECK\" LDFLAGS=\"-L${PARSECDIR}/pkgs/libs/mesa/inst/${PARSECPLAT}/lib ${LDFLAGS}\" LIBS=\"${LIBS} -lXmu -lX11 -lGL -lGLU -lpthread -lXext\""
+ 
+ # Whether the build system supports only in-place compilation.
+ # If TRUE, then all sources will be copied to the build directory before we
+Only in parsec-2.1-patched/pkgs/apps/raytrace/parsec: gcc-pthreads.bldconf~
+diff -r --unified parsec-2.1/pkgs/apps/raytrace/src/RTTL/common/MapOptions.hxx parsec-2.1-patched/pkgs/apps/raytrace/src/RTTL/common/MapOptions.hxx
+--- parsec-2.1/pkgs/apps/raytrace/src/RTTL/common/MapOptions.hxx	2009-02-01 22:53:26.000000000 -0800
++++ parsec-2.1-patched/pkgs/apps/raytrace/src/RTTL/common/MapOptions.hxx	2016-03-29 12:35:02.143784112 -0700
+@@ -17,6 +17,7 @@
+ #include <cstring>
+ #include <vector>
+ #include <map>
++#include <unistd.h>
+ 
+ #ifndef DOXYGEN_SHOULD_IGNORE_THIS
+ #ifdef _MSC_VER
+diff -r --unified parsec-2.1/pkgs/apps/raytrace/src/RTTL/common/RTThread.hxx parsec-2.1-patched/pkgs/apps/raytrace/src/RTTL/common/RTThread.hxx
+--- parsec-2.1/pkgs/apps/raytrace/src/RTTL/common/RTThread.hxx	2009-02-11 13:04:29.000000000 -0800
++++ parsec-2.1-patched/pkgs/apps/raytrace/src/RTTL/common/RTThread.hxx	2016-03-29 12:35:02.147784112 -0700
 @@ -60,38 +60,56 @@
  class AtomicCounter
  {
@@ -64,4 +87,3 @@ diff -r --unified /home/stijn/parsec-2.1-mirror/pkgs/apps/raytrace/src/RTTL/comm
    }
  
  
-Only in /home/stijn/parsec-2.1-mirror/pkgs/apps/raytrace/src/RTTL/common: RTThread.hxx~

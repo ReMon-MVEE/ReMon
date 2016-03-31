@@ -133,7 +133,7 @@ enum mvee_shared_buffer_types
 
 //
 // MVEE_GET_THREAD_NUM: Fetches the monitorid of the monitorthread responsible
-// for monitoring the caller and also returns the childnum of the caller
+// for monitoring the caller and also returns the variantnum of the caller
 //
 #define MVEE_GET_THREAD_NUM            MVEE_FAKE_SYSCALL_BASE + 10
 

@@ -1,0 +1,25 @@
+Prerequisites: libxext-dev libxmu-dev libxmu-headers libxi-dev libgl1-mesa-dev libglu1-mesa-dev (install using apt-get install)
+
+1) Download and unpack PARSEC 2.1 (in the ext/ folder)
+
+$ wget http://parsec.cs.princeton.edu/download/2.1/parsec-2.1.tar.gz
+$ tar xzf parsec-2.1.tar.gz
+
+2) Apply the data races patches
+
+$ cd parsec-2.1
+$ patch -p1 < /path/to/ReMon/patches/parsec-config.patch 
+$ patch -p1 < /path/to/ReMon/patches/parsec-dedup.patch 
+$ patch -p1 < /path/to/ReMon/patches/parsec-ferret.patch
+$ patch -p1 < /path/to/ReMon/patches/parsec-freqmine.patch
+$ patch -p1 < /path/to/ReMon/patches/parsec-imagick.patch
+$ patch -p1 < /path/to/ReMon/patches/parsec-raytrace.patch
+$ patch -p1 < /path/to/ReMon/patches/parsec-openssl.patch
+$ patch -p1 < /path/to/ReMon/patches/parsec-libxml2.patch
+
+3) Build PARSEC
+
+$ bin/parsecmgmt -a build -c gcc-pthreads -p blackscholes bodytrack canneal dedup fluidanimate raytrace streamcluster swaptions vips x264
+$ bin/parsecmgmt -a build -c gcc-openmp -p freqmine
+
+

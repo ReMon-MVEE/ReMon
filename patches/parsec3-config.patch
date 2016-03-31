@@ -1,0 +1,47 @@
+diff -r --unified parsec-3.0/config/gcc.bldconf parsec-3.0-patched/config/gcc.bldconf
+--- parsec-3.0/config/gcc.bldconf	2013-07-28 07:38:51.000000000 -0700
++++ parsec-3.0-patched/config/gcc.bldconf	2016-03-29 17:01:37.883693582 -0700
+@@ -71,14 +71,14 @@
+ PORTABILITY_FLAGS="-static-libgcc -Wl,--hash-style=both,--as-needed"
+ 
+ # Arguments to use
+-export CFLAGS=" -O3 -g -funroll-loops -fprefetch-loop-arrays ${PORTABILITY_FLAGS}"
+-export CXXFLAGS="-O3 -g -funroll-loops -fprefetch-loop-arrays -fpermissive -fno-exceptions ${PORTABILITY_FLAGS}"
++export CFLAGS=" -O3 -g -funroll-loops -fprefetch-loop-arrays ${PORTABILITY_FLAGS} -DNODATARACE"
++export CXXFLAGS="-O3 -g -funroll-loops -fprefetch-loop-arrays -fpermissive -fno-exceptions ${PORTABILITY_FLAGS}  -DNODATARACE"
+ export CPPFLAGS=""
+ export CXXCPPFLAGS=""
+ export LDFLAGS="-L${CC_HOME}/lib64 -L${CC_HOME}/lib"
+ export LIBS=""
+ export EXTRA_LIBS=""
+-export PARMACS_MACRO_FILE="pthreads"
++export PARMACS_MACRO_FILE="pthreads_barrier"
+ 
+ 
+ # OS-specific arguments
+@@ -97,8 +97,8 @@
+ fi
+ 
+ # Java
+-export JAVA_HOME="/usr"
+-export JAVAC="${JAVA_HOME}/bin/javac"
++#export JAVA_HOME="/usr"
++#export JAVAC="${JAVA_HOME}/bin/javac"
+ 
+ # Version numbers
+ if [ -x ${CC} ]; then
+@@ -116,9 +116,9 @@
+ else
+   LD_ver=""
+ fi
+-if [ -x ${JAVAC} ]; then
+-  JAVAC_ver=$(${JAVAC} -version 2>&1)
+-else
+-  JAVAC_ver=""
+-fi
++#if [ -x ${JAVAC} ]; then
++#  JAVAC_ver=$(${JAVAC} -version 2>&1)
++#else
++#  JAVAC_ver=""
++#fi
+ 

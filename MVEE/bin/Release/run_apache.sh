@@ -1,4 +1,4 @@
-CMD="$HOME/MVEE/VARAN/apache_1.3.29/src/httpd"
+CMD="$MVEEROOT/Benchmarks/VARAN/apache_1.3.29/src/httpd"
 
 if [ "$1" == "0" ]
 then

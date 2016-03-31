@@ -1,4 +1,4 @@
-CMD="$HOME/MVEE/VARAN/memcached-1.4.17/memcached -p 22 -u root"
+CMD="$MVEEROOT/Benchmarks/VARAN/memcached-1.4.17/memcached -p 22 -u root"
 
 if [ "$1" == "0" ]
 then

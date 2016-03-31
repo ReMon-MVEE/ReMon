@@ -1,4 +1,0 @@
-The following line should contain a single '3':
-3
-If it said anything else (such as 'zd') try compiling
-with -DSPEC_CPU_NOZMODIFIER

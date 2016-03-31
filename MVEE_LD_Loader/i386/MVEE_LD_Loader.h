@@ -1,7 +1,7 @@
 #include "/usr/include/i386-linux-gnu/asm/unistd_32.h"
 
 #define INTERP              "/lib/ld-linux.so.2"
-#define INTERP_SHORT        "MVEE Child %d >"
+#define INTERP_SHORT        "MVEE Variant %d >"
 
 //#define MVEE_HIDE_DSO
 //#define MVEE_DEBUG

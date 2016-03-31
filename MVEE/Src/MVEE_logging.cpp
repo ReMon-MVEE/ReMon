@@ -35,6 +35,36 @@
 #include "MVEE_memory.h"
 
 /*-----------------------------------------------------------------------------
+    cache_mismatch_info
+-----------------------------------------------------------------------------*/
+void monitor::cache_mismatch_info(const char* format, ...)
+{
+	char buffer[4096];
+    va_list va;
+    va_start(va, format);
+	if (vsnprintf(buffer, 4096, format, va) > 0)
+		mismatch_info << buffer;		
+    va_end(va);
+}
+
+/*-----------------------------------------------------------------------------
+    dump_mismatch_info
+-----------------------------------------------------------------------------*/
+void monitor::dump_mismatch_info()
+{
+	warnf(mismatch_info.str().c_str());
+	flush_mismatch_info();
+}
+
+/*-----------------------------------------------------------------------------
+    flush_mismatch_info
+-----------------------------------------------------------------------------*/
+void monitor::flush_mismatch_info()
+{
+	mismatch_info.str("");
+}
+
+/*-----------------------------------------------------------------------------
     log_ipmon_state
 -----------------------------------------------------------------------------*/
 void monitor::log_ipmon_state()
@@ -50,7 +80,7 @@ void monitor::log_ipmon_state()
 	struct ipmon_buffer* buffer = (struct ipmon_buffer*) ipmon_buffer->ptr;
 
 	debugf("Global state:\n");
-	debugf("\tnumchilds = %d\n", buffer->ipmon_numvariants);
+	debugf("\tnumvariants = %d\n", buffer->ipmon_numvariants);
 	debugf("\tusable_size = %d\n", buffer->ipmon_usable_size);
 	debugf("\thave_pending_signals = %ld\n", buffer->ipmon_have_pending_signals);
 
@@ -60,7 +90,7 @@ void monitor::log_ipmon_state()
 		if (offsets[i] > highest)
 			highest = offsets[i];
 
-		debugf("Child %d\n", i);
+		debugf("Variant %d\n", i);
 		debugf("\tstatus %d, pos %d\n", 
 			   buffer->ipmon_variant_info[i].status,
 			   buffer->ipmon_variant_info[i].pos);
@@ -80,11 +110,11 @@ void monitor::log_ipmon_state()
 		{
 			if (offsets[i] == offset)
 			{
-				ss << " <= child " <<  i;
+				ss << " <= variant " <<  i;
 			}
 			else if (offsets[i] > offset && offsets[i] < entry->syscall_entry_size + offset)
 			{
-				ss << " <= child " << i << " (call in progress)";
+				ss << " <= variant " << i << " (call in progress)";
 			}
 		}
 		ss << "\n";
@@ -151,14 +181,6 @@ void monitor::log_ipmon_state()
 }
 
 /*-----------------------------------------------------------------------------
-    log_monitor_state_live
------------------------------------------------------------------------------*/
-void monitor::log_monitor_state_live()
-{
-
-}
-
-/*-----------------------------------------------------------------------------
     log_monitor_state
 -----------------------------------------------------------------------------*/
 void monitor::log_monitor_state(void (*logfunc)(const char* format, ...))
@@ -172,36 +194,41 @@ void monitor::log_monitor_state(void (*logfunc)(const char* format, ...))
     logfunc("* monitorid: %d\n",          monitorid);
     logfunc("* monitor state: %s\n",      getTextualState(state));
     logfunc("* created by monitor: %d\n", parentmonitorid);
-    logfunc("* monitoring program: %s %s\n",
-            set_mmap_table->mmap_execve_image.c_str(),
-            set_mmap_table->mmap_execve_args.c_str());
+
+	for (int i = 0; i < mvee::numvariants; ++i)
+	{
+		logfunc("* monitoring variant %d: %s %s\n", i,				
+				set_mmap_table->mmap_startup_info[i].image.c_str(),
+				set_mmap_table->mmap_startup_info[i].serialized_argv.c_str());
+	}
     logfunc("* monitoring main thread? %s\n", monitorid == set_mmap_table->mmap_execve_id ? "YES" : "NO");
+
     if (monitorid == set_mmap_table->mmap_execve_id)
     {
         for (int i = 0; i < mvee::numvariants; ++i)
         {
             char        cmd[1000];
-            sprintf(cmd, "ps ux | grep %s | grep \" %d \" | grep -v grep", set_mmap_table->mmap_execve_image.c_str(),
-                    childs[i].childpid);
+            sprintf(cmd, "ps ux | grep %s | grep \" %d \" | grep -v grep", set_mmap_table->mmap_startup_info[i].image.c_str(),
+                    variants[i].variantpid);
             std::string buf = mvee::log_read_from_proc_pipe(cmd, NULL);
-            logfunc("* child %d ps: %s\n", i, buf.c_str());
+            logfunc("* variant %d ps: %s\n", i, buf.c_str());
         }
     }
     logfunc("===========================================================================\n");
     for (int i = 0; i < mvee::numvariants; ++i)
     {
-        bool call_dispatched = childs[i].call_dispatched;
+        bool call_dispatched = variants[i].call_dispatched;
         bool in_call         = (state == STATE_IN_MASTERCALL
                                 || state == STATE_IN_SYSCALL
                                 || state == STATE_IN_FORKCALL
-                                || (childs[i].call_type == MVEE_CALL_TYPE_UNSYNCED && call_dispatched));
-        bool at_call_entry   = (childs[i].callnum != NO_CALL);
-        bool at_call_exit    = childs[i].callnum == NO_CALL;
+                                || (variants[i].call_type == MVEE_CALL_TYPE_UNSYNCED && call_dispatched));
+        bool at_call_entry   = (variants[i].callnum != NO_CALL);
+        bool at_call_exit    = variants[i].callnum == NO_CALL;
 		bool in_sigsuspend   = in_call && (
 #ifdef __NR_sigsuspend
-			childs[0].callnum == __NR_sigsuspend ||
+			variants[0].callnum == __NR_sigsuspend ||
 #endif 
-			childs[0].callnum == __NR_rt_sigsuspend);
+			variants[0].callnum == __NR_rt_sigsuspend);
         bool needs_sigstop   = true;
 
         if ((!in_call && at_call_entry && !call_dispatched)
@@ -210,12 +237,12 @@ void monitor::log_monitor_state(void (*logfunc)(const char* format, ...))
 			|| in_sigsuspend)
             needs_sigstop = false;
 
-        logfunc(">>> child %d: pid %d\n", i, childs[i].childpid);
+        logfunc(">>> variant %d: pid %d\n", i, variants[i].variantpid);
         logfunc("    > in syscall: %s\n", in_call ? "YES" : "NO");
         logfunc("    > current syscall: %d (%s)\n",
-                childs[i].callnum,
-                getTextualSyscall(childs[i].callnum));
-        logfunc("    > call type: %d\n",                  childs[i].call_type);
+                variants[i].callnum,
+                getTextualSyscall(variants[i].callnum));
+        logfunc("    > call type: %d\n",                  variants[i].call_type);
         logfunc("    > needs sigstop to interrupt: %s\n", needs_sigstop ? "YES" : "NO");
     }
     logfunc("===========================================================================\n");
@@ -231,22 +258,29 @@ void monitor::log_backtraces()
     warnf("Backtrace requested. current monitor state: %s\n",
                 getTextualState(state));
 
+	if (set_mmap_table->mmap_startup_info[0].image.length() == 0)
+	{
+		warnf("Can't backtrace because variants haven't been fully initialized yet\n");
+	}
+	else
+	{
 # if defined(MVEE_BENCHMARK) && defined(MVEE_FORCE_ENABLE_BACKTRACING)
     log_monitor_state(mvee::warnf);
 # else
     log_monitor_state(mvee::logf);
 # endif
 
-    for (int i = 0; i < mvee::numvariants; ++i)
-    {
-        if (!childs[i].child_terminated)
-            log_child_backtrace(i, 0, 1);
-        else
-            debugf("pid: %d was already TERMINATED - can't backtrace!\n", childs[i].childpid);
-    }
+		for (int i = 0; i < mvee::numvariants; ++i)
+		{
+			if (!variants[i].variant_terminated)
+				log_variant_backtrace(i, 0, 1);
+			else
+				debugf("pid: %d was already TERMINATED - can't backtrace!\n", variants[i].variantpid);
+		}
 
-	log_ipmon_state();
-    log_dump_queues(set_shm_table.get());
+		log_ipmon_state();
+		log_dump_queues(set_shm_table.get());
+	}
 #endif
 }
 
@@ -281,7 +315,7 @@ void monitor::log_fini()
 -----------------------------------------------------------------------------*/
 void monitor::log_caller_info
 (
-    int childnum,
+    int variantnum,
     int level,
     unsigned long address,
     int calculate_file_offsets,
@@ -291,31 +325,31 @@ void monitor::log_caller_info
     if (!logfunc)
         logfunc = mvee::logf;
 
-    std::string caller_info = set_mmap_table->get_caller_info(childnum, childs[childnum].childpid, address, calculate_file_offsets);
-    logfunc("pid: %d - %03d: %s\n", childs[childnum].childpid, level, caller_info.c_str());
+    std::string caller_info = set_mmap_table->get_caller_info(variantnum, variants[variantnum].variantpid, address, calculate_file_offsets);
+    logfunc("pid: %d - %03d: %s\n", variants[variantnum].variantpid, level, caller_info.c_str());
 }
 
 /*-----------------------------------------------------------------------------
-    log_child_backtrace -
+    log_variant_backtrace -
 -----------------------------------------------------------------------------*/
-void monitor::log_child_backtrace(int childnum, int max_depth, int calculate_file_offsets, int is_segfault)
+void monitor::log_variant_backtrace(int variantnum, int max_depth, int calculate_file_offsets, int is_segfault)
 {
     int  i, status;
     void (*logfunc)(const char*, ...) = mvee::logf;
     bool should_send_sigstop = state != STATE_WAITING_RESUME;
-    bool at_call_entry       = childs[childnum].callnum != NO_CALL;
-    bool call_returned       = childs[childnum].callnum == NO_CALL;
-    bool call_dispatched     = childs[childnum].call_dispatched;
+    bool at_call_entry       = variants[variantnum].callnum != NO_CALL;
+    bool call_returned       = variants[variantnum].callnum == NO_CALL;
+    bool call_dispatched     = variants[variantnum].call_dispatched;
     bool in_call             =
         (state == STATE_IN_MASTERCALL
          || state == STATE_IN_SYSCALL
          || state == STATE_IN_FORKCALL
-         || (childs[childnum].call_type == MVEE_CALL_TYPE_UNSYNCED && call_dispatched));
+         || (variants[variantnum].call_type == MVEE_CALL_TYPE_UNSYNCED && call_dispatched));
 	bool in_sigsuspend   = in_call && (
 #ifdef __NR_sigsuspend
-		childs[childnum].callnum == __NR_sigsuspend ||
+		variants[variantnum].callnum == __NR_sigsuspend ||
 #endif 
-		childs[childnum].callnum == __NR_rt_sigsuspend);
+		variants[variantnum].callnum == __NR_rt_sigsuspend);
 
 //	MutexLock lock(&mvee::global_lock);
 
@@ -323,92 +357,92 @@ void monitor::log_child_backtrace(int childnum, int max_depth, int calculate_fil
     logfunc = mvee::warnf;
 #endif
 
-    // we're in state normal but this child has reached the entrance
+    // we're in state normal but this variant has reached the entrance
     // of a call already and we haven't dispatched it yet
-    // so the child is definitely still blocked!
+    // so the variant is definitely still blocked!
     if ((in_call && !call_dispatched)                      // from a call handler
         || (!in_call && at_call_entry && !call_dispatched) // from a get_call_type/log_args/precall handler
         || (in_call && call_returned)                      // from a postcall/log_return handler
-        || (childs[childnum].callnum == MVEE_RDTSC_FAKE_SYSCALL)
+        || (variants[variantnum].callnum == MVEE_RDTSC_FAKE_SYSCALL)
         || is_segfault                                     // from a signal-delivery-stop
 		|| in_sigsuspend)
 		should_send_sigstop = false;
 
-    logfunc("pid: %d - ==================================\n", childs[childnum].childpid);
-    logfunc("pid: %d - generating local backtrace for child: %d\n",
-            childs[childnum].childpid,
-            childs[childnum].childpid);
+    logfunc("pid: %d - ==================================\n", variants[variantnum].variantpid);
+    logfunc("pid: %d - generating local backtrace for variant: %d\n",
+            variants[variantnum].variantpid,
+            variants[variantnum].variantpid);
 
     if (should_send_sigstop)
     {
-        logfunc("pid: %d - > child is currently running or in a syscall. Waiting for SIGSTOP delivery...\n",
-                childs[childnum].childpid);
+        logfunc("pid: %d - > variant is currently running or in a syscall. Waiting for SIGSTOP delivery...\n",
+                variants[variantnum].variantpid);
 
-        i = waitpid(childs[childnum].childpid, &status, __WALL | WUNTRACED | __WNOTHREAD | WNOHANG);
+        i = waitpid(variants[variantnum].variantpid, &status, __WALL | WUNTRACED | __WNOTHREAD | WNOHANG);
 
         if (should_send_sigstop && i <= 0)
         {
-            long tmp = ptrace(PTRACE_PEEKUSER, childs[childnum].childpid, 0, NULL);
+            long tmp = ptrace(PTRACE_PEEKUSER, variants[variantnum].variantpid, 0, NULL);
 
             if (tmp != -1)
             {
-                logfunc("pid: %d - > we were about to send SIGSTOP to this child but it was already in ptrace-stop!\n",
-                        childs[childnum].childpid);
+                logfunc("pid: %d - > we were about to send SIGSTOP to this variant but it was already in ptrace-stop!\n",
+                        variants[variantnum].variantpid);
                 goto was_interrupted;
             }
 
-            int  err = syscall(__NR_tgkill, childs[childnum].childtgid,
-                               childs[childnum].childpid, SIGSTOP);
+            int  err = syscall(__NR_tgkill, variants[variantnum].varianttgid,
+                               variants[variantnum].variantpid, SIGSTOP);
 
             if (err)
             {
                 logfunc("pid: %d - > signal delivery failed... err = %d (%s)\n",
-                        childs[childnum].childpid, errno, strerror(errno));
+                        variants[variantnum].variantpid, errno, strerror(errno));
                 return;
             }
 
-            i = waitpid(childs[childnum].childpid, &status, __WALL | WUNTRACED | __WNOTHREAD);
+            i = waitpid(variants[variantnum].variantpid, &status, __WALL | WUNTRACED | __WNOTHREAD);
 
             if (i == -1)
             {
-                logfunc("pid: %d - > error while waiting for child: %d (%s)\n",
-                        childs[childnum].childpid, errno, strerror(errno));
+                logfunc("pid: %d - > error while waiting for variant: %d (%s)\n",
+                        variants[variantnum].variantpid, errno, strerror(errno));
                 return;
             }
             else if (i != 0)
             {
-                logfunc("pid: %d - > child stopped.\n",
-                        childs[childnum].childpid);
+                logfunc("pid: %d - > variant stopped.\n",
+                        variants[variantnum].variantpid);
             }
 
             if (WIFEXITED(status))
             {
                 logfunc("pid: %d - >>> Process %d exited. Status = %d\n",
-                        childs[childnum].childpid, i, WEXITSTATUS(status));
+                        variants[variantnum].variantpid, i, WEXITSTATUS(status));
                 return;
             }
             else if (WIFSIGNALED(status))
             {
                 logfunc("pid: %d - >>> Process %d terminated by signal: %s\n",
-                        childs[childnum].childpid, i, getTextualSig(WTERMSIG(status)));
+                        variants[variantnum].variantpid, i, getTextualSig(WTERMSIG(status)));
                 if (WTERMSIG(status) != SIGSEGV)
                     return;
             }
             else if (WIFCONTINUED(status))
             {
                 logfunc("pid: %d - >>> Process %d continued! (this shouldn't happen!)\n",
-                        childs[childnum].childpid, i);
+                        variants[variantnum].variantpid, i);
                 return;
             }
             else if (WIFSTOPPED(status))
             {
                 logfunc("pid: %d - >>> Process %d stopped by signal: %s\n",
-                        childs[childnum].childpid, i, getTextualSig(WSTOPSIG(status)));
+                        variants[variantnum].variantpid, i, getTextualSig(WSTOPSIG(status)));
             }
             else
             {
                 logfunc(">>> Couldn't poll process status...\n",
-                        childs[childnum].childpid);
+                        variants[variantnum].variantpid);
                 return;
             }
         }
@@ -416,29 +450,29 @@ void monitor::log_child_backtrace(int childnum, int max_depth, int calculate_fil
     else
     {
 was_interrupted:
-        logfunc("pid: %d - > child is currently suspended\n", childs[childnum].childpid);
+        logfunc("pid: %d - > variant is currently suspended\n", variants[variantnum].variantpid);
         //sync();
 
         mvee_syscall_handler handler;
-        if (childs[childnum].callnum > 0 && childs[childnum].callnum <= MAX_CALLS)
+        if (variants[variantnum].callnum > 0 && variants[variantnum].callnum <= MAX_CALLS)
         {
-            handler = monitor::syscall_logger_table[childs[childnum].callnum][MVEE_LOG_ARGS];
+            handler = monitor::syscall_logger_table[variants[variantnum].callnum][MVEE_LOG_ARGS];
             if (handler != MVEE_HANDLER_DONTHAVE && handler != MVEE_HANDLER_DONTNEED)
-                (this->*handler)(childnum);
+                (this->*handler)(variantnum);
         }
     }
 
     // read /proc/maps
-//    unsigned long      stack_base = set_mmap_table->get_stack_base(childnum);
+//    unsigned long      stack_base = set_mmap_table->get_stack_base(variantnum);
     i = 1;
 
     // Stack walk
     unsigned long      prev_ip    = 0;
-    mvee_dwarf_context context(childs[childnum].childpid);
-    log_caller_info(childnum, 0, IP(context.regs), 0, logfunc);
+    mvee_dwarf_context context(variants[variantnum].variantpid);
+    log_caller_info(variantnum, 0, IP(context.regs), 0, logfunc);
     while (1)
     {
-        if (set_mmap_table->dwarf_step(childnum, childs[childnum].childpid, &context) != 1
+        if (set_mmap_table->dwarf_step(variantnum, variants[variantnum].variantpid, &context) != 1
 /*            || (unsigned long)SP(context.regs) > stack_base */
 			  || (unsigned long)IP(context.regs) == prev_ip)
         {
@@ -446,11 +480,11 @@ was_interrupted:
             break;
         }
 
-        log_caller_info(childnum, i++, IP(context.regs), 0, logfunc);
+        log_caller_info(variantnum, i++, IP(context.regs), 0, logfunc);
         prev_ip = IP(context.regs);
     }
 
-    log_registers(childnum, logfunc);
+    log_registers(variantnum, logfunc);
 }
 
 /*-----------------------------------------------------------------------------
@@ -466,10 +500,11 @@ void monitor::log_dump_queues(shm_table* shm_table)
     if (atomic_buffer)
     {
         std::vector<unsigned long> pos(mvee::numvariants);
+		std::fill(pos.begin(), pos.end(), 0);
 
         for (int i = 0; i < mvee::numvariants; ++i)
-            if (atomic_queue_pos[i])
-                pos[i] = mvee_wrap_ptrace(PTRACE_PEEKDATA, childs[i].childpid, (unsigned long)atomic_queue_pos[i], NULL);
+            if (atomic_queue_pos[i] && !variants[i].variant_terminated)
+                pos[i] = mvee_wrap_ptrace(PTRACE_PEEKDATA, variants[i].variantpid, (unsigned long)atomic_queue_pos[i], NULL);
 
         char                       logname[100];
         sprintf(logname, "%s/Logs/%s_%d.log", mvee::os_get_orig_working_dir().c_str(),
@@ -479,11 +514,14 @@ void monitor::log_dump_queues(shm_table* shm_table)
         if (!logfile)
             return;
 
-        warnf("dumping queue: %s - FILE: %s (%d - %s)\n",
-                    getTextualBufferType(MVEE_LIBC_ATOMIC_BUFFER), logname, logfile, strerror(errno));
+        warnf("dumping queue: %s\n", getTextualBufferType(MVEE_LIBC_ATOMIC_BUFFER));
+
+//        warnf("dumping queue: %s - FILE: %s (%d - %s)\n",
+//                    getTextualBufferType(MVEE_LIBC_ATOMIC_BUFFER), logname, logfile, strerror(errno));
 
         for (int i = 0; i < mvee::numvariants; ++i)
-            fprintf(logfile, "CHILD %d - POS: %05ld\n", i, pos[i]);
+            fprintf(logfile, "VARIANT %d - POS: %05ld %s\n", i, pos[i],
+					variants[i].variant_terminated ? "(terminated)" : " ");
 
         struct mvee_op_entry*      buffer  = (struct mvee_op_entry*)atomic_buffer->ptr;
         for (master_pos = 0; master_pos < SHARED_QUEUE_SLOTS; ++master_pos)
@@ -495,7 +533,7 @@ void monitor::log_dump_queues(shm_table* shm_table)
 
             for (int i = 0; i < mvee::numvariants; ++i)
                 if (master_pos == pos[i])
-                    fprintf(logfile, " <= child %d", i);
+                    fprintf(logfile, " <= variant %d", i);
             fprintf(logfile, "\n");
 
             if (!buffer[master_pos].counter_and_idx)
@@ -504,10 +542,13 @@ void monitor::log_dump_queues(shm_table* shm_table)
 
         for (int i = 0; i < mvee::numvariants; ++i)
         {
-            fprintf(logfile, "\n\n COUNTER DUMP FOR CHILD: %d (PID: %d)\n",
-                    i, childs[i].childpid);
+			if (variants[i].variant_terminated)
+				continue;
 
-            struct mvee_counter* counters = (struct mvee_counter*)mvee_rw_read_data(childs[i].childpid,
+            fprintf(logfile, "\n\n COUNTER DUMP FOR VARIANT: %d (PID: %d)\n",
+                    i, variants[i].variantpid);
+
+            struct mvee_counter* counters = (struct mvee_counter*)mvee_rw_read_data(variants[i].variantpid,
                                                                                     (unsigned long)atomic_counters[i], MVEE_COUNTERS * sizeof(struct mvee_counter), 0);
 
             if (counters)
@@ -558,7 +599,7 @@ void monitor::log_dump_queues(shm_table* shm_table)
             fprintf(logfile, "> * EIP queue shm size    : %d bytes              \n", info->eip_sz);
             fprintf(logfile, "> * EIP queue stack depth : %d                    \n", info->eip_stack_depth);
         }
-        fprintf(logfile, "> Child Info                                      \n");
+        fprintf(logfile, "> Variant Info                                      \n");
 
         // try to determine the last non-empty slot in this buffer
         for (int j = 0; j < mvee::numvariants; ++j)
@@ -566,8 +607,8 @@ void monitor::log_dump_queues(shm_table* shm_table)
             unsigned int tmppos = *(unsigned int*)(ROUND_UP((unsigned long)info->ptr, 64) + j * 64 + sizeof(int));
             if (j == 0)
                 master_pos = tmppos;
-            fprintf(logfile, "> * Child %d                                      \n", j);
-            fprintf(logfile, ">   + pid               : %d                    \n",   childs[j].childpid);
+            fprintf(logfile, "> * Variant %d                                      \n", j);
+            fprintf(logfile, ">   + pid               : %d                    \n",   variants[j].variantpid);
 
             if (it.first == MVEE_LIBC_LOCK_BUFFER_PARTIAL)
             {
@@ -705,7 +746,7 @@ void monitor::log_dump_queues(shm_table* shm_table)
                 {
                     for (unsigned char z = 0; z < info->eip_stack_depth; ++z)
                     {
-                        std::string call_site = set_mmap_table->get_caller_info(x, childs[x].childpid,
+                        std::string call_site = set_mmap_table->get_caller_info(x, variants[x].variantpid,
                                                                                 eip_buffer[info->eip_stack_depth * (j * mvee::numvariants + x) + z], 0);
                         fprintf(logfile, ">>> %d:%d > %s\n", x, z, call_site.c_str());
                     }
@@ -730,7 +771,7 @@ void monitor::log_dump_queues(shm_table* shm_table)
 -----------------------------------------------------------------------------*/
 void monitor::log_calculate_clock_spread()
 {
-	if (!atomic_counters[0])
+	if (!atomic_counters[0] || variants[0].variant_terminated)
 		return;
 
 	int lowest_clock_used  = 0;
@@ -740,7 +781,7 @@ void monitor::log_calculate_clock_spread()
 
 	std::vector<double> cntrs(MVEE_COUNTERS);
 
-	struct mvee_counter* counters = (struct mvee_counter*)mvee_rw_read_data(childs[0].childpid,
+	struct mvee_counter* counters = (struct mvee_counter*)mvee_rw_read_data(variants[0].variantpid,
 		(unsigned long)atomic_counters[0], MVEE_COUNTERS * sizeof(struct mvee_counter), 0);
 
 	for (int j = 0; j < MVEE_COUNTERS; ++j)
@@ -773,7 +814,7 @@ void monitor::log_calculate_clock_spread()
 -----------------------------------------------------------------------------*/
 void monitor::log_monitor_state_short(int err)
 {
-    warnf("prevcall : %ld (%s)\n", childs[0].prevcallnum, getTextualSyscall(childs[0].prevcallnum));
+    warnf("prevcall : %ld (%s)\n", variants[0].prevcallnum, getTextualSyscall(variants[0].prevcallnum));
     warnf("state    : %d (%s)\n",  state,                 getTextualState(state));
     warnf("errno    : %d (%s)\n",  err,                   strerror(err));
 }
@@ -785,13 +826,13 @@ void monitor::log_unhandled_sig(int status, int index)
 {
     warnf("==================================\n");
     warnf("ERROR: Unhandled signal\n");
-    warnf("pid      : %d\n",          childs[index].childpid);
+    warnf("pid      : %d\n",          variants[index].variantpid);
     warnf("status   : 0x%08X\n",      status);
     warnf("signal   : 0x%08X (%s)\n", WSTOPSIG(status),      getTextualSig(WSTOPSIG(status)));
-    warnf("call     : %ld (%s)\n",    childs[index].callnum, getTextualSyscall(childs[index].callnum));
+    warnf("call     : %ld (%s)\n",    variants[index].callnum, getTextualSyscall(variants[index].callnum));
 #if !defined(MVEE_BENCHMARK) || defined(MVEE_FORCE_ENABLE_BACKTRACING)
     log_monitor_state_short(0);
-    log_child_backtrace(index);
+    log_variant_backtrace(index);
 #endif
     warnf("==================================\n");
 }
@@ -806,23 +847,23 @@ void monitor::log_call_mismatch(int index1, int index2)
 
     warnf("==================================\n");
     warnf("ERROR: Callnumber mismatch\n");
-    warnf("pid1     : %d\n",       childs[index1].childpid);
-    warnf("call1    : %ld (%s)\n", childs[index1].callnum, getTextualSyscall(childs[index1].callnum));
-    warnf("type1    : %d\n",       childs[index1].call_type);
-    warnf("pid2     : %d\n",       childs[index2].childpid);
-    warnf("call2    : %ld (%s)\n", childs[index2].callnum, getTextualSyscall(childs[index2].callnum));
-    warnf("type2    : %d\n",       childs[index2].call_type);
+    warnf("pid1     : %d\n",       variants[index1].variantpid);
+    warnf("call1    : %ld (%s)\n", variants[index1].callnum, getTextualSyscall(variants[index1].callnum));
+    warnf("type1    : %d\n",       variants[index1].call_type);
+    warnf("pid2     : %d\n",       variants[index2].variantpid);
+    warnf("call2    : %ld (%s)\n", variants[index2].callnum, getTextualSyscall(variants[index2].callnum));
+    warnf("type2    : %d\n",       variants[index2].call_type);
     warnf("==================================\n");
     mvee_syscall_handler handler;
-    if (childs[index1].callnum > 0 && childs[index1].callnum <= MAX_CALLS)
+    if (variants[index1].callnum > 0 && variants[index1].callnum <= MAX_CALLS)
     {
-        handler = monitor::syscall_logger_table[childs[index1].callnum][MVEE_LOG_ARGS];
+        handler = monitor::syscall_logger_table[variants[index1].callnum][MVEE_LOG_ARGS];
         if (handler != MVEE_HANDLER_DONTHAVE && handler != MVEE_HANDLER_DONTNEED)
             (this->*handler)(index1);
     }
-    if (childs[index2].callnum > 0 && childs[index2].callnum <= MAX_CALLS)
+    if (variants[index2].callnum > 0 && variants[index2].callnum <= MAX_CALLS)
     {
-        handler = monitor::syscall_logger_table[childs[index2].callnum][MVEE_LOG_ARGS];
+        handler = monitor::syscall_logger_table[variants[index2].callnum][MVEE_LOG_ARGS];
         if (handler != MVEE_HANDLER_DONTHAVE && handler != MVEE_HANDLER_DONTNEED)
             (this->*handler)(index2);
     }
@@ -841,9 +882,9 @@ void monitor::log_callargs_mismatch()
     warnf("==================================\n");
     warnf("ERROR: Call arguments mismatch\n");
     warnf("call     : %ld (%s)\n",
-                childs[0].callnum, getTextualSyscall(childs[0].callnum));
+                variants[0].callnum, getTextualSyscall(variants[0].callnum));
     for (int i = 0; i < mvee::numvariants; ++i)
-        warnf("child %d  : %d\n", i, childs[i].childpid);
+        warnf("variant %d  : %d\n", i, variants[i].variantpid);
     log_monitor_state_short(0);
     warnf("==================================\n");
 }
@@ -851,13 +892,13 @@ void monitor::log_callargs_mismatch()
 /*-----------------------------------------------------------------------------
     log_stack
 -----------------------------------------------------------------------------*/
-void monitor::log_stack(int childnum)
+void monitor::log_stack(int variantnum)
 {
 #ifndef MVEE_BENCHMARK
-	call_check_regs(childnum);
+	call_check_regs(variantnum);
 	for (int i = -10; i < 10; ++i)
 	{
-		unsigned long stack_word = mvee_wrap_ptrace(PTRACE_PEEKDATA, childs[childnum].childpid, childs[childnum].regs.rsp + i * sizeof(unsigned long), 0);
+		unsigned long stack_word = mvee_wrap_ptrace(PTRACE_PEEKDATA, variants[variantnum].variantpid, variants[variantnum].regs.rsp + i * sizeof(unsigned long), 0);
 
 		debugf("stack[rsp + %d] = " PTRSTR "\n", i*sizeof(unsigned long), stack_word);
 	}
@@ -867,39 +908,39 @@ void monitor::log_stack(int childnum)
 /*-----------------------------------------------------------------------------
     log_segfault - Logs segfault (SIGSEGV) info.
 -----------------------------------------------------------------------------*/
-void monitor::log_segfault(int childnum)
+void monitor::log_segfault(int variantnum)
 {
     siginfo_t siginfo = {0};
-    mvee_wrap_ptrace(PTRACE_GETSIGINFO, childs[childnum].childpid, 0, (void*)&siginfo);
-    FETCH_IP(childnum, eip);
-    warnf("Warning: %s in child %d (PID: %d)\n",
-                getTextualSig(siginfo.si_signo), childnum,
-                childs[childnum].childpid);
+    mvee_wrap_ptrace(PTRACE_GETSIGINFO, variants[variantnum].variantpid, 0, (void*)&siginfo);
+    FETCH_IP(variantnum, eip);
+    warnf("Warning: %s in variant %d (PID: %d)\n",
+                getTextualSig(siginfo.si_signo), variantnum,
+                variants[variantnum].variantpid);
     warnf("IP: " PTRSTR ", Address: " PTRSTR ", Code: %s (%d), Errno: %d\n",
                 eip, siginfo.si_addr, getTextualSEGVCode(siginfo.si_code),
                 siginfo.si_code, siginfo.si_errno);
-    log_registers(childnum, mvee::logf);
+    log_registers(variantnum, mvee::logf);
 //    set_mmap_table->print_mmap_table(mvee::logf);
 #if !defined(MVEE_ENABLE_VALGRIND_HACKS) && (!defined(MVEE_BENCHMARK) || defined(MVEE_FORCE_ENABLE_BACKTRACING))
-    log_child_backtrace(childnum, 0, 1, 1);
+    log_variant_backtrace(variantnum, 0, 1, 1);
 #endif
 
 	log_ipmon_state();
-	log_stack(childnum);
+	log_stack(variantnum);
 	set_mmap_table->print_mmap_table();
 }
 
 /*-----------------------------------------------------------------------------
     log_hw_bp_event -
 -----------------------------------------------------------------------------*/
-void monitor::log_hw_bp_event (int childnum, siginfo_t* sig)
+void monitor::log_hw_bp_event (int variantnum, siginfo_t* sig)
 {
     int i;
     unsigned long dr6;
 
-    debugf("Hardware Breakpoint hit by child: %d\n", childs[childnum].childpid);
+    debugf("Hardware Breakpoint hit by variant: %d\n", variants[variantnum].variantpid);
 
-    dr6 = mvee_wrap_ptrace(PTRACE_PEEKUSER, childs[childnum].childpid,
+    dr6 = mvee_wrap_ptrace(PTRACE_PEEKUSER, variants[variantnum].variantpid,
                            offsetof(user, u_debugreg) + 6*sizeof(long), NULL);
 
     for (i = 0; i < 4; ++i)
@@ -907,11 +948,11 @@ void monitor::log_hw_bp_event (int childnum, siginfo_t* sig)
         if (dr6 & (1 << i))
         {
             debugf("> this BP at address " PTRSTR " is registered in slot %d and has type %s\n",
-                       childs[childnum].hw_bps[i], i,
-                       getTextualBreakpointType(childs[childnum].hw_bps_type[i]));
+                       variants[variantnum].hw_bps[i], i,
+                       getTextualBreakpointType(variants[variantnum].hw_bps_type[i]));
             debugf("> current value -> " LONGRESULTSTR " \n",
-                       mvee_wrap_ptrace(PTRACE_PEEKDATA, childs[childnum].childpid,
-                                        childs[childnum].hw_bps[i], NULL));
+                       mvee_wrap_ptrace(PTRACE_PEEKDATA, variants[variantnum].variantpid,
+                                        variants[variantnum].hw_bps[i], NULL));
             break;
         }
     }
@@ -920,7 +961,7 @@ void monitor::log_hw_bp_event (int childnum, siginfo_t* sig)
         warnf("> couldn't find the BP in the BP list...\n");
 
 #ifndef MVEE_BENCHMARK
-    log_child_backtrace(childnum, 0, 1, 1);
+    log_variant_backtrace(variantnum, 0, 1, 1);
 #endif
 }
 
@@ -1184,7 +1225,7 @@ std::string mvee::log_read_from_proc_pipe(const char* proc, size_t* output_lengt
 
 /*-----------------------------------------------------------------------------
     log_dump_locking_stats - called when a shared segment is detached
-    (i.e. it has no more children referencing it)
+    (i.e. it has no more variants referencing it)
 -----------------------------------------------------------------------------*/
 void mvee::log_dump_locking_stats(monitor* mon, mmap_table* mmap_table, shm_table* shm_table)
 {
@@ -1199,8 +1240,8 @@ void mvee::log_dump_locking_stats(monitor* mon, mmap_table* mmap_table, shm_tabl
     {
         mmap_table->grab_lock();
         fprintf(mvee::lockstats_logfile, "Stats for process:\n    > PROC: %s\n    > ARGS: %s\n",
-                mmap_table->mmap_execve_image.c_str(),
-                mmap_table->mmap_execve_args.c_str());
+				mmap_table->mmap_startup_info[0].image.c_str(),
+                mmap_table->mmap_startup_info[0].serialized_argv.c_str());
         fprintf(mvee::lockstats_logfile, "Process was created by monitor: %d\n",
                 mmap_table->mmap_execve_id);
         fprintf(mvee::lockstats_logfile, "Stats were dumped by monitor: %d\n",
@@ -1212,12 +1253,12 @@ void mvee::log_dump_locking_stats(monitor* mon, mmap_table* mmap_table, shm_tabl
 
     // This is deprecated. Need to fix sometime!
 #ifdef MVEE_CHECK_SYNC_PRIMITIVES
-    if (mon->childs[0].sync_primitives_ptr)
+    if (mon->variants[0].sync_primitives_ptr)
     {
         fprintf(mvee::lockstats_logfile, "HIGH-LEVEL SYNC PRIMITIVES IN THIS PROGRAM:\n");
 
 #define CHECK_PRIMITIVE(a) \
-    fprintf(mvee::lockstats_logfile, "%s : %s\n", #a, (mon->childs[0].sync_primitives_bitmask & (1 << a)) ? "YES" : "NO");
+    fprintf(mvee::lockstats_logfile, "%s : %s\n", #a, (mon->variants[0].sync_primitives_bitmask & (1 << a)) ? "YES" : "NO");
 
         CHECK_PRIMITIVE(PTHREAD_BARRIER);
         CHECK_PRIMITIVE(PTHREAD_COND);

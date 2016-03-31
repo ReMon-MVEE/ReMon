@@ -39,7 +39,7 @@
 -----------------------------------------------------------------------------*/
 mmap_region_info::mmap_region_info
 (
-    int           childnum,
+    int           variantnum,
     unsigned long address,
     unsigned long size,
     unsigned int  prot_flags,
@@ -57,7 +57,7 @@ mmap_region_info::mmap_region_info
 
     if (backing_file)
     {
-        region_backing_file_fd    = backing_file->fds[childnum];
+        region_backing_file_fd    = backing_file->fds[variantnum];
         region_backing_file_path  = backing_file->path;
         if (backing_file->path.rfind(".so") == backing_file->path.size() - 3)
             region_is_so = true;
@@ -74,7 +74,7 @@ mmap_region_info::mmap_region_info
 
 #ifdef MVEE_MMAN_DEBUG
     debugf("mvee_mman_create_region_info(%d, " PTRSTR "-" PTRSTR ", %d (%s))\n",
-               childnum, address, region_size+address,
+               variantnum, address, region_size+address,
                region_backing_file_fd,
                region_backing_file_path.c_str());
 #endif
@@ -86,7 +86,7 @@ mmap_region_info::mmap_region_info
 
     MUST RETURN A VALID REGION!!!!
 -----------------------------------------------------------------------------*/
-mmap_addr2line_proc* mmap_region_info::get_addr2line_proc(int childnum, pid_t childpid)
+mmap_addr2line_proc* mmap_region_info::get_addr2line_proc(int variantnum, pid_t variantpid)
 {
     if (region_addr2line_proc)
         return region_addr2line_proc.get();
@@ -97,7 +97,7 @@ mmap_addr2line_proc* mmap_region_info::get_addr2line_proc(int childnum, pid_t ch
     if (!region_addr2line_proc)
     {
         region_addr2line_proc = std::shared_ptr<mmap_addr2line_proc>(
-            new mmap_addr2line_proc(region_backing_file_path, childnum, childpid, region_base_address, region_size));
+            new mmap_addr2line_proc(region_backing_file_path, variantnum, variantpid, region_base_address, region_size));
         mvee::addr2line_cache.insert(std::pair<std::string, std::weak_ptr<mmap_addr2line_proc> >(
                                          region_backing_file_path, region_addr2line_proc));
     }
@@ -108,7 +108,7 @@ mmap_addr2line_proc* mmap_region_info::get_addr2line_proc(int childnum, pid_t ch
 /*-----------------------------------------------------------------------------
     mmap_region_info::get_dwarf_info
 -----------------------------------------------------------------------------*/
-dwarf_info* mmap_region_info::get_dwarf_info(int childnum, pid_t childpid)
+dwarf_info* mmap_region_info::get_dwarf_info(int variantnum, pid_t variantpid)
 {
     if (region_dwarf_info)
         return region_dwarf_info.get();
@@ -118,7 +118,7 @@ dwarf_info* mmap_region_info::get_dwarf_info(int childnum, pid_t childpid)
 
     if (!region_dwarf_info)
     {
-        region_dwarf_info = std::shared_ptr<dwarf_info>(new dwarf_info(region_backing_file_path, childnum, childpid, this));
+        region_dwarf_info = std::shared_ptr<dwarf_info>(new dwarf_info(region_backing_file_path, variantnum, variantpid, this));
 
         if (!region_dwarf_info->info_valid)
             region_dwarf_info.reset();  // this will also dealloc it
@@ -159,16 +159,19 @@ void mmap_table::init()
 
 mmap_table::mmap_table()
     : mmap_execve_id(0),
+	  have_diversified_variants(false),
 #ifdef MVEE_FILTER_LOGGING
-    set_logging_enabled(false),
+	  set_logging_enabled(false),
 #else
-    set_logging_enabled(true),
+	  set_logging_enabled(true),
 #endif
-    enlarged_initial_stacks(false)
+	  thread_group_shutting_down(false),
+	  enlarged_initial_stacks(false)
 {
     init();
     full_map.resize(mvee::numvariants);
     cached_instrs.resize(mvee::numvariants);
+	mmap_startup_info.resize(mvee::numvariants);
 
 #ifdef MVEE_MMAN_DEBUG
     print_mmap_table(mvee::logf);
@@ -179,21 +182,21 @@ mmap_table::mmap_table(const mmap_table& parent)
 {
     init();
 
-    mmap_execve_id          = parent.mmap_execve_id;
-    mmap_execve_image       = parent.mmap_execve_image;
-    mmap_execve_args        = parent.mmap_execve_args;
-    mmap_execve_argv        = parent.mmap_execve_argv;
-	mmap_execve_loader      = parent.mmap_execve_loader;
+    mmap_execve_id            = parent.mmap_execve_id;
+	mmap_startup_info         = parent.mmap_startup_info;
+	have_diversified_variants = parent.have_diversified_variants;
 #ifdef MVEE_FILTER_LOGGING
-    set_logging_enabled     = parent.set_logging_enabled;
+    set_logging_enabled       = parent.set_logging_enabled;
 #endif
-    enlarged_initial_stacks = parent.enlarged_initial_stacks;
-    cached_instrs           = parent.cached_instrs;
-    cached_syms             = parent.cached_syms;
+    enlarged_initial_stacks   = parent.enlarged_initial_stacks;
+    cached_instrs             = parent.cached_instrs;
+    cached_syms               = parent.cached_syms;
 
     full_map.resize(mvee::numvariants);
+
     for (int i = 0; i < mvee::numvariants; ++i)
     {
+		// copy memory map
         std::set<mmap_region_info*>::iterator it = parent.full_map[i].begin();
 
         for (; it != parent.full_map[i].end(); ++it)
@@ -219,33 +222,33 @@ void mmap_table::truncate_table()
     enlarged_initial_stacks = 0;
 
     for (int i = 0; i < mvee::numvariants; ++i)
-        truncate_table_child(i);
+        truncate_table_variant(i);
 
     // clear resolved symbols
     cached_syms.clear();
 }
 
 /*-----------------------------------------------------------------------------
-    truncate_table_child
+    truncate_table_variant
 -----------------------------------------------------------------------------*/
-void mmap_table::truncate_table_child(int childnum)
+void mmap_table::truncate_table_variant(int variantnum)
 {
-//    warnf("truncating table for child: %d - full map has %d regions\n",
-//      childnum, full_map[childnum].size());
+//    warnf("truncating table for variant: %d - full map has %d regions\n",
+//      variantnum, full_map[variantnum].size());
 
     // clear resolved instructions
-    cached_instrs[childnum].clear();
+    cached_instrs[variantnum].clear();
 
     // clear resolved regions
-    for (std::set<mmap_region_info*>::iterator it = full_map[childnum].begin();
-         it != full_map[childnum].end();
+    for (std::set<mmap_region_info*>::iterator it = full_map[variantnum].begin();
+         it != full_map[variantnum].end();
          ++it)
     {
         //(*it)->print_region_info("deleting region", mvee::warnf);
         delete *it;
     }
 
-    full_map[childnum].clear();
+    full_map[variantnum].clear();
 }
 
 /*-----------------------------------------------------------------------------
@@ -283,17 +286,25 @@ void mmap_table::print_mmap_table(void (*logfunc)(const char* format, ...))
     logfunc("======================================== MMAN TABLE DUMP ========================================\n");
     grab_lock();
     logfunc("ORIGINAL MONITORID: %d\n", mmap_execve_id);
-    logfunc("PROC: %s %s\n",            mmap_execve_image.c_str(), mmap_execve_args.c_str());
+
+	for (int i = 0; i < mvee::numvariants; ++i)
+	{
+		logfunc("PROC %d: %s %s\n", i, 
+				mmap_startup_info[i].image.c_str(), 
+				mmap_startup_info[i].serialized_argv.c_str());
+	}
+
     for (int i = 0; i < mvee::numvariants; ++i)
     {
         for (std::set<mmap_region_info*, region_sort>::iterator it = full_map[i].begin();
              it != full_map[i].end(); ++it)
         {
             char prefix[100];
-            sprintf(prefix, "child %d ->", i);
+            sprintf(prefix, "variant %d ->", i);
             (*it)->print_region_info(prefix, logfunc);
         }
     }
+
     release_lock();
     logfunc("=================================================================================================\n");
 }
@@ -301,14 +312,14 @@ void mmap_table::print_mmap_table(void (*logfunc)(const char* format, ...))
 /*-----------------------------------------------------------------------------
     get_region_info
 -----------------------------------------------------------------------------*/
-mmap_region_info* mmap_table::get_region_info (int childnum, unsigned long address, unsigned long region_size)
+mmap_region_info* mmap_table::get_region_info (int variantnum, unsigned long address, unsigned long region_size)
 {
-    mmap_region_info                                   tmp_region(childnum, address, region_size, 0, NULL, 0, 0);
+    mmap_region_info                                   tmp_region(variantnum, address, region_size, 0, NULL, 0, 0);
 
     std::set<mmap_region_info*, region_sort>::iterator it =
-        full_map[childnum].find(&tmp_region);
+        full_map[variantnum].find(&tmp_region);
 
-    if (it != full_map[childnum].end())
+    if (it != full_map[variantnum].end())
         return *it;
 
     return NULL;
@@ -321,7 +332,7 @@ mmap_region_info* mmap_table::get_region_info (int childnum, unsigned long addre
     If the regions CAN be merged, the function will delete region2 from the
     table and region1 will become the merged region.
 -----------------------------------------------------------------------------*/
-mmap_region_info* mmap_table::merge_regions(int childnum, mmap_region_info* region1, mmap_region_info* region2, bool dont_touch_maps)
+mmap_region_info* mmap_table::merge_regions(int variantnum, mmap_region_info* region1, mmap_region_info* region2, bool dont_touch_maps)
 {
     if (region1 && region2 &&
         (region1->region_base_address + region1->region_size == region2->region_base_address
@@ -343,12 +354,12 @@ mmap_region_info* mmap_table::merge_regions(int childnum, mmap_region_info* regi
             int                                   reinsert = 0;
             if (!dont_touch_maps)
             {
-                it = full_map[childnum].find(region1);
+                it = full_map[variantnum].find(region1);
 
-                if (it != full_map[childnum].end())
+                if (it != full_map[variantnum].end())
                 {
                     reinsert = 1;
-                    full_map[childnum].erase(it);
+                    full_map[variantnum].erase(it);
                 }
             }
 
@@ -369,15 +380,15 @@ mmap_region_info* mmap_table::merge_regions(int childnum, mmap_region_info* regi
 #endif
             if (!dont_touch_maps)
             {
-                it = full_map[childnum].find(region2);
-                if (it != full_map[childnum].end())
+                it = full_map[variantnum].find(region2);
+                if (it != full_map[variantnum].end())
                 {
                     delete *it;
-                    full_map[childnum].erase(it);
+                    full_map[variantnum].erase(it);
                 }
 
                 if (reinsert)
-                    full_map[childnum].insert(region1);
+                    full_map[variantnum].insert(region1);
             }
 
             return region1;
@@ -391,16 +402,16 @@ mmap_region_info* mmap_table::merge_regions(int childnum, mmap_region_info* regi
     split_region - returns the lower part of the split.
     existing_region becomes the upper part!!!
 -----------------------------------------------------------------------------*/
-mmap_region_info* mmap_table::split_region(int childnum, mmap_region_info* existing_region, unsigned long split_address)
+mmap_region_info* mmap_table::split_region(int variantnum, mmap_region_info* existing_region, unsigned long split_address)
 {
 #ifdef MVEE_MMAN_DEBUG
     existing_region->print_region_info(">>> splitting region: ");
 #endif
 
     std::set<mmap_region_info*>::iterator it           =
-        full_map[childnum].find(existing_region);
-    if (it != full_map[childnum].end())
-        full_map[childnum].erase(it);
+        full_map[variantnum].find(existing_region);
+    if (it != full_map[variantnum].end())
+        full_map[variantnum].erase(it);
 
     mmap_region_info*                     lower_region = new mmap_region_info(*existing_region);
     mmap_region_info*                     upper_region = existing_region;
@@ -412,8 +423,8 @@ mmap_region_info* mmap_table::split_region(int childnum, mmap_region_info* exist
     lower_region->region_size         = split_address - lower_region->region_base_address;
     if (upper_region->region_backing_file_path[0] != '[')
         upper_region->region_backing_file_offset = lower_region->region_backing_file_offset + lower_region->region_size;
-    full_map[childnum].insert(lower_region);
-    full_map[childnum].insert(upper_region);
+    full_map[variantnum].insert(lower_region);
+    full_map[variantnum].insert(upper_region);
 
 #ifdef MVEE_MMAN_DEBUG
     lower_region->print_region_info(">>> lower split: ");
@@ -426,11 +437,11 @@ mmap_region_info* mmap_table::split_region(int childnum, mmap_region_info* exist
 /*-----------------------------------------------------------------------------
     get_vdso_region
 -----------------------------------------------------------------------------*/
-mmap_region_info* mmap_table::get_vdso_region(int childnum)
+mmap_region_info* mmap_table::get_vdso_region(int variantnum)
 {
     std::set<mmap_region_info*, region_sort>::iterator it;
 
-    for (it = full_map[childnum].begin(); it != full_map[childnum].end(); ++it)
+    for (it = full_map[variantnum].begin(); it != full_map[variantnum].end(); ++it)
         if ((*it)->region_backing_file_path == "[vdso]")
             return (*it);
 
@@ -440,11 +451,11 @@ mmap_region_info* mmap_table::get_vdso_region(int childnum)
 /*-----------------------------------------------------------------------------
     get_heap_region
 -----------------------------------------------------------------------------*/
-mmap_region_info* mmap_table::get_heap_region(int childnum)
+mmap_region_info* mmap_table::get_heap_region(int variantnum)
 {
     std::set<mmap_region_info*, region_sort>::iterator it;
 
-    for (it = full_map[childnum].begin(); it != full_map[childnum].end(); ++it)
+    for (it = full_map[variantnum].begin(); it != full_map[variantnum].end(); ++it)
         if ((*it)->region_backing_file_path == "[heap]")
             return (*it);
 
@@ -454,23 +465,23 @@ mmap_region_info* mmap_table::get_heap_region(int childnum)
 /*-----------------------------------------------------------------------------
     get_ld_loader_bounds
 -----------------------------------------------------------------------------*/
-bool mmap_table::get_ld_loader_bounds(int childnum, unsigned long& loader_base, unsigned long& loader_size)
+bool mmap_table::get_ld_loader_bounds(int variantnum, unsigned long& loader_base, unsigned long& loader_size)
 {
     mmap_region_info* info = NULL;
     if (sizeof(long) == 4)
-        info = get_region_info(childnum, 0x08048000, 0);
+        info = get_region_info(variantnum, 0x08048000, 0);
     else
-        info = get_region_info(childnum, 0x10000000, 0);
+        info = get_region_info(variantnum, 0x10000000, 0);
 
     if (info)
     {
         // also look for the data segment
         std::set<mmap_region_info*, region_sort>::iterator it =
-            full_map[childnum].find(info);
-        if (it != full_map[childnum].end())
+            full_map[variantnum].find(info);
+        if (it != full_map[variantnum].end())
         {
             it++;
-            if (it != full_map[childnum].end())
+            if (it != full_map[variantnum].end())
             {
                 unsigned long loader_end = (*it)->region_base_address
                                            + (*it)->region_size;
@@ -566,9 +577,9 @@ bool mmap_table::compare_region_addresses (std::vector<unsigned long>& addresses
 /*-----------------------------------------------------------------------------
     insert_region
 -----------------------------------------------------------------------------*/
-bool mmap_table::insert_region(int childnum, mmap_region_info* region)
+bool mmap_table::insert_region(int variantnum, mmap_region_info* region)
 {
-    return full_map[childnum].insert(region).second;
+    return full_map[variantnum].insert(region).second;
 }
 
 /*-----------------------------------------------------------------------------
@@ -706,16 +717,16 @@ int mmap_table::foreach_region
             warnf("only found %d regions while iterating over ranges:\n");
             for (int i = 0; i < mvee::numvariants; ++i)
             {
-                warnf("> child %d range: 0x" PTRSTR "-0x" PTRSTR "\n", i, addresses[i], addresses[i] + size);
+                warnf("> variant %d range: 0x" PTRSTR "-0x" PTRSTR "\n", i, addresses[i], addresses[i] + size);
             }
             warnf("> last valid address for the master was: 0x" PTRSTR "\n", __addresses[0]);
             for (int i = 0; i < mvee::numvariants; ++i)
             {
                 if (infos[i])
-                    warnf("> child %d region found: 0x" PTRSTR "-0x" PTRSTR " (%s)\n", i, infos[i]->region_base_address,
+                    warnf("> variant %d region found: 0x" PTRSTR "-0x" PTRSTR " (%s)\n", i, infos[i]->region_base_address,
                                 infos[i]->region_base_address + infos[i]->region_size, infos[i]->region_backing_file_path.c_str());
                 else
-                    warnf("> child %d region not found\n", i);
+                    warnf("> variant %d region not found\n", i);
             }
             throw;
             return -1;
@@ -733,40 +744,40 @@ out:
 }
 
 /*-----------------------------------------------------------------------------
-    foreach_region_one_child - iterates over all regions for the
-    specified child only
+    foreach_region_one_variant - iterates over all regions for the
+    specified variant only
 
     WARNING: the semantics are slightly different! The callback function
     gets a pointer to the mmap_region_info rather than a pointer to an
     mmap_region_info arrayy!!!
 -----------------------------------------------------------------------------*/
-int mmap_table::foreach_region_one_child
+int mmap_table::foreach_region_one_variant
 (
-    int childnum,
+    int variantnum,
     unsigned long address,
     unsigned long size,
     void* callback_param,
     bool (* callback)(mmap_table*, mmap_region_info*, void*)
 )
 {
-    mmap_region_info                                   initial_info(childnum, address, 0, 0, NULL, 0, 0);
+    mmap_region_info                                   initial_info(variantnum, address, 0, 0, NULL, 0, 0);
     mmap_region_info*                                  info;
     unsigned long                                      initial_address = address;
 
 #ifdef MVEE_MMAN_DEBUG
     debugf("foreach region\n");
-    debugf("region %d => 0x" PTRSTR "-0x" PTRSTR "\n", childnum, address, address+size);
+    debugf("region %d => 0x" PTRSTR "-0x" PTRSTR "\n", variantnum, address, address+size);
 #endif
 
     // get the lower bounds
     std::set<mmap_region_info*, region_sort>::iterator it;
-    it = full_map[childnum].lower_bound(&initial_info);
-    if (it != full_map[childnum].end())
+    it = full_map[variantnum].lower_bound(&initial_info);
+    if (it != full_map[variantnum].end())
     {
         if ((*it)->region_base_address + (*it)->region_size < address)
         {
             it++;
-            if (it != full_map[childnum].end())
+            if (it != full_map[variantnum].end())
             {
                 address = (*it)->region_base_address;
                 info    = *(it);
@@ -795,8 +806,8 @@ int mmap_table::foreach_region_one_child
         if (!callback(this, info, callback_param))
             return -1;
 
-        it                               = full_map[childnum].upper_bound(&initial_info);
-        if (it == full_map[childnum].end())
+        it                               = full_map[variantnum].upper_bound(&initial_info);
+        if (it == full_map[variantnum].end())
             return 0;
         info                             = *it;
         address                          = info->region_base_address;
@@ -842,7 +853,7 @@ bool mmap_table::compare_ranges(std::vector<unsigned long>& addresses, unsigned 
     only change the flags for the mapped portions of those regions
     * mprotecting partial regions is allowed!
 -----------------------------------------------------------------------------*/
-static __thread int           __mprotect_childnum;
+static __thread int           __mprotect_variantnum;
 static __thread unsigned long __mprotect_base;
 static __thread unsigned long __mprotect_size;
 static __thread unsigned int  __mprotect_new_prot_flags;
@@ -852,32 +863,32 @@ bool mmap_table::mman_mprotect_range_callback(mmap_table* table, mmap_region_inf
     // watch out for partial mprotects!
     if (__mprotect_base > region_info->region_base_address)
         // split_region returns the lower part. the existing region info becomes the upper part...
-        table->split_region(__mprotect_childnum, region_info, __mprotect_base);
+        table->split_region(__mprotect_variantnum, region_info, __mprotect_base);
     if (__mprotect_base + __mprotect_size < region_info->region_base_address + region_info->region_size)
-        region_info = table->split_region(__mprotect_childnum, region_info, __mprotect_base + __mprotect_size);
+        region_info = table->split_region(__mprotect_variantnum, region_info, __mprotect_base + __mprotect_size);
     //mvee_mman_print_region_info("mprotecting region => ", region_info);
     region_info->region_prot_flags = __mprotect_new_prot_flags;
     return true;
 }
 
-bool mmap_table::mprotect_range (int childnum, unsigned long base, unsigned long size, unsigned int new_prot_flags)
+bool mmap_table::mprotect_range (int variantnum, unsigned long base, unsigned long size, unsigned int new_prot_flags)
 {
     base                      = ROUND_DOWN(base, 4096);
     size                      = ROUND_UP(size, 4096);
-    __mprotect_childnum       = childnum;
+    __mprotect_variantnum       = variantnum;
     __mprotect_base           = base;
     __mprotect_size           = size;
     __mprotect_new_prot_flags = new_prot_flags;
-    if (foreach_region_one_child(childnum, base, size, (void*)(unsigned long)childnum, mmap_table::mman_mprotect_range_callback) != 0)
+    if (foreach_region_one_variant(variantnum, base, size, (void*)(unsigned long)variantnum, mmap_table::mman_mprotect_range_callback) != 0)
         return false;
 
     // try to merge everything in this range
-    mmap_region_info                                   info(childnum, base - PAGE_SIZE, size + PAGE_SIZE, 0, NULL, 0, 0);
+    mmap_region_info                                   info(variantnum, base - PAGE_SIZE, size + PAGE_SIZE, 0, NULL, 0, 0);
     std::set<mmap_region_info*, region_sort>::iterator it   =
-        full_map[childnum].lower_bound(&info);
+        full_map[variantnum].lower_bound(&info);
 
     mmap_region_info*                                  prev = NULL;
-    for (; it != full_map[childnum].end(); ++it)
+    for (; it != full_map[variantnum].end(); ++it)
     {
         if (!prev)
         {
@@ -890,8 +901,8 @@ bool mmap_table::mprotect_range (int childnum, unsigned long base, unsigned long
 
         // if merging succeeds, then iterator will be invalidated
         // and the object the iterator pointed to will be deleted
-        if (merge_regions(childnum, prev, *it))
-            it = full_map[childnum].find(prev);
+        if (merge_regions(variantnum, prev, *it))
+            it = full_map[variantnum].find(prev);
 
         prev = *it;
     }
@@ -909,7 +920,7 @@ bool mmap_table::mprotect_range (int childnum, unsigned long base, unsigned long
     only munmap the mapped portions of those regions
     * munmapping partial regions is allowed
 -----------------------------------------------------------------------------*/
-static __thread int           __munmap_childnum;
+static __thread int           __munmap_variantnum;
 static __thread unsigned long __munmap_base;
 static __thread unsigned long __munmap_size;
 
@@ -920,13 +931,13 @@ bool mmap_table::mman_munmap_range_callback(mmap_table* table, mmap_region_info*
     if (__munmap_base > region_info->region_base_address)
     {
         // split_region returns the lower part. the existing region info becomes the upper part...
-        table->split_region(__munmap_childnum, region_info, __munmap_base);
+        table->split_region(__munmap_variantnum, region_info, __munmap_base);
         //	warnf("splitting because munmap base > region base\n");
     }
     if (__munmap_base + __munmap_size < region_info->region_base_address + region_info->region_size)
     {
         //	warnf("splitting because munmap_limit < region limit\n");
-        region_info = table->split_region(__munmap_childnum, region_info, __munmap_base + __munmap_size);
+        region_info = table->split_region(__munmap_variantnum, region_info, __munmap_base + __munmap_size);
     }
 
     // delete the region from the table
@@ -939,15 +950,15 @@ bool mmap_table::mman_munmap_range_callback(mmap_table* table, mmap_region_info*
     return true;
 }
 
-bool mmap_table::munmap_range (int childnum, unsigned long base, unsigned long size)
+bool mmap_table::munmap_range (int variantnum, unsigned long base, unsigned long size)
 {
     base              = ROUND_DOWN(base, 4096);
     size              = ROUND_UP(size, 4096);
-    __munmap_childnum = childnum;
+    __munmap_variantnum = variantnum;
     __munmap_base     = base;
     __munmap_size     = size;
-    //    warnf("munmapping range: 0x%08x-0x%08x for child: %d\n", base, base+size, childnum);
-    if (foreach_region_one_child(childnum, base, size, (void*)(unsigned long)childnum, mmap_table::mman_munmap_range_callback) != 0)
+    //    warnf("munmapping range: 0x%08x-0x%08x for variant: %d\n", base, base+size, variantnum);
+    if (foreach_region_one_variant(variantnum, base, size, (void*)(unsigned long)variantnum, mmap_table::mman_munmap_range_callback) != 0)
         return false;
     return true;
 }
@@ -960,24 +971,38 @@ bool mmap_table::munmap_range (int childnum, unsigned long base, unsigned long s
 
     Pass NULL as the region_backing_file if we're creating an anonymous region!
 -----------------------------------------------------------------------------*/
-bool mmap_table::map_range (int childnum, unsigned long address, unsigned long size, unsigned int map_flags, unsigned int prot_flags, fd_info* region_backing_file, unsigned int region_backing_file_offset)
+bool mmap_table::map_range (int variantnum, unsigned long address, unsigned long size, unsigned int map_flags, unsigned int prot_flags, fd_info* region_backing_file, unsigned int region_backing_file_offset)
 {
     address = ROUND_DOWN(address, 4096);
     size    = ROUND_UP(size, 4096);
 
     // munmap the range first
-    munmap_range(childnum, address, size);
+    munmap_range(variantnum, address, size);
 
     // now we can just create a new region without having to deal with
     // overlap scenarios
-    mmap_region_info* new_region = new mmap_region_info(childnum, address, size, prot_flags, region_backing_file, region_backing_file_offset, map_flags);
+    mmap_region_info* new_region = new mmap_region_info(variantnum, address, size, prot_flags, region_backing_file, region_backing_file_offset, map_flags);
 //    new_region->print_region_info("inserting region: ", mvee::warnf);
-    if (!full_map[childnum].insert(new_region).second)
+    if (!full_map[variantnum].insert(new_region).second)
     {
         delete new_region;
         warnf("failed to insert new region....\n");
     }
     return true;
+}
+
+/*-----------------------------------------------------------------------------
+    find_image_base - Kind of like win32 GetModuleHandle
+-----------------------------------------------------------------------------*/
+unsigned long mmap_table::find_image_base (int variantnum, std::string image_name)
+{
+	for (auto it : full_map[variantnum])
+	{
+		if (it->region_backing_file_path.compare(image_name) == 0)
+			return it->region_base_address;
+	}
+
+	return 0;
 }
 
 /*-----------------------------------------------------------------------------
@@ -995,7 +1020,7 @@ void mmap_table::calculate_disjoint_bases (unsigned long size, std::vector<unsig
     std::set<mmap_region_info*, region_sort>::iterator it2;
     std::set<mmap_region_info*, region_sort>::iterator prev;
 
-    // step 0: Attempt to enlarge each child's stack to stack_limit size so
+    // step 0: Attempt to enlarge each variant's stack to stack_limit size so
     // we don't accidentally map anything too close to the stack, preventing it
     // from growing to its maximum size...
     //
@@ -1154,9 +1179,9 @@ void mmap_table::calculate_disjoint_bases (unsigned long size, std::vector<unsig
     // for (it = merged_regions.begin(); it != merged_regions.end(); ++it)
     //	warnf("> found region - 0x%08x-0x%08x\n", (*it)->region_base_address, (*it)->region_size + (*it)->region_base_address);
 
-    // step 3: for each child, find a new base address that:
-    // > a) does not overlap with code addresses in any other childs
-    // > b) does not overlap with any regions in the child itself
+    // step 3: for each variant, find a new base address that:
+    // > a) does not overlap with code addresses in any other variants
+    // > b) does not overlap with any regions in the variant itself
     mmap_region_info test_region(0, 0, 0, 0, NULL, 0, 0);
     for (int i = 0; i < mvee::numvariants; ++i)
     {
@@ -1164,7 +1189,7 @@ void mmap_table::calculate_disjoint_bases (unsigned long size, std::vector<unsig
         it                              = merged_regions.end();
         it--;
 
-        // warnf("testing base: 0x%08x for child: %d\n", ((*it)->region_base_address - size) & ~4095, i);
+        // warnf("testing base: 0x%08x for variant: %d\n", ((*it)->region_base_address - size) & ~4095, i);
 
         // Try to place the region just before the highest mapped region. This will
         // probably be the pseudo-region we added in step 1b
@@ -1173,7 +1198,7 @@ void mmap_table::calculate_disjoint_bases (unsigned long size, std::vector<unsig
 
         while (1)
         {
-            // First check if this address is still available within the child's own address space
+            // First check if this address is still available within the variant's own address space
             // If it is not available, find the lowest address that IS available
             while ((it2 = full_map[i].find(&test_region))
                    != full_map[i].end())
@@ -1182,7 +1207,7 @@ void mmap_table::calculate_disjoint_bases (unsigned long size, std::vector<unsig
 
                 if (size > (*it2)->region_base_address)
                 {
-                    warnf("disjoint code layouting failed - there's not enough space left in child %d's address space to place a region of size: " LONGRESULTSTR "\n", i,                           size);
+                    warnf("disjoint code layouting failed - there's not enough space left in variant %d's address space to place a region of size: " LONGRESULTSTR "\n", i,                           size);
                     warnf("we detected overlap with region: 0x" PTRSTR "-0x" PTRSTR " (%s)\n",                                                                         (*it2)->region_base_address, (*it2)->region_base_address +  (*it2)->region_size, (*it2)->region_backing_file_path.c_str());
                     throw;
                     return;
@@ -1192,13 +1217,13 @@ void mmap_table::calculate_disjoint_bases (unsigned long size, std::vector<unsig
             }
 
             // Now also check if this region would overlap with any code regions we already have
-            // in other childs. If it does overlap, we have to do the whole thing all over again
+            // in other variants. If it does overlap, we have to do the whole thing all over again
             it = merged_regions.find(&test_region);
             if (it != merged_regions.end())
             {
                 // after adjustment, the new base now overlaps with another code region
                 // => skip that code region first, then continue looking within
-                // the child's own address space
+                // the variant's own address space
                 // warnf("also found overlap with an existing code region at: %08x\n", (*it)->region_base_address);
 
                 if (size > (*it)->region_base_address)
@@ -1220,11 +1245,11 @@ void mmap_table::calculate_disjoint_bases (unsigned long size, std::vector<unsig
         bases[i] = test_region.region_base_address;
 
         // now we insert the region in the merged regions set
-        // so the next childs won't get an overlapping region
+        // so the next variants won't get an overlapping region
         mmap_region_info* new_region = new mmap_region_info(0, test_region.region_base_address, test_region.region_size, 0, NULL, 0, 0);
 
         merged_regions.insert(new_region);
-        // warnf("returning region 0x%08x-0x%08x for child %d\n",
+        // warnf("returning region 0x%08x-0x%08x for variant %d\n",
         //		bases[i], bases[i] + size, i);
     }
 
@@ -1238,22 +1263,22 @@ void mmap_table::calculate_disjoint_bases (unsigned long size, std::vector<unsig
 /*-----------------------------------------------------------------------------
     mvee_mman_check_vdso_overlap
 -----------------------------------------------------------------------------*/
-int mmap_table::check_vdso_overlap(int childnum)
+int mmap_table::check_vdso_overlap(int variantnum)
 {
-    mmap_region_info* vdso = get_vdso_region(childnum);
+    mmap_region_info* vdso = get_vdso_region(variantnum);
     vdso->print_region_info("Checking overlap for VDSO");
 
     if (!vdso)
         return -1;
 
-    for (int i = 0; i < childnum; ++i)
+    for (int i = 0; i < variantnum; ++i)
     {
         mmap_region_info* other = get_vdso_region(i);
         if (mmap_table::check_region_overlap(vdso, other))
         {
             debugf("overlapping vdsos:\n");
-            vdso->print_region_info("VDSO for this child");
-            other->print_region_info("VDSO for other child");
+            vdso->print_region_info("VDSO for this variant");
+            other->print_region_info("VDSO for other variant");
             return i;
         }
     }
@@ -1263,13 +1288,13 @@ int mmap_table::check_vdso_overlap(int childnum)
 
 /*-----------------------------------------------------------------------------
     find_writable_region - find a PROT_WRITE region of at least len bytes
-    long in the address space of child childnum
+    long in the address space of variant variantnum
 -----------------------------------------------------------------------------*/
-mmap_region_info* mmap_table::find_writable_region(int childnum, unsigned long len, pid_t look_for_thread, bool is_main_thread)
+mmap_region_info* mmap_table::find_writable_region(int variantnum, unsigned long len, pid_t look_for_thread, bool is_main_thread)
 {
     std::set<mmap_region_info*, region_sort>::iterator region_iterator;
     std::set<mmap_region_info*, region_sort> *         region_table
-        = &full_map[childnum];
+        = &full_map[variantnum];
 
     char*                                              look_for_region = NULL;
 

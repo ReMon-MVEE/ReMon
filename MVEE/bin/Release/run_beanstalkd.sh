@@ -1,4 +1,4 @@
-CMD="$HOME/MVEE/VARAN/beanstalkd/beanstalkd -p 22"
+CMD="$MVEEROOT/Benchmarks/VARAN/beanstalkd/beanstalkd -p 22"
 
 if [ "$1" == "0" ]
 then

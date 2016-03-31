@@ -65,10 +65,10 @@
 #define MVEE_NO_RW_LOGGING
 
 // MVEE_CHECK_SYNC_PRIMITIVES: the MVEE will keep track of which high-level synchronization
-// primitives the replicae are using. Requires libc-support. NO LONGER WORKS. FIXME
+// primitives the variants are using. Requires libc-support. NO LONGER WORKS. FIXME
 // #define MVEE_CHECK_SYNC_PRIMITIVES
 
-// MVEE_ALLOW_MONITOR_SCHEDULING: if defined, the monitor might pin replica threads
+// MVEE_ALLOW_MONITOR_SCHEDULING: if defined, the monitor might pin variant threads
 // and their respective thread monitors onto the same physical cpu
 // We have predefined scheduling rules in Src/MVEE_demos.cpp
 // #define MVEE_ALLOW_MONITOR_SCHEDULING
@@ -86,7 +86,7 @@
 // the GHUMVEE kernel extensions (PTRACE_COPYMEM and PTRACE_COPYSTRING)
 // #define MVEE_HAVE_MVEE_KERNEL
 
-// MVEE_ALLOW_SHM: When defined, the replicae are permitted to attach to sysv shared
+// MVEE_ALLOW_SHM: When defined, the variants are permitted to attach to sysv shared
 // memory segments even though it is clearly a bad idea to allow them to do so!!!!
 // #define MVEE_ALLOW_SHM
 
@@ -114,7 +114,7 @@
 // #define MVEE_DWARF_DEBUG
 
 // MVEE_ALLOW_PERF: allow the use of the -p commandline parameter, which enables
-// performance counting for the replicae
+// performance counting for the variants
 // #define MVEE_ALLOW_PERF
 
 /*-----------------------------------------------------------------------------

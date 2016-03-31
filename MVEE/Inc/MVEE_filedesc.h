@@ -56,7 +56,7 @@ public:
     std::vector<unsigned long> fds;                   // file descriptor values in all variants - note: if master_file == true, these fds will be virtual fds for all slave variants
     std::string                path;                  // For a filesystem file descriptor, the full path to the corresponding file
     unsigned long              access_flags;          // e.g. O_RDONLY
-    bool                       master_file;           // if set to true, this file is only actually opened by the master child
+    bool                       master_file;           // if set to true, this file is only actually opened by the master variant
     bool                       close_on_exec;         // fds are duplicated across forks but if O_CLOEXEC is set, they will be closed if the new fork executes execve
     bool                       unsynced_reads;        // if set to true, sys_read* calls from this fd are dispatched as normal calls rather than mastercalls
     ssize_t                    original_file_size;    // for shared mappings that we changed to private, we need to know the original file size!!!
@@ -68,62 +68,103 @@ public:
 };
 
 //
-// File Descriptor Table. Since ALL file operations
-// are synchronized, we only need one of these tables per set
-// of equivalent childs.
+// File Descriptor Table. File operations are generally synchronized. All
+// variants therefore (try to) open the same files. Consequently, we can store
+// file information in a map and use the master's fd as the key.
+//
+// File operations are NOT synchronized while fast forwarding to the program
+// entry point, however. Thus, the variants might open different files.
+// We store the information about files used during fast forwarding in the
+// temporary_files vector.
 //
 class fd_table
 {
 public:
-    std::string fd_cwd;                               // current working directory
+	//
+    // Current working directory. We currently assume that all sys_chdir calls
+	// are synchronized. If this changes at some point in the future (due to
+	// fast forwarding for example), then this variable should be a vector of
+	// strings.
+	//
+    std::string fd_cwd;
 
-    // We want the locking to go through these functions for debugging purposes
+	//
+    // Thread-safety: We want the locking to go through these functions for
+    // debugging purposes
+	// 
     void          grab_lock           ();
     void          release_lock        ();
     void          full_release_lock   ();
 
-    // Creating/Deleting file descriptors
+	//
+    // Creating/Deleting file descriptors. These are the functions we use for
+    // synchronized file operations.
+	//
     void          create_fd_info      (FileType type, std::vector<unsigned long>& fds, std::string path, unsigned long access_flags, bool close_on_exec, bool master_file, bool unsynced_reads=false, ssize_t original_file_size=0);
     void          free_fd_info        (unsigned long fd);
     void          free_cloexec_fds    ();
 
-    // Getters
-    fd_info*      get_fd_info         (unsigned long fd, int childnum=0);
-    fd_info*      get_fd_info_by_path (const char* path);
-    std::string   get_full_path       (pid_t master_pid, unsigned long master_dirfd, void* master_path_ptr);
-    unsigned long get_free_fd         (int childnum, unsigned long bias=(unsigned long)-1);
+	// Temporary files management. These functions are used for unsynchronized
+	// file operations that happen during fast forwarding
+	// 
+	void          create_temporary_fd_info (int variantnum, unsigned long fd, std::string path, unsigned long access_flags, bool close_on_exec, ssize_t original_file_size=0);
+	void          free_temporary_fd_info   (int variantnum, unsigned long fd);
+	void          flush_temporary_files    (int variantnum);
 
-    bool          is_fd_unsynced      (unsigned long fd, int childnum=0);
-    bool          is_fd_master_file   (unsigned long fd, int childnum=0);
+	//
+    // Getters. These are temporary file-aware. All of these functions
+	// first search through the "regular" fd @table and will search
+	// through the @temporary_files table if nothing is found.
+	// 
+    fd_info*      get_fd_info         (unsigned long fd, int variantnum=0);
+    std::string   get_full_path       (int variantnum, pid_t variant_pid, unsigned long dirfd, void* path_ptr);
+    unsigned long get_free_fd         (int variantnum, unsigned long bias=(unsigned long)-1);
 
-    // Epoll support
+    bool          is_fd_unsynced      (unsigned long fd, int variantnum=0);
+    bool          is_fd_master_file   (unsigned long fd, int variantnum=0);
+
+	//
+    // Epoll support. We assume that sys_epoll_* calls are synchronized.
+	// Thus, these functions are not temporary file-aware
+	//
     void          epoll_id_register   (unsigned long epfd, unsigned long fd, std::vector<unsigned long> ids);
     void          epoll_id_remove     (unsigned long epfd, unsigned long fd);
     std::vector<unsigned long>
                   epoll_id_map        (unsigned long epfd, unsigned long master_id);
 
-
+	//
+	// Support for select-style syscalls
+	// 
     void          master_fd_set_to_non_master_fd_sets
-        (fd_set *master_fd_set, int nfds, std::vector<fd_set>& child_fd_sets);
+                                      (fd_set *master_fd_set, int nfds, std::vector<fd_set>& variant_fd_sets);
 
-    //
-    void          print_fd_table ();
-    void          print_fd_table_proc(pid_t pid);
-    bool          verify_path(std::string& mvee_path, const char* proc_path);
-    void          verify_fd_table(std::vector<pid_t> pids);
+	//
+    // Debugging goodies
+	//
+    void          print_fd_table      ();
+    void          print_fd_table_proc (pid_t pid);
+    bool          verify_path         (std::string& mvee_path, const char* proc_path);
+    void          verify_fd_table     (std::vector<pid_t> pids);
 
-    void          chdir (const char* path);
+	//
+	// Changes the current working directory. Supports relative @path names
+	// 
+    void          chdir               (const char* path);
 
-    // IP-MON file mapping
-	_shm_info*    file_map_get();
-	bool          file_map_exists();
-	int           file_map_id();
-	void          file_map_set(int fd, FileType type);
+	//
+    // IP-MON file mapping. We assume that IP-MON is only used for synchronized
+    // calls so these functions are not @temporary_files aware.
+	//
+	_shm_info*    file_map_get        ();
+	bool          file_map_exists     ();
+	int           file_map_id         ();
+	void          file_map_set        (int fd, FileType type);
+	void          set_blocking        (int fd);
+	void          set_non_blocking    (int fd);
 
-	void          set_blocking(int fd);
-	void          set_non_blocking(int fd);
-
-    //
+	//
+    // Constructors/Destructors
+	//
     fd_table();
     fd_table(const fd_table& parent);
 	~fd_table();
@@ -132,10 +173,14 @@ private:
     pthread_mutex_t lock;
     std::map<unsigned long, fd_info>
                     table;                         // maps fds onto fd info, key = fd in the master variant
+
     std::map<unsigned long,
              std::map<unsigned long,
                       std::vector<unsigned long> > >
                     epoll_map;                     // maps epoll fd -> fd registered on the epoll fd -> ids for the registered fd
+
+	std::vector<std::map<unsigned long, fd_info>>
+                    temporary_files;               // temporary files tracked during fast forwarding
 
     //
     // This is a page sized sysv shared mem segment that can be mapped
