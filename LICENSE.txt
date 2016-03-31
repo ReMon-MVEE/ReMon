@@ -1,5 +1,4 @@
 Copyright (c) 2010-2016, Stijn Volckaert <stijnv@gmail.com>
-Copyright (c) 
 
 All rights reserved.
 
