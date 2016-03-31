@@ -225,7 +225,7 @@ void mvee::start_demo(int demonum, int variantindex, bool native)
 			return;
 		}
 
-		cmd << " -a run -p " << parsec_bench 
+		cmd << " -a run -p " << (parsec_bench ? parsec_bench : splash_bench)
 			<< " -n " << mvee::demo_args[0] 
 			<< " -i " << mvee::demo_args[1] 
 			<< " -c " << (parsec_config ? parsec_config : "gcc-pthreads");
