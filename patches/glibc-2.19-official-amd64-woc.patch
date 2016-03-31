@@ -1,6 +1,6 @@
-diff -N -r --unified glibc-2.19.orig/crypt/crypt_util.c glibc-2.19-tmp/crypt/crypt_util.c
---- glibc-2.19.orig/crypt/crypt_util.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/crypt/crypt_util.c	2015-04-12 14:02:44.290071586 -0700
+diff -r --unified -N glibc-2.19/crypt/crypt_util.c glibc-2.19-woc/crypt/crypt_util.c
+--- glibc-2.19/crypt/crypt_util.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/crypt/crypt_util.c	2016-03-31 13:07:41.515882650 -0700
 @@ -360,10 +360,10 @@
    sb[2] = (long64*)__data->sb2; sb[3] = (long64*)__data->sb3;
  #endif
@@ -23,9 +23,9 @@ diff -N -r --unified glibc-2.19.orig/crypt/crypt_util.c glibc-2.19-tmp/crypt/cry
  #ifdef __GNU_LIBRARY__
  small_tables_done:
      __libc_lock_unlock(_ufc_tables_lock);
-diff -N -r --unified glibc-2.19.orig/csu/libc-start.c glibc-2.19-tmp/csu/libc-start.c
---- glibc-2.19.orig/csu/libc-start.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/csu/libc-start.c	2015-04-12 14:02:44.290071586 -0700
+diff -r --unified -N glibc-2.19/csu/libc-start.c glibc-2.19-woc/csu/libc-start.c
+--- glibc-2.19/csu/libc-start.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/csu/libc-start.c	2016-03-31 13:07:41.515882650 -0700
 @@ -104,6 +104,305 @@
  # define MAIN_AUXVEC_PARAM
  #endif
@@ -332,9 +332,9 @@ diff -N -r --unified glibc-2.19.orig/csu/libc-start.c glibc-2.19-tmp/csu/libc-st
  STATIC int LIBC_START_MAIN (int (*main) (int, char **, char **
  					 MAIN_AUXVEC_DECL),
  			    int argc,
-diff -N -r --unified glibc-2.19.orig/csu/Versions glibc-2.19-tmp/csu/Versions
---- glibc-2.19.orig/csu/Versions	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/csu/Versions	2015-04-12 14:02:44.290071586 -0700
+diff -r --unified -N glibc-2.19/csu/Versions glibc-2.19-woc/csu/Versions
+--- glibc-2.19/csu/Versions	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/csu/Versions	2016-03-31 13:07:41.516882650 -0700
 @@ -4,6 +4,14 @@
    GLIBC_2.0 {
      # helper functions
@@ -350,9 +350,9 @@ diff -N -r --unified glibc-2.19.orig/csu/Versions glibc-2.19-tmp/csu/Versions
    }
    GLIBC_2.1 {
      # New special glibc functions.
-diff -N -r --unified glibc-2.19.orig/inet/getnetgrent_r.c glibc-2.19-tmp/inet/getnetgrent_r.c
---- glibc-2.19.orig/inet/getnetgrent_r.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/inet/getnetgrent_r.c	2015-04-12 14:02:44.291071586 -0700
+diff -r --unified -N glibc-2.19/inet/getnetgrent_r.c glibc-2.19-woc/inet/getnetgrent_r.c
+--- glibc-2.19/inet/getnetgrent_r.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/inet/getnetgrent_r.c	2016-03-31 13:07:41.516882650 -0700
 @@ -50,7 +50,7 @@
    static service_user *startp;
    int no_more;
@@ -371,9 +371,9 @@ diff -N -r --unified glibc-2.19.orig/inet/getnetgrent_r.c glibc-2.19-tmp/inet/ge
      }
    else
      {
-diff -N -r --unified glibc-2.19.orig/malloc/arena.c glibc-2.19-tmp/malloc/arena.c
---- glibc-2.19.orig/malloc/arena.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/malloc/arena.c	2015-04-12 14:02:44.291071586 -0700
+diff -r --unified -N glibc-2.19/malloc/arena.c glibc-2.19-woc/malloc/arena.c
+--- glibc-2.19/malloc/arena.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/malloc/arena.c	2016-03-31 13:07:41.518882650 -0700
 @@ -526,7 +526,7 @@
  new_heap (size_t size, size_t top_pad)
  {
@@ -539,9 +539,9 @@ diff -N -r --unified glibc-2.19.orig/malloc/arena.c glibc-2.19-tmp/malloc/arena.
          {
            if (catomic_compare_and_exchange_bool_acq (&narenas, n + 1, n))
              goto repeat;
-diff -N -r --unified glibc-2.19.orig/malloc/malloc.c glibc-2.19-tmp/malloc/malloc.c
---- glibc-2.19.orig/malloc/malloc.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/malloc/malloc.c	2015-04-12 14:02:44.292071586 -0700
+diff -r --unified -N glibc-2.19/malloc/malloc.c glibc-2.19-woc/malloc/malloc.c
+--- glibc-2.19/malloc/malloc.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/malloc/malloc.c	2016-03-31 13:07:41.519882650 -0700
 @@ -1705,6 +1705,9 @@
  
  struct malloc_par
@@ -1217,9 +1217,9 @@ diff -N -r --unified glibc-2.19.orig/malloc/malloc.c glibc-2.19-tmp/malloc/mallo
        break;
  
      case M_CHECK_ACTION:
-diff -N -r --unified glibc-2.19.orig/nis/nss_nisplus/nisplus-alias.c glibc-2.19-tmp/nis/nss_nisplus/nisplus-alias.c
---- glibc-2.19.orig/nis/nss_nisplus/nisplus-alias.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nis/nss_nisplus/nisplus-alias.c	2015-04-12 14:02:44.292071586 -0700
+diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-alias.c glibc-2.19-woc/nis/nss_nisplus/nisplus-alias.c
+--- glibc-2.19/nis/nss_nisplus/nisplus-alias.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nis/nss_nisplus/nisplus-alias.c	2016-03-31 13:07:41.519882650 -0700
 @@ -43,7 +43,7 @@
  static enum nss_status
  _nss_create_tablename (int *errnop)
@@ -1256,9 +1256,9 @@ diff -N -r --unified glibc-2.19.orig/nis/nss_nisplus/nisplus-alias.c glibc-2.19-
      {
        __libc_lock_lock (lock);
  
-diff -N -r --unified glibc-2.19.orig/nis/nss_nisplus/nisplus-ethers.c glibc-2.19-tmp/nis/nss_nisplus/nisplus-ethers.c
---- glibc-2.19.orig/nis/nss_nisplus/nisplus-ethers.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nis/nss_nisplus/nisplus-ethers.c	2015-04-12 14:02:44.292071586 -0700
+diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-ethers.c glibc-2.19-woc/nis/nss_nisplus/nisplus-ethers.c
+--- glibc-2.19/nis/nss_nisplus/nisplus-ethers.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nis/nss_nisplus/nisplus-ethers.c	2016-03-31 13:07:41.520882650 -0700
 @@ -88,7 +88,7 @@
  static enum nss_status
  _nss_create_tablename (int *errnop)
@@ -1304,9 +1304,9 @@ diff -N -r --unified glibc-2.19.orig/nis/nss_nisplus/nisplus-ethers.c glibc-2.19
      {
        __libc_lock_lock (lock);
  
-diff -N -r --unified glibc-2.19.orig/nis/nss_nisplus/nisplus-grp.c glibc-2.19-tmp/nis/nss_nisplus/nisplus-grp.c
---- glibc-2.19.orig/nis/nss_nisplus/nisplus-grp.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nis/nss_nisplus/nisplus-grp.c	2015-04-12 14:02:44.293071586 -0700
+diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-grp.c glibc-2.19-woc/nis/nss_nisplus/nisplus-grp.c
+--- glibc-2.19/nis/nss_nisplus/nisplus-grp.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nis/nss_nisplus/nisplus-grp.c	2016-03-31 13:07:41.520882650 -0700
 @@ -50,7 +50,7 @@
  enum nss_status
  _nss_grp_create_tablename (int *errnop)
@@ -1343,9 +1343,9 @@ diff -N -r --unified glibc-2.19.orig/nis/nss_nisplus/nisplus-grp.c glibc-2.19-tm
      {
        enum nss_status status = _nss_grp_create_tablename (errnop);
  
-diff -N -r --unified glibc-2.19.orig/nis/nss_nisplus/nisplus-hosts.c glibc-2.19-tmp/nis/nss_nisplus/nisplus-hosts.c
---- glibc-2.19.orig/nis/nss_nisplus/nisplus-hosts.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nis/nss_nisplus/nisplus-hosts.c	2015-04-12 14:02:44.293071586 -0700
+diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-hosts.c glibc-2.19-woc/nis/nss_nisplus/nisplus-hosts.c
+--- glibc-2.19/nis/nss_nisplus/nisplus-hosts.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nis/nss_nisplus/nisplus-hosts.c	2016-03-31 13:07:41.520882650 -0700
 @@ -191,7 +191,7 @@
  static enum nss_status
  _nss_create_tablename (int *errnop)
@@ -1409,9 +1409,9 @@ diff -N -r --unified glibc-2.19.orig/nis/nss_nisplus/nisplus-hosts.c glibc-2.19-
      {
        enum nss_status status = get_tablename (herrnop);
        if (status != NSS_STATUS_SUCCESS)
-diff -N -r --unified glibc-2.19.orig/nis/nss_nisplus/nisplus-network.c glibc-2.19-tmp/nis/nss_nisplus/nisplus-network.c
---- glibc-2.19.orig/nis/nss_nisplus/nisplus-network.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nis/nss_nisplus/nisplus-network.c	2015-04-12 14:02:44.293071586 -0700
+diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-network.c glibc-2.19-woc/nis/nss_nisplus/nisplus-network.c
+--- glibc-2.19/nis/nss_nisplus/nisplus-network.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nis/nss_nisplus/nisplus-network.c	2016-03-31 13:07:41.520882650 -0700
 @@ -142,7 +142,7 @@
  static enum nss_status
  _nss_create_tablename (int *errnop)
@@ -1475,9 +1475,9 @@ diff -N -r --unified glibc-2.19.orig/nis/nss_nisplus/nisplus-network.c glibc-2.1
      {
        __libc_lock_lock (lock);
  
-diff -N -r --unified glibc-2.19.orig/nis/nss_nisplus/nisplus-proto.c glibc-2.19-tmp/nis/nss_nisplus/nisplus-proto.c
---- glibc-2.19.orig/nis/nss_nisplus/nisplus-proto.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nis/nss_nisplus/nisplus-proto.c	2015-04-12 14:02:44.293071586 -0700
+diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-proto.c glibc-2.19-woc/nis/nss_nisplus/nisplus-proto.c
+--- glibc-2.19/nis/nss_nisplus/nisplus-proto.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nis/nss_nisplus/nisplus-proto.c	2016-03-31 13:07:41.521882650 -0700
 @@ -137,7 +137,7 @@
  static enum nss_status
  _nss_create_tablename (int *errnop)
@@ -1541,9 +1541,9 @@ diff -N -r --unified glibc-2.19.orig/nis/nss_nisplus/nisplus-proto.c glibc-2.19-
      {
        __libc_lock_lock (lock);
  
-diff -N -r --unified glibc-2.19.orig/nis/nss_nisplus/nisplus-pwd.c glibc-2.19-tmp/nis/nss_nisplus/nisplus-pwd.c
---- glibc-2.19.orig/nis/nss_nisplus/nisplus-pwd.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nis/nss_nisplus/nisplus-pwd.c	2015-04-12 14:02:44.294071586 -0700
+diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-pwd.c glibc-2.19-woc/nis/nss_nisplus/nisplus-pwd.c
+--- glibc-2.19/nis/nss_nisplus/nisplus-pwd.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nis/nss_nisplus/nisplus-pwd.c	2016-03-31 13:07:41.521882650 -0700
 @@ -49,7 +49,7 @@
  enum nss_status
  _nss_pwd_create_tablename (int *errnop)
@@ -1580,9 +1580,9 @@ diff -N -r --unified glibc-2.19.orig/nis/nss_nisplus/nisplus-pwd.c glibc-2.19-tm
      {
        enum nss_status status = _nss_pwd_create_tablename (errnop);
  
-diff -N -r --unified glibc-2.19.orig/nis/nss_nisplus/nisplus-rpc.c glibc-2.19-tmp/nis/nss_nisplus/nisplus-rpc.c
---- glibc-2.19.orig/nis/nss_nisplus/nisplus-rpc.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nis/nss_nisplus/nisplus-rpc.c	2015-04-12 14:02:44.294071586 -0700
+diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-rpc.c glibc-2.19-woc/nis/nss_nisplus/nisplus-rpc.c
+--- glibc-2.19/nis/nss_nisplus/nisplus-rpc.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nis/nss_nisplus/nisplus-rpc.c	2016-03-31 13:07:41.521882650 -0700
 @@ -138,7 +138,7 @@
  static enum nss_status
  _nss_create_tablename (int *errnop)
@@ -1646,9 +1646,9 @@ diff -N -r --unified glibc-2.19.orig/nis/nss_nisplus/nisplus-rpc.c glibc-2.19-tm
      {
        __libc_lock_lock (lock);
  
-diff -N -r --unified glibc-2.19.orig/nis/nss_nisplus/nisplus-service.c glibc-2.19-tmp/nis/nss_nisplus/nisplus-service.c
---- glibc-2.19.orig/nis/nss_nisplus/nisplus-service.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nis/nss_nisplus/nisplus-service.c	2015-04-12 14:02:44.294071586 -0700
+diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-service.c glibc-2.19-woc/nis/nss_nisplus/nisplus-service.c
+--- glibc-2.19/nis/nss_nisplus/nisplus-service.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nis/nss_nisplus/nisplus-service.c	2016-03-31 13:07:41.521882650 -0700
 @@ -145,7 +145,7 @@
  static enum nss_status
  _nss_create_tablename (int *errnop)
@@ -1712,9 +1712,9 @@ diff -N -r --unified glibc-2.19.orig/nis/nss_nisplus/nisplus-service.c glibc-2.1
      {
        __libc_lock_lock (lock);
  
-diff -N -r --unified glibc-2.19.orig/nptl/allocatestack.c glibc-2.19-tmp/nptl/allocatestack.c
---- glibc-2.19.orig/nptl/allocatestack.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/allocatestack.c	2015-04-12 14:02:44.294071586 -0700
+diff -r --unified -N glibc-2.19/nptl/allocatestack.c glibc-2.19-woc/nptl/allocatestack.c
+--- glibc-2.19/nptl/allocatestack.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/allocatestack.c	2016-03-31 13:07:41.522882650 -0700
 @@ -130,13 +130,13 @@
  
  
@@ -1939,9 +1939,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/allocatestack.c glibc-2.19-tmp/nptl/al
  
    /* If this failed, it must have had not started yet or else exited.  */
    if (!INTERNAL_SYSCALL_ERROR_P (val, err))
-diff -N -r --unified glibc-2.19.orig/nptl/descr.h glibc-2.19-tmp/nptl/descr.h
---- glibc-2.19.orig/nptl/descr.h	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/descr.h	2015-04-12 14:02:44.295071586 -0700
+diff -r --unified -N glibc-2.19/nptl/descr.h glibc-2.19-woc/nptl/descr.h
+--- glibc-2.19/nptl/descr.h	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/descr.h	2016-03-31 13:07:41.522882650 -0700
 @@ -342,7 +342,7 @@
       in normal operation.  */
    struct pthread *joinid;
@@ -1951,9 +1951,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/descr.h glibc-2.19-tmp/nptl/descr.h
  
    /* The result of the thread function.  */
    void *result;
-diff -N -r --unified glibc-2.19.orig/nptl/nptl-init.c glibc-2.19-tmp/nptl/nptl-init.c
---- glibc-2.19.orig/nptl/nptl-init.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/nptl-init.c	2015-04-12 14:07:15.948068995 -0700
+diff -r --unified -N glibc-2.19/nptl/nptl-init.c glibc-2.19-woc/nptl/nptl-init.c
+--- glibc-2.19/nptl/nptl-init.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/nptl-init.c	2016-03-31 13:07:41.522882650 -0700
 @@ -44,7 +44,7 @@
  #ifndef __ASSUME_SET_ROBUST_LIST
  /* Negative if we do not have the system call and we can use it.  */
@@ -1972,486 +1972,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/nptl-init.c glibc-2.19-tmp/nptl/nptl-i
    lll_futex_wake (&self->setxid_futex, 1, LLL_PRIVATE);
  
    if (atomic_decrement_val (&__xidcmd->cntr) == 0)
-diff -N -r --unified glibc-2.19.orig/nptl/nptl-init.c~ glibc-2.19-tmp/nptl/nptl-init.c~
---- glibc-2.19.orig/nptl/nptl-init.c~	1969-12-31 16:00:00.000000000 -0800
-+++ glibc-2.19-tmp/nptl/nptl-init.c~	2015-04-12 14:02:44.295071586 -0700
-@@ -0,0 +1,473 @@
-+/* Copyright (C) 2002-2014 Free Software Foundation, Inc.
-+   This file is part of the GNU C Library.
-+   Contributed by Ulrich Drepper <drepper@redhat.com>, 2002.
-+
-+   The GNU C Library is free software; you can redistribute it and/or
-+   modify it under the terms of the GNU Lesser General Public
-+   License as published by the Free Software Foundation; either
-+   version 2.1 of the License, or (at your option) any later version.
-+
-+   The GNU C Library is distributed in the hope that it will be useful,
-+   but WITHOUT ANY WARRANTY; without even the implied warranty of
-+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-+   Lesser General Public License for more details.
-+
-+   You should have received a copy of the GNU Lesser General Public
-+   License along with the GNU C Library; if not, see
-+   <http://www.gnu.org/licenses/>.  */
-+
-+#include <assert.h>
-+#include <errno.h>
-+#include <limits.h>
-+#include <signal.h>
-+#include <stdlib.h>
-+#include <unistd.h>
-+#include <sys/param.h>
-+#include <sys/resource.h>
-+#include <pthreadP.h>
-+#include <atomic.h>
-+#include <ldsodefs.h>
-+#include <tls.h>
-+#include <list.h>
-+#include <fork.h>
-+#include <version.h>
-+#include <shlib-compat.h>
-+#include <smp.h>
-+#include <lowlevellock.h>
-+#include <kernel-features.h>
-+
-+
-+/* Size and alignment of static TLS block.  */
-+size_t __static_tls_size;
-+size_t __static_tls_align_m1;
-+
-+//#ifndef __ASSUME_SET_ROBUST_LIST
-+///* Negative if we do not have the system call and we can use it.  */
-+//int __set_robust_list_avail;
-+//# define set_robust_list_not_avail()		\
-+//  __set_robust_list_avail = -1
-+//#else
-+# define set_robust_list_not_avail() do { } while (0)
-+//#endif
-+
-+#ifndef __ASSUME_FUTEX_CLOCK_REALTIME
-+/* Nonzero if we do not have FUTEX_CLOCK_REALTIME.  */
-+int __have_futex_clock_realtime;
-+# define __set_futex_clock_realtime() \
-+  __have_futex_clock_realtime = 1
-+#else
-+#define __set_futex_clock_realtime() do { } while (0)
-+#endif
-+
-+/* Version of the library, used in libthread_db to detect mismatches.  */
-+static const char nptl_version[] __attribute_used__ = VERSION;
-+
-+
-+#ifndef SHARED
-+extern void __libc_setup_tls (size_t tcbsize, size_t tcbalign);
-+#endif
-+
-+#ifdef SHARED
-+static
-+#else
-+extern
-+#endif
-+void __nptl_set_robust (struct pthread *);
-+
-+#ifdef SHARED
-+static void nptl_freeres (void);
-+
-+
-+static const struct pthread_functions pthread_functions =
-+  {
-+    .ptr_pthread_attr_destroy = __pthread_attr_destroy,
-+# if SHLIB_COMPAT(libpthread, GLIBC_2_0, GLIBC_2_1)
-+    .ptr___pthread_attr_init_2_0 = __pthread_attr_init_2_0,
-+# endif
-+    .ptr___pthread_attr_init_2_1 = __pthread_attr_init_2_1,
-+    .ptr_pthread_attr_getdetachstate = __pthread_attr_getdetachstate,
-+    .ptr_pthread_attr_setdetachstate = __pthread_attr_setdetachstate,
-+    .ptr_pthread_attr_getinheritsched = __pthread_attr_getinheritsched,
-+    .ptr_pthread_attr_setinheritsched = __pthread_attr_setinheritsched,
-+    .ptr_pthread_attr_getschedparam = __pthread_attr_getschedparam,
-+    .ptr_pthread_attr_setschedparam = __pthread_attr_setschedparam,
-+    .ptr_pthread_attr_getschedpolicy = __pthread_attr_getschedpolicy,
-+    .ptr_pthread_attr_setschedpolicy = __pthread_attr_setschedpolicy,
-+    .ptr_pthread_attr_getscope = __pthread_attr_getscope,
-+    .ptr_pthread_attr_setscope = __pthread_attr_setscope,
-+    .ptr_pthread_condattr_destroy = __pthread_condattr_destroy,
-+    .ptr_pthread_condattr_init = __pthread_condattr_init,
-+    .ptr___pthread_cond_broadcast = __pthread_cond_broadcast,
-+    .ptr___pthread_cond_destroy = __pthread_cond_destroy,
-+    .ptr___pthread_cond_init = __pthread_cond_init,
-+    .ptr___pthread_cond_signal = __pthread_cond_signal,
-+    .ptr___pthread_cond_wait = __pthread_cond_wait,
-+    .ptr___pthread_cond_timedwait = __pthread_cond_timedwait,
-+# if SHLIB_COMPAT(libpthread, GLIBC_2_0, GLIBC_2_3_2)
-+    .ptr___pthread_cond_broadcast_2_0 = __pthread_cond_broadcast_2_0,
-+    .ptr___pthread_cond_destroy_2_0 = __pthread_cond_destroy_2_0,
-+    .ptr___pthread_cond_init_2_0 = __pthread_cond_init_2_0,
-+    .ptr___pthread_cond_signal_2_0 = __pthread_cond_signal_2_0,
-+    .ptr___pthread_cond_wait_2_0 = __pthread_cond_wait_2_0,
-+    .ptr___pthread_cond_timedwait_2_0 = __pthread_cond_timedwait_2_0,
-+# endif
-+    .ptr_pthread_equal = __pthread_equal,
-+    .ptr___pthread_exit = __pthread_exit,
-+    .ptr_pthread_getschedparam = __pthread_getschedparam,
-+    .ptr_pthread_setschedparam = __pthread_setschedparam,
-+    .ptr_pthread_mutex_destroy = __pthread_mutex_destroy,
-+    .ptr_pthread_mutex_init = __pthread_mutex_init,
-+    .ptr_pthread_mutex_lock = __pthread_mutex_lock,
-+    .ptr_pthread_mutex_unlock = __pthread_mutex_unlock,
-+    .ptr_pthread_self = __pthread_self,
-+    .ptr_pthread_setcancelstate = __pthread_setcancelstate,
-+    .ptr_pthread_setcanceltype = __pthread_setcanceltype,
-+    .ptr___pthread_cleanup_upto = __pthread_cleanup_upto,
-+    .ptr___pthread_once = __pthread_once,
-+    .ptr___pthread_rwlock_rdlock = __pthread_rwlock_rdlock,
-+    .ptr___pthread_rwlock_wrlock = __pthread_rwlock_wrlock,
-+    .ptr___pthread_rwlock_unlock = __pthread_rwlock_unlock,
-+    .ptr___pthread_key_create = __pthread_key_create,
-+    .ptr___pthread_getspecific = __pthread_getspecific,
-+    .ptr___pthread_setspecific = __pthread_setspecific,
-+    .ptr__pthread_cleanup_push_defer = __pthread_cleanup_push_defer,
-+    .ptr__pthread_cleanup_pop_restore = __pthread_cleanup_pop_restore,
-+    .ptr_nthreads = &__nptl_nthreads,
-+    .ptr___pthread_unwind = &__pthread_unwind,
-+    .ptr__nptl_deallocate_tsd = __nptl_deallocate_tsd,
-+    .ptr__nptl_setxid = __nptl_setxid,
-+    /* For now only the stack cache needs to be freed.  */
-+    .ptr_freeres = nptl_freeres,
-+    .ptr_set_robust = __nptl_set_robust
-+  };
-+# define ptr_pthread_functions &pthread_functions
-+#else
-+# define ptr_pthread_functions NULL
-+#endif
-+
-+
-+#ifdef SHARED
-+/* This function is called indirectly from the freeres code in libc.  */
-+static void
-+__libc_freeres_fn_section
-+nptl_freeres (void)
-+{
-+  __unwind_freeres ();
-+  __free_stacks (0);
-+}
-+
-+
-+static
-+#endif
-+void
-+__nptl_set_robust (struct pthread *self)
-+{
-+  INTERNAL_SYSCALL_DECL (err);
-+  INTERNAL_SYSCALL (set_robust_list, err, 2, &self->robust_head,
-+		    sizeof (struct robust_list_head));
-+}
-+
-+
-+/* For asynchronous cancellation we use a signal.  This is the handler.  */
-+static void
-+sigcancel_handler (int sig, siginfo_t *si, void *ctx)
-+{
-+  /* Determine the process ID.  It might be negative if the thread is
-+     in the middle of a fork() call.  */
-+  pid_t pid = THREAD_GETMEM (THREAD_SELF, pid);
-+  if (__builtin_expect (pid < 0, 0))
-+    pid = -pid;
-+
-+  /* Safety check.  It would be possible to call this function for
-+     other signals and send a signal from another process.  This is not
-+     correct and might even be a security problem.  Try to catch as
-+     many incorrect invocations as possible.  */
-+  if (sig != SIGCANCEL
-+      || si->si_pid != pid
-+      || si->si_code != SI_TKILL)
-+    return;
-+
-+  struct pthread *self = THREAD_SELF;
-+
-+  int oldval = THREAD_GETMEM (self, cancelhandling);
-+  while (1)
-+    {
-+      /* We are canceled now.  When canceled by another thread this flag
-+	 is already set but if the signal is directly send (internally or
-+	 from another process) is has to be done here.  */
-+      int newval = oldval | CANCELING_BITMASK | CANCELED_BITMASK;
-+
-+      if (oldval == newval || (oldval & EXITING_BITMASK) != 0)
-+	/* Already canceled or exiting.  */
-+	break;
-+
-+      int curval = THREAD_ATOMIC_CMPXCHG_VAL (self, cancelhandling, newval,
-+					      oldval);
-+      if (curval == oldval)
-+	{
-+	  /* Set the return value.  */
-+	  THREAD_SETMEM (self, result, PTHREAD_CANCELED);
-+
-+	  /* Make sure asynchronous cancellation is still enabled.  */
-+	  if ((newval & CANCELTYPE_BITMASK) != 0)
-+	    /* Run the registered destructors and terminate the thread.  */
-+	    __do_cancel ();
-+
-+	  break;
-+	}
-+
-+      oldval = curval;
-+    }
-+}
-+
-+
-+struct xid_command *__xidcmd attribute_hidden;
-+
-+/* We use the SIGSETXID signal in the setuid, setgid, etc. implementations to
-+   tell each thread to call the respective setxid syscall on itself.  This is
-+   the handler.  */
-+static void
-+sighandler_setxid (int sig, siginfo_t *si, void *ctx)
-+{
-+  /* Determine the process ID.  It might be negative if the thread is
-+     in the middle of a fork() call.  */
-+  pid_t pid = THREAD_GETMEM (THREAD_SELF, pid);
-+  if (__builtin_expect (pid < 0, 0))
-+    pid = -pid;
-+
-+  /* Safety check.  It would be possible to call this function for
-+     other signals and send a signal from another process.  This is not
-+     correct and might even be a security problem.  Try to catch as
-+     many incorrect invocations as possible.  */
-+  if (sig != SIGSETXID
-+      || si->si_pid != pid
-+      || si->si_code != SI_TKILL)
-+    return;
-+
-+  INTERNAL_SYSCALL_DECL (err);
-+  INTERNAL_SYSCALL_NCS (__xidcmd->syscall_no, err, 3, __xidcmd->id[0],
-+			__xidcmd->id[1], __xidcmd->id[2]);
-+
-+  /* Reset the SETXID flag.  */
-+  struct pthread *self = THREAD_SELF;
-+  int flags, newval;
-+  do
-+    {
-+      flags = THREAD_GETMEM (self, cancelhandling);
-+      newval = THREAD_ATOMIC_CMPXCHG_VAL (self, cancelhandling,
-+					  flags & ~SETXID_BITMASK, flags);
-+    }
-+  while (flags != newval);
-+
-+  /* And release the futex.  */
-+  atomic_store(self->setxid_futex, 1);
-+  lll_futex_wake (&self->setxid_futex, 1, LLL_PRIVATE);
-+
-+  if (atomic_decrement_val (&__xidcmd->cntr) == 0)
-+    lll_futex_wake (&__xidcmd->cntr, 1, LLL_PRIVATE);
-+}
-+
-+
-+/* When using __thread for this, we do it in libc so as not
-+   to give libpthread its own TLS segment just for this.  */
-+extern void **__libc_dl_error_tsd (void) __attribute__ ((const));
-+
-+
-+/* This can be set by the debugger before initialization is complete.  */
-+static bool __nptl_initial_report_events __attribute_used__;
-+
-+void
-+__pthread_initialize_minimal_internal (void)
-+{
-+#ifndef SHARED
-+  /* Unlike in the dynamically linked case the dynamic linker has not
-+     taken care of initializing the TLS data structures.  */
-+  __libc_setup_tls (TLS_TCB_SIZE, TLS_TCB_ALIGN);
-+
-+  /* We must prevent gcc from being clever and move any of the
-+     following code ahead of the __libc_setup_tls call.  This function
-+     will initialize the thread register which is subsequently
-+     used.  */
-+  __asm __volatile ("");
-+#endif
-+
-+  /* Minimal initialization of the thread descriptor.  */
-+  struct pthread *pd = THREAD_SELF;
-+  INTERNAL_SYSCALL_DECL (err);
-+  pd->pid = pd->tid = INTERNAL_SYSCALL (set_tid_address, err, 1, &pd->tid);
-+  THREAD_SETMEM (pd, specific[0], &pd->specific_1stblock[0]);
-+  THREAD_SETMEM (pd, user_stack, true);
-+  if (LLL_LOCK_INITIALIZER != 0)
-+    THREAD_SETMEM (pd, lock, LLL_LOCK_INITIALIZER);
-+#if HP_TIMING_AVAIL
-+  THREAD_SETMEM (pd, cpuclock_offset, GL(dl_cpuclock_offset));
-+#endif
-+
-+  /* Initialize the robust mutex data.  */
-+#ifdef __PTHREAD_MUTEX_HAVE_PREV
-+  pd->robust_prev = &pd->robust_head;
-+#endif
-+  pd->robust_head.list = &pd->robust_head;
-+#ifdef __NR_set_robust_list
-+  pd->robust_head.futex_offset = (offsetof (pthread_mutex_t, __data.__lock)
-+				  - offsetof (pthread_mutex_t,
-+					      __data.__list.__next));
-+  int res = INTERNAL_SYSCALL (set_robust_list, err, 2, &pd->robust_head,
-+			      sizeof (struct robust_list_head));
-+  if (INTERNAL_SYSCALL_ERROR_P (res, err))
-+#endif
-+    set_robust_list_not_avail ();
-+
-+#ifndef __ASSUME_PRIVATE_FUTEX
-+  /* Private futexes are always used (at least internally) so that
-+     doing the test once this early is beneficial.  */
-+  {
-+    int word = 0;
-+    word = INTERNAL_SYSCALL (futex, err, 3, &word,
-+			    FUTEX_WAKE | FUTEX_PRIVATE_FLAG, 1);
-+    if (!INTERNAL_SYSCALL_ERROR_P (word, err))
-+      THREAD_SETMEM (pd, header.private_futex, FUTEX_PRIVATE_FLAG);
-+  }
-+
-+  /* Private futexes have been introduced earlier than the
-+     FUTEX_CLOCK_REALTIME flag.  We don't have to run the test if we
-+     know the former are not supported.  This also means we know the
-+     kernel will return ENOSYS for unknown operations.  */
-+  if (THREAD_GETMEM (pd, header.private_futex) != 0)
-+#endif
-+#ifndef __ASSUME_FUTEX_CLOCK_REALTIME
-+    {
-+      int word = 0;
-+      /* NB: the syscall actually takes six parameters.  The last is the
-+	 bit mask.  But since we will not actually wait at all the value
-+	 is irrelevant.  Given that passing six parameters is difficult
-+	 on some architectures we just pass whatever random value the
-+	 calling convention calls for to the kernel.  It causes no harm.  */
-+      word = INTERNAL_SYSCALL (futex, err, 5, &word,
-+			       FUTEX_WAIT_BITSET | FUTEX_CLOCK_REALTIME
-+			       | FUTEX_PRIVATE_FLAG, 1, NULL, 0);
-+      assert (INTERNAL_SYSCALL_ERROR_P (word, err));
-+      if (INTERNAL_SYSCALL_ERRNO (word, err) != ENOSYS)
-+	__set_futex_clock_realtime ();
-+    }
-+#endif
-+
-+  /* Set initial thread's stack block from 0 up to __libc_stack_end.
-+     It will be bigger than it actually is, but for unwind.c/pt-longjmp.c
-+     purposes this is good enough.  */
-+  THREAD_SETMEM (pd, stackblock_size, (size_t) __libc_stack_end);
-+
-+  /* Initialize the list of all running threads with the main thread.  */
-+  INIT_LIST_HEAD (&__stack_user);
-+  list_add (&pd->list, &__stack_user);
-+
-+  /* Before initializing __stack_user, the debugger could not find us and
-+     had to set __nptl_initial_report_events.  Propagate its setting.  */
-+  THREAD_SETMEM (pd, report_events, __nptl_initial_report_events);
-+
-+  /* Install the cancellation signal handler.  If for some reason we
-+     cannot install the handler we do not abort.  Maybe we should, but
-+     it is only asynchronous cancellation which is affected.  */
-+  struct sigaction sa;
-+  sa.sa_sigaction = sigcancel_handler;
-+  sa.sa_flags = SA_SIGINFO;
-+  __sigemptyset (&sa.sa_mask);
-+
-+  (void) __libc_sigaction (SIGCANCEL, &sa, NULL);
-+
-+  /* Install the handle to change the threads' uid/gid.  */
-+  sa.sa_sigaction = sighandler_setxid;
-+  sa.sa_flags = SA_SIGINFO | SA_RESTART;
-+
-+  (void) __libc_sigaction (SIGSETXID, &sa, NULL);
-+
-+  /* The parent process might have left the signals blocked.  Just in
-+     case, unblock it.  We reuse the signal mask in the sigaction
-+     structure.  It is already cleared.  */
-+  __sigaddset (&sa.sa_mask, SIGCANCEL);
-+  __sigaddset (&sa.sa_mask, SIGSETXID);
-+  (void) INTERNAL_SYSCALL (rt_sigprocmask, err, 4, SIG_UNBLOCK, &sa.sa_mask,
-+			   NULL, _NSIG / 8);
-+
-+  /* Get the size of the static and alignment requirements for the TLS
-+     block.  */
-+  size_t static_tls_align;
-+  _dl_get_tls_static_info (&__static_tls_size, &static_tls_align);
-+
-+  /* Make sure the size takes all the alignments into account.  */
-+  if (STACK_ALIGN > static_tls_align)
-+    static_tls_align = STACK_ALIGN;
-+  __static_tls_align_m1 = static_tls_align - 1;
-+
-+  __static_tls_size = roundup (__static_tls_size, static_tls_align);
-+
-+  /* Determine the default allowed stack size.  This is the size used
-+     in case the user does not specify one.  */
-+  struct rlimit limit;
-+  if (getrlimit (RLIMIT_STACK, &limit) != 0
-+      || limit.rlim_cur == RLIM_INFINITY)
-+    /* The system limit is not usable.  Use an architecture-specific
-+       default.  */
-+    limit.rlim_cur = ARCH_STACK_DEFAULT_SIZE;
-+  else if (limit.rlim_cur < PTHREAD_STACK_MIN)
-+    /* The system limit is unusably small.
-+       Use the minimal size acceptable.  */
-+    limit.rlim_cur = PTHREAD_STACK_MIN;
-+
-+  /* Make sure it meets the minimum size that allocate_stack
-+     (allocatestack.c) will demand, which depends on the page size.  */
-+  const uintptr_t pagesz = GLRO(dl_pagesize);
-+  const size_t minstack = pagesz + __static_tls_size + MINIMAL_REST_STACK;
-+  if (limit.rlim_cur < minstack)
-+    limit.rlim_cur = minstack;
-+
-+  /* Round the resource limit up to page size.  */
-+  limit.rlim_cur = (limit.rlim_cur + pagesz - 1) & -pagesz;
-+  lll_lock (__default_pthread_attr_lock, LLL_PRIVATE);
-+  __default_pthread_attr.stacksize = limit.rlim_cur;
-+  __default_pthread_attr.guardsize = GLRO (dl_pagesize);
-+  lll_unlock (__default_pthread_attr_lock, LLL_PRIVATE);
-+
-+#ifdef SHARED
-+  /* Transfer the old value from the dynamic linker's internal location.  */
-+  *__libc_dl_error_tsd () = *(*GL(dl_error_catch_tsd)) ();
-+  GL(dl_error_catch_tsd) = &__libc_dl_error_tsd;
-+
-+  /* Make __rtld_lock_{,un}lock_recursive use pthread_mutex_{,un}lock,
-+     keep the lock count from the ld.so implementation.  */
-+  GL(dl_rtld_lock_recursive) = (void *) __pthread_mutex_lock;
-+  GL(dl_rtld_unlock_recursive) = (void *) __pthread_mutex_unlock;
-+  unsigned int rtld_lock_count = GL(dl_load_lock).mutex.__data.__count;
-+  GL(dl_load_lock).mutex.__data.__count = 0;
-+  while (rtld_lock_count-- > 0)
-+    __pthread_mutex_lock (&GL(dl_load_lock).mutex);
-+
-+  GL(dl_make_stack_executable_hook) = &__make_stacks_executable;
-+#endif
-+
-+  GL(dl_init_static_tls) = &__pthread_init_static_tls;
-+
-+  GL(dl_wait_lookup_done) = &__wait_lookup_done;
-+
-+  /* Register the fork generation counter with the libc.  */
-+#ifndef TLS_MULTIPLE_THREADS_IN_TCB
-+  __libc_multiple_threads_ptr =
-+#endif
-+    __libc_pthread_init (&__fork_generation, __reclaim_stacks,
-+			 ptr_pthread_functions);
-+
-+  /* Determine whether the machine is SMP or not.  */
-+  __is_smp = is_smp_system ();
-+}
-+strong_alias (__pthread_initialize_minimal_internal,
-+	      __pthread_initialize_minimal)
-+
-+
-+size_t
-+__pthread_get_minstack (const pthread_attr_t *attr)
-+{
-+  struct pthread_attr *iattr = (struct pthread_attr *) attr;
-+
-+  return (GLRO(dl_pagesize) + __static_tls_size + PTHREAD_STACK_MIN
-+	  + iattr->guardsize);
-+}
-diff -N -r --unified glibc-2.19.orig/nptl/pthread_barrier_wait.c glibc-2.19-tmp/nptl/pthread_barrier_wait.c
---- glibc-2.19.orig/nptl/pthread_barrier_wait.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/pthread_barrier_wait.c	2015-04-12 14:02:44.295071586 -0700
+diff -r --unified -N glibc-2.19/nptl/pthread_barrier_wait.c glibc-2.19-woc/nptl/pthread_barrier_wait.c
+--- glibc-2.19/nptl/pthread_barrier_wait.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/pthread_barrier_wait.c	2016-03-31 13:07:41.523882650 -0700
 @@ -41,7 +41,10 @@
      {
        /* Yes. Increment the event counter to avoid invalid wake-ups and
@@ -2489,9 +2012,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/pthread_barrier_wait.c glibc-2.19-tmp/
  
    /* If this was the last woken thread, unlock.  */
    if (atomic_increment_val (&ibarrier->left) == init_count)
-diff -N -r --unified glibc-2.19.orig/nptl/pthread_cancel.c glibc-2.19-tmp/nptl/pthread_cancel.c
---- glibc-2.19.orig/nptl/pthread_cancel.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/pthread_cancel.c	2015-04-12 14:02:44.295071586 -0700
+diff -r --unified -N glibc-2.19/nptl/pthread_cancel.c glibc-2.19-woc/nptl/pthread_cancel.c
+--- glibc-2.19/nptl/pthread_cancel.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/pthread_cancel.c	2016-03-31 13:07:41.523882650 -0700
 @@ -44,7 +44,7 @@
    do
      {
@@ -2510,9 +2033,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/pthread_cancel.c glibc-2.19-tmp/nptl/p
  				  SIGCANCEL);
  
  	  if (INTERNAL_SYSCALL_ERROR_P (val, err))
-diff -N -r --unified glibc-2.19.orig/nptl/pthread_cond_signal.c glibc-2.19-tmp/nptl/pthread_cond_signal.c
---- glibc-2.19.orig/nptl/pthread_cond_signal.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/pthread_cond_signal.c	2015-04-12 14:02:44.295071586 -0700
+diff -r --unified -N glibc-2.19/nptl/pthread_cond_signal.c glibc-2.19-woc/nptl/pthread_cond_signal.c
+--- glibc-2.19/nptl/pthread_cond_signal.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/pthread_cond_signal.c	2016-03-31 13:07:41.523882650 -0700
 @@ -63,12 +63,18 @@
  	}
        else
@@ -2532,9 +2055,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/pthread_cond_signal.c glibc-2.19-tmp/n
  
        /* Fallback if neither of them work.  */
        lll_futex_wake (&cond->__data.__futex, 1, pshared);
-diff -N -r --unified glibc-2.19.orig/nptl/pthread_create.c glibc-2.19-tmp/nptl/pthread_create.c
---- glibc-2.19.orig/nptl/pthread_create.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/pthread_create.c	2015-04-12 14:02:44.296071586 -0700
+diff -r --unified -N glibc-2.19/nptl/pthread_create.c glibc-2.19-woc/nptl/pthread_create.c
+--- glibc-2.19/nptl/pthread_create.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/pthread_create.c	2016-03-31 13:07:41.524882650 -0700
 @@ -265,7 +265,7 @@
    /* If the parent was running cancellation handlers while creating
       the thread the new thread inherited the signal mask.  Reset the
@@ -2573,9 +2096,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/pthread_create.c glibc-2.19-tmp/nptl/p
      }
  
    /* We cannot call '_exit' here.  '_exit' will terminate the process.
-diff -N -r --unified glibc-2.19.orig/nptl/pthread_detach.c glibc-2.19-tmp/nptl/pthread_detach.c
---- glibc-2.19.orig/nptl/pthread_detach.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/pthread_detach.c	2015-04-12 14:02:44.296071586 -0700
+diff -r --unified -N glibc-2.19/nptl/pthread_detach.c glibc-2.19-woc/nptl/pthread_detach.c
+--- glibc-2.19/nptl/pthread_detach.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/pthread_detach.c	2016-03-31 13:07:41.524882650 -0700
 @@ -47,7 +47,7 @@
    else
      /* Check whether the thread terminated meanwhile.  In this case we
@@ -2585,9 +2108,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/pthread_detach.c glibc-2.19-tmp/nptl/p
        /* Note that the code in __free_tcb makes sure each thread
  	 control block is freed only once.  */
        __free_tcb (pd);
-diff -N -r --unified glibc-2.19.orig/nptl/pthread_getattr_np.c glibc-2.19-tmp/nptl/pthread_getattr_np.c
---- glibc-2.19.orig/nptl/pthread_getattr_np.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/pthread_getattr_np.c	2015-04-12 14:02:44.296071586 -0700
+diff -r --unified -N glibc-2.19/nptl/pthread_getattr_np.c glibc-2.19-woc/nptl/pthread_getattr_np.c
+--- glibc-2.19/nptl/pthread_getattr_np.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/pthread_getattr_np.c	2016-03-31 13:07:41.524882650 -0700
 @@ -66,7 +66,7 @@
      {
        /* No stack information available.  This must be for the initial
@@ -2597,9 +2120,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/pthread_getattr_np.c glibc-2.19-tmp/np
  
        /* Stack size limit.  */
        struct rlimit rl;
-diff -N -r --unified glibc-2.19.orig/nptl/pthread_getcpuclockid.c glibc-2.19-tmp/nptl/pthread_getcpuclockid.c
---- glibc-2.19.orig/nptl/pthread_getcpuclockid.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/pthread_getcpuclockid.c	2015-04-12 14:02:44.296071586 -0700
+diff -r --unified -N glibc-2.19/nptl/pthread_getcpuclockid.c glibc-2.19-woc/nptl/pthread_getcpuclockid.c
+--- glibc-2.19/nptl/pthread_getcpuclockid.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/pthread_getcpuclockid.c	2016-03-31 13:07:41.524882650 -0700
 @@ -42,11 +42,11 @@
  
       If some day more clock IDs are needed the ID part can be
@@ -2614,9 +2137,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/pthread_getcpuclockid.c glibc-2.19-tmp
  
    return 0;
  #else
-diff -N -r --unified glibc-2.19.orig/nptl/pthread_getschedparam.c glibc-2.19-tmp/nptl/pthread_getschedparam.c
---- glibc-2.19.orig/nptl/pthread_getschedparam.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/pthread_getschedparam.c	2015-04-12 14:02:44.296071586 -0700
+diff -r --unified -N glibc-2.19/nptl/pthread_getschedparam.c glibc-2.19-woc/nptl/pthread_getschedparam.c
+--- glibc-2.19/nptl/pthread_getschedparam.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/pthread_getschedparam.c	2016-03-31 13:07:41.524882650 -0700
 @@ -46,7 +46,7 @@
       not yet been retrieved do it now.  */
    if ((pd->flags & ATTR_FLAG_SCHED_SET) == 0)
@@ -2635,9 +2158,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/pthread_getschedparam.c glibc-2.19-tmp
        if (pd->schedpolicy == -1)
  	result = 1;
        else
-diff -N -r --unified glibc-2.19.orig/nptl/pthread_join.c glibc-2.19-tmp/nptl/pthread_join.c
---- glibc-2.19.orig/nptl/pthread_join.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/pthread_join.c	2015-04-12 14:02:44.296071586 -0700
+diff -r --unified -N glibc-2.19/nptl/pthread_join.c glibc-2.19-woc/nptl/pthread_join.c
+--- glibc-2.19/nptl/pthread_join.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/pthread_join.c	2016-03-31 13:07:41.525882651 -0700
 @@ -67,11 +67,11 @@
    int oldtype = CANCEL_ASYNC ();
  
@@ -2662,9 +2185,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/pthread_join.c glibc-2.19-tmp/nptl/pth
  
        /* Store the return value if the caller is interested.  */
        if (thread_return != NULL)
-diff -N -r --unified glibc-2.19.orig/nptl/pthread_key_create.c glibc-2.19-tmp/nptl/pthread_key_create.c
---- glibc-2.19.orig/nptl/pthread_key_create.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/pthread_key_create.c	2015-04-12 14:02:44.296071586 -0700
+diff -r --unified -N glibc-2.19/nptl/pthread_key_create.c glibc-2.19-woc/nptl/pthread_key_create.c
+--- glibc-2.19/nptl/pthread_key_create.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/pthread_key_create.c	2016-03-31 13:07:41.525882651 -0700
 @@ -29,7 +29,7 @@
    /* Find a slot in __pthread_kyes which is unused.  */
    for (size_t cnt = 0; cnt < PTHREAD_KEYS_MAX; ++cnt)
@@ -2674,9 +2197,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/pthread_key_create.c glibc-2.19-tmp/np
  
        if (KEY_UNUSED (seq) && KEY_USABLE (seq)
  	  /* We found an unused slot.  Try to allocate it.  */
-diff -N -r --unified glibc-2.19.orig/nptl/pthread_key_delete.c glibc-2.19-tmp/nptl/pthread_key_delete.c
---- glibc-2.19.orig/nptl/pthread_key_delete.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/pthread_key_delete.c	2015-04-12 14:02:44.297071586 -0700
+diff -r --unified -N glibc-2.19/nptl/pthread_key_delete.c glibc-2.19-woc/nptl/pthread_key_delete.c
+--- glibc-2.19/nptl/pthread_key_delete.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/pthread_key_delete.c	2016-03-31 13:07:41.525882651 -0700
 @@ -29,7 +29,7 @@
  
    if (__builtin_expect (key < PTHREAD_KEYS_MAX, 1))
@@ -2686,9 +2209,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/pthread_key_delete.c glibc-2.19-tmp/np
  
        if (__builtin_expect (! KEY_UNUSED (seq), 1)
  	  && ! atomic_compare_and_exchange_bool_acq (&__pthread_keys[key].seq,
-diff -N -r --unified glibc-2.19.orig/nptl/pthread_mutex_lock.c glibc-2.19-tmp/nptl/pthread_mutex_lock.c
---- glibc-2.19.orig/nptl/pthread_mutex_lock.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/pthread_mutex_lock.c	2015-04-12 14:02:44.297071586 -0700
+diff -r --unified -N glibc-2.19/nptl/pthread_mutex_lock.c glibc-2.19-woc/nptl/pthread_mutex_lock.c
+--- glibc-2.19/nptl/pthread_mutex_lock.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/pthread_mutex_lock.c	2016-03-31 13:07:41.525882651 -0700
 @@ -183,7 +183,7 @@
        THREAD_SETMEM (THREAD_SELF, robust_head.list_op_pending,
  		     &mutex->__data.__list.__next);
@@ -2725,9 +2248,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/pthread_mutex_lock.c glibc-2.19-tmp/np
  
  	/* Check whether we already hold the mutex.  */
  	if (mutex->__data.__owner == id)
-diff -N -r --unified glibc-2.19.orig/nptl/pthread_mutex_setprioceiling.c glibc-2.19-tmp/nptl/pthread_mutex_setprioceiling.c
---- glibc-2.19.orig/nptl/pthread_mutex_setprioceiling.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/pthread_mutex_setprioceiling.c	2015-04-12 14:02:44.297071586 -0700
+diff -r --unified -N glibc-2.19/nptl/pthread_mutex_setprioceiling.c glibc-2.19-woc/nptl/pthread_mutex_setprioceiling.c
+--- glibc-2.19/nptl/pthread_mutex_setprioceiling.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/pthread_mutex_setprioceiling.c	2016-03-31 13:07:41.525882651 -0700
 @@ -33,7 +33,7 @@
    if ((mutex->__data.__kind & PTHREAD_MUTEX_PRIO_PROTECT_NP) == 0)
      return EINVAL;
@@ -2759,9 +2282,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/pthread_mutex_setprioceiling.c glibc-2
    atomic_full_barrier ();
  
    lll_futex_wake (&mutex->__data.__lock, INT_MAX,
-diff -N -r --unified glibc-2.19.orig/nptl/pthread_mutex_timedlock.c glibc-2.19-tmp/nptl/pthread_mutex_timedlock.c
---- glibc-2.19.orig/nptl/pthread_mutex_timedlock.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/pthread_mutex_timedlock.c	2015-04-12 14:02:44.297071586 -0700
+diff -r --unified -N glibc-2.19/nptl/pthread_mutex_timedlock.c glibc-2.19-woc/nptl/pthread_mutex_timedlock.c
+--- glibc-2.19/nptl/pthread_mutex_timedlock.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/pthread_mutex_timedlock.c	2016-03-31 13:07:41.526882651 -0700
 @@ -141,7 +141,7 @@
        THREAD_SETMEM (THREAD_SELF, robust_head.list_op_pending,
  		     &mutex->__data.__list.__next);
@@ -2798,9 +2321,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/pthread_mutex_timedlock.c glibc-2.19-t
  
  	/* Check whether we already hold the mutex.  */
  	if (mutex->__data.__owner == id)
-diff -N -r --unified glibc-2.19.orig/nptl/pthread_mutex_trylock.c glibc-2.19-tmp/nptl/pthread_mutex_trylock.c
---- glibc-2.19.orig/nptl/pthread_mutex_trylock.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/pthread_mutex_trylock.c	2015-04-12 14:02:44.297071586 -0700
+diff -r --unified -N glibc-2.19/nptl/pthread_mutex_trylock.c glibc-2.19-woc/nptl/pthread_mutex_trylock.c
+--- glibc-2.19/nptl/pthread_mutex_trylock.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/pthread_mutex_trylock.c	2016-03-31 13:07:41.526882651 -0700
 @@ -98,7 +98,7 @@
        THREAD_SETMEM (THREAD_SELF, robust_head.list_op_pending,
  		     &mutex->__data.__list.__next);
@@ -2837,9 +2360,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/pthread_mutex_trylock.c glibc-2.19-tmp
  
  	/* Check whether we already hold the mutex.  */
  	if (mutex->__data.__owner == id)
-diff -N -r --unified glibc-2.19.orig/nptl/pthread_mutex_unlock.c glibc-2.19-tmp/nptl/pthread_mutex_unlock.c
---- glibc-2.19.orig/nptl/pthread_mutex_unlock.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/pthread_mutex_unlock.c	2015-04-12 14:02:44.298071586 -0700
+diff -r --unified -N glibc-2.19/nptl/pthread_mutex_unlock.c glibc-2.19-woc/nptl/pthread_mutex_unlock.c
+--- glibc-2.19/nptl/pthread_mutex_unlock.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/pthread_mutex_unlock.c	2016-03-31 13:07:41.526882651 -0700
 @@ -229,7 +229,7 @@
  	--mutex->__data.__nusers;
  
@@ -2858,9 +2381,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/pthread_mutex_unlock.c glibc-2.19-tmp/
  	  newval = oldval & PTHREAD_MUTEX_PRIO_CEILING_MASK;
  	}
        while (atomic_compare_and_exchange_bool_rel (&mutex->__data.__lock,
-diff -N -r --unified glibc-2.19.orig/nptl/pthread_once.c glibc-2.19-tmp/nptl/pthread_once.c
---- glibc-2.19.orig/nptl/pthread_once.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/pthread_once.c	2015-04-12 14:02:44.298071586 -0700
+diff -r --unified -N glibc-2.19/nptl/pthread_once.c glibc-2.19-woc/nptl/pthread_once.c
+--- glibc-2.19/nptl/pthread_once.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/pthread_once.c	2016-03-31 13:07:41.526882651 -0700
 @@ -1,6 +1,5 @@
 -/* Copyright (C) 2002-2014 Free Software Foundation, Inc.
 +/* Copyright (C) 2004-2014 Free Software Foundation, Inc.
@@ -2973,9 +2496,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/pthread_once.c glibc-2.19-tmp/nptl/pth
 -strong_alias (__pthread_once, pthread_once)
 +weak_alias (__pthread_once, pthread_once)
  hidden_def (__pthread_once)
-diff -N -r --unified glibc-2.19.orig/nptl/pthread_setschedparam.c glibc-2.19-tmp/nptl/pthread_setschedparam.c
---- glibc-2.19.orig/nptl/pthread_setschedparam.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/pthread_setschedparam.c	2015-04-12 14:02:44.298071586 -0700
+diff -r --unified -N glibc-2.19/nptl/pthread_setschedparam.c glibc-2.19-woc/nptl/pthread_setschedparam.c
+--- glibc-2.19/nptl/pthread_setschedparam.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/pthread_setschedparam.c	2016-03-31 13:07:41.527882651 -0700
 @@ -54,7 +54,7 @@
      }
  
@@ -2985,9 +2508,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/pthread_setschedparam.c glibc-2.19-tmp
  					      param) == -1, 0))
      result = errno;
    else
-diff -N -r --unified glibc-2.19.orig/nptl/pthread_setschedprio.c glibc-2.19-tmp/nptl/pthread_setschedprio.c
---- glibc-2.19.orig/nptl/pthread_setschedprio.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/pthread_setschedprio.c	2015-04-12 14:02:44.298071586 -0700
+diff -r --unified -N glibc-2.19/nptl/pthread_setschedprio.c glibc-2.19-woc/nptl/pthread_setschedprio.c
+--- glibc-2.19/nptl/pthread_setschedprio.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/pthread_setschedprio.c	2016-03-31 13:07:41.527882651 -0700
 @@ -48,7 +48,7 @@
      param.sched_priority = pd->tpp->priomax;
  
@@ -2997,9 +2520,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/pthread_setschedprio.c glibc-2.19-tmp/
      result = errno;
    else
      {
-diff -N -r --unified glibc-2.19.orig/nptl/pthread_spin_lock.c glibc-2.19-tmp/nptl/pthread_spin_lock.c
---- glibc-2.19.orig/nptl/pthread_spin_lock.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/pthread_spin_lock.c	2015-04-12 14:02:44.298071586 -0700
+diff -r --unified -N glibc-2.19/nptl/pthread_spin_lock.c glibc-2.19-woc/nptl/pthread_spin_lock.c
+--- glibc-2.19/nptl/pthread_spin_lock.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/pthread_spin_lock.c	2016-03-31 13:07:41.527882651 -0700
 @@ -54,12 +54,12 @@
  	{
  	  int wait = SPIN_LOCK_READS_BETWEEN_CMPXCHG;
@@ -3015,9 +2538,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/pthread_spin_lock.c glibc-2.19-tmp/npt
  	    ;
  	}
      }
-diff -N -r --unified glibc-2.19.orig/nptl/pthread_spin_unlock.c glibc-2.19-tmp/nptl/pthread_spin_unlock.c
---- glibc-2.19.orig/nptl/pthread_spin_unlock.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/pthread_spin_unlock.c	2015-04-12 14:02:44.298071586 -0700
+diff -r --unified -N glibc-2.19/nptl/pthread_spin_unlock.c glibc-2.19-woc/nptl/pthread_spin_unlock.c
+--- glibc-2.19/nptl/pthread_spin_unlock.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/pthread_spin_unlock.c	2016-03-31 13:07:41.527882651 -0700
 @@ -24,6 +24,6 @@
  pthread_spin_unlock (pthread_spinlock_t *lock)
  {
@@ -3026,9 +2549,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/pthread_spin_unlock.c glibc-2.19-tmp/n
 +  atomic_store(*lock, 0);
    return 0;
  }
-diff -N -r --unified glibc-2.19.orig/nptl/pthread_timedjoin.c glibc-2.19-tmp/nptl/pthread_timedjoin.c
---- glibc-2.19.orig/nptl/pthread_timedjoin.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/pthread_timedjoin.c	2015-04-12 14:02:44.298071586 -0700
+diff -r --unified -N glibc-2.19/nptl/pthread_timedjoin.c glibc-2.19-woc/nptl/pthread_timedjoin.c
+--- glibc-2.19/nptl/pthread_timedjoin.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/pthread_timedjoin.c	2016-03-31 13:07:41.527882651 -0700
 @@ -50,7 +50,7 @@
      return EINVAL;
  
@@ -3047,9 +2570,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/pthread_timedjoin.c glibc-2.19-tmp/npt
  
    return result;
  }
-diff -N -r --unified glibc-2.19.orig/nptl/pthread_tryjoin.c glibc-2.19-tmp/nptl/pthread_tryjoin.c
---- glibc-2.19.orig/nptl/pthread_tryjoin.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/pthread_tryjoin.c	2015-04-12 14:02:44.299071586 -0700
+diff -r --unified -N glibc-2.19/nptl/pthread_tryjoin.c glibc-2.19-woc/nptl/pthread_tryjoin.c
+--- glibc-2.19/nptl/pthread_tryjoin.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/pthread_tryjoin.c	2016-03-31 13:07:41.528882651 -0700
 @@ -42,7 +42,7 @@
      return EINVAL;
  
@@ -3068,9 +2591,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/pthread_tryjoin.c glibc-2.19-tmp/nptl/
      return EBUSY;
  
    /* Wait for the thread to finish.  If it is already locked something
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/pthread/createthread.c glibc-2.19-tmp/nptl/sysdeps/pthread/createthread.c
---- glibc-2.19.orig/nptl/sysdeps/pthread/createthread.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/pthread/createthread.c	2015-04-12 14:02:44.299071586 -0700
+diff -r --unified -N glibc-2.19/nptl/sysdeps/pthread/createthread.c glibc-2.19-woc/nptl/sysdeps/pthread/createthread.c
+--- glibc-2.19/nptl/sysdeps/pthread/createthread.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/pthread/createthread.c	2016-03-31 13:07:41.528882651 -0700
 @@ -211,7 +211,7 @@
  
  	      /* Enqueue the descriptor.  */
@@ -3080,9 +2603,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/pthread/createthread.c glibc-2
  	      while (atomic_compare_and_exchange_bool_acq (&__nptl_last_event,
  							   pd, pd->nextevent)
  		     != 0);
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/pthread/list.h glibc-2.19-tmp/nptl/sysdeps/pthread/list.h
---- glibc-2.19.orig/nptl/sysdeps/pthread/list.h	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/pthread/list.h	2015-04-12 14:02:44.299071586 -0700
+diff -r --unified -N glibc-2.19/nptl/sysdeps/pthread/list.h glibc-2.19-woc/nptl/sysdeps/pthread/list.h
+--- glibc-2.19/nptl/sysdeps/pthread/list.h	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/pthread/list.h	2016-03-31 13:07:41.528882651 -0700
 @@ -57,11 +57,11 @@
  static inline void
  list_add (list_t *newp, list_t *head)
@@ -3152,9 +2675,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/pthread/list.h glibc-2.19-tmp/
  
  #endif /* _LIST_H */
  
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/pthread/unwind-forcedunwind.c glibc-2.19-tmp/nptl/sysdeps/pthread/unwind-forcedunwind.c
---- glibc-2.19.orig/nptl/sysdeps/pthread/unwind-forcedunwind.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/pthread/unwind-forcedunwind.c	2015-04-12 14:02:44.299071586 -0700
+diff -r --unified -N glibc-2.19/nptl/sysdeps/pthread/unwind-forcedunwind.c glibc-2.19-woc/nptl/sysdeps/pthread/unwind-forcedunwind.c
+--- glibc-2.19/nptl/sysdeps/pthread/unwind-forcedunwind.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/pthread/unwind-forcedunwind.c	2016-03-31 13:07:41.528882651 -0700
 @@ -42,7 +42,7 @@
    void *getcfa;
    void *handle;
@@ -3221,9 +2744,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/pthread/unwind-forcedunwind.c 
      pthread_cancel_init ();
    else
      atomic_read_barrier ();
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/fork.c glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/fork.c
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/fork.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/fork.c	2015-04-12 14:02:44.299071586 -0700
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/fork.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/fork.c
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/fork.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/fork.c	2016-03-31 13:07:41.528882651 -0700
 @@ -62,12 +62,12 @@
    /* Run all the registered preparation handlers.  In reverse order.
       While doing this we build up a list of all the entries.  */
@@ -3270,9 +2793,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/fork.c glibc-2
  	}
      }
  
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/lowlevellock.c glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/lowlevellock.c
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/lowlevellock.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/lowlevellock.c	2015-04-12 14:02:44.299071586 -0700
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/lowlevellock.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/lowlevellock.c
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/lowlevellock.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/lowlevellock.c	2016-03-31 13:07:41.529882651 -0700
 @@ -26,7 +26,7 @@
  void
  __lll_lock_wait_private (int *futex)
@@ -3300,9 +2823,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/lowlevellock.c
      {
        struct timeval tv;
        struct timespec rt;
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/lowlevelrobustlock.c glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/lowlevelrobustlock.c
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/lowlevelrobustlock.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/lowlevelrobustlock.c	2015-04-12 14:02:44.300071586 -0700
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/lowlevelrobustlock.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/lowlevelrobustlock.c
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/lowlevelrobustlock.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/lowlevelrobustlock.c	2016-03-31 13:07:41.529882651 -0700
 @@ -26,7 +26,7 @@
  int
  __lll_robust_lock_wait (int *futex, int private)
@@ -3321,9 +2844,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/lowlevelrobust
  
    /* If the futex changed meanwhile try locking again.  */
    if (oldval == 0)
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/pthread_getaffinity.c glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/pthread_getaffinity.c
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/pthread_getaffinity.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/pthread_getaffinity.c	2015-04-12 14:02:44.300071586 -0700
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_getaffinity.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_getaffinity.c
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_getaffinity.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_getaffinity.c	2016-03-31 13:07:41.529882651 -0700
 @@ -32,7 +32,7 @@
    const struct pthread *pd = (const struct pthread *) th;
  
@@ -3333,9 +2856,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/pthread_getaff
  			      MIN (INT_MAX, cpusetsize), cpuset);
    if (INTERNAL_SYSCALL_ERROR_P (res, err))
      return INTERNAL_SYSCALL_ERRNO (res, err);
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/pthread_getcpuclockid.c glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/pthread_getcpuclockid.c
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/pthread_getcpuclockid.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/pthread_getcpuclockid.c	2015-04-12 14:02:44.300071586 -0700
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_getcpuclockid.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_getcpuclockid.c
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_getcpuclockid.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_getcpuclockid.c	2016-03-31 13:07:41.529882651 -0700
 @@ -38,7 +38,7 @@
  
    /* The clockid_t value is a simple computation from the TID.  */
@@ -3345,9 +2868,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/pthread_getcpu
  
    *clockid = tidclock;
    return 0;
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/pthread_getname.c glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/pthread_getname.c
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/pthread_getname.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/pthread_getname.c	2015-04-12 14:02:44.300071586 -0700
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_getname.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_getname.c
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_getname.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_getname.c	2016-03-31 13:07:41.529882651 -0700
 @@ -46,7 +46,7 @@
  
  #define FMT "/proc/self/task/%u/comm"
@@ -3357,9 +2880,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/pthread_getnam
  
    int fd = open_not_cancel_2 (fname, O_RDONLY);
    if (fd == -1)
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/pthread_setaffinity.c glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/pthread_setaffinity.c
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/pthread_setaffinity.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/pthread_setaffinity.c	2015-04-12 14:02:44.300071586 -0700
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_setaffinity.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_setaffinity.c
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_setaffinity.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_setaffinity.c	2016-03-31 13:07:41.530882651 -0700
 @@ -63,7 +63,7 @@
  
    if (__builtin_expect (__kernel_cpumask_size == 0, 0))
@@ -3378,9 +2901,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/pthread_setaff
  			  cpuset);
  
  #ifdef RESET_VGETCPU_CACHE
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/pthread_setname.c glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/pthread_setname.c
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/pthread_setname.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/pthread_setname.c	2015-04-12 14:02:44.300071586 -0700
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_setname.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_setname.c
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_setname.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_setname.c	2016-03-31 13:07:41.530882651 -0700
 @@ -46,7 +46,7 @@
  
  #define FMT "/proc/self/task/%u/comm"
@@ -3390,9 +2913,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/pthread_setnam
  
    int fd = open_not_cancel_2 (fname, O_RDWR);
    if (fd == -1)
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/register-atfork.c glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/register-atfork.c
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/register-atfork.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/register-atfork.c	2015-04-12 14:02:44.300071586 -0700
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/register-atfork.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/register-atfork.c
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/register-atfork.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/register-atfork.c	2016-03-31 13:07:41.530882651 -0700
 @@ -49,18 +49,18 @@
      {
        /* Search for an empty entry.  */
@@ -3445,9 +2968,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/register-atfor
  
    /* Free eventually allocated memory blocks for the object pool.  */
    struct fork_handler_pool *runp = fork_handler_pool.next;
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/sem_post.c glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/sem_post.c
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/sem_post.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/sem_post.c	2015-04-12 14:02:44.301071586 -0700
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/sem_post.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/sem_post.c
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/sem_post.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/sem_post.c	2016-03-31 13:07:41.530882651 -0700
 @@ -34,8 +34,8 @@
    __typeof (isem->value) cur;
    do
@@ -3468,9 +2991,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/sem_post.c gli
      {
        int err = lll_futex_wake (&isem->value, 1,
  				isem->private ^ FUTEX_PRIVATE_FLAG);
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/sem_trywait.c glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/sem_trywait.c
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/sem_trywait.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/sem_trywait.c	2015-04-12 14:02:44.301071586 -0700
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/sem_trywait.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/sem_trywait.c
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/sem_trywait.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/sem_trywait.c	2016-03-31 13:07:41.530882651 -0700
 @@ -32,7 +32,7 @@
    int *futex = (int *) sem;
    int val;
@@ -3480,9 +3003,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/sem_trywait.c 
      {
        val = atomic_decrement_if_positive (futex);
        if (val > 0)
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/timer_routines.c glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/timer_routines.c
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/timer_routines.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/timer_routines.c	2015-04-12 14:02:44.301071586 -0700
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/timer_routines.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/timer_routines.c
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/timer_routines.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/timer_routines.c	2016-03-31 13:07:41.531882651 -0700
 @@ -182,7 +182,7 @@
    int res = pthread_create (&th, &attr, timer_helper_thread, NULL);
    if (res == 0)
@@ -3492,9 +3015,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/timer_routines
  
    /* Restore the signal mask.  */
    INTERNAL_SYSCALL (rt_sigprocmask, err, 4, SIG_SETMASK, &oss, NULL,
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/unregister-atfork.c glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/unregister-atfork.c
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/unregister-atfork.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/unregister-atfork.c	2015-04-12 14:02:44.301071586 -0700
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/unregister-atfork.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/unregister-atfork.c
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/unregister-atfork.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/unregister-atfork.c	2016-03-31 13:07:41.531882651 -0700
 @@ -33,16 +33,16 @@
       We do not worry about other threads adding entries for this DSO
       right this moment.  If this happens this is a race and we can do
@@ -3566,9 +3089,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/unregister-atf
  	lll_futex_wait (&deleted->handler->refcntr, val, LLL_PRIVATE);
  
        deleted = deleted->next;
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/clone.S glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/clone.S
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/clone.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/clone.S	1969-12-31 16:00:00.000000000 -0800
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/clone.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/clone.S
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/clone.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/clone.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,9 +0,0 @@
 -/* We want an #include_next, but we are the main source file.
 -   So, #include ourselves and in that incarnation we can use #include_next.  */
@@ -3579,9 +3102,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/clone.S
 -# define RESET_PID
 -# include_next <clone.S>
 -#endif
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S	1969-12-31 16:00:00.000000000 -0800
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,19 +0,0 @@
 -/* Copyright (C) 2002-2014 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -3602,9 +3125,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/libc-lo
 -   <http://www.gnu.org/licenses/>.  */
 -
 -#include "lowlevellock.S"
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h	2015-04-12 14:02:44.302071586 -0700
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h	2016-03-31 13:07:41.532882651 -0700
 @@ -1,6 +1,5 @@
 -/* Copyright (C) 2002-2014 Free Software Foundation, Inc.
 +/* Copyright (C) 2005-2014 Free Software Foundation, Inc.
@@ -4438,9 +3961,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/lowleve
 +  })
  
  #endif	/* lowlevellock.h */
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S	1969-12-31 16:00:00.000000000 -0800
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,462 +0,0 @@
 -/* Copyright (C) 2002-2014 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -4904,9 +4427,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/lowleve
 -	cfi_endproc
 -	.size	__lll_timedwait_tid,.-__lll_timedwait_tid
 -#endif
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevelrobustlock.S glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevelrobustlock.S
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevelrobustlock.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevelrobustlock.S	1969-12-31 16:00:00.000000000 -0800
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevelrobustlock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevelrobustlock.S
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevelrobustlock.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevelrobustlock.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,306 +0,0 @@
 -/* Copyright (C) 2002-2014 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -5214,9 +4737,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/lowleve
 -#endif
 -	cfi_endproc
 -	.size	__lll_robust_timedlock_wait,.-__lll_robust_timedlock_wait
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_barrier_wait.S glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_barrier_wait.S
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_barrier_wait.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_barrier_wait.S	1969-12-31 16:00:00.000000000 -0800
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_barrier_wait.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_barrier_wait.S
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_barrier_wait.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_barrier_wait.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,160 +0,0 @@
 -/* Copyright (C) 2002-2014 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -5378,9 +4901,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread
 -	callq	__lll_unlock_wake
 -	jmp	10b
 -	.size	pthread_barrier_wait,.-pthread_barrier_wait
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_broadcast.S glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_broadcast.S
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_broadcast.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_broadcast.S	1969-12-31 16:00:00.000000000 -0800
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_broadcast.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_broadcast.S
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_broadcast.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_broadcast.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,179 +0,0 @@
 -/* Copyright (C) 2002-2014 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -5561,9 +5084,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread
 -	.size	__pthread_cond_broadcast, .-__pthread_cond_broadcast
 -versioned_symbol (libpthread, __pthread_cond_broadcast, pthread_cond_broadcast,
 -		  GLIBC_2_3_2)
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_signal.S glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_signal.S
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_signal.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_signal.S	1969-12-31 16:00:00.000000000 -0800
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_signal.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_signal.S
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_signal.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_signal.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,164 +0,0 @@
 -/* Copyright (C) 2002-2014 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -5729,9 +5252,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread
 -	.size	__pthread_cond_signal, .-__pthread_cond_signal
 -versioned_symbol (libpthread, __pthread_cond_signal, pthread_cond_signal,
 -		  GLIBC_2_3_2)
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_timedwait.S glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_timedwait.S
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_timedwait.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_timedwait.S	1969-12-31 16:00:00.000000000 -0800
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_timedwait.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_timedwait.S
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_timedwait.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_timedwait.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,840 +0,0 @@
 -/* Copyright (C) 2002-2014 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -6573,9 +6096,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread
 -DW.ref.__gcc_personality_v0:
 -	ASM_ADDR __gcc_personality_v0
 -#endif
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S	1969-12-31 16:00:00.000000000 -0800
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,555 +0,0 @@
 -/* Copyright (C) 2002-2014 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -7132,9 +6655,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread
 -DW.ref.__gcc_personality_v0:
 -	ASM_ADDR __gcc_personality_v0
 -#endif
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_once.S glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_once.S
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_once.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_once.S	1969-12-31 16:00:00.000000000 -0800
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_once.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_once.S
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_once.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_once.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,193 +0,0 @@
 -/* Copyright (C) 2002-2014 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -7329,9 +6852,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread
 -DW.ref.__gcc_personality_v0:
 -	ASM_ADDR __gcc_personality_v0
 -#endif
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_rdlock.S glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_rdlock.S
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_rdlock.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_rdlock.S	1969-12-31 16:00:00.000000000 -0800
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_rdlock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_rdlock.S
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_rdlock.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_rdlock.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,177 +0,0 @@
 -/* Copyright (C) 2002-2014 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -7510,9 +7033,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread
 -
 -strong_alias (__pthread_rwlock_rdlock, pthread_rwlock_rdlock)
 -hidden_def (__pthread_rwlock_rdlock)
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedrdlock.S glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedrdlock.S
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedrdlock.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedrdlock.S	1969-12-31 16:00:00.000000000 -0800
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedrdlock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedrdlock.S
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedrdlock.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedrdlock.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,274 +0,0 @@
 -/* Copyright (C) 2002-2014 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -7788,9 +7311,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread
 -	jmp	9b
 -	cfi_endproc
 -	.size	pthread_rwlock_timedrdlock,.-pthread_rwlock_timedrdlock
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedwrlock.S glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedwrlock.S
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedwrlock.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedwrlock.S	1969-12-31 16:00:00.000000000 -0800
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedwrlock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedwrlock.S
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedwrlock.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedwrlock.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,266 +0,0 @@
 -/* Copyright (C) 2002-2014 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -8058,9 +7581,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread
 -	jmp	9b
 -	cfi_endproc
 -	.size	pthread_rwlock_timedwrlock,.-pthread_rwlock_timedwrlock
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_unlock.S glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_unlock.S
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_unlock.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_unlock.S	1969-12-31 16:00:00.000000000 -0800
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_unlock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_unlock.S
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_unlock.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_unlock.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,126 +0,0 @@
 -/* Copyright (C) 2002-2014 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -8188,9 +7711,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread
 -
 -strong_alias (__pthread_rwlock_unlock, pthread_rwlock_unlock)
 -hidden_def (__pthread_rwlock_unlock)
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_wrlock.S glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_wrlock.S
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_wrlock.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_wrlock.S	1969-12-31 16:00:00.000000000 -0800
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_wrlock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_wrlock.S
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_wrlock.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_wrlock.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,165 +0,0 @@
 -/* Copyright (C) 2002-2014 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -8357,14 +7880,14 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread
 -
 -strong_alias (__pthread_rwlock_wrlock, pthread_rwlock_wrlock)
 -hidden_def (__pthread_rwlock_wrlock)
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_spin_unlock.S glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_spin_unlock.S
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_spin_unlock.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_spin_unlock.S	1969-12-31 16:00:00.000000000 -0800
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_spin_unlock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_spin_unlock.S
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_spin_unlock.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_spin_unlock.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1 +0,0 @@
 -#include <nptl/sysdeps/x86_64/pthread_spin_unlock.S>
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/sem_post.S glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/sem_post.S
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/sem_post.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/sem_post.S	1969-12-31 16:00:00.000000000 -0800
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/sem_post.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/sem_post.S
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/sem_post.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/sem_post.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,75 +0,0 @@
 -/* Copyright (C) 2002-2014 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -8441,9 +7964,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/sem_pos
 -	orl	$-1, %eax
 -	retq
 -	.size	sem_post,.-sem_post
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/sem_timedwait.S glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/sem_timedwait.S
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/sem_timedwait.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/sem_timedwait.S	1969-12-31 16:00:00.000000000 -0800
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/sem_timedwait.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/sem_timedwait.S
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/sem_timedwait.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/sem_timedwait.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,380 +0,0 @@
 -/* Copyright (C) 2002-2014 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -8825,9 +8348,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/sem_tim
 -DW.ref.__gcc_personality_v0:
 -	ASM_ADDR __gcc_personality_v0
 -#endif
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/sem_trywait.S glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/sem_trywait.S
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/sem_trywait.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/sem_trywait.S	1969-12-31 16:00:00.000000000 -0800
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/sem_trywait.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/sem_trywait.S
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/sem_trywait.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/sem_trywait.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,47 +0,0 @@
 -/* Copyright (C) 2002-2014 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -8876,9 +8399,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/sem_try
 -	orl	$-1, %eax
 -	retq
 -	.size	sem_trywait,.-sem_trywait
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/sem_wait.S glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/sem_wait.S
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/sem_wait.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/sem_wait.S	1969-12-31 16:00:00.000000000 -0800
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/sem_wait.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/sem_wait.S
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/sem_wait.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/sem_wait.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,176 +0,0 @@
 -/* Copyright (C) 2002-2014 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -9056,9 +8579,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/sem_wai
 -DW.ref.__gcc_personality_v0:
 -	ASM_ADDR __gcc_personality_v0
 -#endif
-diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/timer_create.c glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/timer_create.c
---- glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/timer_create.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/sysdeps/unix/sysv/linux/x86_64/timer_create.c	2015-04-12 14:02:44.305071586 -0700
+diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/timer_create.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/timer_create.c
+--- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/timer_create.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/timer_create.c	2016-03-31 13:07:41.536882651 -0700
 @@ -42,7 +42,7 @@
      {
        int i;
@@ -9068,9 +8591,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/sysdeps/unix/sysv/linux/x86_64/timer_c
  	    && ! atomic_compare_and_exchange_bool_acq (&__compat_timer_list[i],
  						       newp, NULL))
  	  {
-diff -N -r --unified glibc-2.19.orig/nptl/tpp.c glibc-2.19-tmp/nptl/tpp.c
---- glibc-2.19.orig/nptl/tpp.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nptl/tpp.c	2015-04-12 14:02:44.305071586 -0700
+diff -r --unified -N glibc-2.19/nptl/tpp.c glibc-2.19-woc/nptl/tpp.c
+--- glibc-2.19/nptl/tpp.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nptl/tpp.c	2016-03-31 13:07:41.536882651 -0700
 @@ -33,7 +33,7 @@
  {
    __sched_fifo_max_prio = sched_get_priority_max (SCHED_FIFO);
@@ -9134,9 +8657,9 @@ diff -N -r --unified glibc-2.19.orig/nptl/tpp.c glibc-2.19-tmp/nptl/tpp.c
        if (self->schedpolicy == -1)
  	result = -1;
        else
-diff -N -r --unified glibc-2.19.orig/nss/getXXbyYY_r.c glibc-2.19-tmp/nss/getXXbyYY_r.c
---- glibc-2.19.orig/nss/getXXbyYY_r.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/nss/getXXbyYY_r.c	2015-04-12 14:02:44.305071586 -0700
+diff -r --unified -N glibc-2.19/nss/getXXbyYY_r.c glibc-2.19-woc/nss/getXXbyYY_r.c
+--- glibc-2.19/nss/getXXbyYY_r.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/nss/getXXbyYY_r.c	2016-03-31 13:07:41.536882651 -0700
 @@ -200,7 +200,7 @@
      }
  #endif
@@ -9155,9 +8678,9 @@ diff -N -r --unified glibc-2.19.orig/nss/getXXbyYY_r.c glibc-2.19-tmp/nss/getXXb
      }
    else
      {
-diff -N -r --unified glibc-2.19.orig/stdlib/cxa_atexit.c glibc-2.19-tmp/stdlib/cxa_atexit.c
---- glibc-2.19.orig/stdlib/cxa_atexit.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/stdlib/cxa_atexit.c	2015-04-12 14:02:44.305071586 -0700
+diff -r --unified -N glibc-2.19/stdlib/cxa_atexit.c glibc-2.19-woc/stdlib/cxa_atexit.c
+--- glibc-2.19/stdlib/cxa_atexit.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/stdlib/cxa_atexit.c	2016-03-31 13:07:41.536882651 -0700
 @@ -44,7 +44,7 @@
    new->func.cxa.arg = arg;
    new->func.cxa.dso_handle = d;
@@ -9167,9 +8690,9 @@ diff -N -r --unified glibc-2.19.orig/stdlib/cxa_atexit.c glibc-2.19-tmp/stdlib/c
    return 0;
  }
  
-diff -N -r --unified glibc-2.19.orig/stdlib/cxa_finalize.c glibc-2.19-tmp/stdlib/cxa_finalize.c
---- glibc-2.19.orig/stdlib/cxa_finalize.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/stdlib/cxa_finalize.c	2015-04-12 14:02:44.305071586 -0700
+diff -r --unified -N glibc-2.19/stdlib/cxa_finalize.c glibc-2.19-woc/stdlib/cxa_finalize.c
+--- glibc-2.19/stdlib/cxa_finalize.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/stdlib/cxa_finalize.c	2016-03-31 13:07:41.537882651 -0700
 @@ -32,7 +32,7 @@
    struct exit_function_list *funcs;
  
@@ -9210,9 +8733,9 @@ diff -N -r --unified glibc-2.19.orig/stdlib/cxa_finalize.c glibc-2.19-tmp/stdlib
      }
  
    /* Remove the registered fork handlers.  We do not have to
-diff -N -r --unified glibc-2.19.orig/stdlib/msort.c glibc-2.19-tmp/stdlib/msort.c
---- glibc-2.19.orig/stdlib/msort.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/stdlib/msort.c	2015-04-12 14:02:44.306071586 -0700
+diff -r --unified -N glibc-2.19/stdlib/msort.c glibc-2.19-woc/stdlib/msort.c
+--- glibc-2.19/stdlib/msort.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/stdlib/msort.c	2016-03-31 13:07:41.537882651 -0700
 @@ -182,7 +182,7 @@
        static long int phys_pages;
        static int pagesize;
@@ -9231,9 +8754,9 @@ diff -N -r --unified glibc-2.19.orig/stdlib/msort.c glibc-2.19-tmp/stdlib/msort.
  	}
  
        /* Just a comment here.  We cannot compute
-diff -N -r --unified glibc-2.19.orig/stdlib/on_exit.c glibc-2.19-tmp/stdlib/on_exit.c
---- glibc-2.19.orig/stdlib/on_exit.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/stdlib/on_exit.c	2015-04-12 14:02:44.306071586 -0700
+diff -r --unified -N glibc-2.19/stdlib/on_exit.c glibc-2.19-woc/stdlib/on_exit.c
+--- glibc-2.19/stdlib/on_exit.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/stdlib/on_exit.c	2016-03-31 13:07:41.537882651 -0700
 @@ -35,7 +35,7 @@
    new->func.on.fn = func;
    new->func.on.arg = arg;
@@ -9243,9 +8766,9 @@ diff -N -r --unified glibc-2.19.orig/stdlib/on_exit.c glibc-2.19-tmp/stdlib/on_e
    return 0;
  }
  weak_alias (__on_exit, on_exit)
-diff -N -r --unified glibc-2.19.orig/sysdeps/unix/sysv/linux/check_pf.c glibc-2.19-tmp/sysdeps/unix/sysv/linux/check_pf.c
---- glibc-2.19.orig/sysdeps/unix/sysv/linux/check_pf.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/sysdeps/unix/sysv/linux/check_pf.c	2015-04-12 14:02:44.306071586 -0700
+diff -r --unified -N glibc-2.19/sysdeps/unix/sysv/linux/check_pf.c glibc-2.19-woc/sysdeps/unix/sysv/linux/check_pf.c
+--- glibc-2.19/sysdeps/unix/sysv/linux/check_pf.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/sysdeps/unix/sysv/linux/check_pf.c	2016-03-31 13:07:41.537882651 -0700
 @@ -75,7 +75,7 @@
    if (atomic_increment_val (&nl_timestamp) == 0)
      atomic_increment (&nl_timestamp);
@@ -9264,9 +8787,9 @@ diff -N -r --unified glibc-2.19.orig/sysdeps/unix/sysv/linux/check_pf.c glibc-2.
  	  && atomic_add_zero (&olddata->usecnt, -1))
  	free (olddata);
  
-diff -N -r --unified glibc-2.19.orig/sysdeps/unix/sysv/linux/getsysstats.c glibc-2.19-tmp/sysdeps/unix/sysv/linux/getsysstats.c
---- glibc-2.19.orig/sysdeps/unix/sysv/linux/getsysstats.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/sysdeps/unix/sysv/linux/getsysstats.c	2015-04-12 14:02:44.306071586 -0700
+diff -r --unified -N glibc-2.19/sysdeps/unix/sysv/linux/getsysstats.c glibc-2.19-woc/sysdeps/unix/sysv/linux/getsysstats.c
+--- glibc-2.19/sysdeps/unix/sysv/linux/getsysstats.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/sysdeps/unix/sysv/linux/getsysstats.c	2016-03-31 13:07:41.537882651 -0700
 @@ -130,7 +130,7 @@
    static time_t timestamp;
  
@@ -9285,9 +8808,9 @@ diff -N -r --unified glibc-2.19.orig/sysdeps/unix/sysv/linux/getsysstats.c glibc
  
    return result;
  }
-diff -N -r --unified glibc-2.19.orig/sysdeps/unix/sysv/linux/malloc-sysdep.h glibc-2.19-tmp/sysdeps/unix/sysv/linux/malloc-sysdep.h
---- glibc-2.19.orig/sysdeps/unix/sysv/linux/malloc-sysdep.h	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/sysdeps/unix/sysv/linux/malloc-sysdep.h	2015-04-12 14:02:44.306071586 -0700
+diff -r --unified -N glibc-2.19/sysdeps/unix/sysv/linux/malloc-sysdep.h glibc-2.19-woc/sysdeps/unix/sysv/linux/malloc-sysdep.h
+--- glibc-2.19/sysdeps/unix/sysv/linux/malloc-sysdep.h	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/sysdeps/unix/sysv/linux/malloc-sysdep.h	2016-03-31 13:07:41.538882651 -0700
 @@ -34,13 +34,14 @@
  check_may_shrink_heap (void)
  {
@@ -9322,9 +8845,9 @@ diff -N -r --unified glibc-2.19.orig/sysdeps/unix/sysv/linux/malloc-sysdep.h gli
  }
  
  #define HAVE_MREMAP 1
-diff -N -r --unified glibc-2.19.orig/sysdeps/x86_64/bits/atomic.h glibc-2.19-tmp/sysdeps/x86_64/bits/atomic.h
---- glibc-2.19.orig/sysdeps/x86_64/bits/atomic.h	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-tmp/sysdeps/x86_64/bits/atomic.h	2015-04-12 14:02:44.307071586 -0700
+diff -r --unified -N glibc-2.19/sysdeps/x86_64/bits/atomic.h glibc-2.19-woc/sysdeps/x86_64/bits/atomic.h
+--- glibc-2.19/sysdeps/x86_64/bits/atomic.h	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/sysdeps/x86_64/bits/atomic.h	2016-03-31 13:07:41.538882651 -0700
 @@ -55,10 +55,71 @@
  # endif
  #endif
