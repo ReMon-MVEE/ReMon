@@ -500,9 +500,10 @@ void monitor::log_dump_queues(shm_table* shm_table)
     if (atomic_buffer)
     {
         std::vector<unsigned long> pos(mvee::numvariants);
+		std::fill(pos.begin(), pos.end(), 0);
 
         for (int i = 0; i < mvee::numvariants; ++i)
-            if (atomic_queue_pos[i])
+            if (atomic_queue_pos[i] && !variants[i].variant_terminated)
                 pos[i] = mvee_wrap_ptrace(PTRACE_PEEKDATA, variants[i].variantpid, (unsigned long)atomic_queue_pos[i], NULL);
 
         char                       logname[100];
@@ -513,11 +514,14 @@ void monitor::log_dump_queues(shm_table* shm_table)
         if (!logfile)
             return;
 
-        warnf("dumping queue: %s - FILE: %s (%d - %s)\n",
-                    getTextualBufferType(MVEE_LIBC_ATOMIC_BUFFER), logname, logfile, strerror(errno));
+        warnf("dumping queue: %s\n", getTextualBufferType(MVEE_LIBC_ATOMIC_BUFFER));
+
+//        warnf("dumping queue: %s - FILE: %s (%d - %s)\n",
+//                    getTextualBufferType(MVEE_LIBC_ATOMIC_BUFFER), logname, logfile, strerror(errno));
 
         for (int i = 0; i < mvee::numvariants; ++i)
-            fprintf(logfile, "VARIANT %d - POS: %05ld\n", i, pos[i]);
+            fprintf(logfile, "VARIANT %d - POS: %05ld %s\n", i, pos[i],
+					variants[i].variant_terminated ? "(terminated)" : " ");
 
         struct mvee_op_entry*      buffer  = (struct mvee_op_entry*)atomic_buffer->ptr;
         for (master_pos = 0; master_pos < SHARED_QUEUE_SLOTS; ++master_pos)
@@ -538,6 +542,9 @@ void monitor::log_dump_queues(shm_table* shm_table)
 
         for (int i = 0; i < mvee::numvariants; ++i)
         {
+			if (variants[i].variant_terminated)
+				continue;
+
             fprintf(logfile, "\n\n COUNTER DUMP FOR VARIANT: %d (PID: %d)\n",
                     i, variants[i].variantpid);
 
@@ -764,7 +771,7 @@ void monitor::log_dump_queues(shm_table* shm_table)
 -----------------------------------------------------------------------------*/
 void monitor::log_calculate_clock_spread()
 {
-	if (!atomic_counters[0])
+	if (!atomic_counters[0] || variants[0].variant_terminated)
 		return;
 
 	int lowest_clock_used  = 0;
