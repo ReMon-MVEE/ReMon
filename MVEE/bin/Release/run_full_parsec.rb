@@ -4,19 +4,20 @@ require 'pty'
 
 @poresults = Hash.new
 @toresults = Hash.new
-@inputset  = "native"
-@workers   = (5..8)
-#@replicae  = (2..4)
-@replicae  = [2]
-#@parsec    = [80, 81, 83, 85, 86, 87, 88, 89, 90, 91, 92]
-@parsec    = [92]
-@runs      = 15
+@inputset  = "test"
+@workers   = [4]
+@variants  = [2]
+@parsec    = (30..42)
+@runs      = 1
 
 def get_bench_name(benchnum)
-  benchname=`grep "case #{benchnum}:" -A8 ../../Src/MVEE_demos.cpp | grep parsec\_bench | head -n1`.split("\"")[1]
+  _benchname=`grep "REGISTER.*(#{benchnum}," ../../Src/MVEE_demos.cpp`.split('"')[3]
+  return _benchname if _benchname
+  "dunno"
 end
 
-def run_bench(benchnum, replicae, threads, input, results, native)
+
+def run_bench(benchnum, variants, threads, input, results, native)
   benchname=get_bench_name(benchnum)
   if native
       results[threads] = Hash.new if not results[threads]
@@ -26,18 +27,18 @@ def run_bench(benchnum, replicae, threads, input, results, native)
     return
   end
     
-  PTY.spawn("./MVEE #{benchnum} #{replicae} #{threads} #{input} #{'-n' if native} 2>&1") do |stdout, stdin, pid|
+  PTY.spawn("./MVEE #{benchnum} #{variants} #{threads} #{input} #{'-n' if native} 2>&1") do |stdout, stdin, pid|
     begin
       stdout.each { |ln|
         if ln.match(/real\t/)
           time = ln.split("\t")[1].chop 
           seconds = Float(time.split("m")[0].to_i * 60) + Float(time.split("m")[1].chop)
           
-          replicae = 0 if native
+          variants = 0 if native
           results[threads] = Hash.new if not results[threads]
           results[threads][benchname] = Hash.new if not results[threads][benchname]
-          results[threads][benchname][replicae] = Array.new if not results[threads][benchname][replicae]
-          results[threads][benchname][replicae] << seconds
+          results[threads][benchname][variants] = Array.new if not results[threads][benchname][variants]
+          results[threads][benchname][variants] << seconds
           
           print("        #{seconds.to_s.gsub(".", ",")}\n")
         else 
@@ -64,8 +65,8 @@ def dump_spreadsheet(results, prefix, threads)
 
   File.open("parsec_#{prefix}_#{threads}_workers.csv", "w") { |file|
     columns="Benchmark;Native;"
-    @replicae.each { |replicae|
-      columns << "GHUMVEE (#{replicae} Replicae);"
+    @variants.each { |variants|
+      columns << "GHUMVEE (#{variants} Variants);"
     }
     print_spreadsheet(file, columns + "\n")
 
@@ -102,11 +103,11 @@ end
   print("\n")
 
 #  install_partialorder_libc()
-  @replicae.each { |replicae|
-    print("#{replicae} replicae:\n")
+  @variants.each { |variants|
+    print("#{variants} variants:\n")
     @parsec.each { |num| 
       print("    running benchmark: #{get_bench_name(num)}\n")
-      (1..@runs).each { run_bench(num, replicae, threads, @inputset, @poresults, false) }
+      (1..@runs).each { run_bench(num, variants, threads, @inputset, @poresults, false) }
     }
 
     print("\n")
@@ -119,11 +120,11 @@ end
   #   @toresults[threads][benchname] = Hash.new
   #   @toresults[threads][benchname][0] = benchtable[0]
   # }
-  # @replicae.each { |replicae|
-  #   print("#{replicae} replicae:\n")
+  # @variants.each { |variants|
+  #   print("#{variants} variants:\n")
   #   @parsec.each { |num| 
   #     print("    running benchmark: #{get_bench_name(num)}\n")
-  #     (1..@runs).each { run_bench(num, replicae, threads, @inputset, @toresults, false) }
+  #     (1..@runs).each { run_bench(num, variants, threads, @inputset, @toresults, false) }
   #   }
 
   #   print("\n")
