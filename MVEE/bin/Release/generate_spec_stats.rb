@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 
 def run_bench(benchnum)
-  benchname=`grep "case #{benchnum}:" -A8 ../../Src/MVEE_demos.cpp | grep execl | head -n1`.split(",")[2]
+  benchname=`grep "REGISTER.*(#{benchnum}," ../../Src/MVEE_demos.cpp`.split('"')[1]
 
   if benchname
     benchname=benchname.match(/[[:digit:]]{3}.[[:alnum:]]*/)
@@ -28,8 +28,8 @@ def run_suite(suite)
   }
 end
 
-specint=(60..72).to_a
-specfp=(118..133).to_a
+specint=(1..12).to_a
+specfp=(13..29).to_a
 
 `rm -rf Logs`
 `mkdir Logs`

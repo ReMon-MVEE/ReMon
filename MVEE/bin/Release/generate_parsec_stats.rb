@@ -1,11 +1,13 @@
 #!/usr/bin/env ruby
 
-@parsec  = [80, 81, 83, 85, 86, 87, 88, 89, 90, 91, 92]
+@parsec  = (30..42)
 @workers = (1..8)
 @input    = "native"
 
 def get_bench_name(benchnum)
-  benchname=`grep "case #{benchnum}:" -A8 ../../Src/MVEE_demos.cpp | grep parsec\_bench | head -n1`.split("\"")[1]  
+  _benchname=`grep "REGISTER.*(#{benchnum}," ../../Src/MVEE_demos.cpp`.split('"')[3]
+  return _benchname if _benchname
+  "dunno"
 end
 
 def run_bench(benchnum, threads)
@@ -27,14 +29,6 @@ def run_bench(benchnum, threads)
   }
   
   `rm Logs/*.log`
-end
-
-def install_partialorder_libc()
-  print("Installing GHUMVEE partial order eglibc 2.19\n")
-  orig = Dir.pwd
-  Dir.chdir(File.expand_path("~/eglibc-builds/eglibc-mvee-partialorder-nodebugging"))
-  `sudo dpkg -i libc6_2.19-0ubuntu6_amd64.deb libc6-dbg_2.19-0ubuntu6_amd64.deb libc-bin_2.19-0ubuntu6_amd64.deb multiarch-support_2.19-0ubuntu6_amd64.deb`
-  Dir.chdir(orig)
 end
 
 `rm -rf Logs`
