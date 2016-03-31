@@ -812,14 +812,18 @@ void monitor::shutdown(bool success)
             // just kill this group
             debugf("GHUMVEE is monitoring multiple process groups => we're only shutting this group down\n");
 
-            log_dump_queues(set_shm_table.get());
+#ifndef MVEE_BENCHMARK
+			if (!set_mmap_table->thread_group_shutting_down)
+				log_dump_queues(set_shm_table.get());
+#endif
 
             for (int i = 0; i < mvee::numvariants; ++i)
             {
                 if (!variants[i].variant_terminated)
                 {
 #ifndef MVEE_BENCHMARK
-					log_variant_backtrace(i);
+					if (!set_mmap_table->thread_group_shutting_down)
+						log_variant_backtrace(i);
 #endif
                     variants[i].variant_terminated = true;
                     kill(variants[i].varianttgid, SIGKILL);
@@ -834,7 +838,8 @@ void monitor::shutdown(bool success)
         }
     }
 
-    if (mvee::get_should_generate_backtraces())
+    if (mvee::get_should_generate_backtraces() &&
+		!set_mmap_table->thread_group_shutting_down)
         log_backtraces();
 
 nobacktrace:
