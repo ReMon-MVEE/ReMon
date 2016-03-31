@@ -586,7 +586,6 @@ long monitor::handle_write_log_args(int variantnum)
 
 long monitor::handle_write_precall(int variantnum)
 {
-    //    mvee_log_variant_backtrace(0);
     CHECKFD(1);
     CHECKPOINTER(2);
 
@@ -932,6 +931,8 @@ long monitor::handle_unlink_postcall(int variantnum)
         if (unlink_fd && strstr(unlink_fd, "/tmp/vgdb-pipe") == unlink_fd)
             WRITE_SYSCALL_RETURN(variantnum, 0)
             SAFEDELETEARRAY(unlink_fd);
+
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
     }
 #endif
     return 0;
@@ -1440,7 +1441,7 @@ long monitor::handle_pause_call(int variantnum)
 
 long monitor::handle_pause_postcall(int variantnum)
 {
-    return MVEE_POSTCALL_RESUME;
+    return MVEE_POSTCALL_RESUME | MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1547,8 +1548,6 @@ long monitor::handle_access_log_args(int variantnum)
 
 long monitor::handle_access_precall(int variantnum)
 {
-    //  for (int i = 0; i < mvee::numvariants; ++i)
-    //    log_variant_backtrace(i);
     CHECKPOINTER(1);
     CHECKARG(2);
     CHECKSTRING(1);
@@ -2019,8 +2018,6 @@ long monitor::handle_ioctl_precall(int variantnum)
     CHECKFD(1);
     CHECKPOINTER(3);
 
-//	log_variant_backtrace(0);
-
     unsigned char is_master = 0;
     switch(ARG2(0))
     {
@@ -2054,7 +2051,6 @@ long monitor::handle_ioctl_precall(int variantnum)
             break;
         default:
             warnf("unknown ioctl: %d (0x%08x)\n", ARG2(0), ARG2(0));
-            //			log_variant_backtrace(0);
             shutdown(false);
             break;
     }
@@ -2687,7 +2683,6 @@ long monitor::handle_gettimeofday_precall(int variantnum)
 {
     CHECKPOINTER(2);
     CHECKPOINTER(1);
-//	log_variant_backtrace(0);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -4474,7 +4469,6 @@ long monitor::handle_mprotect_precall(int variantnum)
     CHECKARG(2);
     CHECKARG(3);
     CHECKREGION(1, ARG2(0));
-    //	log_variant_backtrace(0);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
@@ -5031,7 +5025,6 @@ long monitor::handle_rt_sigprocmask_precall(int variantnum)
     CHECKPOINTER(2);
     CHECKSIGSET(2, OLDCALLIFNOT(__NR_rt_sigprocmask));
     CHECKPOINTER(3);    
-    //	log_variant_backtrace(0);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
@@ -5264,7 +5257,6 @@ long monitor::handle_mmap_call(int variantnum)
             warnf("variants are opening a shared memory mapping backed by an O_RDWR file!!!\n");
             warnf("> file = %s\n",           info->path.c_str());
             warnf("> map prot flags = %s\n", getTextualProtectionFlags(ARG3(0)).c_str());
-            //			mvee_log_variant_backtrace(0);
 //#endif
 
             if (ARG3(0) & PROT_WRITE)
@@ -5882,7 +5874,6 @@ long monitor::handle_fstat64_postcall(int variantnum)
 -----------------------------------------------------------------------------*/
 long monitor::handle_madvise_get_call_type(int variantnum)
 {
-    //  mvee_log_variant_backtrace(variantnum);
     return MVEE_CALL_TYPE_UNSYNCED;
 }
 
@@ -6002,7 +5993,6 @@ long monitor::handle_gettid_call(int variantnum)
             }
             if (ARG3(i) == 59)
             {
-                //mvee_log_variant_backtrace(i, 1, 0, 0);
                 warnf("[PID:%05d] - [INVALID_LOCK_TYPE=>READ:%d (%s) - EXPECTED:%d (%s)]\n",
                             variants[i].variantpid, ARG4(i), getTextualAtomicType(ARG4(i)),
                             ARG5(i), getTextualAtomicType(ARG5(i)));
@@ -6025,6 +6015,8 @@ long monitor::handle_gettid_call(int variantnum)
                 shutdown(false);
             }
         }
+
+		return MVEE_CALL_HANDLED_UNSYNCED_CALL | MVEE_CALL_ALLOW;
     }
 #endif
 
@@ -6262,8 +6254,6 @@ long monitor::handle_futex_log_return(int variantnum)
                    ((long)rets[i] < 0) ? "(" : "",
                    ((long)rets[i] < 0) ? strerror(-(long)rets[i]) : "",
                    ((long)rets[i] < 0) ? ")" : "");
-        /* if (rets[i] == (unsigned long)-EINVAL)*/
-        //		log_variant_backtrace(i);
     }
 
     return 0;
@@ -6437,7 +6427,7 @@ long monitor::handle_sched_getaffinity_postcall(int variantnum)
     }
 
 
-    return 0;
+    return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
 
 /*-----------------------------------------------------------------------------
