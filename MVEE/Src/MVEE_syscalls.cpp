@@ -243,7 +243,7 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 			{
 				warnf("FIXME - stijn: CALL handler for syscall %d (%s) was not unsync-aware\n",
 					  callnum, getTextualSyscall(callnum));				
-				shutdown(true);				
+				shutdown(false);				
 			}
 
 		}
@@ -740,7 +740,7 @@ long monitor::call_postcall_return_unsynced (int variantnum)
 			{
 				warnf("FIXME - stijn: POSTCALL handler for syscall %d (%s) was not unsync-aware\n",
 					  callnum, getTextualSyscall(callnum));				
-				shutdown(true);				
+				shutdown(false);				
 			}
 		}
 #ifndef MVEE_BENCHMARK
