@@ -79,10 +79,10 @@ void mvee::setup_env(int demonum, bool native)
         setenv("SPECPATH",    std::string(spec_path + "benchspec/CPU2006").c_str(), 1);
 		setenv("SPECLIBPATH", std::string(spec_path + "bin/lib").c_str(),           1);
 		setenv("SPECPROFILE", get_spec_profile(native),                             1);
-
-		// export this one for our spec scripts
-		setenv("MVEEROOT",    mvee::config.mvee_root_path,                          1);
     }
+
+	// export this one for our spec scripts
+	setenv("MVEEROOT",    mvee::config.mvee_root_path,                          1);
 }
 
 /*-----------------------------------------------------------------------------
