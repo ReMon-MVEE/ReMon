@@ -1,6 +1,6 @@
-diff -N -r --unified glibc-2.19/csu/ipmon_stub_asm.S glibc-2.19-ipmon/csu/ipmon_stub_asm.S
---- glibc-2.19/csu/ipmon_stub_asm.S	1969-12-31 16:00:00.000000000 -0800
-+++ glibc-2.19-ipmon/csu/ipmon_stub_asm.S	2015-12-14 17:19:06.687045572 -0800
+diff -r --unified -N glibc-2.19-woc/csu/ipmon_stub_asm.S glibc-2.19-ipmon/csu/ipmon_stub_asm.S
+--- glibc-2.19-woc/csu/ipmon_stub_asm.S	1969-12-31 16:00:00.000000000 -0800
++++ glibc-2.19-ipmon/csu/ipmon_stub_asm.S	2016-01-26 05:51:27.801449054 -0800
 @@ -0,0 +1,22 @@
 +/* This just performs the syscall and returns, it does not set errno
 +   like the normal syscall function does. We can use it as a weak
@@ -24,9 +24,9 @@ diff -N -r --unified glibc-2.19/csu/ipmon_stub_asm.S glibc-2.19-ipmon/csu/ipmon_
 +        syscall
 +        ret
 +		.cfi_endproc
-diff -N -r --unified glibc-2.19/csu/ipmon_stub.c glibc-2.19-ipmon/csu/ipmon_stub.c
---- glibc-2.19/csu/ipmon_stub.c	1969-12-31 16:00:00.000000000 -0800
-+++ glibc-2.19-ipmon/csu/ipmon_stub.c	2015-12-14 17:23:46.379045572 -0800
+diff -r --unified -N glibc-2.19-woc/csu/ipmon_stub.c glibc-2.19-ipmon/csu/ipmon_stub.c
+--- glibc-2.19-woc/csu/ipmon_stub.c	1969-12-31 16:00:00.000000000 -0800
++++ glibc-2.19-ipmon/csu/ipmon_stub.c	2016-01-26 05:51:27.802449054 -0800
 @@ -0,0 +1,8 @@
 +/* 
 + * This file contains stubs that are overridden at run-time by IP-MON
@@ -36,9 +36,9 @@ diff -N -r --unified glibc-2.19/csu/ipmon_stub.c glibc-2.19-ipmon/csu/ipmon_stub
 +{
 +
 +}
-diff -N -r --unified glibc-2.19/csu/Makefile glibc-2.19-ipmon/csu/Makefile
---- glibc-2.19/csu/Makefile	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-ipmon/csu/Makefile	2015-12-14 17:18:07.639045572 -0800
+diff -r --unified -N glibc-2.19-woc/csu/Makefile glibc-2.19-ipmon/csu/Makefile
+--- glibc-2.19-woc/csu/Makefile	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-ipmon/csu/Makefile	2016-01-26 05:51:27.802449054 -0800
 @@ -25,7 +25,7 @@
  subdir := csu
  
@@ -48,9 +48,9 @@ diff -N -r --unified glibc-2.19/csu/Makefile glibc-2.19-ipmon/csu/Makefile
  aux	 = errno
  elide-routines.os = libc-tls
  static-only-routines = elf-init
-diff -N -r --unified glibc-2.19/csu/Versions glibc-2.19-ipmon/csu/Versions
---- glibc-2.19/csu/Versions	2015-12-14 17:56:11.971045572 -0800
-+++ glibc-2.19-ipmon/csu/Versions	2015-12-14 17:24:04.547045572 -0800
+diff -r --unified -N glibc-2.19-woc/csu/Versions glibc-2.19-ipmon/csu/Versions
+--- glibc-2.19-woc/csu/Versions	2016-03-31 13:07:41.516882650 -0700
++++ glibc-2.19-ipmon/csu/Versions	2016-01-26 05:51:27.802449054 -0800
 @@ -12,6 +12,8 @@
      mvee_all_heaps_aligned;
      mvee_should_sync_tid;
@@ -60,9 +60,9 @@ diff -N -r --unified glibc-2.19/csu/Versions glibc-2.19-ipmon/csu/Versions
    }
    GLIBC_2.1 {
      # New special glibc functions.
-diff -N -r --unified glibc-2.19/malloc/malloc.c glibc-2.19-ipmon/malloc/malloc.c
---- glibc-2.19/malloc/malloc.c	2015-12-14 17:56:11.975045572 -0800
-+++ glibc-2.19-ipmon/malloc/malloc.c	2015-12-14 17:17:49.367045572 -0800
+diff -r --unified -N glibc-2.19-woc/malloc/malloc.c glibc-2.19-ipmon/malloc/malloc.c
+--- glibc-2.19-woc/malloc/malloc.c	2016-03-31 13:07:41.519882650 -0700
++++ glibc-2.19-ipmon/malloc/malloc.c	2016-01-26 05:51:27.803449055 -0800
 @@ -4615,7 +4615,7 @@
                         content.  */
                      memset (paligned_mem, 0x89, size & ~psm1);
@@ -72,9 +72,9 @@ diff -N -r --unified glibc-2.19/malloc/malloc.c glibc-2.19-ipmon/malloc/malloc.c
  
                      result = 1;
                    }
-diff -N -r --unified glibc-2.19/nptl/pthread_create.c glibc-2.19-ipmon/nptl/pthread_create.c
---- glibc-2.19/nptl/pthread_create.c	2015-12-14 17:56:11.979045572 -0800
-+++ glibc-2.19-ipmon/nptl/pthread_create.c	2015-12-14 17:29:24.891045572 -0800
+diff -r --unified -N glibc-2.19-woc/nptl/pthread_create.c glibc-2.19-ipmon/nptl/pthread_create.c
+--- glibc-2.19-woc/nptl/pthread_create.c	2016-03-31 13:07:41.524882650 -0700
++++ glibc-2.19-ipmon/nptl/pthread_create.c	2016-01-26 05:51:27.803449055 -0800
 @@ -304,6 +304,9 @@
  
        LIBC_PROBE (pthread_start, 3, (pthread_t) pd, pd->start_routine, pd->arg);
@@ -85,9 +85,21 @@ diff -N -r --unified glibc-2.19/nptl/pthread_create.c glibc-2.19-ipmon/nptl/pthr
        /* Run the code the user provided.  */
  #ifdef CALL_THREAD_FCT
        THREAD_SETMEM (pd, result, CALL_THREAD_FCT (pd));
-diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/cancellation.S glibc-2.19-ipmon/nptl/sysdeps/unix/sysv/linux/x86_64/cancellation.S
---- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/cancellation.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-ipmon/nptl/sysdeps/unix/sysv/linux/x86_64/cancellation.S	2015-12-14 17:17:49.367045572 -0800
+diff -r --unified -N glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/fork.c glibc-2.19-ipmon/nptl/sysdeps/unix/sysv/linux/fork.c
+--- glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/fork.c	2016-03-31 13:07:41.528882651 -0700
++++ glibc-2.19-ipmon/nptl/sysdeps/unix/sysv/linux/fork.c	2016-01-31 15:21:11.909309382 -0800
+@@ -207,6 +207,8 @@
+ 
+       /* Initialize the fork lock.  */
+       __fork_lock = LLL_LOCK_INITIALIZER;
++
++	  ipmon_register_thread();
+     }
+   else
+     {
+diff -r --unified -N glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/cancellation.S glibc-2.19-ipmon/nptl/sysdeps/unix/sysv/linux/x86_64/cancellation.S
+--- glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/cancellation.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-ipmon/nptl/sysdeps/unix/sysv/linux/x86_64/cancellation.S	2016-01-26 05:51:27.804449055 -0800
 @@ -111,7 +111,7 @@
  	xorq	%r10, %r10
  	addq	$CANCELHANDLING, %rdi
@@ -97,9 +109,9 @@ diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/cancellation
  	movl	%fs:CANCELHANDLING, %eax
  	jmp	3b
  END(__pthread_disable_asynccancel)
-diff -N -r --unified glibc-2.19/nptl/sysdeps/x86_64/pthreaddef.h glibc-2.19-ipmon/nptl/sysdeps/x86_64/pthreaddef.h
---- glibc-2.19/nptl/sysdeps/x86_64/pthreaddef.h	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-ipmon/nptl/sysdeps/x86_64/pthreaddef.h	2015-12-14 17:29:48.499045572 -0800
+diff -r --unified -N glibc-2.19-woc/nptl/sysdeps/x86_64/pthreaddef.h glibc-2.19-ipmon/nptl/sysdeps/x86_64/pthreaddef.h
+--- glibc-2.19-woc/nptl/sysdeps/x86_64/pthreaddef.h	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-ipmon/nptl/sysdeps/x86_64/pthreaddef.h	2016-01-26 05:51:27.804449055 -0800
 @@ -47,5 +47,10 @@
  /* XXX Until we have a better place keep the definitions here.  */
  
@@ -111,9 +123,9 @@ diff -N -r --unified glibc-2.19/nptl/sysdeps/x86_64/pthreaddef.h glibc-2.19-ipmo
 +#define __exit_thread_inline(val) \
 +  ipmon_syscall(__NR_exit, val)
 +#endif /* defined IS_IN_rtld */
-diff -N -r --unified glibc-2.19/nptl/sysdeps/x86_64/tls.h glibc-2.19-ipmon/nptl/sysdeps/x86_64/tls.h
---- glibc-2.19/nptl/sysdeps/x86_64/tls.h	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-ipmon/nptl/sysdeps/x86_64/tls.h	2015-12-14 17:52:28.115045572 -0800
+diff -r --unified -N glibc-2.19-woc/nptl/sysdeps/x86_64/tls.h glibc-2.19-ipmon/nptl/sysdeps/x86_64/tls.h
+--- glibc-2.19-woc/nptl/sysdeps/x86_64/tls.h	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-ipmon/nptl/sysdeps/x86_64/tls.h	2016-01-26 05:51:27.804449055 -0800
 @@ -144,6 +144,7 @@
  
     We have to make the syscall for both uses of the macro since the
@@ -145,9 +157,9 @@ diff -N -r --unified glibc-2.19/nptl/sysdeps/x86_64/tls.h glibc-2.19-ipmon/nptl/
  
  /* Return the address of the dtv for the current thread.  */
  # define THREAD_DTV() \
-diff -N -r --unified glibc-2.19/sysdeps/unix/sysv/linux/x86_64/clone.S glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/clone.S
---- glibc-2.19/sysdeps/unix/sysv/linux/x86_64/clone.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/clone.S	2015-12-14 17:17:49.367045572 -0800
+diff -r --unified -N glibc-2.19-woc/sysdeps/unix/sysv/linux/x86_64/clone.S glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/clone.S
+--- glibc-2.19-woc/sysdeps/unix/sysv/linux/x86_64/clone.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/clone.S	2016-01-26 05:51:27.804449055 -0800
 @@ -99,7 +99,7 @@
  	movl	$-1, %eax
  	jne	2f
@@ -157,9 +169,9 @@ diff -N -r --unified glibc-2.19/sysdeps/unix/sysv/linux/x86_64/clone.S glibc-2.1
  2:	movl	%eax, %fs:PID
  	movl	%eax, %fs:TID
  1:
-diff -N -r --unified glibc-2.19/sysdeps/unix/sysv/linux/x86_64/getcontext.S glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/getcontext.S
---- glibc-2.19/sysdeps/unix/sysv/linux/x86_64/getcontext.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/getcontext.S	2015-12-14 17:17:49.367045572 -0800
+diff -r --unified -N glibc-2.19-woc/sysdeps/unix/sysv/linux/x86_64/getcontext.S glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/getcontext.S
+--- glibc-2.19-woc/sysdeps/unix/sysv/linux/x86_64/getcontext.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/getcontext.S	2016-01-26 05:51:27.804449055 -0800
 @@ -75,7 +75,7 @@
  #endif
  	movl	$_NSIG8,%r10d
@@ -169,9 +181,9 @@ diff -N -r --unified glibc-2.19/sysdeps/unix/sysv/linux/x86_64/getcontext.S glib
  	cmpq	$-4095, %rax		/* Check %rax for error.  */
  	jae	SYSCALL_ERROR_LABEL	/* Jump to error handler if error.  */
  
-diff -N -r --unified glibc-2.19/sysdeps/unix/sysv/linux/x86_64/____longjmp_chk.S glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/____longjmp_chk.S
---- glibc-2.19/sysdeps/unix/sysv/linux/x86_64/____longjmp_chk.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/____longjmp_chk.S	2015-12-14 17:17:49.367045572 -0800
+diff -r --unified -N glibc-2.19-woc/sysdeps/unix/sysv/linux/x86_64/____longjmp_chk.S glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/____longjmp_chk.S
+--- glibc-2.19-woc/sysdeps/unix/sysv/linux/x86_64/____longjmp_chk.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/____longjmp_chk.S	2016-01-26 05:51:27.805449055 -0800
 @@ -84,7 +84,7 @@
  	xorl	%edi, %edi
  	lea	-sizeSS(%rsp), %RSI_LP
@@ -181,9 +193,9 @@ diff -N -r --unified glibc-2.19/sysdeps/unix/sysv/linux/x86_64/____longjmp_chk.S
  	/* Without working sigaltstack we cannot perform the test.  */
  	testl	%eax, %eax
  	jne	.Lok2
-diff -N -r --unified glibc-2.19/sysdeps/unix/sysv/linux/x86_64/sched_getcpu.S glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/sched_getcpu.S
---- glibc-2.19/sysdeps/unix/sysv/linux/x86_64/sched_getcpu.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/sched_getcpu.S	2015-12-14 17:17:49.367045572 -0800
+diff -r --unified -N glibc-2.19-woc/sysdeps/unix/sysv/linux/x86_64/sched_getcpu.S glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/sched_getcpu.S
+--- glibc-2.19-woc/sysdeps/unix/sysv/linux/x86_64/sched_getcpu.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/sched_getcpu.S	2016-01-26 05:51:27.805449055 -0800
 @@ -42,7 +42,7 @@
  #else
  # ifdef __NR_getcpu
@@ -193,9 +205,9 @@ diff -N -r --unified glibc-2.19/sysdeps/unix/sysv/linux/x86_64/sched_getcpu.S gl
  #  ifndef __ASSUME_GETCPU_SYSCALL
  	cmpq	$-ENOSYS, %rax
  	jne	1f
-diff -N -r --unified glibc-2.19/sysdeps/unix/sysv/linux/x86_64/setcontext.S glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/setcontext.S
---- glibc-2.19/sysdeps/unix/sysv/linux/x86_64/setcontext.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/setcontext.S	2015-12-14 17:17:49.367045572 -0800
+diff -r --unified -N glibc-2.19-woc/sysdeps/unix/sysv/linux/x86_64/setcontext.S glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/setcontext.S
+--- glibc-2.19-woc/sysdeps/unix/sysv/linux/x86_64/setcontext.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/setcontext.S	2016-01-26 05:51:27.805449055 -0800
 @@ -43,7 +43,7 @@
  	movl	$SIG_SETMASK, %edi
  	movl	$_NSIG8,%r10d
@@ -205,9 +217,9 @@ diff -N -r --unified glibc-2.19/sysdeps/unix/sysv/linux/x86_64/setcontext.S glib
  	popq	%rdi			/* Reload %rdi, adjust stack.  */
  	cfi_adjust_cfa_offset(-8)
  	cmpq	$-4095, %rax		/* Check %rax for error.  */
-diff -N -r --unified glibc-2.19/sysdeps/unix/sysv/linux/x86_64/swapcontext.S glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/swapcontext.S
---- glibc-2.19/sysdeps/unix/sysv/linux/x86_64/swapcontext.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/swapcontext.S	2015-12-14 17:17:49.367045572 -0800
+diff -r --unified -N glibc-2.19-woc/sysdeps/unix/sysv/linux/x86_64/swapcontext.S glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/swapcontext.S
+--- glibc-2.19-woc/sysdeps/unix/sysv/linux/x86_64/swapcontext.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/swapcontext.S	2016-01-26 05:51:27.805449055 -0800
 @@ -75,7 +75,7 @@
  	movl	$SIG_SETMASK, %edi
  	movl	$_NSIG8,%r10d
@@ -217,9 +229,9 @@ diff -N -r --unified glibc-2.19/sysdeps/unix/sysv/linux/x86_64/swapcontext.S gli
  	cmpq	$-4095, %rax		/* Check %rax for error.  */
  	jae	SYSCALL_ERROR_LABEL	/* Jump to error handler if error.  */
  
-diff -N -r --unified glibc-2.19/sysdeps/unix/sysv/linux/x86_64/syscall.S glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/syscall.S
---- glibc-2.19/sysdeps/unix/sysv/linux/x86_64/syscall.S	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/syscall.S	2015-12-21 17:58:06.760859500 -0800
+diff -r --unified -N glibc-2.19-woc/sysdeps/unix/sysv/linux/x86_64/syscall.S glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/syscall.S
+--- glibc-2.19-woc/sysdeps/unix/sysv/linux/x86_64/syscall.S	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/syscall.S	2016-01-26 05:51:27.805449055 -0800
 @@ -27,6 +27,7 @@
  
  	.text
@@ -245,9 +257,9 @@ diff -N -r --unified glibc-2.19/sysdeps/unix/sysv/linux/x86_64/syscall.S glibc-2
  	cmpq $-4095, %rax	/* Check %rax for error.  */
  	jae SYSCALL_ERROR_LABEL	/* Jump to error handler if error.  */
  	ret			/* Return to caller.  */
-diff -N -r --unified glibc-2.19/sysdeps/unix/sysv/linux/x86_64/sysdep.h glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/sysdep.h
---- glibc-2.19/sysdeps/unix/sysv/linux/x86_64/sysdep.h	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/sysdep.h	2015-12-14 17:28:32.483045572 -0800
+diff -r --unified -N glibc-2.19-woc/sysdeps/unix/sysv/linux/x86_64/sysdep.h glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/sysdep.h
+--- glibc-2.19-woc/sysdeps/unix/sysv/linux/x86_64/sysdep.h	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-ipmon/sysdeps/unix/sysv/linux/x86_64/sysdep.h	2016-01-26 05:51:27.806449055 -0800
 @@ -172,12 +172,16 @@
  
      Syscalls of more than 6 arguments are not supported.  */
@@ -414,9 +426,9 @@ diff -N -r --unified glibc-2.19/sysdeps/unix/sysv/linux/x86_64/sysdep.h glibc-2.
  
  #endif /* linux/x86_64/sysdep.h */
 +
-diff -N -r --unified glibc-2.19/sysdeps/x86_64/sysdep.h glibc-2.19-ipmon/sysdeps/x86_64/sysdep.h
---- glibc-2.19/sysdeps/x86_64/sysdep.h	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-ipmon/sysdeps/x86_64/sysdep.h	2015-12-14 17:28:52.051045572 -0800
+diff -r --unified -N glibc-2.19-woc/sysdeps/x86_64/sysdep.h glibc-2.19-ipmon/sysdeps/x86_64/sysdep.h
+--- glibc-2.19-woc/sysdeps/x86_64/sysdep.h	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-ipmon/sysdeps/x86_64/sysdep.h	2016-01-26 05:51:27.806449055 -0800
 @@ -152,6 +152,9 @@
  #define R14_LP	"r14"
  #define R15_LP	"r15"
