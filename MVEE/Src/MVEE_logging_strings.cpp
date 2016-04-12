@@ -1398,6 +1398,8 @@ const char* getTextualISA(VariantArch arch)
 			return "ARM 64-bit (aarch64)";
 		case ARCH_HOST:
 			return "Native";
+		case ARCH_UNKNOWN:
+			return "Architecture Unidentified";
 		default:
 			return "(unknown)";
 	}

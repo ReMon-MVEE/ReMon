@@ -1062,6 +1062,7 @@ long monitor::handle_execve_call(int variantnum)
 	if (IS_UNSYNCED_CALL)
 	{
 		warnf("unsynced execve dispatch - was this intentional?\n");
+		variants[variantnum].entry_point_bp_set = false;
 		return MVEE_CALL_ALLOW;
 	}
 	
@@ -1092,40 +1093,50 @@ long monitor::handle_execve_call(int variantnum)
 
 	// Identify the architecture for each binary
 	std::vector<VariantArch> archs(mvee::numvariants);
-	if (!set_mmap_table->have_diversified_variants)
-	{
-		std::fill(archs.begin(), archs.end(), 
-				  mvee::os_identify_arch(set_mmap_table->mmap_startup_info[0].image));
-
-		if (archs[0] == ARCH_HOST && 
-			!mvee::config.mvee_hide_vdso && 
-			!mvee::config.mvee_use_dcl && 
-			mvee::custom_library_path.length() == 0)
-			return MVEE_CALL_ALLOW;
-	}
-	else
-	{
-		bool have_different_archs = false;
-		for (int i = 0; i < mvee::numvariants; ++i)
-		{
-			archs[i] = mvee::os_identify_arch(set_mmap_table->mmap_startup_info[i].image);
-
-			if (archs[i] != archs[0])
-				have_different_archs = true;
-		}
-
-		// force all variants to run on top of QEMU user even if they can run
-		// natively on the host platform
-		if (have_different_archs)
-		{
-			for (int i = 0; i < mvee::numvariants; ++i)
-				if (archs[i] == ARCH_HOST)
-					archs[i] = HOST_ARCH;
-		}
-	}
+	bool have_qemu_variants = false;
 
 	for (int i = 0; i < mvee::numvariants; ++i)
+	{
+//		warnf("Identifying ARCH for binary: %s\n", set_mmap_table->mmap_startup_info[i].image.c_str());
+
+		// See if the architecture has been forced in MVEE_demos.cpp
+		if (variants[i].arch != ARCH_UNKNOWN)
+		{
+			archs[i] = variants[i].arch;
+		}
+		else
+		{
+			if (!set_mmap_table->have_diversified_variants && i != 0)
+				archs[i] = archs[0];
+			else
+				archs[i] = mvee::os_identify_arch(set_mmap_table->mmap_startup_info[i].image);
+		}
+
+		if (archs[i] != ARCH_HOST)
+			have_qemu_variants = true;
+
+		variants[i].arch = archs[i];
+	}
+
+	// if we have any qemu variants at all, then ALL variants should use qemu
+	if (have_qemu_variants)
+	{
+		for (int i = 0; i < mvee::numvariants; ++i)
+			if (archs[i] == ARCH_HOST)
+				archs[i] = HOST_ARCH;
+	}
+
+	if (!have_qemu_variants &&
+		!mvee::config.mvee_hide_vdso && 
+		!mvee::config.mvee_use_dcl && 
+		mvee::custom_library_path.length() == 0)
+		return MVEE_CALL_ALLOW;
+
+	for (int i = 0; i < mvee::numvariants; ++i)
+	{
 		rewrite_execve_args(i, archs[i], true, false);
+		variants[i].entry_point_bp_set = false;
+	}
 
     return MVEE_CALL_ALLOW;
 }

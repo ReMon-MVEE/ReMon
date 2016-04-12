@@ -67,6 +67,7 @@ long mvee_wrap_ptrace                 (unsigned short request, pid_t pid, unsign
 
 enum VariantArch
 {
+	ARCH_UNKNOWN,       // Architecture has not been identified yet
 	ARCH_HOST,          // Variant should run natively
 	ARCH_I386,          // Variant should run on top of qemu-i386
 	ARCH_AMD64,         // Variant should run on top of qemu-amd64

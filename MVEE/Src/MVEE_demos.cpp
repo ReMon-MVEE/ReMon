@@ -26,6 +26,11 @@
 -----------------------------------------------------------------------------*/
 void mvee::set_demo_options(int demonum)
 {
+	// perlbench
+	if (demonum == 1)
+		for (int i = 0; i < mvee::numvariants; ++i)
+			mvee::active_monitor->variants[i].arch = ARCH_AMD64;
+
     if (!mvee::config.mvee_use_system_libc)
         mvee::add_library_path(mvee::config.mvee_libc_path);
     if (!mvee::config.mvee_use_system_libstdcpp)
@@ -51,8 +56,8 @@ void mvee::set_demo_options(int demonum)
 -----------------------------------------------------------------------------*/
 const char* mvee::get_spec_profile(bool native)
 {
-	if (native)
-		return SPECPROFILENOPIE;
+//	if (native)
+//		return SPECPROFILENOPIE;
 	return SPECPROFILEPIE;
 }
 
