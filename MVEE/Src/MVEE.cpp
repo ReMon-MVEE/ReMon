@@ -539,6 +539,7 @@ bool mvee::os_add_interp_for_file(std::deque<char*>& add_to_queue, std::string& 
 {
 //	warnf("Determining Interp for file: %s - ARCH: %s\n", file.c_str(), getTextualISA(arch));
 
+	/*
 	if (arch != ARCH_HOST)
 	{
 		std::string qemu_user_basename, qemu_user_path = 
@@ -550,6 +551,7 @@ bool mvee::os_add_interp_for_file(std::deque<char*>& add_to_queue, std::string& 
 			return true;
 		}
 	}
+	*/
 
     {   MutexLock lock(&mvee::global_lock);
         auto      it = interp_map.find(file);
@@ -1758,8 +1760,8 @@ void mvee::start_monitored()
         sigaddset(&set, SIGINT);
         pthread_sigmask(SIG_UNBLOCK, &set, NULL);
 
-        mvee::set_demo_options(mvee::demo_num);
         mvee::active_monitor = new monitor(procs);
+        mvee::set_demo_options(mvee::demo_num);
 
         // Install signal handlers for SIGINT and SIGQUIT so we can shut down safely after CTRL+C
         signal(SIGINT,  mvee_mon_external_termination_request);

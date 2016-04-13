@@ -37,6 +37,13 @@ unsigned long  new_sp              = 1;
 unsigned long  new_entry           = 1;
 unsigned short __variant_num       = 1;
 
+#ifdef MVEE_USE_MVEE_LD
+#undef INTERP
+unsigned char  found_mvee_root = 0;
+char           mvee_root[4096] = {1};
+char           INTERP[4096] = {1};
+#endif
+
 unsigned long  mvee_write_stack_data(const void* data, int datalen, int padbytes)
 {    
     memcpy((void*)((unsigned long)initial_stack + 8192 - initial_stack_depth - datalen - padbytes), data, datalen);
@@ -356,6 +363,57 @@ int  main(int argc, char** argv, char** envp)
     fprintf(stderr, "\n");
 #endif
 
+	new_sp    = (unsigned long) argv - sizeof(unsigned long);
+    unsigned long stack_base;
+
+    // step 0: look for stack base and the name of the interpreter we should load
+    if (envp[0] == NULL)
+	{
+#ifdef MVEE_DEBUG
+		fprintf(stderr, "no environment pointers! wtf!\n");
+#endif
+		stack_base = ((unsigned long)argv[argc-1] + 4095) & ~4095;
+	}
+    else
+	{
+		int j = 0;
+
+		while (envp[j])
+		{
+#ifdef MVEE_USE_MVEE_LD
+			if (!found_mvee_root)
+			{
+				if (strstr(envp[j], "MVEEROOT=") == envp[j])
+				{
+					strcpy(mvee_root, envp[j] + strlen("MVEEROOT="));
+					found_mvee_root = 1;
+				}
+			}
+#endif
+
+			j++;
+		}
+
+#ifdef MVEE_USE_MVEE_LD
+		if (!found_mvee_root)
+		{
+			fprintf(stderr, "MVEE_LD_Loader is configured with MVEE_USE_MVEE_LD but we could not find the MVEE root folder!\n");
+			return -1;			
+		}
+
+		// Build <MVEE Root>/patched_binaries/ld-linux/<arch>/ld-linux.so
+		strcpy(INTERP, mvee_root);
+		strcat(INTERP, "/patched_binaries/ld-linux/");
+		strcat(INTERP, INTERP_ARCH);
+		strcat(INTERP, "/ld-linux.so");
+
+// 		fprintf(stderr, "INTERP is %s\n", INTERP);
+#endif
+
+		stack_base = ((unsigned long)envp[j-2] + 4095) & ~4095;
+	}
+
+
     // step 1: read ld-linux.so.2
     interp_fd = syscall(__NR_open, INTERP, O_RDONLY);
     if (interp_fd < 0)
@@ -505,24 +563,6 @@ int  main(int argc, char** argv, char** envp)
 #ifdef MVEE_DEBUG
     fprintf(stderr, "attempting to transfer control to entrypoint: " PTRSTR "\n", actual_load_addr + interp_hdr->e_entry);
 #endif
-
-    new_sp    = (unsigned long) argv - sizeof(unsigned long);
-    unsigned long stack_base;
-
-    // look for stack base
-    if (envp[0] == NULL)
-      {
-#ifdef MVEE_DEBUG
-	fprintf(stderr, "no environment pointers! wtf!\n");
-#endif
-	stack_base = ((unsigned long)argv[argc-1] + 4095) & ~4095;
-      }
-    else
-      {
-	int           j          = 0;
-	while (envp[j++]) ;
-	stack_base = ((unsigned long)envp[j-2] + 4095) & ~4095;
-      }
 
     mvee_build_initial_stack(&new_sp, stack_base, interp_hdr, actual_load_addr);
 

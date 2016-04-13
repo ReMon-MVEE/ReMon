@@ -105,7 +105,7 @@ void syscall_arg::set_str(std::string& s)
     variantstate class
 -----------------------------------------------------------------------------*/
 variantstate::variantstate()
-    : arch(ARCH_HOST),
+    : arch(ARCH_UNKNOWN),
 	  variantpid(0),
     prevcallnum(0),
     callnum(0),
@@ -451,6 +451,13 @@ void monitor::rewrite_execve_args(int variantnum, VariantArch arch, bool write_t
     argv.pop_front();
     argv.push_front(mvee::strdup(image.c_str()));
 
+	if (!mvee::os_add_interp_for_file(argv, image, arch))
+	{
+		warnf("ERROR: Could not determine interpreter for file: %s\n", image.c_str());
+		shutdown(false);
+		return;
+	}
+
 	// if we're not running natively, insert the qemu-user binary here
 	size_t argv_size = argv.size();
 	if (arch != ARCH_HOST)
@@ -462,15 +469,6 @@ void monitor::rewrite_execve_args(int variantnum, VariantArch arch, bool write_t
 			argv.push_front(mvee::strdup(qemu_user_path.c_str()));
 
 		variants[variantnum].arch = arch;
-	}
-	else
-	{
-		if (!mvee::os_add_interp_for_file(argv, image, arch))
-		{
-			warnf("ERROR: Could not determine interpreter for file: %s\n", image.c_str());
-			shutdown(false);
-			return;
-		}
 	}
 
 	// we added an interpreter. This is the real binary we're running

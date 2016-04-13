@@ -2,10 +2,15 @@
 
 #define INTERP              "/lib64/ld-linux-x86-64.so.2"
 #define INTERP_SHORT        "MVEE Variant %d >"
+#define INTERP_ARCH         "amd64"
 
 // MVEE_HIDE_DSO: if this is defined, the MVEE loader will hide the VDSO
 // this is important on AMD64, where the DSO contains fast versions of timing funcs
 #define MVEE_HIDE_DSO
+
+// MVEE_USE_MVEE_LD: if this is defined, the MVEE loader will load the ld-linux binary in
+// <MVEE Root>/patched_binaries/ld-linux/amd64/, rather than the system provided LD
+#define MVEE_USE_MVEE_LD
 
 // #define MVEE_DEBUG
 
