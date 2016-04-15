@@ -17,5 +17,6 @@ cd spec/benchspec/CPU2006/482.sphinx3/run/<yourrunfolder>
 cp *.raw ../../data/ref/input
 
 5) To run a benchmark inside GHUMVEE, use ./MVEE <demonum> <number of variants>
+Make sure that the name returned by mvee::get_spec_profile in MVEE/Src/MVEE_demos.cpp matches the name of your config!!
 
 YAY!
