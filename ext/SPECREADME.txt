@@ -9,7 +9,7 @@ cd /path/to/mounted/spec/iso
 ./install.sh # choose /path/to/ReMon/ext/spec2006 as your installation folder
 cd /path/to/ReMon/ext/spec2006
 source shrc
-cd /path/to/your/spec/config/<your config> config/
+cp /path/to/your/spec/config/<your config> config/
 runspec --action=build --size=ref -c <your config without extension or path> all
 
 4) Some benchmarks need some extra work to set up the inputs:
