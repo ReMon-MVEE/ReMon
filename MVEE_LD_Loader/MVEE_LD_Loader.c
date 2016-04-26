@@ -1,8 +1,8 @@
 /*
- * MVEE_LD_Loader.c
+ * GHent University Multi-Variant Execution Environment (GHUMVEE)
  *
- *  Created on: Apr 16, 2014
- *      Author: stijn
+ * This source file is distributed under the terms and conditions 
+ * found in GHUMVEELICENSE.txt.
  */
 
 #define _GNU_SOURCE 1
@@ -355,7 +355,7 @@ int  main(int argc, char** argv, char** envp)
     struct stat   statbuf;
 
 #ifdef MVEE_DEBUG
-    fprintf(stderr, "MVEE LD Loader v1.0 - (c) 2014 Stijn Volckaert <stijn.volckaert@elis.ugent.be>\n");
+    fprintf(stderr, "MVEE LD Loader v1.0\n");
     //  fprintf(stderr, "> argc: %d\n", argc);
     fprintf(stderr, "> Manually loading program: ");
     for (int i = 1; i < argc; ++i)

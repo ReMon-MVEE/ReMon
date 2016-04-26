@@ -1,3 +1,10 @@
+/*
+ * GHent University Multi-Variant Execution Environment (GHUMVEE)
+ *
+ * This source file is distributed under the terms and conditions 
+ * found in GHUMVEELICENSE.txt.
+ */
+
 #include "/usr/include/x86_64-linux-gnu/asm/unistd_64.h"
 
 #define INTERP              "/lib64/ld-linux-x86-64.so.2"

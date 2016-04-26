@@ -1,11 +1,8 @@
 /*
  * GHent University Multi-Variant Execution Environment (GHUMVEE)
- * Copyright (C) 2010-2015 Stijn Volckaert, Ghent University
- *                   <svolckae@elis.ugent.be>
- *                     All rights reserved.
  *
- * This software package is licensed to University of California, Irvine
- * under the terms and conditions found in LICENSE.txt.
+ * This source file is distributed under the terms and conditions 
+ * found in GHUMVEELICENSE.txt.
  */
 
 /*-----------------------------------------------------------------------------
@@ -26,11 +23,6 @@
 -----------------------------------------------------------------------------*/
 void mvee::set_demo_options(int demonum)
 {
-	// perlbench
-	if (demonum == 1)
-		for (int i = 0; i < mvee::numvariants; ++i)
-			mvee::active_monitor->variants[i].arch = ARCH_AMD64;
-
     if (!mvee::config.mvee_use_system_libc)
         mvee::add_library_path(mvee::config.mvee_libc_path);
     if (!mvee::config.mvee_use_system_libstdcpp)

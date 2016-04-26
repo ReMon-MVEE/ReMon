@@ -225,5 +225,12 @@ DOI:10.1109/TDSC.2015.2411254.
 Stijn Volckaert, Bjorn De Sutter, Tim De Baets, and Koen De Bosschere.
 In 5th International Symposium on Foundations and Practice of Security (FPS'12), pages 261-277. Springer, 2013.
 
+## License
 
+The **IP-MON** component is available under the licensing terms in `IPMONLICENSE.txt`.
+This license applies to the following files:
+- `patches/glibc-2.19-ipmon.patch`
+- `patches/linux-3.13-ipmon.patch`
+- The entire `IP-MON` folder
 
+Unless otherwise specified, all other files in the repository are available under the licensing terms in `GHUMVEELICENSE.txt`.

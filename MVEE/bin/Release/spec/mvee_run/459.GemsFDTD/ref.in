@@ -1,0 +1,5 @@
+Yeebench does not read from stdin, but the SPEC tools are by
+default set up to look for *.in and supply it to the program
+on stdin.  Rather than write custom code in object.pm,
+I am taking the lazy way out by supplying this dummy file.
+   -jlh 1-oct-2003

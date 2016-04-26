@@ -1,11 +1,8 @@
 /*
  * GHent University Multi-Variant Execution Environment (GHUMVEE)
- * Copyright (C) 2010-2015 Stijn Volckaert, Ghent University
- *                   <svolckae@elis.ugent.be>
- *                     All rights reserved.
  *
- * This software package is licensed to University of California, Irvine
- * under the terms and conditions found in LICENSE.txt.
+ * This source file is distributed under the terms and conditions 
+ * found in GHUMVEELICENSE.txt.
  */
 
 /*-----------------------------------------------------------------------------
@@ -1748,10 +1745,8 @@ void mvee::start_monitored()
     {
         mvee::log_init();
         logf("======================================================\n");
-        logf("   Ghent University Computer Systems Lab MVEE v3.2    \n");
+        logf("   Ghent University Computer Systems Lab MVEE v4.0    \n");
         logf("                 aka \"GHUMVEE\"                      \n");
-        logf("                                                      \n");
-        logf("(c) 2009-2015 Stijn Volckaert (svolckae@elis.ugent.be)\n");
         logf("======================================================\n");
         logf("\nTracing %d semantically equivalent variant processes...\n\n", mvee::numvariants);
 
@@ -1881,10 +1876,8 @@ int main(int argc, char *argv[])
     if (argc <= 2)
     {
         printf("======================================================\n");
-        printf("   Ghent University Computer Systems Lab MVEE v3.2    \n");
+        printf("   Ghent University Computer Systems Lab MVEE v4.0    \n");
         printf("                 aka \"GHUMVEE\"                      \n");
-        printf("                                                      \n");
-        printf("(c) 2009-2015 Stijn Volckaert (svolckae@elis.ugent.be)\n");
         printf("======================================================\n");
         printf("> Syntax:\n\n");
         printf("> ./MVEE [Demonum] [Number of Variants] [MVEE Options]\n");
