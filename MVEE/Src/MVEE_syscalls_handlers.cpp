@@ -339,41 +339,11 @@ bool monitor::handle_is_known_false_positive(const char* program_name, long call
 		// We allow this in very specific cases
 		if (MVEE_PRECALL_MISMATCHING_ARG((*precall_flags)) == 1)
 		{
-			for (int i = 0; i < mvee::numvariants; ++i)
-			{
-				char* str = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
-				std::string file;
-				
-				if (!str)
-					return false;
-				
-				file = std::string(str);
-				SAFEDELETEARRAY(str);
-				
-				VariantArch arch;
-				if (!mvee::is_qemu_executable(file, arch))
-					return false;
-			}
-
 			set_mmap_table->have_diversified_variants = true;
 			return true;
 		}
 		
 		return false;			
-	}
-	else if (callnum == __NR_openat && MVEE_PRECALL_MISMATCHING_ARG((*precall_flags)) == 2)
-	{
-		for (int i = 0; i < mvee::numvariants; ++i)
-		{
-			char* str = mvee_rw_read_string(variants[i].variantpid, ARG2(i));
-
-			if (!str || strstr(str, "/usr/gnemul/qemu-") != str)
-				return false;
-
-			SAFEDELETEARRAY(str);
-		}
-
-		return true;
 	}
 
 out:
@@ -1018,25 +988,12 @@ long monitor::handle_execve_log_args(int variantnum)
 
 long monitor::handle_execve_precall(int variantnum)
 {
-	VariantArch arch;
-
-    handle_execve_get_args(0);
-
-	if (mvee::is_qemu_executable(set_mmap_table->mmap_startup_info[0].image, arch))
-	{
-		warnf("Variant %d is switching to ISA: %s\n", 0, getTextualISA(arch));
-		variants[0].arch = arch;
-	}
+	handle_execve_get_args(0);
 
     for (int i = 1; i < mvee::numvariants; ++i)
     {
         handle_execve_get_args(i);
-		if (mvee::is_qemu_executable(set_mmap_table->mmap_startup_info[i].image, arch))
-		{
-			warnf("Variant %d is switching to ISA: %s\n", i, getTextualISA(arch));
-			variants[i].arch = arch;
-		}
-
+		
         if (set_mmap_table->mmap_startup_info[i].image.compare(
 				set_mmap_table->mmap_startup_info[0].image))
         {
@@ -1088,50 +1045,14 @@ long monitor::handle_execve_call(int variantnum)
         perf = 1;
 #endif
 
-	// Identify the architecture for each binary
-	std::vector<VariantArch> archs(mvee::numvariants);
-	bool have_qemu_variants = false;
-
-	for (int i = 0; i < mvee::numvariants; ++i)
-	{
-//		warnf("Identifying ARCH for binary: %s\n", set_mmap_table->mmap_startup_info[i].image.c_str());
-
-		// See if the architecture has been forced in MVEE_demos.cpp
-		if (variants[i].arch != ARCH_UNKNOWN)
-		{
-			archs[i] = variants[i].arch;
-		}
-		else
-		{
-			if (!set_mmap_table->have_diversified_variants && i != 0)
-				archs[i] = archs[0];
-			else
-				archs[i] = mvee::os_identify_arch(set_mmap_table->mmap_startup_info[i].image);
-		}
-
-		if (archs[i] != ARCH_HOST)
-			have_qemu_variants = true;
-
-		variants[i].arch = archs[i];
-	}
-
-	// if we have any qemu variants at all, then ALL variants should use qemu
-	if (have_qemu_variants)
-	{
-		for (int i = 0; i < mvee::numvariants; ++i)
-			if (archs[i] == ARCH_HOST)
-				archs[i] = HOST_ARCH;
-	}
-
-	if (!have_qemu_variants &&
-		!mvee::config.mvee_hide_vdso && 
+	if (!mvee::config.mvee_hide_vdso && 
 		!mvee::config.mvee_use_dcl && 
 		mvee::custom_library_path.length() == 0)
 		return MVEE_CALL_ALLOW;
 
 	for (int i = 0; i < mvee::numvariants; ++i)
 	{
-		rewrite_execve_args(i, archs[i], true, false);
+		rewrite_execve_args(i, true, false);
 		variants[i].entry_point_bp_set = false;
 	}
 
@@ -1224,30 +1145,14 @@ long monitor::handle_execve_postcall(int variantnum)
             }
         }
 
-		// enable fast forwarding for QEMU
-		for (int i = 0; i < mvee::numvariants; ++i)
+		// enable fast forwarding?
+		/*for (int i = 0; i < mvee::numvariants; ++i)
 		{
-			if (variants[i].arch != ARCH_HOST)
-				warnf("Variant %d is running architecture %s\n", i, getTextualISA(variants[i].arch));
+			variants[i].entry_point_address = 
+				mvee::os_get_entry_point_address(...);
 			
-			if (variants[i].arch != ARCH_HOST)
-			{
-				std::string qemu_image = (set_mmap_table->mmap_startup_info[i].real_image.length() > 0) ? 
-					set_mmap_table->mmap_startup_info[i].real_image :
-					set_mmap_table->mmap_startup_info[i].image;
-
-				warnf("Variant %d is not running natively - qemu-user binary used: %s\n", i, 
-					  qemu_image.c_str());
-
-				variants[i].entry_point_address = mvee::os_get_entry_point_address(
-					qemu_image);
-
-				warnf("> (Relative) Entry Point Address is 0x%016lx\n", 
-					  variants[i].entry_point_address);
-
-				variants[i].fast_forward_to_entry_point = true;				
-			}
-		}
+			variants[i].fast_forward_to_entry_point = true;				
+		 }*/
     }
 	else
 	{		
@@ -5457,18 +5362,18 @@ long monitor::handle_mmap_postcall(int variantnum)
 		set_mmap_table->verify_mman_table(variantnum, variants[variantnum].variantpid);
 
 		// Check if we mapped the main binary
-		if (info &&
+		/*if (info &&
 			variants[variantnum].fast_forward_to_entry_point &&
 			!variants[variantnum].entry_point_bp_set)
 		{
-			std::string& qemu_image = (set_mmap_table->mmap_startup_info[variantnum].real_image.length() > 0) ? 
+			std::string& program_image = (set_mmap_table->mmap_startup_info[variantnum].real_image.length() > 0) ? 
 				set_mmap_table->mmap_startup_info[variantnum].real_image :
 				set_mmap_table->mmap_startup_info[variantnum].image;
 
 //			warnf("Mapping %s\n", info->path.c_str());
 
 			if ((ARG3(variantnum) & PROT_EXEC) &&
-				info->path.compare(qemu_image) == 0)
+				info->path.compare(program_image) == 0)
 			{
 				// see if we can get a handle to the executable region that
 				// contains the entry point
@@ -5494,7 +5399,7 @@ long monitor::handle_mmap_postcall(int variantnum)
 					}
 				}
 			}
-		}
+			}*/
 
 		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 	}

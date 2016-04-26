@@ -176,27 +176,6 @@ void mvee::start_demo(int demonum, int variantindex, bool native)
 		REGISTER_SPLASH(54, "splash2x.volrend"        ); 
 		REGISTER_SPLASH(55, "splash2x.water_nsquared" ); 
 		REGISTER_SPLASH(56, "splash2x.water_spatial"  ); 
-
-		// 
-		// Cross-ISA MVEE PoC
-		//
-		case 57:
-		{
-			if (variantindex == 0)
-				start_variant_qemu(ARCH_AARCH64, "/home/stijn/ReMon/TestsMultiarch/HelloWorld/hello-aarch64", NULL);
-			else
-				start_variant_qemu(ARCH_AMD64, "/home/stijn/ReMon/TestsMultiarch/HelloWorld/hello-x86", NULL);
-			break;
-		}
-
-		//
-		// Super smart Cross-ISA MVEE PoC
-		//
-		case 58:
-		{
-			start_variant_direct("/home/stijn/ReMon/TestsMultiarch/HelloWorld/hello-aarch64", "hello-aarch64", NULL);
-			break;
-		}
     }
 
     if (parsec_bench || splash_bench)

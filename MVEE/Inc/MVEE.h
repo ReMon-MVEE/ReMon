@@ -62,17 +62,6 @@ long mvee_wrap_ptrace                 (unsigned short request, pid_t pid, unsign
 #include "MVEE_numcalls.h" // defines MAX_CALLS
 #define NO_CALL   0x01000000
 
-enum VariantArch
-{
-	ARCH_UNKNOWN,       // Architecture has not been identified yet
-	ARCH_HOST,          // Variant should run natively
-	ARCH_I386,          // Variant should run on top of qemu-i386
-	ARCH_AMD64,         // Variant should run on top of qemu-amd64
-	ARCH_ARM,           // Variant should run on top of qemu-arm
-	ARCH_AARCH64        // Variant should run on top of qemu-aarch64
-};
-
-
 /*-----------------------------------------------------------------------------
     GHUMVEE Config File Configuration - refer to the default MVEE.ini for
     documentation.
@@ -98,7 +87,6 @@ struct mvee_config
 	const char*   mvee_spec2006_path;
 	const char*   mvee_parsec2_path;
 	const char*   mvee_parsec3_path;
-	const char*   mvee_qemu_path;
     config_t*     config;
 };
 
@@ -200,12 +188,6 @@ public:
 	// Asynchronously request a shutdown of the entire MVEE
 	//
     static void request_shutdown            (bool should_backtrace);
-
-	//
-	// Returns true if the specified file is a valid executable in the QEMU
-	// folder. Also identifies the architecture emulated by the executable.
-	//
-	static bool is_qemu_executable          (std::string& file, VariantArch& arch);
 
     // *************************************************************************
     // Monitor Management - Implemented in MVEE.cpp
@@ -376,33 +358,22 @@ public:
 	// 
     static std::string   os_get_interp               ();
 
-	//
-	// Identify the architecture the specified file was built for.
-	// If the file is not an ELF file, or if it is an ELF file built
-	// for the host platform, we return ELF.
-	// If it is an ELF file for a different platform, we return one
-	// of the different ARCH_* options.
-	//
-	static VariantArch   os_identify_arch            (std::string& file);
-
 	// 
 	// Determine the name of the interpreter to be used to execute @file
 	// and add it to the @add_to_list deque.
 	//
 	// We do this by: 
 	//
-	// 1) Adding the qemu-user interpreter in case @arch is not ARCH_HOST
-	//
-	// 2) Adding no interpreter at all if the file is an ELF file for the
+	// 1) Adding no interpreter at all if the file is an ELF file for the
 	// host platform
 	//
-	// 3) checking the first line of the file to see if it starts with a
+	// 2) checking the first line of the file to see if it starts with a
 	// hashbang (#!). If it does, we add the interpreter specified by the
 	// hashbang line.
 	//
-	// 4) looking at the file extension. We currently support .sh and .rb files
+	// 3) looking at the file extension. We currently support .sh and .rb files
 	// 
-    static bool          os_add_interp_for_file      (std::deque<char*>& add_to_list, std::string& file, VariantArch arch);
+    static bool          os_add_interp_for_file      (std::deque<char*>& add_to_list, std::string& file);
 
 	// 
 	// Cache the interpreter name for the specified file
@@ -435,12 +406,6 @@ public:
 	// Identifies the (relative) entry point address for the specified ELF @binary
 	//
 	static unsigned long os_get_entry_point_address  (std::string& binary);
-
-	//
-	// Returns the path to the qemu-user binary for the specified architecture 
-	// Also returns the basename of said binary
-	//
-	static std::string   os_get_qemu_user_for_arch   (VariantArch arch, std::string& basename);
 
 	//
 	// Normalizes @path by handling relative paths, double slashes, etc.
@@ -626,12 +591,6 @@ private:
 	// as calling execve.
 	//
     static void        start_demo             (int demonum, int variantindex, bool native);
-
-	// 
-	// Starts a QEMU-user variant, using the qemu-user loader for the specified
-	// architecture.
-	// 
-	static void        start_variant_qemu     (VariantArch arch, const char* path, ...);
 
 	// 
 	// Starts a variant directly (i.e. without using a shell to interpret the

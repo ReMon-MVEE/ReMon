@@ -27,8 +27,6 @@
 /*-----------------------------------------------------------------------------
   MVEE LD Loader
 -----------------------------------------------------------------------------*/
-#define HOST_ARCH                  ARCH_I386
-#define HOST_ARCH_STR              " Intel 80386"
 #define MVEE_ARCH_SUFFIX           "/i386/"
 #define MVEE_ARCH_INTERP_PATH      "/lib/"
 #define MVEE_ARCH_INTERP_NAME      "ld-linux.so.2"

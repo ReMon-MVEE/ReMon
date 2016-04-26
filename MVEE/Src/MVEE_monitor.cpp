@@ -102,8 +102,7 @@ void syscall_arg::set_str(std::string& s)
     variantstate class
 -----------------------------------------------------------------------------*/
 variantstate::variantstate()
-    : arch(ARCH_UNKNOWN),
-	  variantpid(0),
+    : variantpid(0),
     prevcallnum(0),
     callnum(0),
     call_flags(0),
@@ -260,7 +259,6 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
     {
         init_variant(i, parent_monitor->variants[i].pendingpid,
                    shares_tgid ? parent_monitor->variants[i].varianttgid : parent_monitor->variants[i].pendingpid);
-		variants[i].arch = parent_monitor->variants[i].arch;		
     }
 
     // variant monitors are a different story. New variants (forks/vforks/clones) always
@@ -382,7 +380,7 @@ bool monitor::restart_variant(int variantnum)
         }
     }
 
-	rewrite_execve_args(variantnum, variants[variantnum].arch, false, true);
+	rewrite_execve_args(variantnum, false, true);
 
     // dispatch the call and wait for the return
     debugf("Restarting variant...\n");
@@ -417,7 +415,7 @@ bool monitor::restart_variant(int variantnum)
 /*-----------------------------------------------------------------------------
     rewrite_execve_args
 -----------------------------------------------------------------------------*/
-void monitor::rewrite_execve_args(int variantnum, VariantArch arch, bool write_to_stack, bool rewrite_envp)
+void monitor::rewrite_execve_args(int variantnum, bool write_to_stack, bool rewrite_envp)
 {
     std::string       image  = set_mmap_table->mmap_startup_info[variantnum].image;
     std::deque<char*> argv   = get_original_argv(variantnum);
@@ -443,33 +441,21 @@ void monitor::rewrite_execve_args(int variantnum, VariantArch arch, bool write_t
 		envp.push_back(NULL);
 	}
 
-    // the original image becomes the first argument for our interpreter/qemu loader
+    // the original image becomes the first argument for our interpreter
     SAFEDELETEARRAY(argv.front());
     argv.pop_front();
     argv.push_front(mvee::strdup(image.c_str()));
 
-	if (!mvee::os_add_interp_for_file(argv, image, arch))
+	size_t argv_size = argv.size();
+	if (!mvee::os_add_interp_for_file(argv, image))
 	{
 		warnf("ERROR: Could not determine interpreter for file: %s\n", image.c_str());
 		shutdown(false);
 		return;
 	}
 
-	// if we're not running natively, insert the qemu-user binary here
-	size_t argv_size = argv.size();
-	if (arch != ARCH_HOST)
-	{
-		std::string qemu_user_basename, qemu_user_path = 
-			mvee::os_get_qemu_user_for_arch(arch, qemu_user_basename);
-
-		if (qemu_user_path.length() > 0)
-			argv.push_front(mvee::strdup(qemu_user_path.c_str()));
-
-		variants[variantnum].arch = arch;
-	}
-
-	// we added an interpreter. This is the real binary we're running
-	if (argv.size() > argv_size)
+	// if we added an interpreter, then store its name in real_image
+    if (argv.size() > argv_size)
 	{
 		set_mmap_table->mmap_startup_info[variantnum].real_image = 
 			std::string(argv[0]);
@@ -490,8 +476,8 @@ void monitor::rewrite_execve_args(int variantnum, VariantArch arch, bool write_t
 		argv.push_front(mvee::strdup("--library-path"));
     }
 
-	// insert interpreter if necessary
-	if (arch != ARCH_HOST || mvee::custom_library_path.length() > 0)
+	// insert ELF interpreter if necessary
+	if (mvee::custom_library_path.length() > 0)
 	{
 		if (mvee::config.mvee_hide_vdso || mvee::config.mvee_use_dcl)
 		{

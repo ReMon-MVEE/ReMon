@@ -127,7 +127,6 @@ public:
 class variantstate
 {
 public:
-	VariantArch   arch;                                             // Which instruction set architecture is this variant using (this is only relevant for QEMU variants)
     pid_t         variantpid;                                       // Process ID of this variant
     long          prevcallnum;                                      // Previous system call executed by the variant. Set when the call returns.
     long          callnum;                                          // System call number being executed by this variant.
@@ -856,9 +855,9 @@ private:
 
 	//
 	// Writes new execve arguments to inject the
-	// MVEE_LD_Loader/interpreter/library path/qemu-user binary etc/...
+	// MVEE_LD_Loader/interpreter/library path/...
 	//
-	void        rewrite_execve_args             (int variantnum, VariantArch arch, bool write_to_stack=true, bool rewrite_envp=false);
+	void        rewrite_execve_args             (int variantnum, bool write_to_stack=true, bool rewrite_envp=false);
 
 	//
 	// Serializes a deque by writing a raw serialized buffer and a raw pointer

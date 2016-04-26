@@ -68,7 +68,6 @@ struct mvee_config                     mvee::config         =
 	"/ext/spec2006/",                       // spec2006_path
 	"/ext/parsec-2.1/",                     // parsec2_path
 	"/ext/parsec-3.0/",                     // parsec3_path
-	"/ext/qemu/",                           // qemu_path
     NULL
 };
 unsigned int                           mvee::demo_schedule_type                  = 0;
@@ -499,57 +498,8 @@ void mvee::os_register_interp(std::string& file, const char* interp)
         interp_map.insert(std::pair<std::string, std::string>(file, interp));
 }
 
-VariantArch mvee::os_identify_arch(std::string& file)
+bool mvee::os_add_interp_for_file(std::deque<char*>& add_to_queue, std::string& file)
 {
-    std::string cmd       = "/usr/bin/file -L " + file + " | grep -v ERROR";
-    std::string file_type = mvee::log_read_from_proc_pipe(cmd.c_str(), NULL);
-
-//	warnf("Determinining arch for file: %s\n", file.c_str());
-
-    if (file_type == "")
-        return ARCH_HOST;
-
-    if (file_type.find("ELF") != std::string::npos)
-    {
-		// support multiple architectures here through QEMU
-		std::deque<std::string> tokens = mvee::strsplit(file_type, ',');
-//		warnf("Arch for file is: %s\n", tokens[1].c_str());
-
-		if (tokens[1].compare(HOST_ARCH_STR) == 0)
-			return ARCH_HOST;
-		else if (tokens[1].compare(" Intel 80386") == 0)
-			return ARCH_I386;
-		else if (tokens[1].compare(" x86-64") == 0)
-			return ARCH_AMD64;
-		else if (tokens[1].compare(" ARM") == 0)
-			return ARCH_ARM;
-		else if (tokens[1].compare(" ARM aarch64") == 0)
-			return ARCH_AARCH64;
-		else
-			warnf("Unrecognized architecture: %s - for file: %s\n", tokens[1].c_str(), file.c_str());
-    }
-
-	return ARCH_HOST;
-}
-
-bool mvee::os_add_interp_for_file(std::deque<char*>& add_to_queue, std::string& file, VariantArch arch)
-{
-//	warnf("Determining Interp for file: %s - ARCH: %s\n", file.c_str(), getTextualISA(arch));
-
-	/*
-	if (arch != ARCH_HOST)
-	{
-		std::string qemu_user_basename, qemu_user_path = 
-			os_get_qemu_user_for_arch(arch, qemu_user_basename);
-
-		if (qemu_user_basename.length() > 0)
-		{
-			add_to_queue.push_front(mvee::strdup(qemu_user_path.c_str()));
-			return true;
-		}
-	}
-	*/
-
     {   MutexLock lock(&mvee::global_lock);
         auto      it = interp_map.find(file);
 
@@ -558,7 +508,8 @@ bool mvee::os_add_interp_for_file(std::deque<char*>& add_to_queue, std::string& 
             if (it->second.length() != 0)
                 add_to_queue.push_front(mvee::strdup(it->second.c_str()));
             return true;
-        }}
+        }
+	}
 
     std::string cmd       = "/usr/bin/file -L " + file + " | grep -v ERROR";
     std::string file_type = mvee::log_read_from_proc_pipe(cmd.c_str(), NULL);
@@ -820,42 +771,6 @@ std::string mvee::os_get_rpath(std::string& binary)
 }
 
 /*-----------------------------------------------------------------------------
-    os_get_qemu_user_for_arch - Returns the full path of the qemu-user binary for
-	the specified architecture
------------------------------------------------------------------------------*/
-std::string mvee::os_get_qemu_user_for_arch(VariantArch arch, std::string& basename)
-{
-	// Find the qemu-user binary
-	std::stringstream qemupath;
-	qemupath << mvee::config.mvee_root_path
-			 << mvee::config.mvee_qemu_path;
-
-	switch(arch)
-	{
-		case ARCH_I386: 
-			qemupath << "/i386-linux-user/qemu-i386"; 		   
-			basename = std::string("qemu-i386");
-			break;
-		case ARCH_AMD64:
-			qemupath << "/x86_64-linux-user/qemu-x86_64";
-			basename = std::string("qemu-x86_64");
-			break;
-		case ARCH_ARM:
-			qemupath << "/arm-linux-user/qemu-arm";
-			basename = std::string("qemu-arm");
-			break;
-		case ARCH_AARCH64:
-			qemupath << "/aarch64-linux-user/qemu-aarch64";
-			basename = std::string("qemu-aarch64");
-			break;			
-		default:
-			return std::string("");			
-	}	
-
-	return os_normalize_path_name(qemupath.str());
-}
-
-/*-----------------------------------------------------------------------------
     os_normalize_path_name
 -----------------------------------------------------------------------------*/
 std::string mvee::os_normalize_path_name(std::string path)
@@ -874,59 +789,6 @@ std::string mvee::os_normalize_path_name(std::string path)
 		free(tmp);
 		return result;
 	}
-}
-
-/*-----------------------------------------------------------------------------
-    is_qemu_executable - Returns true if the specified file is a valid executable
-	in our QEMU subfolder
------------------------------------------------------------------------------*/
-bool mvee::is_qemu_executable(std::string& file, VariantArch& arch)
-{
-	char* tmp = NULL;
-	std::string real_qemu_path, real_file_path;
-	std::stringstream path;
-	path << os_get_mvee_root_dir()
-		 << mvee::config.mvee_qemu_path;
-
-	arch = ARCH_HOST;
-
-	// Normalize the qemu path
-	tmp = realpath(path.str().c_str(), NULL);
-	if (!tmp)
-		return false;
-
-	real_qemu_path = std::string(tmp);
-	free(tmp);
-	tmp = NULL;
-	
-	// Normalize the file path
-	tmp = realpath(file.c_str(), tmp); 
-	if (!tmp)
-		return false;
-
-	real_file_path = std::string(tmp);
-	free(tmp);
-
-	// Test if the file path starts with qemu path
-	if (real_file_path.find(real_qemu_path) != 0)
-		return false;
-
-	// Test if the file is an executable
-	if (access(real_file_path.c_str(), X_OK) != 0)
-		return false;
-
-	if (mvee::str_ends_with(real_file_path, "/qemu-i386"))
-		arch = ARCH_I386;
-	else if (mvee::str_ends_with(real_file_path, "/qemu-x86_64"))
-		arch = ARCH_AMD64;
-	else if (mvee::str_ends_with(real_file_path, "/qemu-arm"))
-		arch = ARCH_ARM;
-	else if (mvee::str_ends_with(real_file_path, "/qemu-aarch64"))
-		arch = ARCH_AARCH64;
-	else
-		warnf("Unknown QEMU binary: %s\n", real_file_path.c_str());
-
-	return true;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1367,7 +1229,6 @@ void mvee::mvee_config_to_config_t (config_t* config)
     mvee::config_store(CONFIG_TYPE_STRING, config, "spec2006_path",          &mvee::config.mvee_spec2006_path);
     mvee::config_store(CONFIG_TYPE_STRING, config, "parsec2_path",           &mvee::config.mvee_parsec2_path);
     mvee::config_store(CONFIG_TYPE_STRING, config, "parsec3_path",           &mvee::config.mvee_parsec3_path);
-    mvee::config_store(CONFIG_TYPE_STRING, config, "qemu_path",              &mvee::config.mvee_qemu_path);
 }
 
 /*-----------------------------------------------------------------------------
@@ -1415,7 +1276,6 @@ void mvee::config_t_to_mvee_config (config_t* config)
     mvee::config_lookup(CONFIG_TYPE_STRING, config, "spec2006_path",          &mvee::config.mvee_spec2006_path);
     mvee::config_lookup(CONFIG_TYPE_STRING, config, "parsec2_path",           &mvee::config.mvee_parsec2_path);
     mvee::config_lookup(CONFIG_TYPE_STRING, config, "parsec3_path",           &mvee::config.mvee_parsec3_path);
-    mvee::config_lookup(CONFIG_TYPE_STRING, config, "qemu_path",              &mvee::config.mvee_qemu_path);
 }
 
 /*-----------------------------------------------------------------------------
@@ -1553,55 +1413,6 @@ void mvee::start_variant_direct(const char* binary, ...)
 void mvee::start_variant_indirect(const char* cmd)
 {
 	execl("/bin/bash", "bash", "-c", cmd, NULL);
-}
-
-/*-----------------------------------------------------------------------------
-    start_variant_qemu - Start a binary through the qemu-user binary for the
-	specified architecture
------------------------------------------------------------------------------*/
-void mvee::start_variant_qemu(VariantArch arch, const char* binary, ...)
-{
-	std::deque<const char*> args;
-	va_list va;
-	const char* arg;
-
-	args.push_back(binary);
-	va_start(va, binary);
-	do
-	{
-		arg = va_arg(va, const char*);
-		args.push_back(arg);
-	} while (arg);
-	va_end(va);
-	args.push_back(NULL);
-
-	std::string qemu_user_path, qemu_user_name;
-	qemu_user_path = os_get_qemu_user_for_arch(arch, qemu_user_name);
-
-	if (qemu_user_path.size() == 0)
-	{
-		printf("ERROR: Unknown architecture requested for QEMU variant\n");
-		return;
-	}
-
-	args.push_front(qemu_user_name.c_str());
-
-	if (access(qemu_user_path.c_str(), X_OK) == -1)
-	{
-		printf("ERROR: Tried to start a QEMU variant but could not find qemu-user binary at:\n  %s\n",
-			   qemu_user_path.c_str());
-		return;
-	}
-
-	const char** _args = new const char*[args.size()];
-	int i = 0;
-	for (auto _arg : args)
-		_args[i++] = _arg;
-
-	// this should not return
-	execv(qemu_user_path.c_str(), (char* const*)_args);
-
-	printf("ERROR: Failed to start QEMU variant\n");
 }
 
 /*-----------------------------------------------------------------------------
