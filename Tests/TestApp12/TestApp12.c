@@ -1,7 +1,4 @@
 /*
- * Multi Variant Execution Environment PoC
- * Copyright (C) 2010 Stijn Volckaert <stijnv@gmail.com>
- *
  * bandwidth 0.22, a benchmark to estimate memory transfer bandwidth.
  * Copyright (C) 2005-2010 by Zack T Smith.
  *
