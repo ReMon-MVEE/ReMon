@@ -1,11 +1,8 @@
 /*
  * GHent University Multi-Variant Execution Environment (GHUMVEE)
- * Copyright (C) 2010-2015 Stijn Volckaert, Ghent University
- *                   <svolckae@elis.ugent.be>
- *                     All rights reserved.
  *
- * This software package is licensed to University of California, Irvine
- * under the terms and conditions found in LICENSE.txt.
+ * This source file is distributed under the terms and conditions 
+ * found in GHUMVEELICENSE.txt.
  */
 
 // *****************************************************************************

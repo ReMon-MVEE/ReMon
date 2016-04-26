@@ -1,11 +1,8 @@
 /*
  * GHent University Multi-Variant Execution Environment (GHUMVEE)
- * Copyright (C) 2010-2015 Stijn Volckaert, Ghent University
- *                   <svolckae@elis.ugent.be>
- *                     All rights reserved.
  *
- * This software package is licensed to University of California, Irvine
- * under the terms and conditions found in LICENSE.txt.
+ * This source file is distributed under the terms and conditions 
+ * found in GHUMVEELICENSE.txt.
  */
 
 #ifndef MVEE_CONFIG_H_
@@ -17,7 +14,7 @@
 //
 // MVEE_BENCHMARK: When this is defined, no messages are logged to the logfile
 // and the monitor won't keep track of the number of syscalls made.
-// #define MVEE_BENCHMARK
+#define MVEE_BENCHMARK
 
 //
 // MVEE_FORCE_ENABLE_BACKTRACING: if this is defined, you can also request a monitor
