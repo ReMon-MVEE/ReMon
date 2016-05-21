@@ -1,0 +1,12 @@
+--- linux-3.19-rc1.orig/kernel/ptrace.c	2014-12-24 13:53:23.055346526 +0100
++++ linux-3.19-rc1/kernel/ptrace.c	2014-12-24 14:17:20.617824840 +0100
+@@ -232,6 +232,9 @@ static int __ptrace_may_access(struct ta
+ 	/* Don't let security modules deny introspection */
+ 	if (same_thread_group(task, current))
+ 		return 0;
++	/* Don't deny introspection to already attached ptracer */
++	if (!ptrace_check_attach(task, true))
++	        return 0;
+ 	rcu_read_lock();
+ 	tcred = __task_cred(task);
+ 	if (uid_eq(cred->uid, tcred->euid) &&

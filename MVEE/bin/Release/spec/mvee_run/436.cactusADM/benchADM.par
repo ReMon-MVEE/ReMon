@@ -1,0 +1,48 @@
+
+!DESC "Benchmarking parameter file for ADM (local grid)"
+
+# $Header
+
+ActiveThorns = "einstein time benchadm pugh pughreduce cartgrid3d ioutil iobasic "
+
+#cactus::cctk_timer_output  = "full"
+#pugh::timer_output         = "yes"
+#io::print_timing_info      = "yes"
+
+einstein::evolution_system = "ADM"     
+einstein::initial_data     = "flat"
+einstein::initial_lapse    = "gaussian"
+einstein::gaussian_amplitude    = "0.0005"
+einstein::slicing          = "static"
+einstein::shift 	   = "none"
+einstein::use_conformal    = "no"
+einstein::use_conformal_derivs = "no"
+
+
+driver::local_nx           = 120
+driver::local_ny           = 120
+driver::local_nz           = 120
+
+time::dtfac                = 0.02
+
+grid::dxyz		   = 0.05
+grid::type                 = "byspacing"
+grid::domain               = "full"
+
+benchadm::method           = "stagleap"
+
+cactus::cctk_itlast        = 1000       
+#cactus::cctk_timer_output  = "full"
+
+IOBasic::outInfo_every     = 10        
+IOBasic::outInfo_vars      = "benchadm::ADM_gxx benchADM::ADM_gyz"
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,61 @@
+diff -r --unified parsec-2.1/pkgs/apps/ferret/src/benchmark/ferret-parallel.c parsec-2.1-patched/pkgs/apps/ferret/src/benchmark/ferret-parallel.c
+--- parsec-2.1/pkgs/apps/ferret/src/benchmark/ferret-parallel.c	2009-06-26 20:19:12.000000000 -0700
++++ parsec-2.1-patched/pkgs/apps/ferret/src/benchmark/ferret-parallel.c	2016-03-29 12:34:45.111784208 -0700
+@@ -60,6 +60,7 @@
+ int input_end, output_end;
+ pthread_cond_t done;
+ pthread_mutex_t done_mutex;
++pthread_mutex_t input_mutex;
+ 
+ cass_env_t *env;
+ cass_table_t *table;
+@@ -171,7 +172,9 @@
+ 		r = image_read_hsv(file, &data->width, &data->height, &data->HSV);
+ 		*/
+ 
++	pthread_mutex_lock(&input_mutex);
+ 	cnt_enqueue++;
++	pthread_mutex_unlock(&input_mutex);
+ 
+ 	queue_enqueue_wait(&q_load_seg, data);
+ 
+@@ -229,7 +232,10 @@
+ 		scan_dir(dir, path);
+ 	}
+ 
++	// MVEE patch
++	pthread_mutex_lock(&input_mutex);
+ 	input_end = 1;
++	pthread_mutex_unlock(&input_mutex);
+ 	return NULL;
+ 
+ }
+@@ -393,9 +399,17 @@
+ 		free(rank);
+ 
+ 		cnt_dequeue++;
+-		
+-		fprintf(stderr, "(%d,%d)\n", cnt_enqueue, cnt_dequeue);
+-		if (input_end && (cnt_enqueue == cnt_dequeue))
++
++		// MVEE patch
++		int __input_end, __cnt_enqueue;
++		pthread_mutex_lock(&input_mutex);
++		__input_end = input_end;
++		__cnt_enqueue = cnt_enqueue;
++		pthread_mutex_unlock(&input_mutex);
++
++		fprintf(stderr, "(%d,%d)\n", __cnt_enqueue, cnt_dequeue);
++	       
++		if (__input_end && (__cnt_enqueue == cnt_dequeue))
+ 		{
+ 			pthread_mutex_lock(&done_mutex);
+ 			output_end = 1;
+@@ -542,6 +556,7 @@
+ 
+ 	pthread_cond_init(&done, NULL);
+ 	pthread_mutex_init(&done_mutex, NULL);
++	pthread_mutex_init(&input_mutex, NULL);
+ 
+ 	input_end = output_end = 0;
+ 	cnt_enqueue = cnt_dequeue = 0;

@@ -1,0 +1,33 @@
+diff -r --unified parsec-2.1/pkgs/kernels/dedup/src/decoder.c parsec-2.1-patched/pkgs/kernels/dedup/src/decoder.c
+--- parsec-2.1/pkgs/kernels/dedup/src/decoder.c	2009-01-27 17:09:55.000000000 -0800
++++ parsec-2.1-patched/pkgs/kernels/dedup/src/decoder.c	2016-03-29 12:34:39.559784240 -0700
+@@ -185,7 +185,7 @@
+   list_head = NULL;
+ 
+   if (args != NULL) {
+-    fd = open((char *)args, O_CREAT|O_WRONLY|O_TRUNC);
++	  fd = open((char *)args, O_CREAT|O_WRONLY|O_TRUNC, S_IRUSR | S_IWUSR);
+     if (fd < 0) 
+       perror("Reassemble open");
+     fchmod(fd, ~(S_ISUID | S_ISGID |S_IXGRP | S_IXUSR | S_IXOTH));
+@@ -255,7 +255,7 @@
+       //get file header
+       head = (send_head *)item->str;
+       if (fd == -1) {
+-        fd = open(head->filename, O_CREAT|O_WRONLY|O_TRUNC);
++		  fd = open(head->filename, O_CREAT|O_WRONLY|O_TRUNC, S_IRUSR | S_IWUSR);
+         if (fd < 0)
+           perror("head_open");
+       }
+diff -r --unified parsec-2.1/pkgs/kernels/dedup/src/encoder.c parsec-2.1-patched/pkgs/kernels/dedup/src/encoder.c
+--- parsec-2.1/pkgs/kernels/dedup/src/encoder.c	2009-01-27 17:19:20.000000000 -0800
++++ parsec-2.1-patched/pkgs/kernels/dedup/src/encoder.c	2016-03-29 12:34:39.559784240 -0700
+@@ -768,7 +768,7 @@
+   int fd = 0;
+   struct hash_entry * entry; 
+ 
+-  fd = open(conf->outfile, O_CREAT|O_TRUNC|O_WRONLY|O_TRUNC);
++  fd = open(conf->outfile, O_CREAT|O_TRUNC|O_WRONLY|O_TRUNC, S_IRUSR | S_IWUSR);
+   if (fd < 0) {
+     perror("SendBlock open");
+     return NULL;

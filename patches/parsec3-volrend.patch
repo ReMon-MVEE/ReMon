@@ -1,0 +1,11 @@
+diff -r --unified parsec-3.0/ext/splash2x/apps/volrend/src/libtiff/Makefile parsec-3.0-patched/ext/splash2x/apps/volrend/src/libtiff/Makefile
+--- parsec-3.0/ext/splash2x/apps/volrend/src/libtiff/Makefile	2013-07-28 07:39:56.000000000 -0700
++++ parsec-3.0-patched/ext/splash2x/apps/volrend/src/libtiff/Makefile	2016-03-29 15:56:01.567715860 -0700
+@@ -61,6 +61,7 @@
+ 	${NULL}
+ CONF_LIBRARY=\
+ 	-DBSDTYPES \
++	-DLIBBSD_OVERLAY \
+ 	-DUSE_VARARGS=0 \
+ 	-DUSE_PROTOTYPES=1 \
+ 	-DHAVE_IEEEFP=1 \

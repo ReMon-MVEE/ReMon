@@ -1,0 +1,6 @@
+/home/banckaer/cpu2006/bin/specdiff -m -l 10  --cw  --floatcompare /home/banckaer/cpu2006/benchspec/CPU2006/464.h264ref/data/ref/output/foreman_ref_baseline_encodelog.out foreman_ref_baseline_encodelog.out
+/home/banckaer/cpu2006/bin/specdiff -m -l 10  --binary  --cw  --floatcompare /home/banckaer/cpu2006/benchspec/CPU2006/464.h264ref/data/ref/output/foreman_ref_baseline_leakybucketparam.cfg foreman_ref_baseline_leakybucketparam.cfg
+/home/banckaer/cpu2006/bin/specdiff -m -l 10  --cw  --floatcompare /home/banckaer/cpu2006/benchspec/CPU2006/464.h264ref/data/ref/output/foreman_ref_main_encodelog.out foreman_ref_main_encodelog.out
+/home/banckaer/cpu2006/bin/specdiff -m -l 10  --binary  --cw  --floatcompare /home/banckaer/cpu2006/benchspec/CPU2006/464.h264ref/data/ref/output/foreman_ref_main_leakybucketparam.cfg foreman_ref_main_leakybucketparam.cfg
+/home/banckaer/cpu2006/bin/specdiff -m -l 10  --cw  --floatcompare /home/banckaer/cpu2006/benchspec/CPU2006/464.h264ref/data/ref/output/sss_main_encodelog.out sss_main_encodelog.out
+/home/banckaer/cpu2006/bin/specdiff -m -l 10  --binary  --cw  --floatcompare /home/banckaer/cpu2006/benchspec/CPU2006/464.h264ref/data/ref/output/sss_main_leakybucketparam.cfg sss_main_leakybucketparam.cfg

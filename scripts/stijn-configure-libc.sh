@@ -1,0 +1,1 @@
+../configure --host=x86_64-linux-gnu --build=x86_64-linux-gnu --prefix=/usr --enable-stackguard-randomization --enable-obsolete-rpc --enable-pt_chown --with-selinux --enable-lock-elision=no --enable-addons=nptl --prefix=$HOME/glibc-build

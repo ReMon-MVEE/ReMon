@@ -1,0 +1,4 @@
+LIBO_UDK_3.5	{
+	global:
+		osl_getThreadHash;
+};

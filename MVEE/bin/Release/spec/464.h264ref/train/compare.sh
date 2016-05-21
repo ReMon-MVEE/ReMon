@@ -1,0 +1,2 @@
+/home/banckaer/cpu2006/bin/specdiff -m -l 10  --cw  --floatcompare /home/banckaer/cpu2006/benchspec/CPU2006/464.h264ref/data/train/output/foreman_train_baseline_encodelog.out foreman_train_baseline_encodelog.out
+/home/banckaer/cpu2006/bin/specdiff -m -l 10  --binary  --cw  --floatcompare /home/banckaer/cpu2006/benchspec/CPU2006/464.h264ref/data/train/output/foreman_train_baseline_leakybucketparam.cfg foreman_train_baseline_leakybucketparam.cfg

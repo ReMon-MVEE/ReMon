@@ -1,0 +1,484 @@
+diff -r --unified linux-source-3.5.0/include/linux/ptrace.h linux-source-3.5.0-MVEE/include/linux/ptrace.h
+--- linux-source-3.5.0/include/linux/ptrace.h	2012-07-21 22:58:29.000000000 +0200
++++ linux-source-3.5.0-MVEE/include/linux/ptrace.h	2013-01-23 14:47:09.161156528 +0100
+@@ -1,5 +1,8 @@
+ #ifndef _LINUX_PTRACE_H
+ #define _LINUX_PTRACE_H
++
++#include <linux/types.h>
++
+ /* ptrace.h */
+ /* structs and defines to help the user use the ptrace system call. */
+ 
+@@ -51,6 +54,32 @@
+ #define PTRACE_INTERRUPT	0x4207
+ #define PTRACE_LISTEN		0x4208
+ 
++/*
++ * Ptrace extensions for multi-variant execution
++ */
++#define PTRACE_EXT_COPYMEM      0x4220
++#define PTRACE_EXT_COPYSTRING	0x4221
++
++/* Passed to sys_ptrace through the data field */
++struct pt_copymem
++{
++	pid_t          source_pid;   		/* PID of the source process */
++	unsigned long  source_va;    		/* Virtual Address of the source buffer */
++	pid_t          dest_pid;     		/* PID of the destination process */
++	unsigned long  dest_va;      		/* Virtual Address of the destination buffer */
++	unsigned long  copy_size;    		/* */
++};
++
++/* Passed to sys_ptrace through the data field */
++struct pt_copystring
++{
++	unsigned long	source_va;		/* Virtual Address of the source string */
++	unsigned long	dest_buffer_va;		/* Virtual Address of the destination buffer */
++	unsigned long	dest_buffer_size;	/* Size of the destination buffer - if the source string doesn't fit in here, an error is returned */
++	unsigned long	out_string_size;	/* The kernel will write the string size here */
++};
++
++
+ /* Wait extended result codes for the above trace options.  */
+ #define PTRACE_EVENT_FORK	1
+ #define PTRACE_EVENT_VFORK	2
+@@ -127,6 +156,7 @@
+ 			  struct task_struct *new_parent);
+ extern void __ptrace_unlink(struct task_struct *child);
+ extern void exit_ptrace(struct task_struct *tracer);
++extern struct task_struct *ptrace_get_task_struct(pid_t pid);
+ #define PTRACE_MODE_READ	0x01
+ #define PTRACE_MODE_ATTACH	0x02
+ #define PTRACE_MODE_NOAUDIT	0x04
+diff -r --unified linux-source-3.5.0/include/linux/sched.h linux-source-3.5.0-MVEE/include/linux/sched.h
+--- linux-source-3.5.0/include/linux/sched.h	2013-01-08 22:40:53.000000000 +0100
++++ linux-source-3.5.0-MVEE/include/linux/sched.h	2013-01-23 14:48:11.849008040 +0100
+@@ -1310,6 +1310,9 @@
+ 				 * execve */
+ 	unsigned in_iowait:1;
+ 
++        /* did the current syscall bypass ptrace? - MVEE extension */
++        unsigned ptrace_ignored_current:1;
++
+ 	/* task may not gain privileges */
+ 	unsigned no_new_privs:1;
+ 
+diff -r --unified linux-source-3.5.0/include/linux/tracehook.h linux-source-3.5.0-MVEE/include/linux/tracehook.h
+--- linux-source-3.5.0/include/linux/tracehook.h	2012-07-21 22:58:29.000000000 +0200
++++ linux-source-3.5.0-MVEE/include/linux/tracehook.h	2013-01-23 14:50:46.205848542 +0100
+@@ -52,6 +52,35 @@
+ #include <linux/task_work.h>
+ struct linux_binprm;
+ 
++/**
++ * ptrace_ext_syscall_masked - returns the masked bit for the specified
++ * syscall in the current task
++ *
++ * @syscall_nr:		number of the syscall to check
++ *
++ * Return masked bit
++ */
++static inline int ptrace_ext_syscall_masked(unsigned int nr)
++{
++  /* sched_yield = unsynced */
++  return nr==158 ? 1 : 0;
++}
++
++/**
++ * ptrace_ext_can_bypass - checks whether or not this syscall can
++ * bypass the debugger.
++ *
++ * @syscall_nr:		number of the syscall the task is trying
++ * to execute
++ *
++ * Return nonzero if task can bypass ptrace.
++ */
++static inline int ptrace_ext_can_bypass(unsigned int syscall_nr)
++{
++  return ptrace_ext_syscall_masked(syscall_nr);
++}
++
++
+ /*
+  * ptrace report for syscall entry and exit looks identical.
+  */
+@@ -99,6 +128,12 @@
+ static inline __must_check int tracehook_report_syscall_entry(
+ 	struct pt_regs *regs)
+ {
++        /* check if the call is allowed to bypass ptrace */	
++	if (ptrace_ext_can_bypass(regs->orig_ax))
++	{
++		get_current()->ptrace_ignored_current = 1;
++		return 0;
++	}	
+ 	return ptrace_report_syscall(regs);
+ }
+ 
+@@ -127,6 +162,12 @@
+ 		force_sig_info(SIGTRAP, &info, current);
+ 		return;
+ 	}
++       
++	if (get_current()->ptrace_ignored_current)
++	{
++		get_current()->ptrace_ignored_current = 0;
++		return;
++	}
+ 
+ 	ptrace_report_syscall(regs);
+ }
+diff -r --unified linux-source-3.5.0/kernel/ptrace.c linux-source-3.5.0-MVEE/kernel/ptrace.c
+--- linux-source-3.5.0/kernel/ptrace.c	2012-07-21 22:58:29.000000000 +0200
++++ linux-source-3.5.0-MVEE/kernel/ptrace.c	2013-01-23 14:40:41.499962527 +0100
+@@ -665,6 +665,314 @@
+ 
+ #endif
+ 
++int ptrace_copymem(void __user* datavp)
++{
++	struct task_struct* 	source		= NULL;
++	struct task_struct* 	dest		= NULL;
++	struct mm_struct*	source_mm	= NULL;
++	struct mm_struct*	dest_mm		= NULL;
++	struct page* 		source_page	= NULL;
++	struct page* 		dest_page_low	= NULL;
++	struct page*		dest_page_high	= NULL;
++	struct vm_area_struct*	source_vma	= NULL;
++	struct vm_area_struct*	dest_vma_low	= NULL;
++	struct vm_area_struct*	dest_vma_high	= NULL;
++	void*			source_addr	= NULL;
++	void*			dest_addr_low	= NULL;
++	void*			dest_addr_high	= NULL;
++	unsigned long 		source_offset	= 0;
++	unsigned long		dest_offset	= 0;
++	unsigned long		to_copy		= 0;
++	unsigned long		to_copy_low	= 0;
++	unsigned long		to_copy_high	= 0;
++	unsigned long		bytes_copied	= 0;
++	unsigned long 		bytes_remaining = 0;
++	int			ret		= 0;
++	int			from_current	= 0;		// Are we copying from the VA of the current process?
++	int			to_current	= 0;		// Are we copying to the VA of the current process?
++	struct pt_copymem 	mem;
++
++	/* Fetch source/dest pids and addresses from issuing process' VA space */
++	if (unlikely(copy_from_user(&mem, datavp, sizeof(struct pt_copymem))))
++		return -EFAULT;
++
++	/* Check if we're copying from/to the current process */
++	if (current->pid == mem.source_pid)
++		from_current = 1;
++	else if (current->pid == mem.dest_pid)
++		to_current = 1;
++
++	/* Get source/dest task structs and mm references */
++	if (!from_current)
++	{
++		source = ptrace_get_task_struct(mem.source_pid);
++		source_mm = get_task_mm(source);
++		if (unlikely(!source_mm))
++			goto out_ret;
++		down_read(&source_mm->mmap_sem);
++	}
++	if (!to_current)
++	{
++		dest   	  = ptrace_get_task_struct(mem.dest_pid);
++		dest_mm   = get_task_mm(dest);
++		if (unlikely(!dest_mm))
++		{
++			to_current = 1;
++			put_task_struct(dest);
++			goto out;
++		}
++		down_read(&dest_mm->mmap_sem);
++	}
++
++	bytes_remaining = mem.copy_size;
++	while (bytes_remaining > 0)
++	{
++		if (!from_current)
++		{
++			/* pin source page */
++			ret = get_user_pages(source, source_mm, mem.source_va
++				+ bytes_copied, 1, 0, 1, &source_page, &source_vma);
++
++			if (ret <= 0)
++				goto out;
++
++			/* map into kmem */
++			source_addr = kmap(source_page);
++		}
++
++		/* offset of the data block within the source page */
++		source_offset = (mem.source_va + bytes_copied) & (PAGE_SIZE-1);
++
++		/* bytes we should copy from this page */
++		to_copy = ((PAGE_SIZE - source_offset) >= bytes_remaining) ?
++			bytes_remaining : PAGE_SIZE - source_offset;
++		to_copy_low = to_copy;
++		to_copy_high = 0;
++
++		if (!to_current)
++		{
++			/* now pin the target page(s) */
++			ret = get_user_pages(dest, dest_mm, mem.dest_va
++				+ bytes_copied, 1, 1, 1, &dest_page_low, &dest_vma_low);
++
++			if (ret <= 0)
++				goto out;
++
++			/* map into kmem */
++			dest_addr_low = kmap(dest_page_low);
++		}
++
++		/* see if we need to map the high page as well */
++		dest_offset = (mem.dest_va + bytes_copied) & (PAGE_SIZE-1);
++
++		if (!to_current && PAGE_SIZE-dest_offset < to_copy)
++		{
++			ret = get_user_pages(dest, dest_mm, mem.dest_va
++				+ bytes_copied + PAGE_SIZE, 1, 1, 1,
++				&dest_page_high, &dest_vma_high);
++
++			if (ret <= 0)
++				goto out;
++
++			to_copy_low 	= PAGE_SIZE - dest_offset;
++			to_copy_high 	= to_copy - to_copy_low;
++
++			/* map into kmem */
++			dest_addr_high = kmap(dest_page_high);
++		}
++
++		/* flush cache entries from datacache */
++		if (source_vma)
++			flush_cache_page(source_vma, mem.source_va + bytes_copied, page_to_pfn(source_page));
++		if (dest_vma_low)
++			flush_cache_page(dest_vma_low, mem.dest_va + bytes_copied, page_to_pfn(dest_page_low));
++		if (dest_vma_high)
++			flush_cache_page(dest_vma_high, mem.dest_va + bytes_copied + PAGE_SIZE, page_to_pfn(dest_page_high));
++
++		/* copy bytes */
++		if (from_current)
++		{
++			copy_from_user(dest_addr_low + dest_offset, (void __user*)mem.source_va + bytes_copied, to_copy_low);
++			if (to_copy_high > 0)
++				copy_from_user(dest_addr_high, (void __user*)mem.source_va + bytes_copied + to_copy_low, to_copy_high);
++		}
++		else if (to_current)
++		{
++			copy_to_user((void __user*)mem.dest_va + bytes_copied, source_addr + source_offset, to_copy);
++		}
++		else
++		{
++			memcpy(dest_addr_low + dest_offset, source_addr + source_offset, to_copy_low);
++			if (to_copy_high > 0)
++				memcpy(dest_addr_high, source_addr + source_offset + to_copy_low, to_copy_high);
++		}
++
++		/* flush instruction cache entries and mark pages dirty (if needed) */
++		if (!to_current)
++		{
++			flush_icache_user_range(dest_vma_low, dest_page_low, mem.dest_va + bytes_copied, to_copy_low);
++			set_page_dirty_lock(dest_page_low);
++
++			if (to_copy_high > 0)
++			{
++				flush_icache_user_range(dest_vma_high, dest_page_high, mem.dest_va + bytes_copied + to_copy_low, to_copy_high);
++				set_page_dirty_lock(dest_page_high);
++			}
++		}
++
++		/* unmap pages */
++		if (!from_current)
++		  {
++			kunmap(source_page);
++			put_page(source_page);
++		  }
++		if (!to_current)
++		{
++			kunmap(dest_page_low);
++			put_page(dest_page_low);
++			if (to_copy_high > 0)
++			  {
++				kunmap(dest_page_high);
++				put_page(dest_page_high);
++			  }
++		}
++
++		/* adjust counters */
++		bytes_copied 	+= to_copy;
++		bytes_remaining -= to_copy;
++
++		/* cleanup */
++		source_page = dest_page_low = dest_page_high = NULL;
++	}
++
++	ret = bytes_copied;
++
++out:
++	/* release all locks and references */
++	if (!to_current)
++	{
++		up_read(&dest_mm->mmap_sem);
++		put_task_struct(dest);
++		mmput(dest_mm);
++	}
++	if (!from_current)
++	{
++		up_read(&source_mm->mmap_sem);
++		put_task_struct(source);
++		mmput(source_mm);
++	}
++
++out_ret:
++	return ret;
++}
++
++int ptrace_copystring(struct task_struct* child, void __user* datavp)
++{
++	struct mm_struct*	source_mm	= NULL;
++	struct page* 		source_page	= NULL;
++	struct vm_area_struct*	source_vma	= NULL;
++	void*			source_addr	= NULL;
++	unsigned long 		source_offset	= 0;
++	unsigned long		len		= 0;		/* length of the string, including the NUL byte */
++	unsigned long		i 		= 0;
++	int			ret		= 0;
++	struct pt_copystring	mem;
++
++	/* Fetch dest buffer info */
++	if (unlikely(copy_from_user(&mem, datavp, sizeof(struct pt_copystring))))
++		return -EFAULT;
++
++	/* Get mm ref */
++	source_mm = get_task_mm(child);
++	if (unlikely(!source_mm))
++		goto out_ret;
++	down_read(&source_mm->mmap_sem);
++
++	/* determine string length */
++	while (true)
++	{
++		ret = get_user_pages(child, source_mm, mem.source_va
++			+ len, 1, 0, 1, &source_page, &source_vma);
++
++		if (unlikely(ret <= 0))
++			goto out;
++
++		flush_cache_page(source_vma, mem.source_va + len, page_to_pfn(source_page));
++
++		source_addr = kmap(source_page);
++		source_offset = (mem.source_va + len) & (PAGE_SIZE-1);
++
++		for (i = source_offset; i < PAGE_SIZE; ++i)
++			if (*(char*)((unsigned long)source_addr + i) == '\0')
++				break;
++
++		len += i - source_offset;
++		if (i < PAGE_SIZE)
++		{
++			len++;
++			kunmap(source_page);
++			put_page(source_page);
++			break;
++		}
++
++		kunmap(source_page);
++		put_page(source_page);
++	}
++
++	//printk("string copy - determined length: %d - dest buffer size: %d\n", len, mem.dest_buffer_size);
++
++	/* pass string size to user space */
++	mem.out_string_size = len;
++	copy_to_user(datavp, &mem, sizeof(struct pt_copystring));
++
++	/* see if it will fit into our destination buffer */
++	if (unlikely(len > mem.dest_buffer_size))
++	{
++		ret = -ENOMEM;
++		goto out;
++	}
++
++	/* ok, it fits. Determine how many pages we need to map in to copy the entire thing in one go */
++	int bytes_remaining = len;
++	int bytes_copied = 0;
++	int to_copy = 0;
++
++	while (bytes_remaining > 0)
++	{
++		ret = get_user_pages(child, source_mm, mem.source_va
++			+ bytes_copied, 1, 0, 1, &source_page, &source_vma);
++		if (unlikely(ret <= 0))
++			goto out;
++
++		source_addr 	= kmap(source_page);
++		source_offset 	= (mem.source_va + bytes_copied) & (PAGE_SIZE-1);
++		to_copy 	= bytes_remaining > (PAGE_SIZE - source_offset) ? (PAGE_SIZE - source_offset) : bytes_remaining;
++
++		if (unlikely(copy_to_user((void*)(mem.dest_buffer_va + bytes_copied),
++			(const void*)((unsigned long)source_addr + source_offset),
++			to_copy)))
++		{
++			ret = -EFAULT;
++			kunmap(source_page);
++			put_page(source_page);
++			goto out;
++		}
++
++		bytes_remaining -= to_copy;
++		bytes_copied 	+= to_copy;
++
++		kunmap(source_page);
++		put_page(source_page);
++	}
++
++out:
++	up_read(&source_mm->mmap_sem);
++	mmput(source_mm);
++
++out_ret:
++	return ret;
++}
++
+ int ptrace_request(struct task_struct *child, long request,
+ 		   unsigned long addr, unsigned long data)
+ {
+@@ -835,7 +1143,7 @@
+ 	return ret;
+ }
+ 
+-static struct task_struct *ptrace_get_task_struct(pid_t pid)
++struct task_struct *ptrace_get_task_struct(pid_t pid)
+ {
+ 	struct task_struct *child;
+ 
+@@ -866,6 +1174,13 @@
+ 			arch_ptrace_attach(current);
+ 		goto out;
+ 	}
++	/*
++	 * Architecture independent extension for Multi-Variant Execution
++	 */
++	else if (request == PTRACE_EXT_COPYMEM)
++	{
++		return ptrace_copymem((void __user*)data);
++	}
+ 
+ 	child = ptrace_get_task_struct(pid);
+ 	if (IS_ERR(child)) {
+@@ -873,6 +1188,11 @@
+ 		goto out;
+ 	}
+ 
++	if (request == PTRACE_EXT_COPYSTRING)                                                                                                  
++	{
++	  return ptrace_copystring(child, (void __user*)data);                                                                            
++	}
++
+ 	if (request == PTRACE_ATTACH || request == PTRACE_SEIZE) {
+ 		ret = ptrace_attach(child, request, addr, data);
+ 		/*

@@ -1,0 +1,28 @@
+GLIBC_2.0 {
+  shmget;
+  getpid;
+  __getpid;
+  tmpnam;
+  tmpnam_r;
+  tempnam;
+  mkstemp;
+  mktemp;
+  tmpfile;
+};
+
+GLIBC_2.2 {
+  mkdtemp;
+  mkstemp64;
+};
+
+GLIBC_2.7 {
+  mkostemp64;
+  mkostemp;
+};
+
+GLIBC_2.11 {
+  mkostemps64;
+  mkstemps64;
+  mkstemps;
+  mkostemps;
+};

@@ -1,0 +1,78 @@
+! Uses 837 Mb on an Itanium 2 CPU
+
+PROBLEMSIZE
+
+210 210 210
+
+
+CELLSIZE
+
+ 0.01 0.01 0.01
+
+
+NSTEP
+
+1000
+
+
+PLANEWAVE 
+
+ Gauss
+
+  1.2e-09 2.0e-10
+
+ Directionsphr 
+  0 90  !theta phi 
+ Epolsphr
+  -90
+
+ X0
+
+  0.0 0.0 0.0
+
+ Disttobound
+
+  10
+
+
+PEC
+ Filename
+   sphere.pec
+
+
+OUTERBOUNDARY
+
+ Upmlhigh
+ 
+
+CFL
+
+ 0.95
+
+
+NFTRANS_TD
+
+ Disttobound
+  15
+
+ Theta_angles_no
+  4
+
+ Theta_interval
+  180.0 360.0
+
+ Phi_angles_no
+  1
+
+ Phi_interval
+  0.0 
+
+ Filenamebase
+  sphere_td
+
+ 
+PROGRESS
+
+ Iteration
+  100
+ 

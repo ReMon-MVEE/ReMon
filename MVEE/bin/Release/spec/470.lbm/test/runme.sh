@@ -1,0 +1,6 @@
+BENCHPATH=$SPECPATH/470.lbm
+BINPATH=$BENCHPATH/build/$SPECPROFILE
+DATAPATH=$BENCHPATH/data/test/input
+ALLDATAPATH=$BENCHPATH/data/all/input
+
+$BINPATH/lbm 20 reference.dat 0 1 $DATAPATH/100_100_130_cf_a.of > lbm.out 

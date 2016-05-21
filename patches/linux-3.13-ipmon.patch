@@ -1,0 +1,548 @@
+diff -r --unified linux-3.13.0.orig/arch/x86/syscalls/syscall_64.tbl linux-3.13.0/arch/x86/syscalls/syscall_64.tbl
+--- linux-3.13.0.orig/arch/x86/syscalls/syscall_64.tbl	2016-03-31 12:04:57.034816347 -0700
++++ linux-3.13.0/arch/x86/syscalls/syscall_64.tbl	2016-03-31 12:11:24.890814152 -0700
+@@ -324,6 +324,7 @@
+ 315	common	sched_getattr		sys_ni_syscall
+ 316	common	renameat2		sys_ni_syscall
+ 317	common	seccomp			sys_seccomp
++318	common	ipmon_invoke	sys_ipmon_invoke
+ 
+ #
+ # x32-specific system call numbers start at 512 to avoid cache impact
+diff -r --unified linux-3.13.0.orig/fs/exec.c linux-3.13.0/fs/exec.c
+--- linux-3.13.0.orig/fs/exec.c	2016-03-31 12:04:56.702816349 -0700
++++ linux-3.13.0/fs/exec.c	2016-03-31 12:42:10.918803704 -0700
+@@ -1574,6 +1574,7 @@
+ 	free_bprm(bprm);
+ 	if (displaced)
+ 		put_files_struct(displaced);
++	current->ipmon_info.ipmon_enabled = 0;
+ 	return retval;
+ 
+ out:
+diff -r --unified linux-3.13.0.orig/include/linux/sched.h linux-3.13.0/include/linux/sched.h
+--- linux-3.13.0.orig/include/linux/sched.h	2016-03-31 12:04:56.294816351 -0700
++++ linux-3.13.0/include/linux/sched.h	2016-03-31 12:15:06.058812900 -0700
+@@ -1049,6 +1049,47 @@
+ 	perf_nr_task_contexts,
+ };
+ 
++#ifndef ROUND_UP
++#define ROUND_UP(x, multiple) ( (((long)(x)) + multiple - 1) & (~(multiple - 1)) )
++#endif
++
++#ifndef __NR_syscalls
++/* this is the highest known syscall no for x86_64 in this kernel... */
++  #define __NR_syscalls __NR_seccomp
++#endif
++
++/* MVEE IP-MON patch */
++struct ipmon_info {
++	/* This is a bitmask in which every bit represents exactly one syscall.  If                                      
++     the bit is set to 1, then the corresponding syscall may bypass the ptracer                                    
++     under two conditions:                                                                                         
++                                                                                                                   
++     1) The syscall must have originated from IP-MON                                                               
++     2) IP-MON must pass the IP-MON key as the 7th syscall argument                                                
++	*/
++	unsigned char ipmon_masked_syscalls[ROUND_UP(__NR_syscalls, 8) / 8];
++
++	/* Is IP-MON enabled within this thread */
++	unsigned char ipmon_enabled;
++
++	/* latest IP-MON key */
++	unsigned int  ipmon_key;
++
++	/* latest syscall we forwarded to IP-MON */
++	unsigned long ipmon_orig_syscall;
++
++	/* This is a pointer to the vm_area_struct of the IP-MON executable code                                         
++     section. */
++	struct vm_area_struct * ipmon_exec;
++
++	/* This is a pointer to the vm_area_struct of the IP-MON Replication Buffer                                      
++     (RB). */
++	struct vm_area_struct * ipmon_rb;
++
++	/* pointer to the ipmon syscall enclave entrypoint */
++	void __user* ipmon_enclave_entrypoint;
++};
++
+ struct task_struct {
+ 	volatile long state;	/* -1 unrunnable, 0 runnable, >0 stopped */
+ 	void *stack;
+@@ -1111,6 +1152,7 @@
+ #endif
+ 
+ 	struct mm_struct *mm, *active_mm;
++	struct ipmon_info ipmon_info;
+ #ifdef CONFIG_COMPAT_BRK
+ 	unsigned brk_randomized:1;
+ #endif
+@@ -1134,6 +1176,7 @@
+ 	/* Revert to default priority/policy when forking */
+ 	unsigned sched_reset_on_fork:1;
+ 	unsigned sched_contributes_to_load:1;
++	unsigned ptrace_ignored_current:1;
+ 
+ 	unsigned long atomic_flags; /* Flags needing atomic access. */
+ 
+@@ -1466,6 +1509,9 @@
+ #endif
+ };
+ 
++/* Defined in kernel/sys.c */
++unsigned char ipmon_handle_bypass (struct pt_regs* regs);
++
+ /* Future-safe accessor for struct task_struct's cpus_allowed. */
+ #define tsk_cpus_allowed(tsk) (&(tsk)->cpus_allowed)
+ 
+diff -r --unified linux-3.13.0.orig/include/linux/tracehook.h linux-3.13.0/include/linux/tracehook.h
+--- linux-3.13.0.orig/include/linux/tracehook.h	2016-03-31 12:04:56.282816352 -0700
++++ linux-3.13.0/include/linux/tracehook.h	2016-03-31 12:42:12.586803695 -0700
+@@ -99,6 +99,11 @@
+ static inline __must_check int tracehook_report_syscall_entry(
+ 	struct pt_regs *regs)
+ {
++	if ((current->ptrace & PT_PTRACED) && ipmon_handle_bypass(regs))
++	{
++		current->ptrace_ignored_current = 1;
++		return 0;
++	}
+ 	return ptrace_report_syscall(regs);
+ }
+ 
+@@ -128,6 +133,12 @@
+ 		return;
+ 	}
+ 
++	if (current->ptrace_ignored_current)
++	{
++		current->ptrace_ignored_current = 0;
++		return;
++	}
++
+ 	ptrace_report_syscall(regs);
+ }
+ 
+diff -r --unified linux-3.13.0.orig/include/uapi/asm-generic/errno.h linux-3.13.0/include/uapi/asm-generic/errno.h
+--- linux-3.13.0.orig/include/uapi/asm-generic/errno.h	2016-03-31 12:04:56.254816352 -0700
++++ linux-3.13.0/include/uapi/asm-generic/errno.h	2016-03-31 12:42:12.234803697 -0700
+@@ -110,4 +110,7 @@
+ 
+ #define EHWPOISON	133	/* Memory page has hardware error */
+ 
++/* MVEE IP-MON patch */
++#define ENOIPMON 256
++
+ #endif
+diff -r --unified linux-3.13.0.orig/include/uapi/linux/prctl.h linux-3.13.0/include/uapi/linux/prctl.h
+--- linux-3.13.0.orig/include/uapi/linux/prctl.h	2016-03-31 12:04:56.258816352 -0700
++++ linux-3.13.0/include/uapi/linux/prctl.h	2016-03-31 12:42:11.826803699 -0700
+@@ -149,4 +149,7 @@
+ 
+ #define PR_GET_TID_ADDRESS	40
+ 
++/* MVEE IP-MON patch */
++#define PR_REGISTER_IPMON 0xb00b135
++
+ #endif /* _LINUX_PRCTL_H */
+diff -r --unified linux-3.13.0.orig/kernel/fork.c linux-3.13.0/kernel/fork.c
+--- linux-3.13.0.orig/kernel/fork.c	2016-03-31 12:04:56.250816352 -0700
++++ linux-3.13.0/kernel/fork.c	2016-03-31 12:42:11.250803703 -0700
+@@ -324,6 +324,7 @@
+ 	setup_thread_stack(tsk, orig);
+ 	clear_user_return_notifier(tsk);
+ 	clear_tsk_need_resched(tsk);
++	tsk->ipmon_info.ipmon_enabled = 0;
+ 	stackend = end_of_stack(tsk);
+ 	*stackend = STACK_END_MAGIC;	/* for overflow detection */
+ 
+diff -r --unified linux-3.13.0.orig/kernel/sys.c linux-3.13.0/kernel/sys.c
+--- linux-3.13.0.orig/kernel/sys.c	2016-03-31 12:04:56.242816352 -0700
++++ linux-3.13.0/kernel/sys.c	2016-03-31 12:50:20.826800932 -0700
+@@ -52,6 +52,8 @@
+ #include <linux/rcupdate.h>
+ #include <linux/uidgid.h>
+ #include <linux/cred.h>
++#include <linux/random.h>
++#include <linux/futex.h>
+ 
+ #include <linux/kmsg_dump.h>
+ /* Move somewhere else to avoid recompiling? */
+@@ -1823,6 +1825,364 @@
+ 	return error;
+ }
+ 
++static unsigned long ipmon_allowed_syscalls [] =
++{
++    __NR_madvise,
++    __NR_fadvise64,
++    __NR_getxattr,
++    __NR_lgetxattr,
++    __NR_fgetxattr,
++    __NR_listxattr,
++    __NR_llistxattr,
++    __NR_flistxattr,
++    __NR_getcwd,
++    __NR_ioprio_get,
++    __NR_read,
++    __NR_write,
++    __NR_readv,
++    __NR_writev,
++    __NR_pread64,
++    __NR_pwrite64,
++    __NR_preadv,
++    __NR_pwritev,
++    __NR_sendfile,
++    __NR_capget,
++    __NR_setitimer,
++    __NR_getitimer,
++    __NR_timer_gettime,
++    __NR_timer_getoverrun,
++    __NR_clock_gettime,
++    __NR_clock_getres,
++    __NR_sched_getscheduler,
++    __NR_sched_getparam,
++    __NR_sched_getaffinity,
++    __NR_sched_yield,
++    __NR_sched_get_priority_max,
++    __NR_sched_get_priority_min,
++    __NR_sched_rr_get_interval,
++    __NR_getpriority,
++    __NR_getresuid,
++    __NR_getresgid,
++    __NR_times,
++    __NR_getpgid,
++    __NR_getsid,
++    __NR_getgroups,
++    __NR_getrlimit,
++    __NR_getrusage,
++    __NR_getcpu,
++    __NR_gettimeofday,
++    __NR_time,
++    __NR_getpid,
++    __NR_getppid,
++    __NR_getuid,
++    __NR_geteuid,
++    __NR_getgid,
++    __NR_getegid,
++    __NR_gettid,
++    __NR_getpgrp,
++    __NR_getsockname,
++    __NR_getpeername,
++    __NR_sendto,
++    __NR_recvfrom,
++    __NR_setsockopt,
++    __NR_getsockopt,
++    __NR_sendmsg,
++    __NR_recvmsg,
++    __NR_recvmmsg,
++    __NR_sendmmsg,
++    __NR_poll,
++    __NR_stat,
++    __NR_fstat,
++    __NR_lstat,
++    __NR_newfstatat,
++    __NR_access,
++    __NR_faccessat,
++    __NR_select,
++    __NR_futex,
++    __NR_getdents,
++    __NR_epoll_wait,
++    __NR_epoll_ctl,
++    __NR_lseek,
++    __NR_alarm,
++    __NR_sync,
++    __NR_fsync,
++    __NR_fdatasync,
++    __NR_syncfs,
++    __NR_sysinfo,
++    __NR_readlink,
++    __NR_readlinkat,
++    __NR_timerfd_settime,
++    __NR_timerfd_gettime,
++    __NR_uname,
++    __NR_nanosleep,
++    __NR_ioctl,
++    __NR_fcntl,
++    __NR_shutdown,
++    __NR_ipmon_invoke
++};
++
++/* We're assuming that we're little endian here... */
++static inline unsigned char ipmon_is_unchecked_syscall(unsigned char* mask, unsigned long syscall_no)
++{
++	unsigned long no_to_byte, bit_in_byte;
++
++	/* This is not very concise but the compiler will optimize it anyway... */
++	if (syscall_no > ROUND_UP(__NR_syscalls, 8))
++		return 0;
++
++	no_to_byte  = syscall_no / 8;
++	bit_in_byte = syscall_no % 8;
++
++	if (mask[no_to_byte] & (1 << (7 - bit_in_byte)))
++		return 1;
++	return 0;
++}
++
++static inline void ipmon_set_unchecked_syscall(unsigned char* mask, unsigned long syscall_no, unsigned char unchecked)
++{
++	unsigned long no_to_byte, bit_in_byte;
++
++	if (syscall_no > ROUND_UP(__NR_syscalls, 8))
++		return;
++
++	no_to_byte  = syscall_no / 8;
++	bit_in_byte = syscall_no % 8;
++
++	if (unchecked)
++		mask[no_to_byte] |= (1 << (7 - bit_in_byte));
++	else
++		mask[no_to_byte] &= ~(1 << (7 - bit_in_byte));
++}
++
++/* This syscall normally does not get called directly. We change the syscall
++ * number to __NR_ipmon_invoke to land here (see ipmon_handle_bypass func
++ * below) */
++SYSCALL_DEFINE0(ipmon_invoke)
++{
++    if (!current->ipmon_info.ipmon_enabled)
++    {
++        printk("sys_ipmon_invoke DENIED - no IP-MON registered for this thread: %d\n", current->pid);
++        return -ENOIPMON;
++    }
++
++	/* Generate a random key */
++    current->ipmon_info.ipmon_key = get_random_int();
++
++    /* TODO: The code below can be optimized! The stack pointer is still valid
++    upon switching to kernel space and the user-mode stack is still
++    accessible.  */
++
++    /* push the syscall return site onto the stack as the return address */
++    if (copy_to_user((void __user*)(task_pt_regs(current)->sp - sizeof(unsigned long)),
++                     &task_pt_regs(current)->ip,
++                     sizeof(unsigned long)))
++    {
++        return -EFAULT;
++    }
++
++    /* adjust the stack pointer */
++    task_pt_regs(current)->sp -= sizeof(unsigned long);
++
++    /* return the replication buffer pointer in register r11 */
++    task_pt_regs(current)->r11 = current->ipmon_info.ipmon_rb->vm_start;
++
++    /* return the magic key in register rcx */
++    task_pt_regs(current)->cx = current->ipmon_info.ipmon_key;
++
++    /* adjust the instruction pointer to jump to the enclave */
++    task_pt_regs(current)->ip = (unsigned long)current->ipmon_info.ipmon_enclave_entrypoint;
++
++    return current->ipmon_info.ipmon_orig_syscall;
++}
++
++/* This gets called at each syscall entry site from include/linux/tracehook.h.
++   If we return 1, the syscall will not be reported to the ptracer. */
++unsigned char ipmon_handle_bypass(struct pt_regs * regs)
++{
++    unsigned char result = 0;
++    unsigned long syscall_no = regs->orig_ax;
++
++    /* Never report sched_yield */
++    if (syscall_no == __NR_sched_yield)
++    {
++        result = 1;
++        goto out;
++    }
++
++    if (likely(current->ipmon_info.ipmon_enabled))
++    {
++        unsigned long r12        = regs->r12;
++        unsigned long pc         = regs->ip;
++        unsigned char in_ipmon   = (pc < current->ipmon_info.ipmon_exec->vm_start ||
++                                    pc >= current->ipmon_info.ipmon_exec->vm_end) ? 0 : 1;
++        unsigned char ipmon_wants_bypass = (r12 == current->ipmon_info.ipmon_key) ? 1 : 0;
++        unsigned char whitelisted_call = ipmon_is_unchecked_syscall(current->ipmon_info.ipmon_masked_syscalls, syscall_no) ? 1 : 0;
++
++        /* Call from outside IP-MON. If the syscall number is in the unchecked                                     
++         list, then don't execute the syscall and return into the IP-MON                                         
++         enclave instead.                                                                                        
++                                                                                                                 
++         If the syscall number is NOT in the unchecked list, then report to the
++         ptracer, and leave the syscall number untouched.  */
++        if (!in_ipmon)
++        {
++            if (!whitelisted_call)
++                goto out;
++
++            current->ipmon_info.ipmon_orig_syscall = syscall_no;
++            regs->orig_ax = __NR_ipmon_invoke;
++            /* we obviously don't want to report the sys_ipmon_invoke call to
++			   the ptracer */
++            result = 1;
++        }
++        else
++        {
++            if (!ipmon_wants_bypass ||
++                (syscall_no != current->ipmon_info.ipmon_orig_syscall && syscall_no != __NR_futex))
++                goto out;
++
++            /* OK. Bypass approved. We can now revoke IP-MON's right to execute
++			   any syscalls other than sched_yield and futex */
++            current->ipmon_info.ipmon_orig_syscall = (unsigned long)-1;
++            result = 1;
++        }
++    }
++
++out:
++    return result;
++}
++
++/* Register IP-MON with the kernel so it gets super duper privileges                                               
++                                                                                                                   
++   Checks if:                                                                                                      
++   * syscall_mask contains only syscalls that are in the ipmon_allowed_syscalls list (see above)                   
++   * replication_buffer_base is in a valid region                                                                  
++   * enclave_entrypoint is within the executable code region that registered IP-MON                                
++   */
++static int prctl_register_ipmon(unsigned char __user* syscall_mask,
++                                unsigned long syscall_mask_size,
++                                void __user* replication_buffer_base,
++                                void __user* enclave_entrypoint)
++{
++    int error = 0, i, j;
++    struct vm_area_struct* ipmon_vma = NULL, * ipmon_rb_vma = NULL;
++    unsigned long kernel_syscall_mask_size = ROUND_UP(__NR_syscalls, 8) / 8;
++    unsigned char syscall_mask_copy[kernel_syscall_mask_size];
++    unsigned char syscall_mask_check[kernel_syscall_mask_size];
++    unsigned long program_counter;
++    unsigned int syscall_no = 0;
++
++    /* This only makes sense if we're being ptraced.  If we allow IP-MON to                                        
++       register before the process is being traced, then the tracer does not get                                   
++       a chance to inspect the syscall mask and to modify it if needed. */
++    if (!current->ptrace)
++    {
++        printk("process %s (%d) attempted to register an IP-MON but is not being ptraced\n", current->comm, current->pid);
++        return -ESRCH;
++    }
++
++    /* see if we already have an IP-MON */
++    if (current->ipmon_info.ipmon_enabled)
++    {
++        printk("process %s (%d) attempted to register an IP-MON it has registered an IP-MON before\n", current->comm, current->pid);
++        return -EPERM;
++    }
++
++    /* IP-MON may not mask calls that this kernel doesn't know - Do some sanity                                    
++     * checks here on the reported syscall mask */
++    if (syscall_mask_size > kernel_syscall_mask_size)
++    {
++        printk("process %s (%d) attempted to register an IP-MON but the syscall_mask_size is invalid (%lu)\n", current->comm, current->pid, syscall_mask_size);
++        return -EINVAL;
++    }
++
++    /* OK. We did not have an initialized IP-MON yet and the mask size seems valid. */
++    if (copy_from_user(syscall_mask_copy, syscall_mask, syscall_mask_size))
++    {
++        printk("process %s (%d) attempted to register an IP-MON but the syscall_mask_address is invalid (%lx)\n", current->comm, current->pid, (unsigned long)syscall_mask);
++        return -EFAULT;
++    }
++
++    if (syscall_mask_size < kernel_syscall_mask_size)
++		memset(syscall_mask_copy + syscall_mask_size, 0, kernel_syscall_mask_size - syscall_mask_size);
++
++    /* Now check if the IP-MON is trying to be naughty */
++    memcpy(syscall_mask_check, syscall_mask_copy, kernel_syscall_mask_size);
++
++    /* mask all syscalls that may actually bypass the ptracer */
++    for (i = 0; i < sizeof(ipmon_allowed_syscalls) / sizeof(unsigned long); ++i)
++        ipmon_set_unchecked_syscall(syscall_mask_check, ipmon_allowed_syscalls[i], 0);
++
++    /* If the mask is non-null then the program is trying to do something nasty :) */
++    for (i = 0; i < kernel_syscall_mask_size; ++i)
++    {
++        if (syscall_mask_check[i])
++        {
++            for (j = 0; j < 8; ++j)
++            {
++                if ((syscall_mask_check[i] >> j) & 0x1)
++                {
++                    syscall_no = i * 8 + (7 - j);
++                    break;
++                }
++            }
++            printk("process %s (%d) attempted to register an IP-MON but the syscall_mask is invalid (syscall %d may not bypass the ptracer)\n", current->comm, current->pid, syscall_no);
++            return -EPERM;
++        }
++    }
++
++    /* ok so the IP-MON has not been initialized yet and the program is not
++	 * trying to unblock any system calls that we will not allow */
++    down_read(&current->mm->mmap_sem);
++
++    /* Fetch the program counter and map it to the VMA. IP-MON must register
++       itself!  Therefore, the program counter we see here must point to
++       IP-MON. It is the ptracer's responsibility to verify that the expected
++       IP-MON is registering, rather than something that impersonates IP-MON! */
++    program_counter = task_pt_regs(current)->ip;
++
++    ipmon_vma = find_vma(current->mm, program_counter);
++    if (!ipmon_vma || ipmon_vma->vm_start > program_counter)
++    {
++        error = -EINVAL;
++        printk("process %s (%d) attempted to register an IP-MON but we could not find the VMA associated with PC: %lx\n", current->comm, current->pid, program_counter);
++        goto out;
++    }
++
++    /* See if we can find the repication buffer */
++    ipmon_rb_vma = find_vma(current->mm, (unsigned long)replication_buffer_base);
++    if (!ipmon_rb_vma || ipmon_rb_vma->vm_start > (unsigned long)replication_buffer_base)
++    {
++        error = -EINVAL;
++        printk("process %s (%d) attempted to register an IP-MON but we could not find the VMA associated with Replication Buffer base: %lx\n", current->comm, current->pid, (unsigned long)replication_buffer_base);
++        goto out;
++    }
++
++    /* Finally, check if the enclave entrypoint is within the vma that registered IP-MON */
++    if ((unsigned long)enclave_entrypoint < ipmon_vma->vm_start ||
++        (unsigned long)enclave_entrypoint >= ipmon_vma->vm_end)
++    {
++        error = -EINVAL;
++        printk("process %s (%d) attempted to register an IP-MON but this enclave entrypoint is invalid: %lx\n", current->comm, current->pid, (unsigned long)enclave_entrypoint);
++        goto out;
++    }
++
++    /* OK! We have everything... */
++    current->ipmon_info.ipmon_exec               = ipmon_vma;
++    current->ipmon_info.ipmon_rb                 = ipmon_rb_vma;
++    current->ipmon_info.ipmon_enclave_entrypoint = enclave_entrypoint;
++    current->ipmon_info.ipmon_enabled            = 1;
++    current->ipmon_info.ipmon_orig_syscall       = (unsigned long)-1;
++    memcpy(current->ipmon_info.ipmon_masked_syscalls, syscall_mask_copy, kernel_syscall_mask_size);
++
++    printk("process %s (%d) registered an IP-MON at: %lx-%lx\n", current->comm, current->pid,
++           ipmon_vma->vm_start, ipmon_vma->vm_end);
++
++out:
++    up_read(&current->mm->mmap_sem);
++    return 0;
++}
++
+ #ifdef CONFIG_CHECKPOINT_RESTORE
+ static int prctl_get_tid_address(struct task_struct *me, int __user **tid_addr)
+ {
+@@ -1998,6 +2358,10 @@
+ 		if (arg2 || arg3 || arg4 || arg5)
+ 			return -EINVAL;
+ 		return task_no_new_privs(current) ? 1 : 0;
++		/* MVEE IP-MON patch */
++		case PR_REGISTER_IPMON:
++			error = prctl_register_ipmon((unsigned char __user*)arg2, arg3, (void __user*)arg4, (void __user*)arg5);
++			break;
+ 	default:
+ 		error = -EINVAL;
+ 		break;

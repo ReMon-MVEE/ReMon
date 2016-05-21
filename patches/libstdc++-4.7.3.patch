@@ -1,0 +1,94 @@
+diff -r --unified gcc-4.7.3.orig/libstdc++-v3/config/abi/pre/gnu.ver gcc-4.7.3/libstdc++-v3/config/abi/pre/gnu.ver
+--- gcc-4.7.3.orig/libstdc++-v3/config/abi/pre/gnu.ver	2012-02-27 14:51:50.000000000 +0100
++++ gcc-4.7.3/libstdc++-v3/config/abi/pre/gnu.ver	2014-01-08 14:38:56.876182618 +0100
+@@ -22,6 +22,9 @@
+ 
+   global:
+ 
++  mvee_atomic_preop;
++  mvee_atomic_postop;
++
+     # Names inside the 'extern' block are demangled names.
+     extern "C++"
+     {
+diff -r --unified gcc-4.7.3.orig/libstdc++-v3/configure.host gcc-4.7.3/libstdc++-v3/configure.host
+--- gcc-4.7.3.orig/libstdc++-v3/configure.host	2012-12-18 15:27:14.000000000 +0100
++++ gcc-4.7.3/libstdc++-v3/configure.host	2014-01-08 13:36:25.727985709 +0100
+@@ -103,9 +103,6 @@
+   crisv32)
+     try_cpu=cris
+     ;;
+-  i[567]86 | x86_64)
+-    try_cpu=i486
+-    ;;
+   hppa*)
+     try_cpu=hppa
+     ;;
+@@ -123,9 +120,6 @@
+     try_cpu=sparc
+     ;;
+   *)
+-    if test -d ${glibcxx_srcdir}/config/cpu/${host_cpu}; then
+-      try_cpu=${host_cpu}
+-    fi
+ esac
+ 
+ 
+diff -r --unified gcc-4.7.3.orig/libstdc++-v3/include/bits/c++config gcc-4.7.3/libstdc++-v3/include/bits/c++config
+--- gcc-4.7.3.orig/libstdc++-v3/include/bits/c++config	2011-11-02 05:23:33.000000000 +0100
++++ gcc-4.7.3/libstdc++-v3/include/bits/c++config	2014-01-09 12:41:29.793101477 +0100
+@@ -30,7 +30,7 @@
+ 
+ #ifndef _GLIBCXX_CXX_CONFIG_H
+ #define _GLIBCXX_CXX_CONFIG_H 1
+-
++  
+ // The current version of the C++ library in compressed ISO date format.
+ #define __GLIBCXX__
+ 
+@@ -450,4 +450,5 @@
+ #undef min
+ #undef max
+ 
++#include "/home/stijn/MVEE/mvee_lazy_hooker/mvee_atomic.h"
+ // End of prewritten config; the settings discovered at configure time follow.
+diff -r --unified gcc-4.7.3.orig/libstdc++-v3/include/ext/atomicity.h gcc-4.7.3/libstdc++-v3/include/ext/atomicity.h
+--- gcc-4.7.3.orig/libstdc++-v3/include/ext/atomicity.h	2012-01-27 21:26:03.000000000 +0100
++++ gcc-4.7.3/libstdc++-v3/include/ext/atomicity.h	2014-01-08 15:01:55.827512749 +0100
+@@ -107,10 +107,10 @@
+ // that the compiler doesn't reorder memory accesses across the
+ // barriers.
+ #ifndef _GLIBCXX_READ_MEM_BARRIER
+-#define _GLIBCXX_READ_MEM_BARRIER __asm __volatile ("":::"memory")
++#define _GLIBCXX_READ_MEM_BARRIER __sync_synchronize()
+ #endif
+ #ifndef _GLIBCXX_WRITE_MEM_BARRIER
+-#define _GLIBCXX_WRITE_MEM_BARRIER __asm __volatile ("":::"memory")
++#define _GLIBCXX_WRITE_MEM_BARRIER __sync_synchronize()
+ #endif
+ 
+ #endif 
+diff -r --unified gcc-4.7.3.orig/libstdc++-v3/libsupc++/guard.cc gcc-4.7.3/libstdc++-v3/libsupc++/guard.cc
+--- gcc-4.7.3.orig/libstdc++-v3/libsupc++/guard.cc	2012-09-11 17:24:06.000000000 +0200
++++ gcc-4.7.3/libstdc++-v3/libsupc++/guard.cc	2014-01-08 15:25:15.806136820 +0100
+@@ -36,11 +36,17 @@
+ # include <climits>
+ # include <syscall.h>
+ # include <unistd.h>
+-# define _GLIBCXX_USE_FUTEX
+-# define _GLIBCXX_FUTEX_WAIT 0
+-# define _GLIBCXX_FUTEX_WAKE 1
++//MVEE Patch
++//# define _GLIBCXX_USE_FUTEX
++//# define _GLIBCXX_FUTEX_WAIT 0
++//# define _GLIBCXX_FUTEX_WAKE 1
+ #endif
+ 
++namespace {
++  extern "C" void mvee_atomic_preop(int op) { __asm__ __volatile__ ("nop; nop; nop; nop; nop; nop; "); }
++  extern "C" void mvee_atomic_postop() { __asm__ __volatile__ ("nop; nop; nop; nop; nop; nop; "); }
++}
++
+ // The IA64/generic ABI uses the first byte of the guard variable.
+ // The ARM EABI uses the least significant bit.
+ 

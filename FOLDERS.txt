@@ -1,0 +1,15 @@
+Folder Name				Public?			Description
+-------------------------------------------------------------------------------------------------------------------------------------
+Benchmarks				Private			Various benchmark programs. These are all horribly outdated (except ones in the VARAN folder)
+exploits				Public			Exploits used in the "Cloning your Gadgets" paper
+interposer_binaries		Public			This is where we dump all compiled interposers
+Interposers				Public	     	Source code for various interposers. We don't really use these anymore
+IP-MON					Public      	Source code for the IP-MON component from the USENIX ATC 2016 paper
+MVEE					Public     		Source code for GHUMVEE/CP-MON itself
+MVEE_LD_Loader			Public			Source code for the GHUMVEE Program Loader
+patched_binaries		Public			GHUMVEE is configured to look for its patched libc/libpthreads/etc. here
+patches					Public			Source code for the various patches for the kernel, system libs, benchmarks, etc.
+scripts					Public			Various scripts (mostly outdated)
+spec_configs			Public			SPEC2006 configs we used for the "Cloning your Gadgets" paper
+Tests					Private			Various unit tests (mostly outdated)
+Utilities				Public			Support libraries + the backtracer

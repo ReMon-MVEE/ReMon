@@ -1,0 +1,66 @@
+diff -r --unified gcc-4.7.3.orig/libgomp/config/linux/ptrlock.h gcc-4.7.3/libgomp/config/linux/ptrlock.h
+--- gcc-4.7.3.orig/libgomp/config/linux/ptrlock.h	2009-04-09 17:00:19.000000000 +0200
++++ gcc-4.7.3/libgomp/config/linux/ptrlock.h	2014-01-13 17:22:30.444421185 +0100
+@@ -39,8 +39,9 @@
+ 
+ static inline void *gomp_ptrlock_get (gomp_ptrlock_t *ptrlock)
+ {
+-  if (ptrlock->ptr != NULL)
+-    return ptrlock->ptr;
++  // LAME
++  /*if (ptrlock->ptr != NULL)
++    return ptrlock->ptr;*/
+ 
+   gomp_mutex_lock (&ptrlock->lock);
+   if (ptrlock->ptr != NULL)
+diff -r --unified gcc-4.7.3.orig/libgomp/configure gcc-4.7.3/libgomp/configure
+--- gcc-4.7.3.orig/libgomp/configure	2013-04-11 09:59:02.000000000 +0200
++++ gcc-4.7.3/libgomp/configure	2014-01-13 18:49:39.765040945 +0100
+@@ -16043,11 +16043,6 @@
+ fi
+ { $as_echo "$as_me:${as_lineno-$LINENO}: result: $libgomp_cv_have_sync_builtins" >&5
+ $as_echo "$libgomp_cv_have_sync_builtins" >&6; }
+-  if test $libgomp_cv_have_sync_builtins = yes; then
+-
+-$as_echo "#define HAVE_SYNC_BUILTINS 1" >>confdefs.h
+-
+-  fi
+ 
+ XCFLAGS="$XCFLAGS$XPCFLAGS"
+ 
+diff -r --unified gcc-4.7.3.orig/libgomp/critical.c gcc-4.7.3/libgomp/critical.c
+--- gcc-4.7.3.orig/libgomp/critical.c	2011-11-30 05:02:53.000000000 +0100
++++ gcc-4.7.3/libgomp/critical.c	2014-01-13 13:36:23.416325210 +0100
+@@ -30,6 +30,9 @@
+ 
+ static gomp_mutex_t default_lock;
+ 
++void __attribute__((noinline)) mvee_atomic_preop(int op) { __asm__ __volatile__ ("nop; nop; nop; nop; nop; nop; "); }
++void __attribute__((noinline)) mvee_atomic_postop() { __asm__ __volatile__ ("nop; nop; nop; nop; nop; nop; "); }
++
+ void
+ GOMP_critical_start (void)
+ {
+diff -r --unified gcc-4.7.3.orig/libgomp/libgomp.h gcc-4.7.3/libgomp/libgomp.h
+--- gcc-4.7.3.orig/libgomp/libgomp.h	2011-11-29 03:19:05.000000000 +0100
++++ gcc-4.7.3/libgomp/libgomp.h	2014-01-13 13:36:23.417325337 +0100
+@@ -35,6 +35,7 @@
+ #ifndef LIBGOMP_H 
+ #define LIBGOMP_H 1
+ 
++#include "mvee_atomic.h"
+ #include "config.h"
+ #include "gstdint.h"
+ 
+diff -r --unified gcc-4.7.3.orig/libgomp/libgomp.map gcc-4.7.3/libgomp/libgomp.map
+--- gcc-4.7.3.orig/libgomp/libgomp.map	2011-08-02 18:13:29.000000000 +0200
++++ gcc-4.7.3/libgomp/libgomp.map	2014-01-13 13:36:23.418325464 +0100
+@@ -1,5 +1,8 @@
+ OMP_1.0 {
+   global:
++  # MVEE patches
++  mvee_atomic_preop;
++  mvee_atomic_postop;
+ 	omp_set_num_threads;
+ 	omp_get_num_threads;
+ 	omp_get_max_threads;

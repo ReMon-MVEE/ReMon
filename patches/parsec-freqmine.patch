@@ -1,0 +1,55 @@
+diff -r --unified parsec-2.1/pkgs/apps/freqmine/src/fp_tree.cpp parsec-2.1-patched/pkgs/apps/freqmine/src/fp_tree.cpp
+--- parsec-2.1/pkgs/apps/freqmine/src/fp_tree.cpp	2009-01-21 08:09:15.000000000 -0800
++++ parsec-2.1-patched/pkgs/apps/freqmine/src/fp_tree.cpp	2016-03-29 12:34:51.419784172 -0700
+@@ -1246,6 +1246,8 @@
+ 
+ void FP_tree::release_node_array_after_mining(int sequence, int thread, int workingthread)
+ {
++#pragma omp critical
++  {
+ 	int current, i;
+ 	thread_finish_status[thread] = sequence;
+ 	current = 0;
+@@ -1253,8 +1255,7 @@
+ 		if (current < thread_finish_status[i])
+ 			current = thread_finish_status[i];
+ 	}
+-{
+-#pragma omp critical
++
+ 	{
+ 		if (current < released_pos) {
+ 			released_pos = current;
+@@ -1262,11 +1263,12 @@
+ 		}
+ 	}
+ }
+-
+ }
+ 
+ void FP_tree::release_node_array_before_mining(int sequence, int thread, int workingthread)
+ {
++#pragma omp critical
++  {
+ 	int current, i;
+ 	thread_begin_status[thread] = sequence;
+ 	current = 0;
+@@ -1275,16 +1277,14 @@
+ 			current = thread_begin_status[i];
+ 	}
+ 	current ++;
+-{
+-#pragma omp critical
++
+ 	{
+ 		if (current < released_pos) {
+ 			released_pos = current;
+ 			fp_node_sub_buf->freebuf(MR_nodes[current], MC_nodes[current], MB_nodes[current]);
+ 		}
+ 	}
+-}
+-
++  }
+ }
+ 
+ int FP_tree::FP_growth_first(FSout* fout)

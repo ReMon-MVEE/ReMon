@@ -1,0 +1,13 @@
+Only in parsec-2.1/pkgs/libs/libxml2/: obj
+diff -r --unified parsec-2.1/pkgs/libs/libxml2/src/nanohttp.c parsec-2.1-patched/pkgs/libs/libxml2/src/nanohttp.c
+--- parsec-2.1/pkgs/libs/libxml2/src/nanohttp.c	2007-04-17 05:43:53.000000000 -0700
++++ parsec-2.1-patched/pkgs/libs/libxml2/src/nanohttp.c	2016-03-29 13:08:47.191772651 -0700
+@@ -1582,7 +1582,7 @@
+     if (!strcmp(filename, "-")) 
+         fd = 0;
+     else {
+-        fd = open(filename, O_CREAT | O_WRONLY);
++        fd = open(filename, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR);
+ 	if (fd < 0) {
+ 	    xmlNanoHTTPClose(ctxt);
+ 	    return(-1);

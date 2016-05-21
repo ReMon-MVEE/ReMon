@@ -1,0 +1,14 @@
+--- glibc-2.19.orig/elf/rtld.c	2014-12-09 16:38:51.929980899 +0100
++++ glibc-2.19/elf/rtld.c	2014-12-28 13:20:18.613821869 +0100
+@@ -1085,6 +1085,11 @@
+       /* Now the map for the main executable is available.  */
+       main_map = GL(dl_ns)[LM_ID_BASE]._ns_loaded;
+ 
++      /* Make sure that the type for the main binary is lt_executable, 
++	 even if it says ET_DYN in the header. This way we won't call the
++	 static initializers twice for PIE binaries */
++      main_map->l_type = lt_executable;
++
+       if (__builtin_expect (mode, normal) == normal
+ 	  && GL(dl_rtld_map).l_info[DT_SONAME] != NULL
+ 	  && main_map->l_info[DT_SONAME] != NULL
