@@ -2,7 +2,7 @@
 #define IPMON_INLINES_H_
 
 /*
- * Most of these inline assembly functions has different variants:
+ * Most of these inline assembly functions have different variants:
  * - one variant has a pointer argument that points to local memory (i.e., not into the RB) and thus can leak
  * - one variant has a pointer argument that points into the RB and should not leak. 
  *   Thus, this argument is now an *offset* into the RB, through the RB_REGISTER register.
