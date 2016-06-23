@@ -212,16 +212,20 @@ cp <arch>-pc-linux-gnu/libstdc++-v3/src/.libs/libstdc++.so.6.0.<ver> /path/to/Re
 
 Here are some of the publications that build on or use ReMon:
 
+[Secure and Efficient Application Monitoring and Replication](http://ics.uci.edu/~stijnv/Papers/atc16-remon.pdf)
+Stijn Volckaert, Bart Coppens, Alexios Voulimeneas, Andrei Homescu, Per Larsen, Bjorn De Sutter, Michael Franz.
+In 2016 USENIX Annual Technical Conference (ATC'16), pages 167-179. USENIX, 2016.
+
 [Advanced Techniques for Multi-Variant Execution](http://ics.uci.edu/~stijnv/Papers/thesis.pdf)
 Stijn Volckaert.
 PhD dissertation, Ghent University, 2015.
 
-[Cloning your Gadgets: Complete ROP Attack Immunity with Multi-Variant Execution](http://ics.uci.edu/~stijnv/Papers/cloning.pdf)
+[Cloning your Gadgets: Complete ROP Attack Immunity with Multi-Variant Execution](http://ics.uci.edu/~stijnv/Papers/tdsc15-gadgets.pdf)
 Stijn Volckaert, Bart Coppens, and Bjorn De Sutter.
 To appear in IEEE Transactions on Dependable and Secure Computing (TDSC).
 DOI:10.1109/TDSC.2015.2411254.
 
-[GHUMVEE: Efficient, effective, and flexible replication](http://ics.uci.edu/~stijnv/Papers/ghumvee.pdf)
+[GHUMVEE: Efficient, effective, and flexible replication](http://ics.uci.edu/~stijnv/Papers/fps12-ghumvee.pdf)
 Stijn Volckaert, Bjorn De Sutter, Tim De Baets, and Koen De Bosschere.
 In 5th International Symposium on Foundations and Practice of Security (FPS'12), pages 261-277. Springer, 2013.
 
