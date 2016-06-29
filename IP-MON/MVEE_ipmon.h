@@ -1,8 +1,11 @@
 /*
  * GHent University Multi-Variant Execution Environment (GHUMVEE)
+ * Copyright (C) 2010-2015 Stijn Volckaert, Ghent University
+ *                   <svolckae@elis.ugent.be>
+ *                     All rights reserved.
  *
- * This source file is distributed under the terms and conditions 
- * found in IPMONLICENSE.txt.
+ * This software package is licensed to University of California, Irvine
+ * under the terms and conditions found in LICENSE.txt.
  */
 
 /*-----------------------------------------------------------------------------
@@ -17,6 +20,18 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/*-----------------------------------------------------------------------------
+    RB Pointer Handling
+-----------------------------------------------------------------------------*/
+//
+// Bart: if this is defined, the enclave entrypoint will _explicitly_ pass the
+// RB pointer to the ipmon_enclave C function as the first argument
+//
+// If this is _NOT_ defined, then the enclave entrypoint will just keep
+// the RB pointer in register R11
+//
+#define IPMON_PASS_RB_POINTER_EXPLICITLY
 
 /*-----------------------------------------------------------------------------
     Policy control
@@ -48,7 +63,10 @@ extern "C" {
 // SOCKET_RO_POLICY + allow write calls on sockets
 #define SOCKET_RW_POLICY     5
 
-#define CURRENT_POLICY       SOCKET_RO_POLICY
+// Allow all supported calls
+#define FULL_SYSCALLS        6
+
+#define CURRENT_POLICY       FULL_SYSCALLS
 
 /*-----------------------------------------------------------------------------
     Definitions and Generic Macros
@@ -71,8 +89,6 @@ extern "C" {
 #define cpu_relax() asm volatile("rep; nop" ::: "memory")
 #define gcc_barrier() asm volatile("" ::: "memory")
 
-#define RB_REGISTER "r13"
-
 
 #define CACHE_LINE_SIZE 64
 #define MVEE_FUTEX_WAIT_TID                30
@@ -87,13 +103,16 @@ extern "C" {
 #define FUTEX_WAKE 1
 #define INT_MAX 0x7fffffff
 
+#define O_FILEFLAGSMASK                    (O_LARGEFILE | O_RSYNC | O_DSYNC | O_NOATIME | O_DIRECT | O_ASYNC | O_FSYNC | O_SYNC | O_NDELAY | O_NONBLOCK | O_APPEND | O_TRUNC | O_NOCTTY | O_EXCL | O_CREAT | O_ACCMODE)
+#define S_FILEMODEMASK                     (S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IWGRP | S_IXGRP | S_IROTH | S_IWOTH | S_IXOTH)
+
+
 typedef unsigned long rb_pointer;
 
-#define STATIC static
-#define INLINE inline __attribute__((always_inline))
+//#define STATIC static
 //#define INLINE inline
-// #define STATIC
-// #define INLINE
+#define STATIC
+#define INLINE
 
 /*-----------------------------------------------------------------------------
     System Call Handler Macros
@@ -127,8 +146,12 @@ typedef unsigned long rb_pointer;
 // syscall args are logged. In the slave variants, this is where the syscall
 // args are compared with the logged values.
 //
+// NOTE: This handler returns a system call type. Only the type returned
+// in the master matters, however. The slave variants will simply use the
+// same type the master logged into the RB.
+//
 #define PRECALL(a)       \
-	STATIC INLINE unsigned long ipmon_handle_##a##_precall       (struct ipmon_syscall_args& args, unsigned long entry_offset, unsigned char order=0)
+	STATIC INLINE unsigned long ipmon_handle_##a##_precall       (struct ipmon_syscall_args& args, struct ipmon_syscall_entry* entry, unsigned char order=0)
 
 //
 // Handles the post-syscall logic. In the master variant, this is where the
@@ -136,7 +159,7 @@ typedef unsigned long rb_pointer;
 // the master's results.
 //
 #define POSTCALL(a)      \
-	STATIC INLINE unsigned int  ipmon_handle_##a##_postcall      (struct ipmon_syscall_args& args, unsigned long entry_offset, long ret, bool success, unsigned char order=0)
+	STATIC INLINE unsigned int  ipmon_handle_##a##_postcall      (struct ipmon_syscall_args& args, struct ipmon_syscall_entry* entry, long ret, long realret, bool success, unsigned char order=0)
 
 // 
 // Convenience Macros used in the syscall handlers
@@ -149,19 +172,23 @@ typedef unsigned long rb_pointer;
 #define ARG6 args.arg6
 
 //
-// Possible ways to complete a system call
+// Who should execute the syscall?
 //
-#define IPMON_EXEC_NO_IPMON  0 // Do not use IP-MON to execute the syscall.
-#define IPMON_EXEC_NOEXEC    1 // Do not execute the syscall but do invoke IP-MON for return value replication
-#define IPMON_EXEC_IPMON     2 // Execute the syscall and if we're the master, also store return values
+#define IPMON_EXEC_NO_IPMON  1 // Do not use IP-MON to execute the syscall - Route to CP-MON instead
+#define IPMON_EXEC_NOEXEC    2 // Abort the syscall but possibly use IP-MON for return value replication
+#define IPMON_EXEC_MASTER    4 // The master executes the syscall. The slaves no not.
+#define IPMON_EXEC_ALL       8 // All variants execute the syscall
 
 //
-// Possible system call types for IPMON_EXEC_IPMON
+// Possible ways to handle replication
 //
-#define IPMON_MASTERCALL     1 // Only the master should invoke the original syscall
-#define IPMON_NORMAL_CALL    2 // All variants invoke the original syscall
-#define IPMON_UNSYNCED_CALL  4 // All variants invoke the original syscall. No lock-stepping neccessary
-#define IPMON_BLOCKING_CALL  8 // The call is expected to block. This is not a distinct call type. It is ORed with one of the above call types.
+#define IPMON_REPLICATE_MASTER 16 // The master results are replicated to the slaves
+
+//
+// Extra modifiers
+//
+#define IPMON_UNSYNCED_CALL  32 // No lock-stepping for this call
+#define IPMON_BLOCKING_CALL  64 // The call is expected to block. This is not a distinct call type. It is ORed with one of the above call types.
 
 #define IPMON_MAYBE_BLOCKING(fd) ((ipmon_get_file_type(fd) & MVEE_BLOCKING_FD) ? IPMON_BLOCKING_CALL : 0)
 
@@ -181,13 +208,14 @@ enum FileType
     FT_PIPE_BLOCKING = 18,    // 16 | 2
     FT_SOCKET_BLOCKING = 19,  // 16 | 3
     FT_POLL_BLOCKING = 20,    // 16 | 4
+	FT_MASTER_FILE = 32
 };
 
 /*-----------------------------------------------------------------------------
     IP-MON Mask Macros
 -----------------------------------------------------------------------------*/
 #define IPMON_MASK(mask) 				    unsigned char mask[ROUND_UP(__NR_syscalls, 8) / 8]
-#define IPMON_MASK_CLEAR(mask) 			    ipmon_memset_ptr(mask, 0, ROUND_UP(__NR_syscalls, 8) / 8)
+#define IPMON_MASK_CLEAR(mask) 			    memset(mask, 0, ROUND_UP(__NR_syscalls, 8) / 8)
 #define IPMON_MASK_SET(mask, syscall) 	    ipmon_set_unchecked_syscall(mask, syscall, 1)
 #define IPMON_MASK_UNSET(mask, syscall)     ipmon_set_unchecked_syscall(mask, syscall, 0)
 #define IPMON_MASK_ISSET(mask, syscall) 	ipmon_is_unchecked_syscall(mask, syscall)
@@ -235,10 +263,10 @@ struct ipmon_condvar
 struct ipmon_syscall_entry
 {
 	unsigned int  syscall_no;								// 0	- syscall no, see unistd.h
-    unsigned char syscall_checked;							// 4	- if set to 1, the syscall must be reported to the ptracer and we don't perform user-space arg verification and return replication
-	unsigned char syscall_is_mastercall;					// 5	- if set to 1, only the master may execute the call. The slaves just get the same result
-	unsigned char syscall_is_blocking;                      // 6    - if set to 1, the master is expecting the syscall to block for some time and the slave should use a futex call on the return_valid field to wait for the result
-	unsigned char padding;                                  // 7    - 
+    unsigned char syscall_type; 							// 4	- bitwise or mask of call types above
+	unsigned char padding1;                                 // 5	- 
+	unsigned char padding2;                                 // 6    - 
+	unsigned char padding3;                                 // 7    - 
 	struct ipmon_condvar
                   syscall_results_available;                // 8    - optimized condition variable. Does not support consecutive wait operations
 	struct ipmon_barrier
@@ -291,15 +319,14 @@ struct ipmon_syscall_args
 	unsigned long arg5;
 	unsigned long arg6;
 
-	unsigned long entry_offset; /* offset wrt base of RB => 0 is invalid */
+	struct ipmon_syscall_entry* entry;
 };
 
 /*-----------------------------------------------------------------------------
     asm functions called from C
 -----------------------------------------------------------------------------*/
-long ipmon_checked_syscall   (unsigned long syscall_no, ...);
+long ipmon_checked_syscall	 (unsigned long syscall_no, ...);
 long ipmon_unchecked_syscall (unsigned long syscall_no, ...);
-/*-----------------------------------------------------------------------------
 
 /*-----------------------------------------------------------------------------
     Global Variables

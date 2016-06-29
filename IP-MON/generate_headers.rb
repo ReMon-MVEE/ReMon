@@ -72,6 +72,6 @@ IO.popen("gcc -E MVEE_ipmon.cpp") { |p|
 write_header(@unsynced, "is_unsynced", "", "return", "")
 write_header(@maybe_checked, "maybe_checked", "args", "return", "")
 write_header(@calcsize, "calcsize", "args, args_size, ret_size", "", "break;")
-write_header(@precall, "precall", "args, entry_offset", "return", "")
-write_header(@postcall, "postcall", "args, entry_offset, ret, success", "return", "")
+write_header(@precall, "precall", "args, entry", "return", "")
+write_header(@postcall, "postcall", "args, entry, ret, realret, success", "return", "")
 
