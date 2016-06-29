@@ -9,8 +9,20 @@
  */
 
 /*-----------------------------------------------------------------------------
-    TODO:
-	* Add syslocks
+    Some system calls, particularly the ones that relate to resource management,
+    have to complete in the same order in all variants. Possible consequences 
+	of not executing these calls in the same order are:
+	1) IP-MON's bookkeeping (e.g. the file map) might become inconsistent
+	2) There might be situations where syscalls fail in some variants but not
+	in others.
+
+	In GHUMVEE, we use a "syslock" mechanism to prevent variants from entering
+	certain syscalls while a related syscall is still in flight in other
+	variants.
+
+	In IP-MON, we cannot implement such a mechanism due to the decentralized
+	nature of the monitor. Instead, we can use logical clocks and assign the
+	current clock value to each "order-sensitive" syscall.
 -----------------------------------------------------------------------------*/
 
 
@@ -43,6 +55,8 @@
 #include <arpa/inet.h>
 #include <sys/un.h>
 #include <sys/mman.h>
+#include <termios.h>
+#include <sys/inotify.h>
 #include "MVEE_ipmon.h"
 #include "MVEE_ipmon_memory.h"
 #include "../MVEE/Inc/MVEE_fake_syscall.h"
@@ -67,13 +81,6 @@ unsigned char            ipmon_variant_num       = 0;
 IPMON_MASK(mask);
 IPMON_MASK(kernelmask);
 
-//
-// epoll support
-//
-unsigned long ipmon_epoll_map[MAX_FDS][MAX_FDS];
-int           ipmon_epoll_map_spinlock = 1;
-volatile int* ipmon_epoll_map_lock_ptr = &ipmon_epoll_map_spinlock;
-
 /*-----------------------------------------------------------------------------
     IP-MON shared memory regions
 -----------------------------------------------------------------------------*/
@@ -82,18 +89,82 @@ volatile int* ipmon_epoll_map_lock_ptr = &ipmon_epoll_map_spinlock;
 //__thread struct ipmon_buffer* ipmon_replication_buffer    = NULL;
 
 // This buffer contains information about the file types for each fd
+
+// TODO: With the full syscalls policy, we might have to invalidate CLOEXEC
+// file descriptors ourselves...
 long           ipmon_reg_file_map_id          = -1;
 char*          ipmon_reg_file_map             = NULL;
 
+/*-----------------------------------------------------------------------------
+    Additional Bookkeeping
+-----------------------------------------------------------------------------*/
+//
+// All of the syscalls that allocate new file descriptors return the master's
+// fd value, even if the slaves do in fact execute that same syscall.
+//
+// Thus, for subsequent syscalls, we need a way to map master fds to slave fds.
+//
+// One situation where this may happen is when the variants load shared libs.
+// To load a shared lib, a program has to open the shared lib's file
+// using sys_open first. This sys_open call has to be executed by all variants,
+// so that the resulting fd is available for subsequent mmap calls.
+//
+// To simplify fd management, however, we return the master's fd value from
+// sys_open. This fd value might differ between variants. Thus, we store a
+// mapping in the ipmon_master_fd_to_slave_fd table below.
+//
 char           ipmon_master_fd_to_slave_fd [4096];
+
+//
+// We keep a similar shadow stucture to map fds registered with epoll instances.
+// This is explained in the USENIX ATC16 paper.
+//
+unsigned long ipmon_epoll_map[MAX_FDS][MAX_FDS];
+int           ipmon_epoll_map_spinlock = 1;
+volatile int* ipmon_epoll_map_lock_ptr = &ipmon_epoll_map_spinlock;
+
+/*-----------------------------------------------------------------------------
+    Syscall Ordering Support
+-----------------------------------------------------------------------------*/
+//
+// This is a logical (lamport-style) clock.
+//
+// NOTE: This mechanism will NOT always work. One situation where it will fail
+// is when variants fd spaces but not their address spaces. This can
+// happen if you pass weird arguments to sys_clone (i.e. CLONE_FILES but 
+// not CLONE_VM). Luckily, I don't think I've ever seen this.
+//
+long syscall_clock = 0;
+
+//
+// The lock that protects the clock.
+//
+long syscall_lock  = 0;
 
 /*-----------------------------------------------------------------------------
     ipmon_arg_verify_failed - Just crash the variant. It's super user friendly!
 -----------------------------------------------------------------------------*/
-STATIC INLINE void ipmon_arg_verify_failed(void* ptr)
+void ipmon_arg_verify_failed(void* ptr)
 {
 	*(volatile unsigned int*)((unsigned long)0x1000000000000000 | ((unsigned long)ptr)) = 0;
                              // 0000000000000000
+}
+
+/*-----------------------------------------------------------------------------
+    FD mapping support
+-----------------------------------------------------------------------------*/
+void ipmon_set_slave_fd(int master_fd, int slave_fd)
+{
+	if (master_fd < 0 || master_fd > 4096)
+		ipmon_arg_verify_failed((void*)(long)master_fd);
+	ipmon_master_fd_to_slave_fd[master_fd] = slave_fd;
+}
+
+int ipmon_get_slave_fd(int master_fd)
+{
+	if (master_fd < 0 || master_fd > 4096)
+		ipmon_arg_verify_failed((void*)(long)master_fd);
+	return ipmon_master_fd_to_slave_fd[master_fd];
 }
 
 /*-----------------------------------------------------------------------------
@@ -106,7 +177,7 @@ STATIC INLINE void ipmon_arg_verify_failed(void* ptr)
 					  : "m" (*mem));					\
 	__result; })
 
-STATIC INLINE void ipmon_epoll_lock()
+void ipmon_epoll_lock()
 {
 	while (1)
 	{
@@ -118,23 +189,23 @@ STATIC INLINE void ipmon_epoll_lock()
 	}
 }
 
-STATIC INLINE void ipmon_epoll_unlock()
+void ipmon_epoll_unlock()
 {
 	gcc_barrier();
 	*ipmon_epoll_map_lock_ptr = 1;
 }
 
-STATIC INLINE void ipmon_epoll_set_ptr_for_fd(int epoll_fd, int fd, unsigned long ptr)
+void ipmon_epoll_set_ptr_for_fd(int epoll_fd, int fd, unsigned long ptr)
 {
 	ipmon_epoll_map[epoll_fd][fd] = ptr;
 }
 
-STATIC INLINE unsigned long ipmon_epoll_get_ptr_for_fd(int epoll_fd, int fd)
+unsigned long ipmon_epoll_get_ptr_for_fd(int epoll_fd, int fd)
 {
 	return ipmon_epoll_map[epoll_fd][fd];
 }
 
-STATIC INLINE int ipmon_epoll_get_fd_for_ptr(int epoll_fd, unsigned long ptr)
+int ipmon_epoll_get_fd_for_ptr(int epoll_fd, unsigned long ptr)
 {
 	// optimization
 	if (ptr < 4096)
@@ -150,7 +221,7 @@ STATIC INLINE int ipmon_epoll_get_fd_for_ptr(int epoll_fd, unsigned long ptr)
 /*-----------------------------------------------------------------------------
     Keeping track of blocking/non-blocking system calls
 -----------------------------------------------------------------------------*/
-STATIC INLINE char ipmon_get_file_type(unsigned long fd)
+char ipmon_get_file_type(unsigned long fd)
 {
 	if (fd > 4096)
 		return 0;
@@ -159,9 +230,19 @@ STATIC INLINE char ipmon_get_file_type(unsigned long fd)
 }
 
 /*-----------------------------------------------------------------------------
+    ipmon_is_master_file
+-----------------------------------------------------------------------------*/
+unsigned char ipmon_is_master_file(unsigned long fd)
+{
+	if (ipmon_get_file_type(fd) & FT_MASTER_FILE)
+		return 1;
+	return 0;
+}
+
+/*-----------------------------------------------------------------------------
     Keeping track of blocking/non-blocking system calls
 -----------------------------------------------------------------------------*/
-STATIC INLINE void ipmon_set_file_type(unsigned long fd, char type)
+void ipmon_set_file_type(unsigned long fd, char type)
 {
 	if (fd > 4096)
 		return;
@@ -173,7 +254,7 @@ STATIC INLINE void ipmon_set_file_type(unsigned long fd, char type)
 /*-----------------------------------------------------------------------------
     ipmon_can_read
 -----------------------------------------------------------------------------*/
-STATIC INLINE bool ipmon_can_read(long fd)
+bool ipmon_can_read(long fd)
 {
 #if CURRENT_POLICY >= SOCKET_RO_POLICY
 	return true;
@@ -192,7 +273,7 @@ STATIC INLINE bool ipmon_can_read(long fd)
 /*-----------------------------------------------------------------------------
     ipmon_can_write
 -----------------------------------------------------------------------------*/
-STATIC INLINE bool ipmon_can_write(long fd)
+bool ipmon_can_write(long fd)
 {
 #if CURRENT_POLICY >= SOCKET_RW_POLICY
 	return true;
@@ -236,11 +317,82 @@ PRECALL(mmap)
 		CHECKREG(ARG6);
 
 		if (ipmon_variant_num != 0)
-			ARG5 = ipmon_master_fd_to_slave_fd[ARG5];
+			ARG5 = ipmon_get_slave_fd(ARG5);
 	}
 	return IPMON_EXEC_ALL;
 }
 
+/*-----------------------------------------------------------------------------
+    munmap - (void* addr, size_t len)
+-----------------------------------------------------------------------------*/
+CALCSIZE(munmap)
+{
+	COUNTREG(ARG);
+	COUNTREG(ARG);
+}
+
+PRECALL(munmap)
+{
+	// TODO: Handle ptmalloc madness
+	CHECKPOINTER(ARG1);
+	CHECKREG(ARG2);
+	return IPMON_EXEC_ALL;
+}
+
+/*-----------------------------------------------------------------------------
+    mprotect - (void* addr, size_t len, int prot)
+-----------------------------------------------------------------------------*/
+CALCSIZE(mprotect)
+{
+	COUNTREG(ARG);
+	COUNTREG(ARG);
+	COUNTREG(ARG);
+}
+
+PRECALL(mprotect)
+{
+	CHECKPOINTER(ARG1);
+	CHECKREG(ARG2);
+	CHECKREG(ARG3);
+	return IPMON_EXEC_ALL;
+}
+
+/*-----------------------------------------------------------------------------
+    mremap - (void* old_address, size_t old_size, 
+	size_t new_size, int flags, void* new_addr)
+-----------------------------------------------------------------------------*/
+CALCSIZE(mremap)
+{
+	COUNTREG(ARG);
+	COUNTREG(ARG);
+	COUNTREG(ARG);
+	COUNTREG(ARG);
+	COUNTREG(ARG);
+}
+
+PRECALL(mremap)
+{
+	CHECKPOINTER(ARG1);
+	CHECKREG(ARG2);
+	CHECKREG(ARG3);
+	CHECKREG(ARG4);
+	CHECKPOINTER(ARG5);
+	return IPMON_EXEC_ALL;
+}
+
+/*-----------------------------------------------------------------------------
+    brk - (void* addr)
+-----------------------------------------------------------------------------*/
+CALCSIZE(brk)
+{
+	COUNTREG(ARG);
+}
+
+PRECALL(brk)
+{
+	CHECKPOINTER(ARG1);
+	return IPMON_EXEC_ALL;
+}
 
 /*-----------------------------------------------------------------------------
     open - (const char* filename, int flags, int mode)
@@ -297,7 +449,7 @@ POSTCALL(open)
 			if (ipmon_variant_num == 0)
 				ipmon_set_file_type(ret, FT_REGULAR);
 			else
-				ipmon_master_fd_to_slave_fd[ret] = realret;
+				ipmon_set_slave_fd(ret, realret);
 		}
 	}
 	return order;
@@ -504,6 +656,49 @@ POSTCALL(accept)
 }
 
 /*-----------------------------------------------------------------------------
+    epoll_create - (int size)
+-----------------------------------------------------------------------------*/
+CALCSIZE(epoll_create)
+{
+	COUNTREG(ARG);
+}
+
+PRECALL(epoll_create)
+{
+	CHECKREG(ARG1);
+	return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
+}
+
+POSTCALL(epoll_create)
+{
+	if (success && ipmon_variant_num == 0)
+		ipmon_set_file_type(ret, FT_POLL_BLOCKING);
+	return order;
+}
+
+/*-----------------------------------------------------------------------------
+    epoll_create1 - (int flags)
+-----------------------------------------------------------------------------*/
+CALCSIZE(epoll_create1)
+{
+	COUNTREG(ARG);
+}
+
+PRECALL(epoll_create1)
+{
+	CHECKREG(ARG1);
+	return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
+}
+
+POSTCALL(epoll_create1)
+{
+	// flags is just used for cloexec. nothing more...
+	if (success && ipmon_variant_num == 0)
+		ipmon_set_file_type(ret, FT_POLL_BLOCKING);
+	return order;
+}
+
+/*-----------------------------------------------------------------------------
     close - (int fd)
 -----------------------------------------------------------------------------*/
 CALCSIZE(close)
@@ -514,20 +709,386 @@ CALCSIZE(close)
 PRECALL(close)
 {
 	CHECKREG(ARG1);
-
-	if (ipmon_variant_num == 0)
-	{
-		char file_type = ipmon_get_file_type(ARG1);
-		if (file_type & FT_MASTER_FILE)
-			return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;	
-	}
-	else
-	{
-		// make sure we get the fd right
-		ARG1 = ipmon_master_fd_to_slave_fd[ARG1];
-	}
-	return IPMON_EXEC_ALL | IPMON_REPLICATE_MASTER;
+	IPMON_MAYBE_DISPATCH_MASTER(ARG1);
 }
+
+POSTCALL(close)
+{
+	if (success && ipmon_variant_num == 0)
+		ipmon_set_file_type(ARG1, FT_UNKNOWN);
+	return order;
+}
+
+/*-----------------------------------------------------------------------------
+    fcntl - (int fd, unsigned int cmd, unsigned long arg)
+-----------------------------------------------------------------------------*/
+CALCSIZE(fcntl)
+{
+	COUNTREG(ARG);
+	COUNTREG(ARG);
+	COUNTREG(ARG);
+}
+
+PRECALL(fcntl)
+{
+	CHECKREG(ARG1);
+	CHECKREG(ARG2);
+	CHECKREG(ARG3);
+	IPMON_MAYBE_DISPATCH_MASTER(ARG1);
+}
+
+POSTCALL(fcntl)
+{
+	if (success && (ARG2 == F_DUPFD || ARG2 == F_DUPFD_CLOEXEC))
+		if (ipmon_variant_num == 0)
+			ipmon_set_file_type(ret, ipmon_get_file_type(ARG1));
+	return order;
+}
+
+/*-----------------------------------------------------------------------------
+    dup - (unsigned int oldfd)
+-----------------------------------------------------------------------------*/
+CALCSIZE(dup)
+{
+	COUNTREG(ARG);
+}
+
+PRECALL(dup)
+{
+	CHECKREG(ARG1);
+	IPMON_MAYBE_DISPATCH_MASTER(ARG1);
+}
+
+POSTCALL(dup)
+{
+	if (success && ipmon_variant_num == 0)
+		ipmon_set_file_type(ret, ipmon_get_file_type(ARG1));
+	return order;
+}
+
+/*-----------------------------------------------------------------------------
+    dup2 - (unsigned int oldfd, unsigned int newfd)
+-----------------------------------------------------------------------------*/
+CALCSIZE(dup2)
+{
+	COUNTREG(ARG);
+	COUNTREG(ARG);
+}
+
+PRECALL(dup2)
+{
+	CHECKREG(ARG1);
+	CHECKREG(ARG2);
+	IPMON_MAYBE_DISPATCH_MASTER(ARG1);
+}
+
+POSTCALL(dup2)
+{
+	if (success && ipmon_variant_num == 0)
+		ipmon_set_file_type(ARG2, ipmon_get_file_type(ARG1));
+	return order;
+}
+
+/*-----------------------------------------------------------------------------
+    dup3 - (unsigned int oldfd, unsigned int newfd, int flags)
+-----------------------------------------------------------------------------*/
+CALCSIZE(dup3)
+{
+	COUNTREG(ARG);
+	COUNTREG(ARG);
+}
+
+PRECALL(dup3)
+{
+	CHECKREG(ARG1);
+	CHECKREG(ARG2);
+	IPMON_MAYBE_DISPATCH_MASTER(ARG1);
+}
+
+POSTCALL(dup3)
+{
+	if (success && ipmon_variant_num == 0)
+		ipmon_set_file_type(ARG2, ipmon_get_file_type(ARG1));
+	return order;
+}
+
+/*-----------------------------------------------------------------------------
+    pipe - (int* fds)
+-----------------------------------------------------------------------------*/
+CALCSIZE(pipe)
+{
+	COUNTREG(ARG);
+	COUNTBUFFER(RET, ARG1, sizeof(int) * 2);
+}
+
+PRECALL(pipe)
+{
+	return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
+}
+
+POSTCALL(pipe)
+{
+	if (success)
+	{
+		if (ipmon_variant_num == 0)
+		{
+			ipmon_set_file_type(((int*)ARG1)[0], FT_PIPE_BLOCKING);
+			ipmon_set_file_type(((int*)ARG1)[1], FT_PIPE_BLOCKING);
+		}
+
+		REPLICATEBUFFER(ARG1, sizeof(int) * 2);
+	}
+	return order;
+}
+
+/*-----------------------------------------------------------------------------
+    pipe2 - (int* fds, int flags)
+-----------------------------------------------------------------------------*/
+CALCSIZE(pipe2)
+{
+	COUNTREG(ARG);
+	COUNTREG(ARG);
+	COUNTBUFFER(RET, ARG1, sizeof(int) * 2);
+}
+
+PRECALL(pipe2)
+{
+	return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
+}
+
+POSTCALL(pipe2)
+{
+	if (success)
+	{
+		if (ipmon_variant_num == 0)
+		{
+			ipmon_set_file_type(((int*)ARG1)[0], (ARG2 & O_NONBLOCK) ? FT_PIPE_NON_BLOCKING : FT_PIPE_BLOCKING);
+			ipmon_set_file_type(((int*)ARG1)[1], (ARG2 & O_NONBLOCK) ? FT_PIPE_NON_BLOCKING : FT_PIPE_BLOCKING);
+		}
+
+		REPLICATEBUFFER(ARG1, sizeof(int) * 2);
+	}
+	return order;
+}
+
+/*-----------------------------------------------------------------------------
+    inotify_init - (void)
+-----------------------------------------------------------------------------*/
+PRECALL(inotify_init)
+{
+	return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
+}
+
+POSTCALL(inotify_init)
+{
+	if (success && ipmon_variant_num == 0)
+		ipmon_set_file_type(ret, FT_POLL_BLOCKING);
+	return order;
+}
+
+/*-----------------------------------------------------------------------------
+    inotify_init1 - (int flags)
+-----------------------------------------------------------------------------*/
+CALCSIZE(inotify_init1)
+{
+	COUNTREG(ARG);
+}
+
+PRECALL(inotify_init1)
+{
+	CHECKREG(ARG1);
+	return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
+}
+
+POSTCALL(inotify_init1)
+{
+	if (success && ipmon_variant_num == 0)
+		ipmon_set_file_type(ret, (ARG1 & IN_NONBLOCK) ? FT_POLL_NON_BLOCKING : FT_POLL_BLOCKING);
+	return order;
+}
+
+/*-----------------------------------------------------------------------------
+    chdir - (const char* path)
+-----------------------------------------------------------------------------*/
+CALCSIZE(chdir)
+{
+	COUNTREG(ARG);
+	if (ARG)
+		COUNTSTRING(ARG, ARG1);
+}
+
+PRECALL(chdir)
+{
+	CHECKPOINTER(ARG1);
+	CHECKSTRING(ARG1);
+	return IPMON_EXEC_ALL;
+}
+
+/*-----------------------------------------------------------------------------
+    fchdir - (int fd)
+-----------------------------------------------------------------------------*/
+CALCSIZE(fchdir)
+{
+	COUNTREG(ARG);
+}
+
+PRECALL(fchdir)
+{
+	CHECKREG(ARG1);
+	ARG1 = ipmon_get_slave_fd(ARG1);
+	return IPMON_EXEC_ALL;
+}
+
+/*-----------------------------------------------------------------------------
+    ioctl - (unsigned int fd, unsigned int cmd, unsigned long arg)
+-----------------------------------------------------------------------------*/
+#if CURRENT_POLICY >= FULL_SYSCALLS
+CALCSIZE(ioctl)
+{
+	COUNTREG(ARG);
+	COUNTREG(ARG);
+	COUNTREG(ARG);
+
+	switch(ARG2)
+	{
+		// IN: const struct termios*
+		case TCSETS:
+		case TCSETSW:
+		case TCSETSF:
+		{
+			COUNTBUFFER(ARG, ARG3, sizeof(struct __kernel_termios));
+			break;
+		}
+
+		// OUT: const struct termios*
+		case TCGETS:
+		{
+			COUNTBUFFER(RET, ARG3, sizeof(struct __kernel_termios));
+			break;
+		}
+
+		// OUT: pid_t*
+		case TIOCGPGRP:
+		{
+			COUNTBUFFER(RET, ARG3, sizeof(pid_t));
+			break;
+		}
+
+		// IN: int*
+		case FIONBIO:
+		case FIOASYNC:
+		{
+			COUNTBUFFER(ARG, ARG3, sizeof(int));
+			break;
+		}
+
+		// OUT: int*
+		case FIONREAD:
+		{
+			COUNTBUFFER(RET, ARG3, sizeof(int));
+			break;
+		}
+
+		// IN: struct winsize*
+		case TIOCSWINSZ:
+		{
+			COUNTBUFFER(ARG, ARG3, sizeof(struct winsize));
+			break;
+		}
+
+		// OUT: struct winsize*
+		case TIOCGWINSZ:
+		{
+			COUNTBUFFER(RET, ARG3, sizeof(struct winsize));
+			break;
+		}
+	}
+}
+
+PRECALL(ioctl)
+{
+	CHECKREG(ARG1);
+	CHECKREG(ARG2);
+    CHECKPOINTER(ARG3);
+
+    unsigned char is_master = 0;
+    switch(ARG2)
+    {
+        case TCGETS:     // struct termios *
+            is_master = ipmon_is_master_file(ARG1);
+            break;
+
+        case FIONREAD:   // int*
+        case TIOCGWINSZ: // struct winsize *
+        case TIOCGPGRP:  // pid_t *
+        case TIOCSPGRP:  // const pid_t *
+            is_master = 1;
+            break;
+
+        case TCSETS:     // const struct termios *
+        case TCSETSW:    // const struct termios *
+        case TCSETSF:    // const struct termios *
+            CHECKBUFFER(ARG3, sizeof(struct __kernel_termios));
+            is_master = 1;
+            break;
+
+        case FIONBIO:    // int*
+        case FIOASYNC:
+            is_master = 1;
+            CHECKBUFFER(ARG3, sizeof(int));
+            break;
+
+        case TIOCSWINSZ:
+            CHECKBUFFER(ARG3, sizeof(struct winsize));
+            is_master = 1;
+            break;
+
+        case FIOCLEX:
+        case FIONCLEX:
+            break;
+
+        default:
+            // Unknown IOCTL
+			ipmon_arg_verify_failed((void*)ARG2);
+			break;
+			
+    }
+
+    if (!is_master)
+    {
+        if (ipmon_variant_num != 0)
+			ARG1 = ipmon_get_slave_fd(ARG1);
+        return IPMON_EXEC_ALL | IPMON_REPLICATE_MASTER;
+    }
+	return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
+}
+
+POSTCALL(ioctl)
+{
+    switch(ARG2)
+    {
+        case FIONREAD:
+            REPLICATEBUFFER(ARG3, sizeof(int));
+            break;
+        case TCGETS:
+            REPLICATEBUFFER(ARG3, sizeof(struct __kernel_termios));
+            break;
+        case TIOCGPGRP:
+            REPLICATEBUFFER(ARG3, sizeof(pid_t));
+            break;
+        case TIOCGWINSZ:
+            REPLICATEBUFFER(ARG3, sizeof(struct winsize));
+            break;
+    }
+
+    return order;
+}
+#endif
+
+/*-----------------------------------------------------------------------------
+    exit_group
+-----------------------------------------------------------------------------*/
+UNSYNCED(exit_group);
 
 /*-----------------------------------------------------------------------------
     uname - (struct utsname* buf)
@@ -2165,6 +2726,7 @@ PRECALL(setsockopt)
 
 	ioctl supports many getter calls which we could allow
 -----------------------------------------------------------------------------*/
+#if CURRENT_POLICY < FULL_SYSCALLS
 MAYBE_CHECKED(ioctl)
 {
 	if (ARG2 == FIONREAD)
@@ -2212,12 +2774,13 @@ POSTCALL(ioctl)
 
 	return order;
 }
+#endif
 
 /*-----------------------------------------------------------------------------
     ipmon_syscall_maybe_checked - allows a system call handler to decide whether
     or not a specific invocation should be reported to the monitor
 -----------------------------------------------------------------------------*/
-STATIC INLINE bool ipmon_syscall_maybe_checked(struct ipmon_syscall_args& args, unsigned long syscall_no)
+bool ipmon_syscall_maybe_checked(struct ipmon_syscall_args& args, unsigned long syscall_no)
 {
 	switch(syscall_no)
 	{
@@ -2229,7 +2792,7 @@ STATIC INLINE bool ipmon_syscall_maybe_checked(struct ipmon_syscall_args& args, 
 /*-----------------------------------------------------------------------------
     ipmon_syscall_is_unsynced
 -----------------------------------------------------------------------------*/
-STATIC INLINE unsigned char ipmon_syscall_is_unsynced(struct ipmon_syscall_args& args, unsigned long syscall_no)
+unsigned char ipmon_syscall_is_unsynced(struct ipmon_syscall_args& args, unsigned long syscall_no)
 {
 	switch(syscall_no)
 	{
@@ -2241,7 +2804,7 @@ STATIC INLINE unsigned char ipmon_syscall_is_unsynced(struct ipmon_syscall_args&
 /*-----------------------------------------------------------------------------
     ipmon_syscall_calcsize
 -----------------------------------------------------------------------------*/
-STATIC INLINE void ipmon_syscall_calcsize(struct ipmon_syscall_args& args, unsigned long syscall_no, unsigned int* ARG, unsigned int* RET)
+void ipmon_syscall_calcsize(struct ipmon_syscall_args& args, unsigned long syscall_no, unsigned int* ARG, unsigned int* RET)
 {
 	switch(syscall_no)
 	{
@@ -2254,7 +2817,7 @@ STATIC INLINE void ipmon_syscall_calcsize(struct ipmon_syscall_args& args, unsig
     verification in the slaves and determines whether or not the call is a
     mastercall
 -----------------------------------------------------------------------------*/
-STATIC INLINE unsigned char ipmon_syscall_precall(struct ipmon_syscall_args& args, struct ipmon_syscall_entry* entry)
+unsigned char ipmon_syscall_precall(struct ipmon_syscall_args& args, struct ipmon_syscall_entry* entry)
 {
 	switch(entry->syscall_no)
 	{
@@ -2269,7 +2832,7 @@ STATIC INLINE unsigned char ipmon_syscall_precall(struct ipmon_syscall_args& arg
     replication in the slaves.  Returns the number of ipmon_syscall_data
     elements used in the buffer for replicating the results
 -----------------------------------------------------------------------------*/
-STATIC INLINE int ipmon_syscall_postcall(struct ipmon_syscall_args& args, struct ipmon_syscall_entry* entry, long realret)
+int ipmon_syscall_postcall(struct ipmon_syscall_args& args, struct ipmon_syscall_entry* entry, long realret)
 {
 	long ret = entry->syscall_return_value;
 	bool success = (ret >= 0 || ret < -4096);
@@ -2293,7 +2856,7 @@ STATIC INLINE int ipmon_syscall_postcall(struct ipmon_syscall_args& args, struct
 
 	TODO: Rewrite in ASM to get rid of explicit pointer
 -----------------------------------------------------------------------------*/
-STATIC INLINE void ipmon_barrier_wait(struct ipmon_buffer* RB, struct ipmon_barrier* barrier)
+void ipmon_barrier_wait(struct ipmon_buffer* RB, struct ipmon_barrier* barrier)
 {
 	unsigned short old_seq = __atomic_load_n(&barrier->seq, __ATOMIC_SEQ_CST);
 	unsigned char count    = __atomic_add_fetch(&barrier->count, 1, __ATOMIC_SEQ_CST);
@@ -2341,7 +2904,7 @@ STATIC INLINE void ipmon_barrier_wait(struct ipmon_buffer* RB, struct ipmon_barr
 
 	TODO: Rewrite in ASM to get rid of explicit pointer
 -----------------------------------------------------------------------------*/
-STATIC INLINE void ipmon_cond_wait(struct ipmon_condvar* cv)
+void ipmon_cond_wait(struct ipmon_condvar* cv)
 {
 #ifndef IPMON_USE_FUTEXES_FOR_CONDVAR
 	int i = 0;
@@ -2381,7 +2944,7 @@ STATIC INLINE void ipmon_cond_wait(struct ipmon_condvar* cv)
 
 	TODO: Rewrite in ASM to get rid of explicit pointer
 -----------------------------------------------------------------------------*/
-STATIC INLINE void ipmon_cond_broadcast(struct ipmon_condvar* cv)
+void ipmon_cond_broadcast(struct ipmon_condvar* cv)
 {
 #ifndef IPMON_USE_FUTEXES_FOR_CONDVAR
 	__atomic_store_n(&cv->signaled, 1, __ATOMIC_SEQ_CST);
@@ -2402,7 +2965,7 @@ STATIC INLINE void ipmon_cond_broadcast(struct ipmon_condvar* cv)
 
 	TODO: Rewrite in ASM to get rid of explicit pointer
 -----------------------------------------------------------------------------*/
-STATIC INLINE void ipmon_sync_on_syscall_entrance(struct ipmon_syscall_entry* entry)
+void ipmon_sync_on_syscall_entrance(struct ipmon_syscall_entry* entry)
 {
 #ifdef IPMON_DO_LOCKSTEP
 	ipmon_barrier_wait(&entry->syscall_lockstep_barrier);
@@ -2416,7 +2979,7 @@ STATIC INLINE void ipmon_sync_on_syscall_entrance(struct ipmon_syscall_entry* en
 
 	TODO: Rewrite in ASM to get rid of explicit pointer
 -----------------------------------------------------------------------------*/
-STATIC INLINE void ipmon_sync_on_syscall_exit(struct ipmon_syscall_entry* entry)
+void ipmon_sync_on_syscall_exit(struct ipmon_syscall_entry* entry)
 {
 #ifdef IPMON_DO_LOCKSTEP
 	ipmon_barrier_wait(&entry->syscall_lockstep_barrier);
@@ -2427,7 +2990,7 @@ STATIC INLINE void ipmon_sync_on_syscall_exit(struct ipmon_syscall_entry* entry)
     ipmon_do_syscall_wake - Called by the master to inform the slaves about
 	the availability of the syscall results. 
 -----------------------------------------------------------------------------*/
-STATIC INLINE void ipmon_do_syscall_wake(struct ipmon_syscall_entry* entry)
+void ipmon_do_syscall_wake(struct ipmon_syscall_entry* entry)
 {
 	ipmon_cond_broadcast(&entry->syscall_results_available);
 }
@@ -2436,7 +2999,7 @@ STATIC INLINE void ipmon_do_syscall_wake(struct ipmon_syscall_entry* entry)
     ipmon_do_syscall_wait - Called by the slaves to wait for the syscall results
     to become available. 
 -----------------------------------------------------------------------------*/
-STATIC INLINE void ipmon_do_syscall_wait(struct ipmon_syscall_entry* entry)
+void ipmon_do_syscall_wait(struct ipmon_syscall_entry* entry)
 {
 	ipmon_cond_wait(&entry->syscall_results_available);
 }
@@ -2452,7 +3015,7 @@ STATIC INLINE void ipmon_do_syscall_wait(struct ipmon_syscall_entry* entry)
 	In our case, however, we want to restart the unchecked call as a checked
 	call. This gives GHUMVEE the opportunity to deliver the interrupting signal
 -----------------------------------------------------------------------------*/
-STATIC INLINE bool ipmon_should_restart_call(long ret)
+bool ipmon_should_restart_call(long ret)
 {
 	// check for ERESTART* errors
 	if (ret <= -512	&& ret >= -516)
@@ -2464,7 +3027,7 @@ STATIC INLINE bool ipmon_should_restart_call(long ret)
     ipmon_flush_buffer - called at a syscall entry when there's not enough
     room to log the next syscall info
 -----------------------------------------------------------------------------*/
-STATIC INLINE void ipmon_flush_buffer(struct ipmon_buffer* RB)
+void ipmon_flush_buffer(struct ipmon_buffer* RB)
 {
 	RB->variant_info[ipmon_variant_num].status = IPMON_STATUS_FLUSHING;
 	ipmon_checked_syscall(MVEE_FLUSH_SHARED_BUFFER, MVEE_IPMON_BUFFER);
@@ -2474,7 +3037,7 @@ STATIC INLINE void ipmon_flush_buffer(struct ipmon_buffer* RB)
     ipmon_wait_for_next_syscall - called only by slaves. Spins on the master's
 	pos variable until it is bigger than the local variant's pos
 -----------------------------------------------------------------------------*/
-STATIC INLINE unsigned char ipmon_wait_for_next_syscall(struct ipmon_buffer* RB)
+unsigned char ipmon_wait_for_next_syscall(struct ipmon_buffer* RB)
 {
 	unsigned int i = 0;
 	unsigned char result = 0;
@@ -2522,7 +3085,7 @@ STATIC INLINE unsigned char ipmon_wait_for_next_syscall(struct ipmon_buffer* RB)
     ipmon_pos_to_pointer - the pos we store in RB->variant_info is relative to
 	the start of the syscall_entry array.
 -----------------------------------------------------------------------------*/
-STATIC INLINE void* ipmon_pos_to_pointer(struct ipmon_buffer* RB)
+void* ipmon_pos_to_pointer(struct ipmon_buffer* RB)
 {
 	return (void*)((unsigned long)RB +
 				   offsetof(struct ipmon_buffer, variant_info) +
@@ -2546,7 +3109,7 @@ STATIC INLINE void* ipmon_pos_to_pointer(struct ipmon_buffer* RB)
 
     If the metadata fits in the buffer, then the policy will be applied
 -----------------------------------------------------------------------------*/
-STATIC INLINE unsigned char ipmon_prepare_syscall (struct ipmon_buffer* RB, struct ipmon_syscall_args& args, unsigned long syscall_no)
+unsigned char ipmon_prepare_syscall (struct ipmon_buffer* RB, struct ipmon_syscall_args& args, unsigned long syscall_no)
 {
 	// Prepare the syscall here. The master needs to ensure that there's room to
 	// write the syscall info
@@ -2590,7 +3153,7 @@ STATIC INLINE unsigned char ipmon_prepare_syscall (struct ipmon_buffer* RB, stru
 		}
 
 		// OK. We have room to write the entry now
-		entry->syscall_no         = (int)syscall_no;
+		entry->syscall_no         = (unsigned short)syscall_no;
 		entry->syscall_entry_size = entry_size;
 		entry->syscall_args_size  = args_size;
 
@@ -2631,7 +3194,7 @@ STATIC INLINE unsigned char ipmon_prepare_syscall (struct ipmon_buffer* RB, stru
 			return entry->syscall_type;
 
 		// Sanity Check 1: Compare the master's syscall number with ours
-		if ((int)syscall_no != entry->syscall_no)
+		if ((unsigned short)syscall_no != entry->syscall_no)
 			ipmon_arg_verify_failed((void*)(long)entry->syscall_no);
 
 		// Sanity Check 2: Compare all syscall arguments
@@ -2651,7 +3214,7 @@ STATIC INLINE unsigned char ipmon_prepare_syscall (struct ipmon_buffer* RB, stru
     * by the slave if the call was unchecked
     * by the slave if the call was noexec
 -----------------------------------------------------------------------------*/
-STATIC INLINE long ipmon_finish_syscall (struct ipmon_buffer* RB, struct ipmon_syscall_args& args, long ret)
+long ipmon_finish_syscall (struct ipmon_buffer* RB, struct ipmon_syscall_args& args, long ret)
 {
 	struct ipmon_syscall_entry* entry = args.entry;
 	long realret = ret;
@@ -2728,7 +3291,7 @@ STATIC INLINE long ipmon_finish_syscall (struct ipmon_buffer* RB, struct ipmon_s
 /*-----------------------------------------------------------------------------
     ipmon_is_unchecked_syscall
 -----------------------------------------------------------------------------*/
-STATIC INLINE unsigned char ipmon_is_unchecked_syscall(unsigned char* mask, unsigned long syscall_no)
+unsigned char ipmon_is_unchecked_syscall(unsigned char* mask, unsigned long syscall_no)
 {
 	unsigned long no_to_byte, bit_in_byte;
 
@@ -2747,7 +3310,7 @@ STATIC INLINE unsigned char ipmon_is_unchecked_syscall(unsigned char* mask, unsi
 /*-----------------------------------------------------------------------------
     ipmon_set_unchecked_syscall
 -----------------------------------------------------------------------------*/
-STATIC INLINE void ipmon_set_unchecked_syscall(unsigned char* mask, unsigned long syscall_no, unsigned char unchecked)
+void ipmon_set_unchecked_syscall(unsigned char* mask, unsigned long syscall_no, unsigned char unchecked)
 {
 	unsigned long no_to_byte, bit_in_byte;
 
@@ -3136,8 +3699,31 @@ void __attribute__((constructor)) init()
 #     endif
 
 #     if CURRENT_POLICY >= FULL_SYSCALLS
+
+	// Memory Management
 	IPMON_MASK_SET(mask, __NR_mmap);
+	IPMON_MASK_SET(mask, __NR_munmap);
+	IPMON_MASK_SET(mask, __NR_mremap);
+	IPMON_MASK_SET(mask, __NR_mprotect);
+	IPMON_MASK_SET(mask, __NR_brk);
+
+	// File Management
 	IPMON_MASK_SET(mask, __NR_open);
+	IPMON_MASK_SET(mask, __NR_close);
+	IPMON_MASK_SET(mask, __NR_fcntl);
+	IPMON_MASK_SET(mask, __NR_dup);
+	IPMON_MASK_SET(mask, __NR_dup2);
+	IPMON_MASK_SET(mask, __NR_dup3);
+	IPMON_MASK_SET(mask, __NR_pipe);
+	IPMON_MASK_SET(mask, __NR_pipe2);
+	IPMON_MASK_SET(mask, __NR_inotify_init);
+	IPMON_MASK_SET(mask, __NR_inotify_init1);
+
+	// Directory management
+	IPMON_MASK_SET(mask, __NR_chdir);
+	IPMON_MASK_SET(mask, __NR_fchdir);
+
+	// Socket Management
 	IPMON_MASK_SET(mask, __NR_socket);
 	IPMON_MASK_SET(mask, __NR_socketpair);
 	IPMON_MASK_SET(mask, __NR_bind);
@@ -3145,7 +3731,14 @@ void __attribute__((constructor)) init()
 	IPMON_MASK_SET(mask, __NR_listen);
 	IPMON_MASK_SET(mask, __NR_accept4);
 	IPMON_MASK_SET(mask, __NR_accept);
-	IPMON_MASK_SET(mask, __NR_close);
+#      ifdef IPMON_SUPPORT_EPOLL
+	IPMON_MASK_SET(mask, __NR_epoll_create);
+	IPMON_MASK_SET(mask, __NR_epoll_create1);
+#      endif
+
+	// Process Management
+	IPMON_MASK_SET(mask, __NR_exit_group);
+
 #     endif // >= FULL_SYSCALLS
 #    endif  // >= SOCKET_RW
 #   endif   // >= SOCKET_RO

@@ -123,7 +123,7 @@ typedef unsigned long rb_pointer;
 // harmless and that do not return mutable results (e.g. sys_sched_yield)
 //
 #define UNSYNCED(a)      \
-	STATIC INLINE unsigned char ipmon_handle_##a##_is_unsynced   () { return 1; }
+	unsigned char ipmon_handle_##a##_is_unsynced   () { return 1; }
 
 //
 // This can be defined for syscalls that may or may not be dispatched as
@@ -131,7 +131,7 @@ typedef unsigned long rb_pointer;
 // like sys_read.
 //
 #define MAYBE_CHECKED(a) \
-	STATIC INLINE bool          ipmon_handle_##a##_maybe_checked (struct ipmon_syscall_args& args)
+	bool          ipmon_handle_##a##_maybe_checked (struct ipmon_syscall_args& args)
 
 //
 // Calculates the size the syscall args and return values may occupy in the
@@ -139,7 +139,7 @@ typedef unsigned long rb_pointer;
 // of the return values will be updated when the syscall returns.
 //
 #define CALCSIZE(a)      \
-	STATIC INLINE void          ipmon_handle_##a##_calcsize      (struct ipmon_syscall_args& args, unsigned int* args_size, unsigned int* ret_size)
+	void          ipmon_handle_##a##_calcsize      (struct ipmon_syscall_args& args, unsigned int* args_size, unsigned int* ret_size)
 
 //
 // Handles the pre-syscall logic. In the master variant, this is where the
@@ -151,7 +151,7 @@ typedef unsigned long rb_pointer;
 // same type the master logged into the RB.
 //
 #define PRECALL(a)       \
-	STATIC INLINE unsigned long ipmon_handle_##a##_precall       (struct ipmon_syscall_args& args, struct ipmon_syscall_entry* entry, unsigned char order=0)
+	unsigned long ipmon_handle_##a##_precall       (struct ipmon_syscall_args& args, struct ipmon_syscall_entry* entry, unsigned char order=0)
 
 //
 // Handles the post-syscall logic. In the master variant, this is where the
@@ -159,7 +159,7 @@ typedef unsigned long rb_pointer;
 // the master's results.
 //
 #define POSTCALL(a)      \
-	STATIC INLINE unsigned int  ipmon_handle_##a##_postcall      (struct ipmon_syscall_args& args, struct ipmon_syscall_entry* entry, long ret, long realret, bool success, unsigned char order=0)
+	unsigned int  ipmon_handle_##a##_postcall      (struct ipmon_syscall_args& args, struct ipmon_syscall_entry* entry, long ret, long realret, bool success, unsigned char order=0)
 
 // 
 // Convenience Macros used in the syscall handlers
@@ -191,6 +191,19 @@ typedef unsigned long rb_pointer;
 #define IPMON_BLOCKING_CALL  64 // The call is expected to block. This is not a distinct call type. It is ORed with one of the above call types.
 
 #define IPMON_MAYBE_BLOCKING(fd) ((ipmon_get_file_type(fd) & MVEE_BLOCKING_FD) ? IPMON_BLOCKING_CALL : 0)
+#define IPMON_MAYBE_DISPATCH_MASTER(fd)							\
+	if (ipmon_variant_num == 0)									\
+	{															\
+		char file_type = ipmon_get_file_type(fd);				\
+		if (file_type & FT_MASTER_FILE)							\
+			return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;	\
+	}															\
+	else														\
+	{															\
+		fd = ipmon_get_slave_fd(fd);							\
+	}															\
+	return IPMON_EXEC_ALL | IPMON_REPLICATE_MASTER;
+
 
 /*-----------------------------------------------------------------------------
     MVEE File Mapping Definitions
@@ -262,11 +275,10 @@ struct ipmon_condvar
 //
 struct ipmon_syscall_entry
 {
-	unsigned int  syscall_no;								// 0	- syscall no, see unistd.h
-    unsigned char syscall_type; 							// 4	- bitwise or mask of call types above
-	unsigned char padding1;                                 // 5	- 
-	unsigned char padding2;                                 // 6    - 
-	unsigned char padding3;                                 // 7    - 
+	unsigned short syscall_no;								// 0	- We use this for integrity checking only so we don't mind that this does not capture pseudo-calls correctly
+    unsigned char  syscall_type; 							// 2	- bitwise or mask of call types above
+	unsigned char  padding;                                 // 3	- 
+	unsigned int   syscall_order;                           // 4    - Logical clock value for order-sensitive syscalls
 	struct ipmon_condvar
                   syscall_results_available;                // 8    - optimized condition variable. Does not support consecutive wait operations
 	struct ipmon_barrier
@@ -320,6 +332,20 @@ struct ipmon_syscall_args
 	unsigned long arg6;
 
 	struct ipmon_syscall_entry* entry;
+};
+
+/*-----------------------------------------------------------------------------
+  kernel_termios is not compatible with termios (doh!)
+-----------------------------------------------------------------------------*/
+#define __KERNEL_NCCS 19
+struct __kernel_termios
+{
+    tcflag_t c_iflag;             /* input mode flags */
+    tcflag_t c_oflag;             /* output mode flags */
+    tcflag_t c_cflag;             /* control mode flags */
+    tcflag_t c_lflag;             /* local mode flags */
+    cc_t     c_line;              /* line discipline */
+    cc_t     c_cc[__KERNEL_NCCS]; /* control characters */
 };
 
 /*-----------------------------------------------------------------------------
