@@ -36,7 +36,13 @@ extern "C" {
 /*-----------------------------------------------------------------------------
     Policy control
 -----------------------------------------------------------------------------*/
-//#define IPMON_DO_LOCKSTEP
+// Enables lock-stepping on all syscall entrances
+#define IPMON_DO_LOCKSTEP
+
+// Does the flush locally, avoiding context switches to GHUMVEE
+#define IPMON_FLUSH_LOCAL
+
+
 #define IPMON_USE_FUTEXES_FOR_CONDVAR
 #define IPMON_SUPPORT_FUTEX
 #define IPMON_SUPPORT_EPOLL
@@ -311,7 +317,9 @@ struct ipmon_buffer
 	int           numvariants;                        // 00-04: number of variants we're running with
 	int           usable_size;                        // 04-08: size that is usable for syscall entries
 	unsigned long have_pending_signals;
-	unsigned char padding[64 - sizeof(unsigned long) - sizeof(int)*2];
+	struct ipmon_barrier pre_flush_barrier;
+	struct ipmon_barrier post_flush_barrier;
+	unsigned char padding[64 - sizeof(unsigned long) - sizeof(int)*2 - sizeof(struct ipmon_barrier) * 2];
 
 	// Cachelines 1-n
 	struct ipmon_variant_info variant_info[1];

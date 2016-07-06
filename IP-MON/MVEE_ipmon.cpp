@@ -25,7 +25,6 @@
 	current clock value to each "order-sensitive" syscall.
 -----------------------------------------------------------------------------*/
 
-
 /*-----------------------------------------------------------------------------
     Includes
 -----------------------------------------------------------------------------*/
@@ -146,7 +145,7 @@ long syscall_lock  = 0;
 -----------------------------------------------------------------------------*/
 void ipmon_arg_verify_failed(void* ptr)
 {
-	*(volatile unsigned int*)((unsigned long)0x1000000000000000 | ((unsigned long)ptr)) = 0;
+	*(volatile unsigned int*)((unsigned long)0x0100000000000000 | ((unsigned long)ptr)) = 0;
                              // 0000000000000000
 }
 
@@ -294,7 +293,7 @@ bool ipmon_can_write(long fd)
 -----------------------------------------------------------------------------*/
 CALCSIZE(mmap)
 {
-	COUNTREG(ARG);
+//	COUNTREG(ARG);
 	COUNTREG(ARG);
 	COUNTREG(ARG);
 	COUNTREG(ARG);
@@ -413,7 +412,7 @@ PRECALL(open)
 
 	CHECKPOINTER(ARG1);
 	CHECKREG(tmp_arg2);
-	CHECKREG(tmp_arg3);
+//	CHECKREG(tmp_arg3); // TODO: stijn: false positives here??
 	CHECKSTRING(ARG1);
 
 	bool master = false;
@@ -587,7 +586,7 @@ CALCSIZE(accept4)
 	if (ARG2 && ARG3)
 	{
 		COUNTBUFFER(RET, ARG3, sizeof(int));
-		COUNTBUFFER(RET, ARG2, ARG3);
+		COUNTBUFFER(RET, ARG2, *(int*)ARG3);
 	}
 }
 
@@ -2965,10 +2964,10 @@ void ipmon_cond_broadcast(struct ipmon_condvar* cv)
 
 	TODO: Rewrite in ASM to get rid of explicit pointer
 -----------------------------------------------------------------------------*/
-void ipmon_sync_on_syscall_entrance(struct ipmon_syscall_entry* entry)
+void ipmon_sync_on_syscall_entrance(struct ipmon_buffer* rb, struct ipmon_syscall_entry* entry)
 {
 #ifdef IPMON_DO_LOCKSTEP
-	ipmon_barrier_wait(&entry->syscall_lockstep_barrier);
+	ipmon_barrier_wait(rb, &entry->syscall_lockstep_barrier);
 #endif
 }
 
@@ -2979,10 +2978,10 @@ void ipmon_sync_on_syscall_entrance(struct ipmon_syscall_entry* entry)
 
 	TODO: Rewrite in ASM to get rid of explicit pointer
 -----------------------------------------------------------------------------*/
-void ipmon_sync_on_syscall_exit(struct ipmon_syscall_entry* entry)
+void ipmon_sync_on_syscall_exit(struct ipmon_buffer* rb, struct ipmon_syscall_entry* entry)
 {
 #ifdef IPMON_DO_LOCKSTEP
-	ipmon_barrier_wait(&entry->syscall_lockstep_barrier);
+	ipmon_barrier_wait(rb, &entry->syscall_lockstep_barrier);
 #endif
 }
 
@@ -3030,7 +3029,19 @@ bool ipmon_should_restart_call(long ret)
 void ipmon_flush_buffer(struct ipmon_buffer* RB)
 {
 	RB->variant_info[ipmon_variant_num].status = IPMON_STATUS_FLUSHING;
+#ifndef IPMON_FLUSH_LOCAL
 	ipmon_checked_syscall(MVEE_FLUSH_SHARED_BUFFER, MVEE_IPMON_BUFFER);
+#else
+	ipmon_barrier_wait(RB, &RB->pre_flush_barrier);
+	if (ipmon_variant_num == 0)
+	{
+		RB->pre_flush_barrier.hack = 0;
+		memset((void*)((unsigned long)RB + 64), 0, RB->numvariants * 64 + RB->usable_size);
+	}
+	ipmon_barrier_wait(RB, &RB->post_flush_barrier);
+	if (ipmon_variant_num == 0)
+		RB->post_flush_barrier.hack = 0;
+#endif
 }
 
 /*-----------------------------------------------------------------------------
@@ -3153,6 +3164,9 @@ unsigned char ipmon_prepare_syscall (struct ipmon_buffer* RB, struct ipmon_sysca
 		}
 
 		// OK. We have room to write the entry now
+#ifdef IPMON_FLUSH_LOCAL
+//		memset(entry, 0, sizeof(struct ipmon_syscall_entry));
+#endif
 		entry->syscall_no         = (unsigned short)syscall_no;
 		entry->syscall_entry_size = entry_size;
 		entry->syscall_args_size  = args_size;
@@ -3161,6 +3175,7 @@ unsigned char ipmon_prepare_syscall (struct ipmon_buffer* RB, struct ipmon_sysca
 			entry->syscall_type = ipmon_syscall_precall(args, entry);
 		else
 			entry->syscall_type = IPMON_EXEC_NO_IPMON;
+
 
 		// Update the variant's current in-buffer position here.  NOTE: We will
 		// adjust this later, once we know the real size occupied by the return
@@ -3173,7 +3188,7 @@ unsigned char ipmon_prepare_syscall (struct ipmon_buffer* RB, struct ipmon_sysca
 		// All relevant pre-syscall information has been logged into the buffer
 		// This is where we could sync with the slave variants to implement
 		// lock-stepping
-		ipmon_sync_on_syscall_entrance(entry);
+		ipmon_sync_on_syscall_entrance(RB, entry);
 	} 
 	else 
 	{ 
@@ -3195,13 +3210,13 @@ unsigned char ipmon_prepare_syscall (struct ipmon_buffer* RB, struct ipmon_sysca
 
 		// Sanity Check 1: Compare the master's syscall number with ours
 		if ((unsigned short)syscall_no != entry->syscall_no)
-			ipmon_arg_verify_failed((void*)(long)entry->syscall_no);
+			ipmon_arg_verify_failed((void*)(unsigned long)syscall_no);
 
 		// Sanity Check 2: Compare all syscall arguments
 		ipmon_syscall_precall(args, entry);
 
 		// We could sync with the master here to implement lock-stepping
-		ipmon_sync_on_syscall_entrance(entry);
+		ipmon_sync_on_syscall_entrance(RB, entry);
 	}
 
 	return entry->syscall_type;
@@ -3262,7 +3277,7 @@ long ipmon_finish_syscall (struct ipmon_buffer* RB, struct ipmon_syscall_args& a
 		ipmon_do_syscall_wake(entry);
 
 		// We could sync with the slaves here to implement full lock-stepping
-		ipmon_sync_on_syscall_exit(entry);
+		ipmon_sync_on_syscall_exit(RB, entry);
 	}
 	else
 	{
@@ -3282,7 +3297,7 @@ long ipmon_finish_syscall (struct ipmon_buffer* RB, struct ipmon_syscall_args& a
 		}
 
 		// We could sync with the master here
-		ipmon_sync_on_syscall_exit(entry);
+		ipmon_sync_on_syscall_exit(RB, entry);
 	}
 
 	return ret;
@@ -3378,10 +3393,10 @@ extern "C" long ipmon_enclave
 		if (RB->have_pending_signals)
 			syscall_no = (unsigned long)-1;
 
-		result = ipmon_unchecked_syscall(syscall_no, arg1, arg2, arg3, arg4, arg5, arg6);
+		result = ipmon_unchecked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
 
 		if (ipmon_should_restart_call(result))
-			result = ipmon_checked_syscall(syscall_no, arg1, arg2, arg3, arg4, arg5, arg6);		
+			result = ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);		
 
 		return result;
 	}
@@ -3403,12 +3418,12 @@ extern "C" long ipmon_enclave
 			if (RB->have_pending_signals)
 				syscall_no = (unsigned long)-1;
 
-			result = ipmon_unchecked_syscall(syscall_no, arg1, arg2, arg3, arg4, arg5, arg6);
+			result = ipmon_unchecked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
 
 			long ret = ipmon_finish_syscall(RB, args, result);
 
 			if (ipmon_should_restart_call(result))
-				return ipmon_checked_syscall(syscall_no, arg1, arg2, arg3, arg4, arg5, arg6);
+				return ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
 
 			return ret;
 		}
@@ -3418,7 +3433,7 @@ extern "C" long ipmon_enclave
 			long ret = ipmon_finish_syscall(RB, args, 0);
 
 			if (ipmon_should_restart_call(ret))
-				ret = ipmon_checked_syscall(syscall_no, arg1, arg2, arg3, arg4, arg5, arg6);
+				ret = ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
 
 			return ret;
 		}
@@ -3429,12 +3444,12 @@ extern "C" long ipmon_enclave
 		if (RB->have_pending_signals)
 			syscall_no = (unsigned long)-1;
 
-		result = ipmon_unchecked_syscall(syscall_no, arg1, arg2, arg3, arg4, arg5, arg6);
+		result = ipmon_unchecked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
 
 		long ret = ipmon_finish_syscall(RB, args, result);
 
 		if (ipmon_should_restart_call(result))
-			return ipmon_checked_syscall(syscall_no, arg1, arg2, arg3, arg4, arg5, arg6);
+			return ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
 
 		return ret;
 	}
@@ -3444,13 +3459,13 @@ extern "C" long ipmon_enclave
 		long ret = ipmon_finish_syscall(RB, args, 0);
 		
 		if (ipmon_should_restart_call(ret))
-			ret = ipmon_checked_syscall(syscall_no, arg1, arg2, arg3, arg4, arg5, arg6);
+			ret = ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
 		
 		return ret;
 	}
 	else
 	{
-		return ipmon_checked_syscall(syscall_no, arg1, arg2, arg3, arg4, arg5, arg6);
+		return ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
 	}
 }
 
@@ -3468,7 +3483,7 @@ void ipmon_rb_probe()
 /*-----------------------------------------------------------------------------
     ipmon_register_thread - IP-MON registration is thread-local now!
 -----------------------------------------------------------------------------*/
-void ipmon_register_thread()
+extern "C" void ipmon_register_thread()
 {
 	void* RB = (void*)ipmon_checked_syscall(__NR_shmat, 
 											ipmon_checked_syscall(MVEE_GET_SHARED_BUFFER, 0, MVEE_IPMON_BUFFER, NULL, NULL, NULL, NULL), 

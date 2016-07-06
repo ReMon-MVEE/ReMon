@@ -15,4 +15,4 @@ asm MVEE_ipmon_syscall
 compile MVEE_ipmon
 #compile MVEE_ipmon_memory
 
-gcc  -shared -fPIC   -lc -ldl -o libipmon.so MVEE_ipmon.o MVEE_ipmon_syscall.o
+gcc -shared -fPIC -lc -ldl -o libipmon.so MVEE_ipmon.o MVEE_ipmon_syscall.o

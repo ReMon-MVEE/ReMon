@@ -4158,7 +4158,7 @@ long monitor::handle_shmat_postcall(int variantnum)
 		region_name = "[ipmon-buffer]";
 		region_size = ipmon_buffer->sz;
 		hwbp_set_watch(0, addresses[0], MVEE_BP_WRITE_ONLY); // detects overwrites of numvariants
-		hwbp_set_watch(0, addresses[0] + 64 * (1 + mvee::numvariants), MVEE_BP_WRITE_ONLY); // detects writes of first syscall no
+//		hwbp_set_watch(0, addresses[0] + 64 * (1 + mvee::numvariants), MVEE_BP_WRITE_ONLY); // detects writes of first syscall no
 	}
 	else if (set_fd_table->file_map_exists() 
 			 && (int)ARG1(0) == set_fd_table->file_map_id())
@@ -4304,6 +4304,7 @@ long monitor::handle_clone_log_args(int variantnum)
 
 long monitor::handle_clone_precall(int variantnum)
 {
+	log_variant_backtrace(0);
     CHECKARG(1);
 
     // we weren't multithreaded yet but will be after this call!

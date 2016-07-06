@@ -20,7 +20,7 @@ endif
 
 BUILD		= Release
 #BUILD      = Release-syms
-#BUILD		= Debug
+BUILD		= Debug
 #BUILD		= Debug-sanitize
 
 # directories

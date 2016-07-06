@@ -122,10 +122,10 @@ void monitor::log_ipmon_state()
 			offsets[0] == offset)
 			break;
 
-		debugf("\tsyscall           : %d (%s)\n", entry->syscall_no, getTextualSyscall(entry->syscall_no));
-		debugf("\tchecked           : %d\n", entry->syscall_checked);
-		debugf("\tmaster            : %d\n", entry->syscall_is_mastercall);
-		debugf("\tblocking          : %d\n", entry->syscall_is_blocking);
+		debugf("\tsyscall           : %hu (%s)\n", (unsigned short)entry->syscall_no, getTextualSyscall((unsigned short)entry->syscall_no));
+		debugf("\tchecked           : %d\n", (entry->syscall_type & IPMON_EXEC_NO_IPMON) ? 0 : 1);
+		debugf("\tmaster            : %d\n", (entry->syscall_type & IPMON_REPLICATE_MASTER) ? 1 : 0);
+		debugf("\tblocking          : %d\n", (entry->syscall_type & IPMON_BLOCKING_CALL) ? 1 : 0);
 		debugf("\tresults waiters   : %d\n", entry->syscall_results_available.u.s.have_waiters);
 		debugf("\tresults available : %d\n", entry->syscall_results_available.u.s.signaled);
 		debugf("\tlockstep waiters  : %d\n", entry->syscall_lockstep_barrier.u.s.count);

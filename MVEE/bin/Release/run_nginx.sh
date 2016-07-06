@@ -1,4 +1,4 @@
-CMD="$MVEEROOT/Benchmarks/VARAN/nginx-1.5.12/objs/nginx"
+CMD="/home/stijn/ReMon/Benchmarks/VARAN/nginx-1.5.12/objs/nginx"
 
 if [ "$1" == "0" ]
 then

@@ -14,7 +14,7 @@
 //
 // MVEE_BENCHMARK: When this is defined, no messages are logged to the logfile
 // and the monitor won't keep track of the number of syscalls made.
-#define MVEE_BENCHMARK
+// #define MVEE_BENCHMARK
 
 //
 // MVEE_FORCE_ENABLE_BACKTRACING: if this is defined, you can also request a monitor
@@ -59,7 +59,7 @@
 
 // MVEE_NO_RW_LOGGING: when defined, the monitor will not log argument and return buffers
 // for read/write system calls
-#define MVEE_NO_RW_LOGGING
+// #define MVEE_NO_RW_LOGGING
 
 // MVEE_CHECK_SYNC_PRIMITIVES: the MVEE will keep track of which high-level synchronization
 // primitives the variants are using. Requires libc-support. NO LONGER WORKS. FIXME

@@ -1071,11 +1071,10 @@ struct ipmon_condvar
 //
 struct ipmon_syscall_entry
 {
-	unsigned int  syscall_no;								// 0	- syscall no, see unistd.h
-    unsigned char syscall_checked;							// 4	- if set to 1, the syscall must be reported to the ptracer and we don't perform user-space arg verification and return replication
-	unsigned char syscall_is_mastercall;					// 5	- if set to 1, only the master may execute the call. The slaves just get the same result
-	unsigned char syscall_is_blocking;                      // 6    - if set to 1, the master is expecting the syscall to block for some time and the slave should use a futex call on the return_valid field to wait for the result
-	unsigned char padding;                                  // 7    - 
+	unsigned short syscall_no;								// 0	- We use this for integrity checking only so we don't mind that this does not capture pseudo-calls correctly
+    unsigned char  syscall_type; 							// 2	- bitwise or mask of call types above
+	unsigned char  padding;                                 // 3	- 
+	unsigned int   syscall_order;                           // 4    - Logical clock value for order-sensitive syscalls
 	struct ipmon_condvar
                   syscall_results_available;                // 8    - optimized condition variable. Does not support consecutive wait operations
 	struct ipmon_barrier
@@ -1114,6 +1113,26 @@ struct ipmon_buffer
 	// And the actual syscall data
 //	struct ipmon_syscall_entry ipmon_syscall_entry[1];
 };
+
+//
+// Who should execute the syscall?
+//
+#define IPMON_EXEC_NO_IPMON  1 // Do not use IP-MON to execute the syscall - Route to CP-MON instead
+#define IPMON_EXEC_NOEXEC    2 // Abort the syscall but possibly use IP-MON for return value replication
+#define IPMON_EXEC_MASTER    4 // The master executes the syscall. The slaves no not.
+#define IPMON_EXEC_ALL       8 // All variants execute the syscall
+
+//
+// Possible ways to handle replication
+//
+#define IPMON_REPLICATE_MASTER 16 // The master results are replicated to the slaves
+
+//
+// Extra modifiers
+//
+#define IPMON_UNSYNCED_CALL  32 // No lock-stepping for this call
+#define IPMON_BLOCKING_CALL  64 // The call is expected to block. This is not a distinct call type. It is ORed with one of the above call types.
+
 
 
 /*-----------------------------------------------------------------------------
