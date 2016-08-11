@@ -212,8 +212,12 @@ cp <arch>-pc-linux-gnu/libstdc++-v3/src/.libs/libstdc++.so.6.0.<ver> /path/to/Re
 
 Here are some of the publications that build on or use ReMon:
 
+[Multi-Variant Execution of Parallel Programs](http://arxiv.org/abs/1607.07841)
+Stijn Volckaert, Bjorn De Sutter, Koen De Bosschere, and Per Larsen.
+arXiv preprint arXiv:1607.07841.
+
 [Secure and Efficient Application Monitoring and Replication](http://ics.uci.edu/~stijnv/Papers/atc16-remon.pdf)
-Stijn Volckaert, Bart Coppens, Alexios Voulimeneas, Andrei Homescu, Per Larsen, Bjorn De Sutter, Michael Franz.
+Stijn Volckaert, Bart Coppens, Alexios Voulimeneas, Andrei Homescu, Per Larsen, Bjorn De Sutter, and Michael Franz.
 In 2016 USENIX Annual Technical Conference (ATC'16), pages 167-179. USENIX, 2016.
 
 [Advanced Techniques for Multi-Variant Execution](http://ics.uci.edu/~stijnv/Papers/thesis.pdf)
