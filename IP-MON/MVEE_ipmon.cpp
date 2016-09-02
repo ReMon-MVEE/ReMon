@@ -456,6 +456,69 @@ POSTCALL(open)
 }
 
 /*-----------------------------------------------------------------------------
+    openat - (int dirfd, const char* filename, int flags, int mode)
+-----------------------------------------------------------------------------*/
+CALCSIZE(openat)
+{
+	COUNTREG(ARG);
+	COUNTREG(ARG);
+	COUNTSTRING(ARG, ARG2);
+	COUNTREG(ARG);
+	COUNTREG(ARG);
+}
+
+PRECALL(openat)
+{
+	// mask out non-existing modes and flags
+	long tmp_arg3 = ARG3 & O_FILEFLAGSMASK;
+	long tmp_arg4 = ARG4 & S_FILEMODEMASK;
+
+	CHECKREG(ARG1);
+	CHECKPOINTER(ARG2);
+	CHECKREG(tmp_arg3);
+//	CHECKREG(tmp_arg4); // TODO: stijn: false positives here??
+	CHECKSTRING(ARG2);
+
+	bool master = false;
+
+	// Only the master should open /proc/self files (except for the maps and exe files)
+	if (strstr((char*)ARG2, "/proc/self/") &&
+		!(strstr((char*)ARG2, "/proc/self/maps") || strstr((char*)ARG2, "/proc/self/exe")))
+		master = true;
+
+	// Ditto with /dev/
+	if (strstr((char*)ARG2, "/dev/"))
+		master = true;
+
+	// TODO: Handle O_CREAT | O_EXCL in case we're executing a normal call
+
+	if (master)
+		return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
+	return IPMON_EXEC_ALL | IPMON_REPLICATE_MASTER;
+}
+
+POSTCALL(openat)
+{
+	// mark file in fd table
+	if (success)
+	{		
+		if (entry->syscall_type & IPMON_EXEC_MASTER)
+		{
+			if (ipmon_variant_num == 0)
+				ipmon_set_file_type(ret, FT_REGULAR | FT_MASTER_FILE);
+		}
+		else if (entry->syscall_type & IPMON_EXEC_ALL)
+		{
+			if (ipmon_variant_num == 0)
+				ipmon_set_file_type(ret, FT_REGULAR);
+			else
+				ipmon_set_slave_fd(ret, realret);
+		}
+	}
+	return order;
+}
+
+/*-----------------------------------------------------------------------------
     socket - (int family, int type, int protocol)
 -----------------------------------------------------------------------------*/
 CALCSIZE(socket)
@@ -733,7 +796,22 @@ PRECALL(fcntl)
 {
 	CHECKREG(ARG1);
 	CHECKREG(ARG2);
-	CHECKREG(ARG3);
+	switch(ARG2)
+	{
+		case F_GETFD:
+		case F_GETFL:
+		case F_GETOWN:
+		case F_GETSIG:
+		case F_GETLEASE:
+		{
+			break;
+		}
+		default:
+		{
+			CHECKREG(ARG3);
+			break;
+		}
+	}
 	IPMON_MAYBE_DISPATCH_MASTER(ARG1);
 }
 
@@ -3732,6 +3810,7 @@ void __attribute__((constructor)) init()
 
 	// File Management
 	IPMON_MASK_SET(mask, __NR_open);
+	IPMON_MASK_SET(mask, __NR_openat);
 	IPMON_MASK_SET(mask, __NR_close);
 	IPMON_MASK_SET(mask, __NR_fcntl);
 	IPMON_MASK_SET(mask, __NR_dup);
