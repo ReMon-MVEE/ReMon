@@ -222,7 +222,8 @@ int ipmon_epoll_get_fd_for_ptr(int epoll_fd, unsigned long ptr)
 -----------------------------------------------------------------------------*/
 char ipmon_get_file_type(unsigned long fd)
 {
-	if (fd > 4096)
+	return 0;
+	if (fd >= 4096)
 		return 0;
 
 	return ipmon_reg_file_map[fd];
@@ -586,7 +587,7 @@ CALCSIZE(accept4)
 	if (ARG2 && ARG3)
 	{
 		COUNTBUFFER(RET, ARG3, sizeof(int));
-		COUNTBUFFER(RET, ARG2, *(int*)ARG3);
+		COUNTBUFFER(RET, ARG2, *(int*)ARG3); 
 	}
 }
 
@@ -626,7 +627,7 @@ CALCSIZE(accept)
 	if (ARG2 && ARG3)
 	{
 		COUNTBUFFER(RET, ARG3, sizeof(int));
-		COUNTBUFFER(RET, ARG2, ARG3);
+		COUNTBUFFER(RET, ARG2, *(int*)ARG3);
 	}
 }
 
@@ -2858,7 +2859,7 @@ int ipmon_syscall_postcall(struct ipmon_syscall_args& args, struct ipmon_syscall
 void ipmon_barrier_wait(struct ipmon_buffer* RB, struct ipmon_barrier* barrier)
 {
 	unsigned short old_seq = __atomic_load_n(&barrier->seq, __ATOMIC_SEQ_CST);
-	unsigned char count    = __atomic_add_fetch(&barrier->count, 1, __ATOMIC_SEQ_CST);
+	unsigned short count   = __atomic_add_fetch(&barrier->count, 1, __ATOMIC_SEQ_CST);
 
 	// we're not the last thread to reach the barrier
 	if (count < RB->numvariants)
@@ -2869,32 +2870,24 @@ void ipmon_barrier_wait(struct ipmon_buffer* RB, struct ipmon_barrier* barrier)
 		// (i.e. we don't have to wait too long at the barrier)
 		for (int i = 0; i < 10000; ++i)
 		{
-			if (__atomic_load_n(&barrier->seq, __ATOMIC_SEQ_CST) != old_seq)
-				return;
-			
+			if ((__atomic_load_n(&barrier->seq, __ATOMIC_SEQ_CST) | 1) != old_seq)
+				return;			
 			cpu_relax();
 		}
 
 		while ((__atomic_load_n(&barrier->seq, __ATOMIC_SEQ_CST) | 1) == old_seq)
 		{
-			// set the waiters flag
-			*(volatile unsigned char*)&barrier->seq = 1;
-
-			// and wait for seq to change
+			*(volatile char*)&barrier->seq = 1;
 			ipmon_unchecked_syscall(__NR_futex, &barrier->hack, FUTEX_WAIT, old_seq, NULL, NULL, 0);
 		}
 	}
 	// last thread, wake everyone
 	else
 	{
-		// This xchg will clear the least significant byte of seq, increment the
-		// 3 most significant bytes of seq as if it was a 3 byte integer, and
-		// reset the count field to zero
+		unsigned short old_seq = __atomic_load_n(&barrier->seq, __ATOMIC_SEQ_CST);
+		
 		if (__atomic_exchange_n(&barrier->hack, (old_seq | 1) + 255, __ATOMIC_SEQ_CST) & 1)
-		{
-			// if the least significant byte was 1, we need to FUTEX_WAKE
 			ipmon_unchecked_syscall(__NR_futex, &barrier->hack, FUTEX_WAKE, INT_MAX, NULL, NULL, 0);
-		}
 	}
 }
 
@@ -3032,15 +3025,24 @@ void ipmon_flush_buffer(struct ipmon_buffer* RB)
 #ifndef IPMON_FLUSH_LOCAL
 	ipmon_checked_syscall(MVEE_FLUSH_SHARED_BUFFER, MVEE_IPMON_BUFFER);
 #else
+/*
+	if (ipmon_variant_num)
+	{
+		RB->post_flush_barrier.hack = 0;
+		__sync_synchronize();
+	}
+*/
 	ipmon_barrier_wait(RB, &RB->pre_flush_barrier);
 	if (ipmon_variant_num == 0)
 	{
-		RB->pre_flush_barrier.hack = 0;
 		memset((void*)((unsigned long)RB + 64), 0, RB->numvariants * 64 + RB->usable_size);
+//		__sync_synchronize();
 	}
 	ipmon_barrier_wait(RB, &RB->post_flush_barrier);
+/*
 	if (ipmon_variant_num == 0)
-		RB->post_flush_barrier.hack = 0;
+		RB->pre_flush_barrier.hack = 0;
+*/
 #endif
 }
 
@@ -3348,6 +3350,8 @@ void ipmon_set_unchecked_syscall(unsigned char* mask, unsigned long syscall_no, 
 extern "C" void ipmon_enclave_entrypoint();
 extern "C" void ipmon_enclave_entrypoint_alternative();
 
+ipmon_buffer* secret_ipmon_buffer_pointer = NULL;
+
 /*-----------------------------------------------------------------------------
     ipmon_enclave - This is where we land after the enclave entrypoint has
 	set up our arguments for us.
@@ -3375,6 +3379,10 @@ extern "C" long ipmon_enclave
 	args.arg5 = arg5;
 	args.arg6 = arg6;
 	args.entry = NULL;
+
+	if (RB)
+		secret_ipmon_buffer_pointer = RB;
+	RB = secret_ipmon_buffer_pointer;
 
 	// If the syscall is not registered as a possibly unchecked syscall,
 	// then we can skip the policy checks and replication logic altogether.
@@ -3538,7 +3546,7 @@ extern "C" void ipmon_register_thread()
 	if (ret < 0 && ret > -4096)
 	{
 		printf("ERROR: IP-MON registration failed. sys_prctl(PR_REGISTER_IPMON) returned: %ld (%s)\n", ret, strerror(-ret));
-		exit(-1);
+//		exit(-1);
 		return;
 	}
 }

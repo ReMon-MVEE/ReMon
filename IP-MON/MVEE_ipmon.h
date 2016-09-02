@@ -37,7 +37,7 @@ extern "C" {
     Policy control
 -----------------------------------------------------------------------------*/
 // Enables lock-stepping on all syscall entrances
-#define IPMON_DO_LOCKSTEP
+// #define IPMON_DO_LOCKSTEP
 
 // Does the flush locally, avoiding context switches to GHUMVEE
 #define IPMON_FLUSH_LOCAL
@@ -252,8 +252,7 @@ struct ipmon_barrier
 		struct
 		{
 			unsigned short seq;
-			unsigned char count;
-			unsigned char padding;
+			unsigned short count;
 		};
 		unsigned int hack;
 	};
