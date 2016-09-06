@@ -1549,6 +1549,14 @@ void monitor::handle_syscall_entrance_event(int index)
     variants[index].call_type       =
         call_precall_get_call_type(index, variants[index].callnum);
 
+	// Handle -1 IP-MON aborted calls
+	if (callnum == -1 && ipmon_initialized)
+	{
+		variants[index].call_type = MVEE_CALL_TYPE_UNSYNCED;
+		variants[index].call_flags = MVEE_CALL_DENY;
+		variants[index].callnum = __NR_getpid;
+	}
+
     // the current syscall is unsynced. dispatch it!
     if (variants[index].call_type == MVEE_CALL_TYPE_UNSYNCED)
     {

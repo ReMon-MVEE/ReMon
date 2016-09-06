@@ -1070,8 +1070,13 @@ long monitor::handle_execve_postcall(int variantnum)
         // left unchanged."
         set_sighand_table->reset();
 
+		// if IP-MON is running, we don't know anything about the open
+		// fds before the execve call -> wipe the table and try to repopulate
+		if (ipmon_initialized)
+			set_fd_table->refresh_fd_table(getpids());
         // close all file descriptors that have O_CLOEXEC set
-        set_fd_table->free_cloexec_fds();
+		else
+			set_fd_table->free_cloexec_fds();
 
         if (created_by_vfork)
         {
@@ -1292,12 +1297,15 @@ long monitor::handle_setitimer_postcall(int variantnum)
 -----------------------------------------------------------------------------*/
 long monitor::handle_getpid_postcall(int variantnum)
 {
+	if (IS_UNSYNCED_CALL)
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     for (int i = 1; i < mvee::numvariants; ++i)
     {
         WRITE_SYSCALL_RETURN(i, variants[0].varianttgid);
     }
-
-    return 0;
+	
+	return 0;
 }
 
 /*-----------------------------------------------------------------------------
@@ -4157,8 +4165,10 @@ long monitor::handle_shmat_postcall(int variantnum)
 	{
 		region_name = "[ipmon-buffer]";
 		region_size = ipmon_buffer->sz;
+#ifndef MVEE_BENCHMARK
 		hwbp_set_watch(0, addresses[0], MVEE_BP_WRITE_ONLY); // detects overwrites of numvariants
 //		hwbp_set_watch(0, addresses[0] + 64 * (1 + mvee::numvariants), MVEE_BP_WRITE_ONLY); // detects writes of first syscall no
+#endif
 	}
 	else if (set_fd_table->file_map_exists() 
 			 && (int)ARG1(0) == set_fd_table->file_map_id())
@@ -4304,7 +4314,7 @@ long monitor::handle_clone_log_args(int variantnum)
 
 long monitor::handle_clone_precall(int variantnum)
 {
-	log_variant_backtrace(0);
+//	log_variant_backtrace(0);
     CHECKARG(1);
 
     // we weren't multithreaded yet but will be after this call!

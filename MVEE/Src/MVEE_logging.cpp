@@ -20,6 +20,7 @@
 #include <iomanip>
 #include <vector>
 #include <algorithm>
+#include <execinfo.h>
 #include "MVEE.h"
 #include "MVEE_monitor.h"
 #include "MVEE_fake_syscall.h"
@@ -1419,8 +1420,24 @@ void mvee::log_sigaction(struct sigaction* action)
 }
 
 /*-----------------------------------------------------------------------------
+  mvee_log_local_backtrace - log a monitor backtrace to stderr
+-----------------------------------------------------------------------------*/
+void mvee_log_local_backtrace() 
+{
+	void *trace[16];
+	char **messages = (char **)NULL;
+	int i, trace_size = 0;
+
+	trace_size = backtrace(trace, 16);
+	messages = backtrace_symbols(trace, trace_size);
+	warnf("Local Backtrace:\n");
+	for (i=0; i<trace_size; ++i)
+		warnf("[%d] %s\n", i, messages[i]);
+}
+
+/*-----------------------------------------------------------------------------
   mvee_wrap_ptrace - wrapper around ptrace that logs when something went wrong
-  -----------------------------------------------------------------------------*/
+-----------------------------------------------------------------------------*/
 long mvee_wrap_ptrace(unsigned short request, pid_t pid, unsigned long addr, void *data, int allow_even_if_shutting_down)
 {
 //	debugf("PTRACE(%s, %d, 0x" PTRSTR ", 0x" PTRSTR ")\n",
@@ -1446,6 +1463,7 @@ long mvee_wrap_ptrace(unsigned short request, pid_t pid, unsigned long addr, voi
         warnf("addr     : 0x" PTRSTR "\n", addr);
         warnf("data     : 0x" PTRSTR "\n", (long)data);
         mvee::active_monitor->log_monitor_state_short(err);
+		mvee_log_local_backtrace();
         warnf("==================================\n");
         return -1;
     }

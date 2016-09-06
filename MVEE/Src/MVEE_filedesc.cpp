@@ -117,6 +117,73 @@ fd_table::~fd_table()
 }
 
 /*-----------------------------------------------------------------------------
+    refresh_fd_table - Try to wipe and repopulate the fd table. We do this if
+	we see an execve in an IP-MON process because GHUMVEE might lose track
+	of which fds are opened in which variants...
+-----------------------------------------------------------------------------*/
+void fd_table::refresh_fd_table(std::vector<pid_t> variant_pids)
+{
+	table.clear();
+	epoll_map.clear();
+	temporary_files.clear();
+
+	int i = 0;
+	for (auto pid : variant_pids)
+	{
+		debugf("refreshing fd table for variant %d (pid %d)\n", i, pid);
+
+/*
+lrwx------ 1 stijn stijn 64 Sep  5 12:18 0 -> /dev/pts/5
+lrwx------ 1 stijn stijn 64 Sep  5 12:18 1 -> /dev/pts/5
+lrwx------ 1 stijn stijn 64 Sep  5 12:18 2 -> /dev/pts/5
+lrwx------ 1 stijn stijn 64 Sep  5 12:18 3 -> /dev/tty
+*/
+
+		char cmd   [500];
+		char perms [15];
+		char file  [1024];
+		int fd;
+		int prot;
+
+		sprintf(cmd, "ls -al /proc/%d/fd | grep \"\\->\" | sed 's/\\([lrwx-]*\\).*:...\\([0-9]*\\) -> \\(.*\\)/\\1 \\2 \\3/'", pid);
+		std::string line, fd_list = mvee::log_read_from_proc_pipe(cmd, NULL);
+		std::stringstream ss(fd_list);
+		
+		while(std::getline(ss, line))
+		{
+			if (sscanf(line.c_str(), "%s %d %s", perms, &fd, file) != 3)
+			{
+				warnf("Malformed line in refresh_fd_table: %s\n", line.c_str());
+				continue;
+			}
+
+			if (perms[1] == 'r')
+			{
+				if (perms[2] == 'w')
+					prot = O_RDWR;
+				else
+					prot = O_RDONLY;
+			}
+			else if (perms[2] == 'w')
+			{
+				prot = O_WRONLY;
+			}
+			else
+			{
+				prot = 0;
+			}
+
+			// TODO: implement?
+
+			debugf("variant %d (pid %d) has file: %d -> %s (perms: %s)\n",
+				  i, pid, fd, file, perms);
+		}
+
+		i++;
+	}
+}
+
+/*-----------------------------------------------------------------------------
     File Map Management
 -----------------------------------------------------------------------------*/
 bool fd_table::file_map_exists()
@@ -200,7 +267,7 @@ void fd_table::create_fd_info
     auto it = table.find(fds[0]);
     if (it != table.end())
     {
-        warnf("fd override!!! FIXME\n");
+        warnf("fd override!!! FIXME (unless IP-MON is managing fds, in which case you can safely ignore this warning)\n");
         it->second.print_fd_info();
         free_fd_info(it->second.fds[0]);
     }

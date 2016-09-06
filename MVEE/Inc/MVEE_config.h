@@ -59,7 +59,7 @@
 
 // MVEE_NO_RW_LOGGING: when defined, the monitor will not log argument and return buffers
 // for read/write system calls
-// #define MVEE_NO_RW_LOGGING
+#define MVEE_NO_RW_LOGGING
 
 // MVEE_CHECK_SYNC_PRIMITIVES: the MVEE will keep track of which high-level synchronization
 // primitives the variants are using. Requires libc-support. NO LONGER WORKS. FIXME
