@@ -55,7 +55,7 @@ endif
 
 # Debug build.
 ifeq ($(BUILD),Debug)
-BUILD_CXXFLAGS = -ggdb -std=c++11 -pedantic-errors -fno-omit-frame-pointer 
+BUILD_CXXFLAGS = -ggdb -std=c++11 -pedantic-errors -fno-omit-frame-pointer
 endif
 
 # Debug build with address sanitizer
@@ -89,7 +89,7 @@ endif
 
 ifeq ($(BUILD),Debug)
 STD_CXX			= clang++
-STD_LDFLAGS		= 
+STD_LDFLAGS		= -rdynamic
 OBJ				= $(SRCS:%.cpp=$(MVEE_BUILD)/%.o)
 endif
 

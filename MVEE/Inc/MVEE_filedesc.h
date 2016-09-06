@@ -101,6 +101,11 @@ public:
     void          free_fd_info        (unsigned long fd);
     void          free_cloexec_fds    ();
 
+	//
+	// Wipe the fd table and repopulate it using /proc/<pid>/fd
+    //
+	void          refresh_fd_table    (std::vector<pid_t> variant_pids);
+
 	// Temporary files management. These functions are used for unsynchronized
 	// file operations that happen during fast forwarding
 	// 

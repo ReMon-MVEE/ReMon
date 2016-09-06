@@ -680,14 +680,17 @@ long monitor::call_call_dispatch ()
 
             case MVEE_ALL_HEAPS_ALIGNED:
             {
-                for (int i = 0; i < mvee::numvariants; ++i)
-                {
-                    if (variants[i].last_mmap_result & (HEAP_MAX_SIZE - 1))
-                    {
-                        result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
-                        break;
-                    }
-                }
+				if (!ipmon_initialized)
+				{
+					for (int i = 0; i < mvee::numvariants; ++i)
+					{
+						if (variants[i].last_mmap_result & (HEAP_MAX_SIZE - 1))
+						{
+							result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
+							break;
+						}
+					}
+				}
                 if (!result)
                     result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(1);
                 break;
