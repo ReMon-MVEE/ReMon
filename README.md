@@ -97,10 +97,6 @@ sudo make modules_install
 sudo make install
 ``` 
 
-### Building the IP-MON glibc
-
-**IP-MON** requires some minor modifications to glibc to work properly. The glibc binaries **GHUMVEE** ships with do not have the necessary modifications so you'll have to build glibc yourself. Please refer to the "Further Tinkering" > "Building GHUMVEE-ready glibc and libpthreads libraries" for instructions on how to build a GHUMVEE and IP-MON-ready glibc and libpthreads.
-
 ### Configuring the IP-MON policy
 
 The **IP-MON** syscall policy must be selected at the source level. You can do so by editing the /path/to/ReMon/IP-MON/MVEE_ipmon.h file. Here, you can edit the definition of `CURRENT_POLICY` to select your policy.
@@ -229,7 +225,6 @@ In 5th International Symposium on Foundations and Practice of Security (FPS'12),
 
 The **IP-MON** component is available under the licensing terms in `IPMONLICENSE.txt`.
 This license applies to the following files:
-- `patches/glibc-2.19-ipmon.patch`
 - `patches/linux-3.13-ipmon.patch`
 - The entire `IP-MON` folder
 
