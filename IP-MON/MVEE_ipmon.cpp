@@ -133,12 +133,12 @@ volatile int* ipmon_epoll_map_lock_ptr = &ipmon_epoll_map_spinlock;
 // happen if you pass weird arguments to sys_clone (i.e. CLONE_FILES but 
 // not CLONE_VM). Luckily, I don't think I've ever seen this.
 //
-long syscall_clock = 0;
+int syscall_ordering_clock = 0;
 
 //
 // The lock that protects the clock.
 //
-long syscall_lock  = 0;
+long syscall_ordering_lock  = 0;
 
 /*-----------------------------------------------------------------------------
     ipmon_arg_verify_failed - Just crash the variant. It's super user friendly!
@@ -319,7 +319,7 @@ PRECALL(mmap)
 		if (ipmon_variant_num != 0)
 			ARG5 = ipmon_get_slave_fd(ARG5);
 	}
-	return IPMON_EXEC_ALL;
+	return IPMON_EXEC_ALL | IPMON_ORDER_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -336,7 +336,7 @@ PRECALL(munmap)
 	// TODO: Handle ptmalloc madness
 	CHECKPOINTER(ARG1);
 	CHECKREG(ARG2);
-	return IPMON_EXEC_ALL;
+	return IPMON_EXEC_ALL | IPMON_ORDER_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -354,7 +354,7 @@ PRECALL(mprotect)
 	CHECKPOINTER(ARG1);
 	CHECKREG(ARG2);
 	CHECKREG(ARG3);
-	return IPMON_EXEC_ALL;
+	return IPMON_EXEC_ALL | IPMON_ORDER_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -377,7 +377,7 @@ PRECALL(mremap)
 	CHECKREG(ARG3);
 	CHECKREG(ARG4);
 	CHECKPOINTER(ARG5);
-	return IPMON_EXEC_ALL;
+	return IPMON_EXEC_ALL | IPMON_ORDER_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -391,7 +391,7 @@ CALCSIZE(brk)
 PRECALL(brk)
 {
 	CHECKPOINTER(ARG1);
-	return IPMON_EXEC_ALL;
+	return IPMON_EXEC_ALL | IPMON_ORDER_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -431,7 +431,7 @@ PRECALL(open)
 
 	if (master)
 		return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
-	return IPMON_EXEC_ALL | IPMON_REPLICATE_MASTER;
+	return IPMON_EXEC_ALL | IPMON_REPLICATE_MASTER | IPMON_ORDER_CALL;
 }
 
 POSTCALL(open)
@@ -494,7 +494,7 @@ PRECALL(openat)
 
 	if (master)
 		return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
-	return IPMON_EXEC_ALL | IPMON_REPLICATE_MASTER;
+	return IPMON_EXEC_ALL | IPMON_REPLICATE_MASTER | IPMON_ORDER_CALL;
 }
 
 POSTCALL(openat)
@@ -999,7 +999,7 @@ PRECALL(chdir)
 {
 	CHECKPOINTER(ARG1);
 	CHECKSTRING(ARG1);
-	return IPMON_EXEC_ALL;
+	return IPMON_EXEC_ALL | IPMON_ORDER_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1014,7 +1014,7 @@ PRECALL(fchdir)
 {
 	CHECKREG(ARG1);
 	ARG1 = ipmon_get_slave_fd(ARG1);
-	return IPMON_EXEC_ALL;
+	return IPMON_EXEC_ALL | IPMON_ORDER_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1136,7 +1136,7 @@ PRECALL(ioctl)
     {
         if (ipmon_variant_num != 0)
 			ARG1 = ipmon_get_slave_fd(ARG1);
-        return IPMON_EXEC_ALL | IPMON_REPLICATE_MASTER;
+        return IPMON_EXEC_ALL | IPMON_REPLICATE_MASTER | IPMON_ORDER_CALL;
     }
 	return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
 }
@@ -1505,7 +1505,7 @@ PRECALL(getcwd)
 {
 	CHECKPOINTER(ARG1);
 	CHECKREG(ARG2);
-	return IPMON_EXEC_ALL;
+	return IPMON_EXEC_ALL | IPMON_ORDER_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -2925,6 +2925,30 @@ int ipmon_syscall_postcall(struct ipmon_syscall_args& args, struct ipmon_syscall
 }
 
 /*-----------------------------------------------------------------------------
+    ipmon_spin_lock - Used to order syscalls. We don't expect much contention
+	so this is not a super duper optimized lock
+-----------------------------------------------------------------------------*/
+void ipmon_spin_lock(volatile long* lock)
+{
+	while (1)
+	{
+		if (__sync_bool_compare_and_swap(lock, 0, 1))
+			break;
+		cpu_relax();
+	}
+}
+
+/*-----------------------------------------------------------------------------
+    ipmon_spin_unlock - 
+-----------------------------------------------------------------------------*/
+void ipmon_spin_unlock(volatile long* lock)
+{
+	// TODO: can we drop the barrier for intel?
+	__sync_synchronize();
+	*lock = 0;
+}
+
+/*-----------------------------------------------------------------------------
     ipmon_barrier_wait - Super optimized spin-futex barrier. 
 	
 	NOTE: This is a slightly altered version of pool_barrier_wait2 on 
@@ -3028,7 +3052,6 @@ void ipmon_cond_broadcast(struct ipmon_condvar* cv)
 #endif
 }
 
-
 /*-----------------------------------------------------------------------------
     ipmon_sync_on_syscall_entrance - Called just before we invoke the original
 	syscall. This would be the place where we implement lock-stepping.
@@ -3040,6 +3063,26 @@ void ipmon_sync_on_syscall_entrance(struct ipmon_buffer* rb, struct ipmon_syscal
 #ifdef IPMON_DO_LOCKSTEP
 	ipmon_barrier_wait(rb, &entry->syscall_lockstep_barrier);
 #endif
+
+	if (entry->syscall_type & IPMON_ORDER_CALL)
+	{
+		if (ipmon_variant_num == 0)
+		{
+			ipmon_spin_lock(&syscall_ordering_lock);
+			entry->syscall_order = syscall_ordering_clock++;
+		}
+		else
+		{
+			
+            // wait for preceding operations to complete
+			while (1)
+			{
+				if (*(volatile int*)&syscall_ordering_clock == entry->syscall_order)
+					break;
+				cpu_relax();
+			}			
+		}
+	}
 }
 
 /*-----------------------------------------------------------------------------
@@ -3054,6 +3097,20 @@ void ipmon_sync_on_syscall_exit(struct ipmon_buffer* rb, struct ipmon_syscall_en
 #ifdef IPMON_DO_LOCKSTEP
 	ipmon_barrier_wait(rb, &entry->syscall_lockstep_barrier);
 #endif
+
+	if (entry->syscall_type & IPMON_ORDER_CALL)
+	{
+		if (ipmon_variant_num == 0)
+		{
+			ipmon_spin_unlock(&syscall_ordering_lock);
+		}
+		else
+		{
+			// increment clock 
+			__sync_synchronize();
+			syscall_ordering_clock++;
+		}
+	}
 }
 
 /*-----------------------------------------------------------------------------
@@ -3320,7 +3377,10 @@ long ipmon_finish_syscall (struct ipmon_buffer* RB, struct ipmon_syscall_args& a
 
 	// Skip all of the replication logic if REPLICATE_MASTER is not set
 	if (!(entry->syscall_type & IPMON_REPLICATE_MASTER))
+	{
+		ipmon_sync_on_syscall_exit(RB, entry);
 		return ret;
+	}
 
 	if (ipmon_variant_num == 0)
 	{
@@ -3427,6 +3487,7 @@ void ipmon_set_unchecked_syscall(unsigned char* mask, unsigned long syscall_no, 
 -----------------------------------------------------------------------------*/
 extern "C" void ipmon_enclave_entrypoint();
 extern "C" void ipmon_enclave_entrypoint_alternative();
+extern "C" void* ipmon_register_thread();
 
 ipmon_buffer* secret_ipmon_buffer_pointer = NULL;
 
@@ -3458,9 +3519,13 @@ extern "C" long ipmon_enclave
 	args.arg6 = arg6;
 	args.entry = NULL;
 
-	if (RB)
-		secret_ipmon_buffer_pointer = RB;
-	RB = secret_ipmon_buffer_pointer;
+//	if (RB)
+//		secret_ipmon_buffer_pointer = RB;
+//	RB = secret_ipmon_buffer_pointer;
+
+	// check if we need to reinitialize
+	if (!RB)
+		RB = (ipmon_buffer*)ipmon_register_thread();
 
 	// If the syscall is not registered as a possibly unchecked syscall,
 	// then we can skip the policy checks and replication logic altogether.
@@ -3569,7 +3634,7 @@ void ipmon_rb_probe()
 /*-----------------------------------------------------------------------------
     ipmon_register_thread - IP-MON registration is thread-local now!
 -----------------------------------------------------------------------------*/
-extern "C" void ipmon_register_thread()
+extern "C" void* ipmon_register_thread()
 {
 	void* RB = (void*)ipmon_checked_syscall(__NR_shmat, 
 											ipmon_checked_syscall(MVEE_GET_SHARED_BUFFER, 0, MVEE_IPMON_BUFFER, NULL, NULL, NULL, NULL), 
@@ -3579,7 +3644,7 @@ extern "C" void ipmon_register_thread()
 	{
 		printf("ERROR: IP-MON registration failed. Could not attach to Replication Buffer\n");
 		exit(-1);
-		return;
+		return NULL;
 	}
 
 //	printf("Replication buffer mapped @ 0x%016lx\n", ipmon_replication_buffer);
@@ -3595,7 +3660,7 @@ extern "C" void ipmon_register_thread()
 		{
 			printf("ERROR: IP-MON registration failed. Could not attach to File Map\n");
 			exit(-1);
-			return;
+			return NULL;
 		}
 	}
 
@@ -3616,7 +3681,7 @@ extern "C" void ipmon_register_thread()
 #endif
 		);
 
-	RB = NULL;
+///	RB = NULL;
 
 	// TODO: There used to be a race here and it might still be there.
 	// Registration may in fact fail because the calling thread
@@ -3625,24 +3690,10 @@ extern "C" void ipmon_register_thread()
 	{
 		printf("ERROR: IP-MON registration failed. sys_prctl(PR_REGISTER_IPMON) returned: %ld (%s)\n", ret, strerror(-ret));
 //		exit(-1);
-		return;
+		return NULL;
 	}
-}
 
-/*-----------------------------------------------------------------------------
-    is_ipmon_libc_compatible - Check if the currently loaded glibc exports an
-    ipmon_syscall symbol to find out whether or not it is compatible with
-    IP-MON.
------------------------------------------------------------------------------*/
-unsigned char is_ipmon_libc_compatible()
-{
-	if (!ipmon_initialized)
-	{
-		void* libc = dlopen("libc.so.6", RTLD_LAZY);
-		if (libc && dlsym(libc, "ipmon_syscall"))
-			ipmon_libc_compatible = 1;
-	}
-	return ipmon_libc_compatible;
+	return RB;
 }
 
 /*-----------------------------------------------------------------------------
@@ -3669,28 +3720,11 @@ void __attribute__((constructor)) init()
 	// We don't want to recalculate the syscall mask if we've already registered
 	// an IP-MON for this process.
 	if (ipmon_initialized && 
-/*		is_ipmon_libc_compatible() && */
 		is_ipmon_kernel_compatible())
 	{
 		ipmon_register_thread();
 		return;
 	}
-
-/*
-	if (!is_ipmon_libc_compatible())
-	{
-		printf("WARNING: IP-MON has been activated through the use_ipmon setting in MVEE.ini,\n");
-		printf("WARNING: but we could not detect an IP-MON-compatible glibc.\n");
-		printf("WARNING:\n");
-		printf("WARNING: Common causes include:\n");
-		printf("WARNING: * You have set use_system_libc to 1 in MVEE.ini and are therefore not\n");
-		printf("WARNING: loading the glibc binary from MVEE/prebuilt_binaries/libc/arch/.");
-		printf("WARNING:\n");
-		printf("WARNING: * You have not built an IP-MON-compatible glibc. Please refer to\n");
-		printf("WARNING: MVEE/README.txt for instructions\n");
-		return;
-	}
-*/
 
 	if (!is_ipmon_kernel_compatible())
 	{
@@ -3756,7 +3790,7 @@ void __attribute__((constructor)) init()
 	IPMON_MASK_SET(mask, __NR_preadv);
 	IPMON_MASK_SET(mask, __NR_select);
 	IPMON_MASK_SET(mask, __NR_poll); 
-	IPMON_MASK_SET(mask, __NR_ioctl);
+//	IPMON_MASK_SET(mask, __NR_ioctl);
 # if defined(IPMON_SUPPORT_FUTEX) || defined(IPMON_USE_FUTEXES_FOR_BLOCKING_CALLS)
 	IPMON_MASK_SET(mask, __NR_futex);
 # endif
@@ -3806,7 +3840,7 @@ void __attribute__((constructor)) init()
 	IPMON_MASK_SET(mask, __NR_munmap);
 	IPMON_MASK_SET(mask, __NR_mremap);
 	IPMON_MASK_SET(mask, __NR_mprotect);
-	IPMON_MASK_SET(mask, __NR_brk);
+	IPMON_MASK_SET(mask, __NR_brk); // TODO/FIXME: sys_brk interception causes crashes
 
 	// File Management
 	IPMON_MASK_SET(mask, __NR_open);

@@ -137,6 +137,7 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint)
 		// This func needs to manually align the stack. The AMD64 ABI expects
 		// the stack to be aligned on a 16 byte boundary at the moment of the call.
 		push rbp
+		push rsi
 		mov rbp, rsp
 		sub rsp, 16
 		and rsp, 0xfffffffffffffff0
@@ -165,6 +166,7 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint)
 		xor r11, r11
 
 		mov rsp, rbp
+		pop rsi
 		pop rbp
 
 		retq		
@@ -203,6 +205,8 @@ Outgoing Stack:
 -----------------------------------------------------------------------------*/		
 FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint_alternative)
 		push rbp
+		push rsi
+		
 		mov rbp, rsp
 		sub rsp, 16
 		and rsp, 0xfffffffffffffff0
@@ -229,6 +233,8 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint_alternative)
 		pop r12
 
 		mov rsp, rbp
+		
+		pop rsi
 		pop rbp
 
 		retq

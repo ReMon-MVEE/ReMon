@@ -195,6 +195,7 @@ typedef unsigned long rb_pointer;
 //
 #define IPMON_UNSYNCED_CALL  32 // No lock-stepping for this call
 #define IPMON_BLOCKING_CALL  64 // The call is expected to block. This is not a distinct call type. It is ORed with one of the above call types.
+#define IPMON_ORDER_CALL     128 // All ordered calls must execute in the same order in all variants
 
 #define IPMON_MAYBE_BLOCKING(fd) ((ipmon_get_file_type(fd) & MVEE_BLOCKING_FD) ? IPMON_BLOCKING_CALL : 0)
 #define IPMON_MAYBE_DISPATCH_MASTER(fd)							\
