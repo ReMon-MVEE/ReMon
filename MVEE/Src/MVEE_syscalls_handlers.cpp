@@ -1072,8 +1072,9 @@ long monitor::handle_execve_postcall(int variantnum)
 
 		// if IP-MON is running, we don't know anything about the open
 		// fds before the execve call -> wipe the table and try to repopulate
-		if (ipmon_initialized)
+		if (ipmon_fd_handling)
 			set_fd_table->refresh_fd_table(getpids());
+
         // close all file descriptors that have O_CLOEXEC set
 		else
 			set_fd_table->free_cloexec_fds();
@@ -4905,9 +4906,11 @@ long monitor::handle_prctl_call(int variantnum)
 		if (ipmon_mask)
 		{
 			if (ipmon_is_unchecked_syscall(ipmon_mask, __NR_mmap))
-			{
 				ipmon_mmap_handling = true;
-			}
+			if (ipmon_is_unchecked_syscall(ipmon_mask, __NR_open))
+				ipmon_fd_handling = true;
+			
+			debugf("IP-MON handling mmap: %d - fd: %d\n", ipmon_mmap_handling, ipmon_fd_handling);
 
 			delete[] ipmon_mask;
 		}
@@ -5354,7 +5357,7 @@ long monitor::handle_mmap_postcall(int variantnum)
 			&& ARG3(0) == PROT_NONE                                     // no protection flags yet
 			&& ARG4(0) == (MAP_PRIVATE | MAP_NORESERVE | MAP_ANONYMOUS) //
 			&& (int)ARG5(0) == -1                                       // backed by /dev/zero
-			&& ipmon_mmap_handling)
+			&& !ipmon_mmap_handling)
 		{
 			in_new_heap_allocation = true;
 
