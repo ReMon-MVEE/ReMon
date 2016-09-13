@@ -98,7 +98,8 @@ public:
     // synchronized file operations.
 	//
     void          create_fd_info      (FileType type, std::vector<unsigned long>& fds, std::string path, unsigned long access_flags, bool close_on_exec, bool master_file, bool unsynced_reads=false, ssize_t original_file_size=0);
-    void          free_fd_info        (unsigned long fd);
+	std::map<unsigned long, fd_info>::iterator
+                  free_fd_info        (unsigned long fd);
     void          free_cloexec_fds    ();
 
 	//

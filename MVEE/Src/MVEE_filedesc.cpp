@@ -127,6 +127,10 @@ void fd_table::refresh_fd_table(std::vector<pid_t> variant_pids)
 	epoll_map.clear();
 	temporary_files.clear();
 
+// I'm not sure if it's really a good idea to repopulate the table
+// as we generally can't figure out the mapping between master and slave
+// fds if we haven't seen the original sys_open(at)
+# if 0
 	int i = 0;
 	for (auto pid : variant_pids)
 	{
@@ -181,6 +185,7 @@ lrwx------ 1 stijn stijn 64 Sep  5 12:18 3 -> /dev/tty
 
 		i++;
 	}
+#endif
 }
 
 /*-----------------------------------------------------------------------------
@@ -267,7 +272,8 @@ void fd_table::create_fd_info
     auto it = table.find(fds[0]);
     if (it != table.end())
     {
-        warnf("fd override!!! FIXME (unless IP-MON is managing fds, in which case you can safely ignore this warning)\n");
+		if (!mvee::config.mvee_use_ipmon)
+			warnf("fd override!!! FIXME (unless IP-MON is managing fds, in which case you can safely ignore this warning)\n");
         it->second.print_fd_info();
         free_fd_info(it->second.fds[0]);
     }
@@ -285,7 +291,7 @@ void fd_table::create_fd_info
     free_fd_info - We cannot simply erase the file descriptors from the fd table
     since they might also be in the epoll map
 -----------------------------------------------------------------------------*/
-void fd_table::free_fd_info (unsigned long fd)
+std::map<unsigned long, fd_info>::iterator fd_table::free_fd_info (unsigned long fd)
 {
     auto it = table.find(fd);
     if (it != table.end())
@@ -313,6 +319,7 @@ void fd_table::free_fd_info (unsigned long fd)
     }
 
 	file_map_set(fd, FT_UNKNOWN);
+	return it;
 }
 
 /*-----------------------------------------------------------------------------
@@ -338,8 +345,7 @@ void fd_table::free_cloexec_fds ()
         if (it->second.close_on_exec)
         {
             debugf("removing cloexec fd: %d (%s)\n", it->second.fds[0], it->second.path.c_str());
-            free_fd_info(it->second.fds[0]);
-            it = table.begin();
+            it = free_fd_info(it->second.fds[0]);
         }
     }
 }
