@@ -803,6 +803,13 @@ private:
 	// Visualizes the contents of IP-MON's Replication Buffer
 	//
     void log_ipmon_state                 ();
+	bool log_ipmon_entry                 (struct ipmon_syscall_entry* entry, void (*logfunc)(const char* format, ...));
+	struct ipmon_syscall_data* 
+		get_ipmon_data                   (struct ipmon_syscall_entry* entry, unsigned long start_offset, unsigned long end_offset, int data_num);
+	struct ipmon_syscall_data* 
+		get_ipmon_arg                    (struct ipmon_syscall_entry* entry, int arg_num);
+	struct ipmon_syscall_data* 
+		get_ipmon_ret                    (struct ipmon_syscall_entry* entry, int ret_num);
 
 	//
 	// Calculates statistics for the synchronization operations in the
@@ -943,6 +950,7 @@ private:
     bool                              monitor_terminating;
     bool                              have_pending_signals;
     bool                              ipmon_initialized;
+	bool                              ipmon_mmap_handling;
 
     int                               parentmonitorid;        // monitorid of the monitor that created this monitor...
     MonitorState                      state;                  //

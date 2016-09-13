@@ -63,6 +63,123 @@ void monitor::flush_mismatch_info()
 }
 
 /*-----------------------------------------------------------------------------
+    get_ipmon_data
+-----------------------------------------------------------------------------*/
+struct ipmon_syscall_data* monitor::get_ipmon_data
+(
+	struct ipmon_syscall_entry* entry, 
+	unsigned long start_offset,
+	unsigned long end_offset,
+	int data_num
+)
+{
+	unsigned long data_offset = start_offset;
+	unsigned long num = 0;
+
+	while (data_offset < end_offset)
+	{
+		struct ipmon_syscall_data* data = (struct ipmon_syscall_data*)((unsigned long)entry + data_offset);
+
+		if (num == data_num)
+			return data;
+		if (data->len <= 0)
+			return nullptr;
+
+		num++;
+		data_offset += data->len;
+	}
+
+	return nullptr;
+}
+
+/*-----------------------------------------------------------------------------
+    get_ipmon_arg
+-----------------------------------------------------------------------------*/
+struct ipmon_syscall_data* monitor::get_ipmon_arg(struct ipmon_syscall_entry* entry, int arg_num)
+{
+	return get_ipmon_data(entry, 
+						  sizeof(struct ipmon_syscall_entry), 
+						  sizeof(struct ipmon_syscall_entry) + entry->syscall_args_size, 
+						  arg_num);
+}
+
+/*-----------------------------------------------------------------------------
+    get_ipmon_ret
+-----------------------------------------------------------------------------*/
+struct ipmon_syscall_data* monitor::get_ipmon_ret(struct ipmon_syscall_entry* entry, int ret_num)
+{
+	return get_ipmon_data(entry,
+						  sizeof(struct ipmon_syscall_entry) + entry->syscall_args_size,
+						  entry->syscall_entry_size,
+						  ret_num);
+}
+
+/*-----------------------------------------------------------------------------
+    log_ipmon_entry
+-----------------------------------------------------------------------------*/
+bool monitor::log_ipmon_entry
+(
+	struct ipmon_syscall_entry* entry, 
+	void (*logfunc)(const char* format, ...)
+)
+{
+	logfunc("\tsyscall           : %hu (%s)\n", (unsigned short)entry->syscall_no, getTextualSyscall((unsigned short)entry->syscall_no));
+	logfunc("\tchecked           : %d\n", (entry->syscall_type & IPMON_EXEC_NO_IPMON) ? 0 : 1);
+	logfunc("\torder             : %d\n", entry->syscall_order);
+	logfunc("\tmaster            : %d\n", (entry->syscall_type & IPMON_REPLICATE_MASTER) ? 1 : 0);
+	logfunc("\tblocking          : %d\n", (entry->syscall_type & IPMON_BLOCKING_CALL) ? 1 : 0);
+	logfunc("\tresults waiters   : %d\n", entry->syscall_results_available.u.s.have_waiters);
+	logfunc("\tresults available : %d\n", entry->syscall_results_available.u.s.signaled);
+	logfunc("\tlockstep waiters  : %d\n", entry->syscall_lockstep_barrier.u.s.count);
+	logfunc("\tlockstep sequence : %d\n", entry->syscall_lockstep_barrier.u.s.seq >> 8);
+	logfunc("\treturn value      : %lu\n", entry->syscall_return_value);
+	logfunc("\tentrysize         : %d\n", entry->syscall_entry_size);
+
+	if (entry->syscall_entry_size == 0)
+		return false;
+
+	int argnum = 0;
+	while (true)
+	{
+		struct ipmon_syscall_data* arg = get_ipmon_arg(entry, argnum);
+
+		if (!arg)
+			break;
+
+		logfunc("========ARG %02d==================================================================\n", argnum);
+
+		logfunc("\tlen               : %ld\n", arg->len);
+		if (!arg->len)
+			break;
+
+		std::string hex = mvee::log_do_hex_dump (arg->data, arg->len - sizeof(unsigned long));
+		logfunc("\n%s", hex.c_str());
+		argnum++;
+	}
+
+	int retnum = 0;
+	while (true)
+	{
+		struct ipmon_syscall_data* ret = get_ipmon_ret(entry, retnum);
+
+		if (!ret)
+			break;
+
+		logfunc("========RET %02d==================================================================\n", retnum);
+
+		logfunc("\tlen               : %ld\n", ret->len);
+		if (!ret->len)
+			break;
+
+		std::string hex = mvee::log_do_hex_dump (ret->data, ret->len - sizeof(unsigned long));
+		logfunc("\n%s", hex.c_str());
+		retnum++;
+	}
+
+	return true;
+}
+
+/*-----------------------------------------------------------------------------
     log_ipmon_state
 -----------------------------------------------------------------------------*/
 void monitor::log_ipmon_state()
@@ -101,9 +218,10 @@ void monitor::log_ipmon_state()
 	while (offset <= highest)
 	{
 		ipmon_syscall_entry* entry = (ipmon_syscall_entry*)((unsigned long)buffer + data_start + offset);
+
 		debugf("================================================================================\n");
 		std::stringstream ss;
-		ss << "\tentry " << entry_num++ << " - offset: " << offset;
+		ss << "\tentry " << entry_num << " - offset: " << offset;
 		for (int i = 0; i < mvee::numvariants; ++i)
 		{
 			if (offsets[i] == offset)
@@ -117,60 +235,14 @@ void monitor::log_ipmon_state()
 		}
 		ss << "\n";
 		debugf(ss.str().c_str());
-		debugf("================================================================================\n");
 
 		if (offset + sizeof(struct ipmon_syscall_entry) > buffer->ipmon_usable_size ||
 			offsets[0] == offset)
 			break;
 
-		debugf("\tsyscall           : %hu (%s)\n", (unsigned short)entry->syscall_no, getTextualSyscall((unsigned short)entry->syscall_no));
-		debugf("\tchecked           : %d\n", (entry->syscall_type & IPMON_EXEC_NO_IPMON) ? 0 : 1);
-		debugf("\tmaster            : %d\n", (entry->syscall_type & IPMON_REPLICATE_MASTER) ? 1 : 0);
-		debugf("\tblocking          : %d\n", (entry->syscall_type & IPMON_BLOCKING_CALL) ? 1 : 0);
-		debugf("\tresults waiters   : %d\n", entry->syscall_results_available.u.s.have_waiters);
-		debugf("\tresults available : %d\n", entry->syscall_results_available.u.s.signaled);
-		debugf("\tlockstep waiters  : %d\n", entry->syscall_lockstep_barrier.u.s.count);
-		debugf("\tlockstep sequence : %d\n", entry->syscall_lockstep_barrier.u.s.seq >> 8);
-		debugf("\treturn value      : %lu\n", entry->syscall_return_value);
-		debugf("\tentrysize         : %d\n", entry->syscall_entry_size);
-
-		if (entry->syscall_entry_size == 0)
+		debugf("================================================================================\n");
+		if (!log_ipmon_entry(entry, debugf))
 			break;
-
-		unsigned int arg_offset = sizeof(struct ipmon_syscall_entry);
-		int argnum = 0;
-		while (arg_offset < sizeof(struct ipmon_syscall_entry) + entry->syscall_args_size)
-		{
-			struct ipmon_syscall_data* arg = (struct ipmon_syscall_data*)((unsigned long)buffer + data_start + offset + arg_offset);
-			debugf("========ARG %02d==================================================================\n", argnum);
-
-			debugf("\tlen               : %ld\n", arg->len);
-			if (!arg->len)
-				break;
-
-			std::string hex = mvee::log_do_hex_dump (arg->data, arg->len - sizeof(unsigned long));
-			debugf("\n%s", hex.c_str());
-			argnum++;
-			arg_offset += arg->len;
-		}
-
-		unsigned int ret_offset = sizeof(struct ipmon_syscall_entry) + entry->syscall_args_size;
-		int retnum = 0;
-		while (ret_offset < entry->syscall_entry_size)
-		{
-			struct ipmon_syscall_data* ret = (struct ipmon_syscall_data*)((unsigned long)buffer + data_start + offset + ret_offset);
-			debugf("========RET %02d==================================================================\n", retnum);
-
-			debugf("\tlen               : %ld\n", ret->len);
-			if (!ret->len)
-				break;
-
-			std::string hex = mvee::log_do_hex_dump (ret->data, ret->len - sizeof(unsigned long));
-			debugf("\n%s", hex.c_str());
-			retnum++;
-			ret_offset += ret->len;
-		}
-
 
 		offset += entry->syscall_entry_size;
 	}
@@ -911,6 +983,112 @@ void monitor::log_segfault(int variantnum)
     siginfo_t siginfo = {0};
     mvee_wrap_ptrace(PTRACE_GETSIGINFO, variants[variantnum].variantpid, 0, (void*)&siginfo);
     FETCH_IP(variantnum, eip);
+
+#ifdef MVEE_SUPPORTS_IPMON
+	if (ipmon_initialized && siginfo.si_addr == 0)
+	{
+		std::string crash_loc = set_mmap_table->get_caller_info(variantnum,
+																variants[variantnum].variantpid,
+																eip,
+																0);
+
+		// IP-MON crash dumps 
+		if (crash_loc.find("ipmon_arg_verify_failed") != std::string::npos)
+		{
+			warnf("IP-MON verification failed in variant %d (PID: %d)\n", variantnum, variants[variantnum].variantpid);
+
+			// force register refresh
+			variants[variantnum].regs_valid  = false;
+			call_check_regs(variantnum);
+
+			unsigned long master_syscall_no = variants[variantnum].regs.rax;
+			unsigned char arg_no            = master_syscall_no & 0xff;
+			unsigned long slave_arg_val     = variants[variantnum].regs.rbx;
+			unsigned long entry_offset      = 0;
+			ipmon_syscall_entry* entry      = nullptr;			
+			master_syscall_no >>= 8;
+
+			// Get the relevant IP-MON entry
+			if (ipmon_buffer)
+			{
+				struct ipmon_buffer* buffer = (struct ipmon_buffer*) ipmon_buffer->ptr;
+				unsigned int data_start     = 64 * (1 + mvee::numvariants);
+
+				entry_offset = data_start + buffer->ipmon_variant_info[variantnum].pos;
+				entry = (ipmon_syscall_entry*)((unsigned long)buffer + entry_offset);
+			}
+			
+			if (arg_no == 0)
+			{
+				warnf("> Syscall Number Mismatch (Master: %d - %s, Slave: %d - %s)\n",
+					  master_syscall_no, getTextualSyscall(master_syscall_no),
+					  slave_arg_val, getTextualSyscall(slave_arg_val));
+			}
+			else if (master_syscall_no == -1)
+			{
+				warnf("> Unknown cause - check log files\n");
+			}
+			else if (arg_no < 0)
+			{
+				warnf("> Argument Length Mismatch (Syscall: %d - %s - Arg: %d - Slave Length: %d)\n",
+					  master_syscall_no, getTextualSyscall(master_syscall_no),
+					  -arg_no-1, slave_arg_val);
+
+				if (entry)
+				{
+					warnf("========BUFFER ENTRY DUMP=======================================================\n");
+					log_ipmon_entry(entry, warnf);
+					warnf("================================================================================\n");
+				}
+			}
+			else
+			{
+				warnf("> Argument Value Mismatch (Syscall: %d - %s - Arg: %d)\n",
+					  master_syscall_no, getTextualSyscall(master_syscall_no), arg_no-1);
+
+				// dump slave contents
+				// we need to fetch the relevant entry to get the size of the data block
+				if (entry)
+				{
+					struct ipmon_syscall_data* arg = get_ipmon_arg(entry, arg_no - 1);
+				
+					if (arg)
+					{
+						// try to read the slave block from mem
+						unsigned char* slave_arg = mvee_rw_read_data(variants[variantnum].variantpid,
+																	 slave_arg_val,
+																	 arg->len - sizeof(unsigned long),
+																	 0);
+																 
+						if (slave_arg)
+						{
+							std::string hex = mvee::log_do_hex_dump (slave_arg, arg->len - sizeof(unsigned long));
+							warnf("\tSlave Value       :\n%s", hex.c_str());
+							delete[] slave_arg;
+						}
+						else
+						{
+							warnf("> Couldn't read slave value\n");
+						}
+					}
+					else
+					{
+						warnf("> Couldn't read argument from IP-MON buffer\n");
+					}
+
+					warnf("========BUFFER ENTRY DUMP=======================================================\n");
+					log_ipmon_entry(entry, warnf);
+					warnf("================================================================================\n");
+				}
+			}
+
+			shutdown(false);
+			return;
+		}
+	}
+#endif
+
+
     warnf("Warning: %s in variant %d (PID: %d)\n",
                 getTextualSig(siginfo.si_signo), variantnum,
                 variants[variantnum].variantpid);
@@ -1433,6 +1611,7 @@ void mvee_log_local_backtrace()
 	warnf("Local Backtrace:\n");
 	for (i=0; i<trace_size; ++i)
 		warnf("[%d] %s\n", i, messages[i]);
+	free(messages);
 }
 
 /*-----------------------------------------------------------------------------

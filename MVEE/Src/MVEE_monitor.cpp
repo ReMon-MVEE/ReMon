@@ -199,6 +199,7 @@ void monitor::init()
     monitor_terminating            = false;
     have_pending_signals           = false;
     ipmon_initialized              = false;
+	ipmon_mmap_handling            = false;
     monitorid                      = 0;
     parentmonitorid                = 0;
     state                          = STATE_NORMAL;
@@ -608,7 +609,7 @@ void monitor::enable_sync()
                                             (unsigned long)variants[i].should_sync_ptr, NULL);
             *(unsigned char*)&current = 1;
             mvee_wrap_ptrace(PTRACE_POKEDATA, variants[i].variantpid,
-                             (unsigned long)variants[i].should_sync_ptr, (void*)(long)2);
+                             (unsigned long)variants[i].should_sync_ptr, (void*)(long)current);
         }
     }
 #endif
@@ -632,7 +633,7 @@ void monitor::disable_sync()
                                             (unsigned long)variants[i].should_sync_ptr, NULL);
             *(unsigned char*)&current = 0;
             mvee_wrap_ptrace(PTRACE_POKEDATA, variants[i].variantpid,
-                             (unsigned long)variants[i].should_sync_ptr, (void*)(long)1);
+                             (unsigned long)variants[i].should_sync_ptr, (void*)(long)current);
         }
     }
 #endif
@@ -766,6 +767,7 @@ void monitor::set_should_check_multithread_state()
 -----------------------------------------------------------------------------*/
 void monitor::shutdown(bool success)
 {
+	bool should_log = false;
 	bool have_running_variants = false;
 
     debugf("monitor returning - success: %d\n", success);
@@ -793,23 +795,33 @@ void monitor::shutdown(bool success)
             // just kill this group
             debugf("GHUMVEE is monitoring multiple process groups => we're only shutting this group down\n");
 
-#ifndef MVEE_BENCHMARK
 			if (!set_mmap_table->thread_group_shutting_down)
-				log_dump_queues(set_shm_table.get());
-#endif
+			{
+				set_mmap_table->thread_group_shutting_down = 1;
+				should_log = true;
+			}
 
             for (int i = 0; i < mvee::numvariants; ++i)
             {
                 if (!variants[i].variant_terminated)
                 {
 #ifndef MVEE_BENCHMARK
-					if (!set_mmap_table->thread_group_shutting_down)
+					if (should_log)
 						log_variant_backtrace(i);
 #endif
                     variants[i].variant_terminated = true;
                     kill(variants[i].varianttgid, SIGKILL);
                 }
             }
+
+#ifndef MVEE_BENCHMARK
+			if (should_log)
+			{
+				log_dump_queues(set_shm_table.get());
+				log_ipmon_state();
+			}
+#endif
+
 
             // TODO: should we only do this if we shut down the last thread in the group???
             //if (!is_program_multithreaded())
@@ -1359,6 +1371,10 @@ void monitor::handle_resume_event(int index)
 -----------------------------------------------------------------------------*/
 void monitor::handle_exit_event(int index)
 {
+#ifdef MVEE_DUMP_IPMON_BUFFER_ON_FLUSH
+	if (!index)
+		log_ipmon_state();
+#endif
     debugf("SIGTERM variant: %d\n", variants[index].variantpid);
     variants[index].variant_terminated = true;
     // pretending like we've reached the end of the syscall to keep our
@@ -2146,9 +2162,12 @@ void monitor::handle_sig_delivery_stop(int variantnum, int status)
     if (WIFSIGNALED(status))
     {
         variants[variantnum].variant_terminated = true;
-        warnf("Variant: %d was terminated by an unhandled %s signal, core dump: %s.\n",
-                    variants[variantnum].variantpid, getTextualSig(WTERMSIG(status)),
-                    WCOREDUMP(status) ? "yes" : "no");
+		if (!set_mmap_table || !set_mmap_table->thread_group_shutting_down)
+		{
+			warnf("Variant: %d was terminated by an unhandled %s signal, core dump: %s.\n",
+				  variants[variantnum].variantpid, getTextualSig(WTERMSIG(status)),
+				  WCOREDUMP(status) ? "yes" : "no");
+		}
 
         // Since we cannot recover from this, we might as well shut 
 		// down the variants that have not received the signal

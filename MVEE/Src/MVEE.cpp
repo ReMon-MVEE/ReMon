@@ -851,7 +851,7 @@ char* mvee::open_signal_file()
 -----------------------------------------------------------------------------*/
 void mvee::request_shutdown(bool should_backtrace)
 {
-//	warnf("Shutdown requested - should backtrace: %d\n", should_backtrace);
+	warnf("Shutdown requested - should backtrace: %d\n", should_backtrace);
     mvee::lock();
     mvee::shutdown_signal                     = SIGINT;
     mvee::shutdown_should_generate_backtraces = should_backtrace;
@@ -1615,7 +1615,10 @@ void mvee::start_monitored()
             if (mvee::shutdown_signal)
             {
                 if (signal_file && signal_file[0] == '1')
+				{
+					warnf("Shutdown requested by MVEE_backtrace\n");
                     mvee::shutdown_should_generate_backtraces = true;
+				}
                 mvee::unlock();
                 mvee::shutdown(mvee::shutdown_signal,
                                mvee::shutdown_should_generate_backtraces ? 1 : 0);
