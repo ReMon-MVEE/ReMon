@@ -153,7 +153,12 @@ long syscall_ordering_lock  = 0;
 	- Misc IP-MON failures:
 	=> syscall_no and arg_no are -1	
 -----------------------------------------------------------------------------*/
-void ipmon_arg_verify_failed(unsigned long syscall_no, unsigned char arg_no, unsigned long arg_val)
+void ipmon_arg_verify_failed
+(
+	unsigned long syscall_no, 
+	unsigned char arg_no, 
+	unsigned long arg_val
+)
 {
 	unsigned long tmp = (syscall_no << 8) | arg_no;
 
@@ -167,7 +172,7 @@ void ipmon_arg_verify_failed(unsigned long syscall_no, unsigned char arg_no, uns
 void ipmon_set_slave_fd(int master_fd, int slave_fd)
 {
 	if (master_fd < 0 || master_fd > 4096)
-		ipmon_arg_verify_failed(-1, -1, master_fd);
+		ipmon_arg_verify_failed(-1, -1, master_fd);;
 	ipmon_master_fd_to_slave_fd[master_fd] = slave_fd;
 }
 
@@ -337,13 +342,12 @@ PRECALL(mmap)
 /*-----------------------------------------------------------------------------
     munmap - (void* addr, size_t len)
 -----------------------------------------------------------------------------*/
-/*
 unsigned char ipmon_handle_munmap_is_unsynced() 
 { 
 	return 1; 
 }
-*/
 
+/*
 CALCSIZE(munmap)
 {
 	COUNTREG(ARG);
@@ -357,6 +361,7 @@ PRECALL(munmap)
 	CHECKREG(ARG2);
 	return IPMON_EXEC_ALL | IPMON_ORDER_CALL;
 }
+*/
 
 
 /*-----------------------------------------------------------------------------
@@ -374,7 +379,7 @@ PRECALL(mprotect)
 	CHECKPOINTER(ARG1);
 	CHECKREG(ARG2);
 	CHECKREG(ARG3);
-	return IPMON_EXEC_ALL | IPMON_ORDER_CALL;
+	return IPMON_EXEC_ALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1355,9 +1360,9 @@ POSTCALL(getitimer)
 -----------------------------------------------------------------------------*/
 MAYBE_CHECKED(futex)
 {
-//	if (ARG2 == MVEE_FUTEX_WAIT_TID)
+	if (ARG2 == MVEE_FUTEX_WAIT_TID)
 		return true;
-//	return false;
+	return false;
 }
 
 CALCSIZE(futex)
@@ -1368,7 +1373,7 @@ CALCSIZE(futex)
 PRECALL(futex)
 {
 	CHECKREG(ARG2);
-	return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER | IPMON_BLOCKING_CALL;
+	return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER | IPMON_BLOCKING_CALL /* | IPMON_LOCKSTEP_CALL */;
 }
 
 /*-----------------------------------------------------------------------------
@@ -3018,7 +3023,7 @@ void ipmon_barrier_wait(struct ipmon_buffer* RB, struct ipmon_barrier* barrier)
 
 	TODO: Rewrite in ASM to get rid of explicit pointer
 -----------------------------------------------------------------------------*/
-void ipmon_cond_wait(struct ipmon_condvar* cv)
+void ipmon_cond_wait(struct ipmon_condvar* cv, bool expect_long_wait = false)
 {
 #ifndef IPMON_USE_FUTEXES_FOR_CONDVAR
 	int i = 0;
@@ -3034,12 +3039,15 @@ void ipmon_cond_wait(struct ipmon_condvar* cv)
 	}
 #else
 	// We expect to see 1
-	for (int i = 0; i < 10000; ++i)
+	if (!expect_long_wait)
 	{
-		if (__atomic_load_n(&cv->signaled, __ATOMIC_SEQ_CST))
-			return;
+		for (int i = 0; i < 10000; ++i)
+		{
+			if (__atomic_load_n(&cv->signaled, __ATOMIC_SEQ_CST))
+				return;
 
-		cpu_relax();
+			cpu_relax();
+		}
 	}
 
 	// futex_wait while not signaled
@@ -3080,9 +3088,8 @@ void ipmon_cond_broadcast(struct ipmon_condvar* cv)
 -----------------------------------------------------------------------------*/
 void ipmon_sync_on_syscall_entrance(struct ipmon_buffer* rb, struct ipmon_syscall_entry* entry)
 {
-#ifdef IPMON_DO_LOCKSTEP
-	ipmon_barrier_wait(rb, &entry->syscall_lockstep_barrier);
-#endif
+//	if (entry->syscall_type & IPMON_LOCKSTEP_CALL)
+//		ipmon_barrier_wait(rb, &entry->syscall_lockstep_barrier);
 
 	if (entry->syscall_type & IPMON_ORDER_CALL)
 	{
@@ -3092,13 +3099,13 @@ void ipmon_sync_on_syscall_entrance(struct ipmon_buffer* rb, struct ipmon_syscal
 			entry->syscall_order = syscall_ordering_clock++;
 		}
 		else
-		{
-			
+		{			
             // wait for preceding operations to complete
 			while (1)
 			{
 				if (*(volatile int*)&syscall_ordering_clock == entry->syscall_order)
 					break;
+				cpu_relax();
 				ipmon_unchecked_syscall(__NR_sched_yield);
 			}			
 		}
@@ -3114,9 +3121,8 @@ void ipmon_sync_on_syscall_entrance(struct ipmon_buffer* rb, struct ipmon_syscal
 -----------------------------------------------------------------------------*/
 void ipmon_sync_on_syscall_exit(struct ipmon_buffer* rb, struct ipmon_syscall_entry* entry)
 {
-#ifdef IPMON_DO_LOCKSTEP
-	ipmon_barrier_wait(rb, &entry->syscall_lockstep_barrier);
-#endif
+//	if (entry->syscall_type & IPMON_LOCKSTEP_CALL)
+//		ipmon_barrier_wait(rb, &entry->syscall_lockstep_barrier);
 
 	if (entry->syscall_type & IPMON_ORDER_CALL)
 	{
@@ -3148,7 +3154,7 @@ void ipmon_do_syscall_wake(struct ipmon_syscall_entry* entry)
 -----------------------------------------------------------------------------*/
 void ipmon_do_syscall_wait(struct ipmon_syscall_entry* entry)
 {
-	ipmon_cond_wait(&entry->syscall_results_available);
+	ipmon_cond_wait(&entry->syscall_results_available, entry->syscall_type & IPMON_BLOCKING_CALL);
 }
 
 /*-----------------------------------------------------------------------------
@@ -3180,24 +3186,12 @@ void ipmon_flush_buffer(struct ipmon_buffer* RB)
 #ifndef IPMON_FLUSH_LOCAL
 	ipmon_checked_syscall(MVEE_FLUSH_SHARED_BUFFER, MVEE_IPMON_BUFFER);
 #else
-/*
-	if (ipmon_variant_num)
-	{
-		RB->post_flush_barrier.hack = 0;
-		__sync_synchronize();
-	}
-*/
 	ipmon_barrier_wait(RB, &RB->pre_flush_barrier);
 	if (ipmon_variant_num == 0)
 	{
 		memset((void*)((unsigned long)RB + 64), 0, RB->numvariants * 64 + RB->usable_size);
-//		__sync_synchronize();
 	}
 	ipmon_barrier_wait(RB, &RB->post_flush_barrier);
-/*
-	if (ipmon_variant_num == 0)
-		RB->pre_flush_barrier.hack = 0;
-*/
 #endif
 }
 

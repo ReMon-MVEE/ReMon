@@ -36,12 +36,8 @@ extern "C" {
 /*-----------------------------------------------------------------------------
     Policy control
 -----------------------------------------------------------------------------*/
-// Enables lock-stepping on all syscall entrances
-// #define IPMON_DO_LOCKSTEP
-
 // Does the flush locally, avoiding context switches to GHUMVEE
 #define IPMON_FLUSH_LOCAL
-
 
 #define IPMON_USE_FUTEXES_FOR_CONDVAR
 #define IPMON_SUPPORT_FUTEX
@@ -72,7 +68,7 @@ extern "C" {
 // Allow all supported calls
 #define FULL_SYSCALLS        6
 
-#define CURRENT_POLICY       FULL_SYSCALLS
+#define CURRENT_POLICY       SOCKET_RW_POLICY
 
 /*-----------------------------------------------------------------------------
     Definitions and Generic Macros
@@ -193,9 +189,10 @@ typedef unsigned long rb_pointer;
 //
 // Extra modifiers
 //
-#define IPMON_UNSYNCED_CALL  32 // No lock-stepping for this call
-#define IPMON_BLOCKING_CALL  64 // The call is expected to block. This is not a distinct call type. It is ORed with one of the above call types.
+#define IPMON_UNSYNCED_CALL  32  // No lock-stepping for this call
+#define IPMON_BLOCKING_CALL  64  // The call is expected to block. This is not a distinct call type. It is ORed with one of the above call types.
 #define IPMON_ORDER_CALL     128 // All ordered calls must execute in the same order in all variants
+#define IPMON_LOCKSTEP_CALL  256 // 
 
 #define IPMON_MAYBE_BLOCKING(fd) ((ipmon_get_file_type(fd) & MVEE_BLOCKING_FD) ? IPMON_BLOCKING_CALL : 0)
 #define IPMON_MAYBE_DISPATCH_MASTER(fd)							\
@@ -282,8 +279,7 @@ struct ipmon_condvar
 struct ipmon_syscall_entry
 {
 	unsigned short syscall_no;								// 0	- We use this for integrity checking only so we don't mind that this does not capture pseudo-calls correctly
-    unsigned char  syscall_type; 							// 2	- bitwise or mask of call types above
-	unsigned char  padding;                                 // 3	- 
+    unsigned short syscall_type; 							// 2	- bitwise or mask of call types above
 	unsigned int   syscall_order;                           // 4    - Logical clock value for order-sensitive syscalls
 	struct ipmon_condvar
                   syscall_results_available;                // 8    - optimized condition variable. Does not support consecutive wait operations
