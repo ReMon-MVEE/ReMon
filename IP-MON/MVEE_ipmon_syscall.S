@@ -158,7 +158,7 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint)
 		
 		call ipmon_enclave@plt
 
-		pop r8 // I think this should be pop r9. TODO: Verify
+		pop r9 
 		pop r12
 		pop r13
 
@@ -205,8 +205,7 @@ Outgoing Stack:
 -----------------------------------------------------------------------------*/		
 FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint_alternative)
 		push rbp
-		push rsi
-		
+		push rsi				
 		mov rbp, rsp
 		sub rsp, 16
 		and rsp, 0xfffffffffffffff0
@@ -231,9 +230,7 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint_alternative)
 		pop r8
 		pop r9
 		pop r12
-
 		mov rsp, rbp
-		
 		pop rsi
 		pop rbp
 

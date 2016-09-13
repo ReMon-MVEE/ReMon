@@ -64,10 +64,9 @@
     Global Variables
 -----------------------------------------------------------------------------*/
 //
-// Retard check - is the loaded glibc compatible with IP-MON or not?
+// Retard check - is the loaded kernel compatible with IP-MON or not?
 //
 extern "C" unsigned char ipmon_initialized; // MVEE_ipmon_syscall.S
-unsigned char            ipmon_libc_compatible   = 0;
 unsigned char            ipmon_kernel_compatible = 0;
 unsigned char            ipmon_variant_num       = 0;
 
@@ -83,10 +82,6 @@ IPMON_MASK(kernelmask);
 /*-----------------------------------------------------------------------------
     IP-MON shared memory regions
 -----------------------------------------------------------------------------*/
-// This is the buffer we're using to replicate syscalls
-//__thread long                 ipmon_replication_buffer_id = -1;
-//__thread struct ipmon_buffer* ipmon_replication_buffer    = NULL;
-
 // This buffer contains information about the file types for each fd
 
 // TODO: With the full syscalls policy, we might have to invalidate CLOEXEC
@@ -142,11 +137,28 @@ long syscall_ordering_lock  = 0;
 
 /*-----------------------------------------------------------------------------
     ipmon_arg_verify_failed - Just crash the variant. It's super user friendly!
+
+	Conventions:
+	- For syscall number mismatches:
+	=> syscall_no is the master number, arg_no is 0, arg_val is the slave number
+
+	- For argument length mismatches:
+	=> arg_no is in the [-6..-1] range, arg_val is the length of the arg in the slave
+	=> master arg length can be read from the buffer
+
+	- For argument value mismatches:
+	=> arg_no is in the [1..6] range, arg_val is the value of the arg in the slave
+	=> master arg value can be read from the buffer
+
+	- Misc IP-MON failures:
+	=> syscall_no and arg_no are -1	
 -----------------------------------------------------------------------------*/
-void ipmon_arg_verify_failed(void* ptr)
+void ipmon_arg_verify_failed(unsigned long syscall_no, unsigned char arg_no, unsigned long arg_val)
 {
-	*(volatile unsigned int*)((unsigned long)0x0100000000000000 | ((unsigned long)ptr)) = 0;
-                             // 0000000000000000
+	unsigned long tmp = (syscall_no << 8) | arg_no;
+
+	__asm __volatile ("movq %0, %%rax; movq %1, %%rbx; movq %%rax, (0)"
+					  : : "m" (tmp), "m" (arg_val));
 }
 
 /*-----------------------------------------------------------------------------
@@ -155,14 +167,14 @@ void ipmon_arg_verify_failed(void* ptr)
 void ipmon_set_slave_fd(int master_fd, int slave_fd)
 {
 	if (master_fd < 0 || master_fd > 4096)
-		ipmon_arg_verify_failed((void*)(long)master_fd);
+		ipmon_arg_verify_failed(-1, -1, master_fd);
 	ipmon_master_fd_to_slave_fd[master_fd] = slave_fd;
 }
 
 int ipmon_get_slave_fd(int master_fd)
 {
 	if (master_fd < 0 || master_fd > 4096)
-		ipmon_arg_verify_failed((void*)(long)master_fd);
+		ipmon_arg_verify_failed(-1, -1, master_fd);
 	return ipmon_master_fd_to_slave_fd[master_fd];
 }
 
@@ -325,6 +337,13 @@ PRECALL(mmap)
 /*-----------------------------------------------------------------------------
     munmap - (void* addr, size_t len)
 -----------------------------------------------------------------------------*/
+/*
+unsigned char ipmon_handle_munmap_is_unsynced() 
+{ 
+	return 1; 
+}
+*/
+
 CALCSIZE(munmap)
 {
 	COUNTREG(ARG);
@@ -338,6 +357,7 @@ PRECALL(munmap)
 	CHECKREG(ARG2);
 	return IPMON_EXEC_ALL | IPMON_ORDER_CALL;
 }
+
 
 /*-----------------------------------------------------------------------------
     mprotect - (void* addr, size_t len, int prot)
@@ -1127,7 +1147,7 @@ PRECALL(ioctl)
 
         default:
             // Unknown IOCTL
-			ipmon_arg_verify_failed((void*)ARG2);
+			ipmon_arg_verify_failed(__NR_ioctl, 2, ARG2);
 			break;
 			
     }
@@ -1335,9 +1355,9 @@ POSTCALL(getitimer)
 -----------------------------------------------------------------------------*/
 MAYBE_CHECKED(futex)
 {
-	if (ARG2 == MVEE_FUTEX_WAIT_TID)
+//	if (ARG2 == MVEE_FUTEX_WAIT_TID)
 		return true;
-	return false;
+//	return false;
 }
 
 CALCSIZE(futex)
@@ -2262,7 +2282,6 @@ PRECALL(write)
 	CHECKREG(ARG1);
 	CHECKPOINTER(ARG2);
 	CHECKREG(ARG3);
-//	ipmon_arg_verify_failed((void*)ARG2);
 	CHECKBUFFER(ARG2, ARG3);
 	return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER | IPMON_MAYBE_BLOCKING(ARG1);
 }
@@ -2934,7 +2953,8 @@ void ipmon_spin_lock(volatile long* lock)
 	{
 		if (__sync_bool_compare_and_swap(lock, 0, 1))
 			break;
-		cpu_relax();
+//		cpu_relax();
+		ipmon_unchecked_syscall(__NR_sched_yield);
 	}
 }
 
@@ -3079,7 +3099,7 @@ void ipmon_sync_on_syscall_entrance(struct ipmon_buffer* rb, struct ipmon_syscal
 			{
 				if (*(volatile int*)&syscall_ordering_clock == entry->syscall_order)
 					break;
-				cpu_relax();
+				ipmon_unchecked_syscall(__NR_sched_yield);
 			}			
 		}
 	}
@@ -3347,7 +3367,7 @@ unsigned char ipmon_prepare_syscall (struct ipmon_buffer* RB, struct ipmon_sysca
 
 		// Sanity Check 1: Compare the master's syscall number with ours
 		if ((unsigned short)syscall_no != entry->syscall_no)
-			ipmon_arg_verify_failed((void*)(unsigned long)syscall_no);
+			ipmon_arg_verify_failed(entry->syscall_no, 0, syscall_no);
 
 		// Sanity Check 2: Compare all syscall arguments
 		ipmon_syscall_precall(args, entry);
@@ -3519,9 +3539,8 @@ extern "C" long ipmon_enclave
 	args.arg6 = arg6;
 	args.entry = NULL;
 
-//	if (RB)
-//		secret_ipmon_buffer_pointer = RB;
-//	RB = secret_ipmon_buffer_pointer;
+//	return ipmon_unchecked_syscall(syscall_no, arg1, arg2, arg3, arg4, arg5, arg6);
+//#if 0
 
 	// check if we need to reinitialize
 	if (!RB)
@@ -3618,6 +3637,7 @@ extern "C" long ipmon_enclave
 	{
 		return ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
 	}
+//#endif
 }
 
 /*-----------------------------------------------------------------------------
@@ -3683,9 +3703,6 @@ extern "C" void* ipmon_register_thread()
 
 ///	RB = NULL;
 
-	// TODO: There used to be a race here and it might still be there.
-	// Registration may in fact fail because the calling thread
-	// is being transferred from one ptracer to the other.
 	if (ret < 0 && ret > -4096)
 	{
 		printf("ERROR: IP-MON registration failed. sys_prctl(PR_REGISTER_IPMON) returned: %ld (%s)\n", ret, strerror(-ret));
@@ -3840,7 +3857,7 @@ void __attribute__((constructor)) init()
 	IPMON_MASK_SET(mask, __NR_munmap);
 	IPMON_MASK_SET(mask, __NR_mremap);
 	IPMON_MASK_SET(mask, __NR_mprotect);
-	IPMON_MASK_SET(mask, __NR_brk); // TODO/FIXME: sys_brk interception causes crashes
+	IPMON_MASK_SET(mask, __NR_brk);
 
 	// File Management
 	IPMON_MASK_SET(mask, __NR_open);

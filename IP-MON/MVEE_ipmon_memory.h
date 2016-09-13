@@ -694,11 +694,11 @@ STATIC INLINE struct ipmon_syscall_data* ipmon_get_data_at (struct ipmon_syscall
 																		\
 			/* check if the size matches */								\
 			if (DATASIZE(__size_in_buffer) != __arg->len)				\
-				ipmon_arg_verify_failed((void*)__size_in_buffer);		\
+				ipmon_arg_verify_failed(__entry->syscall_no, -__num, __size_in_buffer); \
 																		\
 			/* check if the data matches */								\
 			if ((__ret = __cmp(__arg, __ptr, __size_for_cpyfunc)))		\
-				ipmon_arg_verify_failed((void*)(long)__ret);			\
+				ipmon_arg_verify_failed(__entry->syscall_no, __num, (unsigned long)__ptr); \
 		}																\
 	}																	
 
