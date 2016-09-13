@@ -951,6 +951,7 @@ private:
     bool                              have_pending_signals;
     bool                              ipmon_initialized;
 	bool                              ipmon_mmap_handling;
+	bool                              ipmon_fd_handling;
 
     int                               parentmonitorid;        // monitorid of the monitor that created this monitor...
     MonitorState                      state;                  //
@@ -1050,8 +1051,7 @@ struct ipmon_barrier
 		struct
 		{
 			unsigned short seq;
-			unsigned char count;         // nr of variants that have reached the barrier
-			unsigned char padding;
+			unsigned short count;         // nr of variants that have reached the barrier
 		} s;
 		unsigned int hack;
 	} u;
@@ -1080,8 +1080,7 @@ struct ipmon_condvar
 struct ipmon_syscall_entry
 {
 	unsigned short syscall_no;								// 0	- We use this for integrity checking only so we don't mind that this does not capture pseudo-calls correctly
-    unsigned char  syscall_type; 							// 2	- bitwise or mask of call types above
-	unsigned char  padding;                                 // 3	- 
+    unsigned short syscall_type; 							// 2	- bitwise or mask of call types above
 	unsigned int   syscall_order;                           // 4    - Logical clock value for order-sensitive syscalls
 	struct ipmon_condvar
                   syscall_results_available;                // 8    - optimized condition variable. Does not support consecutive wait operations
@@ -1111,9 +1110,11 @@ struct ipmon_buffer
 {
 	// Cacheline 0
 	int           ipmon_numvariants;                        // 00-04: number of variants we're running with
-	unsigned int  ipmon_usable_size;                        // 04-08: size that is usable for syscall entries
+	int           ipmon_usable_size;                        // 04-08: size that is usable for syscall entries
 	unsigned long ipmon_have_pending_signals;
-	unsigned char ipmon_padding0[64 - sizeof(unsigned long) - sizeof(int)*2];
+	struct ipmon_barrier pre_flush_barrier;
+	struct ipmon_barrier post_flush_barrier;
+	unsigned char ipmon_padding[64 - sizeof(unsigned long) - sizeof(int)*2 - sizeof(struct ipmon_barrier) * 2];
 
 	// Cachelines 1-n
 	struct ipmon_variant_info ipmon_variant_info[1];

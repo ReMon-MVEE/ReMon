@@ -200,6 +200,7 @@ void monitor::init()
     have_pending_signals           = false;
     ipmon_initialized              = false;
 	ipmon_mmap_handling            = false;
+	ipmon_fd_handling              = false;
     monitorid                      = 0;
     parentmonitorid                = 0;
     state                          = STATE_NORMAL;
@@ -767,7 +768,9 @@ void monitor::set_should_check_multithread_state()
 -----------------------------------------------------------------------------*/
 void monitor::shutdown(bool success)
 {
+#ifndef MVEE_BENCHMARK
 	bool should_log = false;
+#endif
 	bool have_running_variants = false;
 
     debugf("monitor returning - success: %d\n", success);
@@ -798,7 +801,9 @@ void monitor::shutdown(bool success)
 			if (!set_mmap_table->thread_group_shutting_down)
 			{
 				set_mmap_table->thread_group_shutting_down = 1;
+#ifndef MVEE_BENCHMARK
 				should_log = true;
+#endif
 			}
 
             for (int i = 0; i < mvee::numvariants; ++i)

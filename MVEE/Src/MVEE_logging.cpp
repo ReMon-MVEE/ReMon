@@ -74,7 +74,7 @@ struct ipmon_syscall_data* monitor::get_ipmon_data
 )
 {
 	unsigned long data_offset = start_offset;
-	unsigned long num = 0;
+	int num = 0;
 
 	while (data_offset < end_offset)
 	{
@@ -1004,7 +1004,6 @@ void monitor::log_segfault(int variantnum)
 			unsigned long master_syscall_no = variants[variantnum].regs.rax;
 			unsigned char arg_no            = master_syscall_no & 0xff;
 			unsigned long slave_arg_val     = variants[variantnum].regs.rbx;
-			unsigned long entry_offset      = 0;
 			ipmon_syscall_entry* entry      = nullptr;			
 			master_syscall_no >>= 8;
 
@@ -1012,10 +1011,18 @@ void monitor::log_segfault(int variantnum)
 			if (ipmon_buffer)
 			{
 				struct ipmon_buffer* buffer = (struct ipmon_buffer*) ipmon_buffer->ptr;
-				unsigned int data_start     = 64 * (1 + mvee::numvariants);
 
-				entry_offset = data_start + buffer->ipmon_variant_info[variantnum].pos;
-				entry = (ipmon_syscall_entry*)((unsigned long)buffer + entry_offset);
+				// find the last valid entry before pos
+				unsigned int offset = 0;
+				unsigned int data_start = 64 * (1 + mvee::numvariants);
+
+				while (offset <= buffer->ipmon_variant_info[variantnum].pos)
+				{
+					entry = (struct ipmon_syscall_entry*)((unsigned long)buffer + data_start + offset);
+					if (offset + sizeof(struct ipmon_syscall_entry) > (unsigned int)buffer->ipmon_usable_size)
+						break;
+					offset += entry->syscall_entry_size;
+				}				
 			}
 			
 			if (arg_no == 0)
@@ -1024,7 +1031,7 @@ void monitor::log_segfault(int variantnum)
 					  master_syscall_no, getTextualSyscall(master_syscall_no),
 					  slave_arg_val, getTextualSyscall(slave_arg_val));
 			}
-			else if (master_syscall_no == -1)
+			else if (master_syscall_no == (unsigned long)-1)
 			{
 				warnf("> Unknown cause - check log files\n");
 			}
