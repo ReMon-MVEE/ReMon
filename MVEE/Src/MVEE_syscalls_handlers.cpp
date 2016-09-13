@@ -1632,10 +1632,8 @@ long monitor::handle_dup_postcall(int variantnum)
     {
         fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0));
         if (!fd_info)
-        {
-            warnf("WTF IS GOING ON HERE? DUP FAIL!!!");
             return 0;
-        }
+
         set_fd_table->create_fd_info(fd_info->file_type, fds, fd_info->path.c_str(), fd_info->access_flags, false, master_file, fd_info->unsynced_reads, fd_info->original_file_size);
         set_fd_table->verify_fd_table(getpids());
     }
@@ -2109,11 +2107,7 @@ long monitor::handle_fcntl_postcall(int variantnum)
 
                 fd_info*                   fd_info = set_fd_table->get_fd_info(ARG1(0));
                 if (!fd_info)
-                {
-                    set_fd_table->print_fd_table();
-                    warnf("WTF IS GOING ON HERE? FCNTL FAIL!!!");
                     return 0;
-                }
 
                 set_fd_table->create_fd_info(fd_info->file_type, fds, fd_info->path.c_str(), fd_info->access_flags, (ARG2(0) == F_DUPFD_CLOEXEC) ? true : fd_info->close_on_exec, state == STATE_IN_MASTERCALL, fd_info->unsynced_reads, fd_info->original_file_size);
                 set_fd_table->verify_fd_table(getpids());
@@ -2260,10 +2254,7 @@ long monitor::handle_dup2_postcall(int variantnum)
             // and close_on_exec flag as before
             fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0));
             if (!fd_info)
-            {
-                warnf("WTF IS GOING ON HERE? DUP2 FAIL!!!");
                 return 0;
-            }
 
             set_fd_table->create_fd_info(fd_info->file_type, fds, fd_info->path.c_str(), fd_info->access_flags, false, fd_info->master_file, fd_info->unsynced_reads, fd_info->original_file_size);
             set_fd_table->verify_fd_table(getpids());
@@ -4048,6 +4039,7 @@ long monitor::handle_shmat_call(int variantnum)
 			shm_sz = atomic_buffer->sz;
 		else
 			shm_sz = atomic_buffer->eip_sz;
+		debugf("attach to atomic buffer requested - size = %ld\n", shm_sz);
 	}
 	else if (set_fd_table->file_map_exists()
 		&& (int)ARG1(0) == set_fd_table->file_map_id())
@@ -4131,18 +4123,25 @@ long monitor::handle_shmat_postcall(int variantnum)
 	}
 
 	if (atomic_buffer &&
-		(int)ARG1(0) == atomic_buffer->id && 
-		atomic_buffer_hidden)
+		(int)ARG1(0) == atomic_buffer->id)
 	{
-		region_name = "[atomic-buffer-hidden]";
 		region_size = atomic_buffer->sz;
 
-		// register into hidden buffer array
-		register_hidden_buffer(MVEE_LIBC_ATOMIC_BUFFER_HIDDEN, atomic_buffer, addresses);
-		
-		// clear the return value
-		for (int i = 0; i < mvee::numvariants; ++i)
-			call_postcall_set_variant_result(i, 0);
+		if (atomic_buffer_hidden)
+		{
+			region_name = "[atomic-buffer-hidden]";
+
+			// register into hidden buffer array
+			register_hidden_buffer(MVEE_LIBC_ATOMIC_BUFFER_HIDDEN, atomic_buffer, addresses);
+
+			// clear the return value
+			for (int i = 0; i < mvee::numvariants; ++i)
+				call_postcall_set_variant_result(i, 0);
+		}
+		else
+		{
+			region_name = "[atomic-buffer]";
+		}		
 	}
 	else if (variants[0].hidden_buffer_array && 
 			 (int)ARG1(0) == variants[0].hidden_buffer_array_id)
@@ -4874,6 +4873,22 @@ long monitor::handle_prctl_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
+unsigned char ipmon_is_unchecked_syscall(unsigned char* mask, unsigned long syscall_no)
+{
+    unsigned long no_to_byte, bit_in_byte;
+
+    if (syscall_no > ROUND_UP(MAX_CALLS, 8))
+		return 0;
+
+    no_to_byte  = syscall_no / 8;
+    bit_in_byte = syscall_no % 8;
+
+    if (mask[no_to_byte] & (1 << (7 - bit_in_byte)))
+		return 1;
+    return 0;
+}
+
+
 long monitor::handle_prctl_call(int variantnum)
 {
     // check if the variants are trying to re-enable rdtsc
@@ -4882,6 +4897,21 @@ long monitor::handle_prctl_call(int variantnum)
         cache_mismatch_info("The program is trying to enable directly reading the time stamp counter. This call has been denied.\n");
         return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
     }
+	else if (ARG1(0) == PR_REGISTER_IPMON)
+	{
+		// inspect the list of syscalls
+		unsigned char* ipmon_mask = mvee_rw_read_data(variants[0].variantpid, ARG2(0), ARG3(0));
+
+		if (ipmon_mask)
+		{
+			if (ipmon_is_unchecked_syscall(ipmon_mask, __NR_mmap))
+			{
+				ipmon_mmap_handling = true;
+			}
+
+			delete[] ipmon_mask;
+		}
+	}
     return MVEE_CALL_ALLOW;
 }
 
@@ -4899,6 +4929,7 @@ long monitor::handle_prctl_postcall(int variantnum)
 
         // Write the IP-MON buffer header
         struct ipmon_buffer* buffer = (struct ipmon_buffer*) ipmon_buffer->ptr;
+
 		// The first cacheline contains the key, number of variants and usable size.
 		// Then we have one cacheline for each variant to store its current position within the IP-MON buffer
         unsigned usable_size = ipmon_buffer->sz - 64 * (1 + mvee::numvariants);
@@ -5322,7 +5353,8 @@ long monitor::handle_mmap_postcall(int variantnum)
 			&& ARG2(0) == 2 * HEAP_MAX_SIZE                             // size = 2*HEAP_MAX_SIZE
 			&& ARG3(0) == PROT_NONE                                     // no protection flags yet
 			&& ARG4(0) == (MAP_PRIVATE | MAP_NORESERVE | MAP_ANONYMOUS) //
-			&& (int)ARG5(0) == -1)                                      // backed by /dev/zero
+			&& (int)ARG5(0) == -1                                       // backed by /dev/zero
+			&& ipmon_mmap_handling)
 		{
 			in_new_heap_allocation = true;
 
@@ -7511,12 +7543,12 @@ long monitor::handle_dup3_log_return(int variantnum)
 
 long monitor::handle_dup3_postcall(int variantnum)
 {
-    std::vector<unsigned long> fds;
+	std::vector<unsigned long> fds;
 
     if (state == STATE_IN_MASTERCALL)
     {
         fds.resize(mvee::numvariants);
-        std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
+		std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
     }
     else
     {
@@ -7541,10 +7573,8 @@ long monitor::handle_dup3_postcall(int variantnum)
             // and close_on_exec flag as before
             fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0));
             if (!fd_info)
-            {
-                warnf("WTF IS GOING ON HERE? DUP3 FAIL!!!");
                 return 0;
-            }			
+
             set_fd_table->create_fd_info(fd_info->file_type, fds, fd_info->path.c_str(), fd_info->access_flags, (ARG3(0) != 0) ? true : false, fd_info->master_file, fd_info->unsynced_reads, fd_info->original_file_size);
             set_fd_table->verify_fd_table(getpids());
         }
@@ -7554,7 +7584,7 @@ long monitor::handle_dup3_postcall(int variantnum)
 
 /*-----------------------------------------------------------------------------
   sys_pipe2
------------------------------------------------------------------------------*/
+  -----------------------------------------------------------------------------*/
 long monitor::handle_pipe2_precall(int variantnum)
 {
     CHECKPOINTER(1);
@@ -7572,8 +7602,8 @@ long monitor::handle_pipe2_postcall(int variantnum)
     if (call_succeeded)
     {
         int                        fildes[2];
-        std::vector<unsigned long> read_fds(mvee::numvariants);
-        std::vector<unsigned long> write_fds(mvee::numvariants);
+		std::vector<unsigned long> read_fds(mvee::numvariants);
+		std::vector<unsigned long> write_fds(mvee::numvariants);
 
         if (!mvee_rw_read_struct(variants[0].variantpid, ARG1(0), 2 * sizeof(int), fildes))
         {
@@ -7581,8 +7611,8 @@ long monitor::handle_pipe2_postcall(int variantnum)
             return 0;
         }
 
-        std::fill(read_fds.begin(),  read_fds.end(),  fildes[0]);
-        std::fill(write_fds.begin(), write_fds.end(), fildes[1]);
+		std::fill(read_fds.begin(),  read_fds.end(),  fildes[0]);
+		std::fill(write_fds.begin(), write_fds.end(), fildes[1]);
 
         REPLICATEBUFFERFIXEDLEN(1, sizeof(int) * 2);
 
@@ -7598,7 +7628,7 @@ long monitor::handle_pipe2_postcall(int variantnum)
 
 /*-----------------------------------------------------------------------------
   sys_inotify_init1
------------------------------------------------------------------------------*/
+  -----------------------------------------------------------------------------*/
 long monitor::handle_inotify_init1_precall(int variantnum)
 {
     CHECKARG(1);
@@ -7614,8 +7644,8 @@ long monitor::handle_inotify_init1_postcall(int variantnum)
 {
     if (call_succeeded)
     {
-        std::vector<unsigned long> fds(mvee::numvariants);
-        std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
+		std::vector<unsigned long> fds(mvee::numvariants);
+		std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
 
 		FileType type = (ARG1(0) & IN_NONBLOCK) ? FT_POLL_NON_BLOCKING : FT_POLL_BLOCKING;
         set_fd_table->create_fd_info(type, fds, "inotify_init1", 0, (ARG1(0) & IN_CLOEXEC) ? true : false, false);
