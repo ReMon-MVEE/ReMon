@@ -133,7 +133,10 @@ int syscall_ordering_clock = 0;
 //
 // The lock that protects the clock.
 //
-long syscall_ordering_lock  = 0;
+struct ipmon_mutex syscall_ordering_mutex;
+
+void ipmon_mutex_lock   (struct ipmon_mutex* mut);
+void ipmon_mutex_unlock (struct ipmon_mutex* mut);
 
 /*-----------------------------------------------------------------------------
     ipmon_arg_verify_failed - Just crash the variant. It's super user friendly!
@@ -336,7 +339,7 @@ PRECALL(mmap)
 		if (ipmon_variant_num != 0)
 			ARG5 = ipmon_get_slave_fd(ARG5);
 	}
-	return IPMON_EXEC_ALL | IPMON_ORDER_CALL;
+	return IPMON_EXEC_ALL | IPMON_LOCKSTEP_CALL | IPMON_ORDER_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -346,23 +349,6 @@ unsigned char ipmon_handle_munmap_is_unsynced()
 { 
 	return 1; 
 }
-
-/*
-CALCSIZE(munmap)
-{
-	COUNTREG(ARG);
-	COUNTREG(ARG);
-}
-
-PRECALL(munmap)
-{
-	// TODO: Handle ptmalloc madness
-	CHECKPOINTER(ARG1);
-	CHECKREG(ARG2);
-	return IPMON_EXEC_ALL | IPMON_ORDER_CALL;
-}
-*/
-
 
 /*-----------------------------------------------------------------------------
     mprotect - (void* addr, size_t len, int prot)
@@ -379,7 +365,7 @@ PRECALL(mprotect)
 	CHECKPOINTER(ARG1);
 	CHECKREG(ARG2);
 	CHECKREG(ARG3);
-	return IPMON_EXEC_ALL;
+	return IPMON_EXEC_ALL | IPMON_LOCKSTEP_CALL | IPMON_ORDER_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -402,7 +388,7 @@ PRECALL(mremap)
 	CHECKREG(ARG3);
 	CHECKREG(ARG4);
 	CHECKPOINTER(ARG5);
-	return IPMON_EXEC_ALL | IPMON_ORDER_CALL;
+	return IPMON_EXEC_ALL | IPMON_LOCKSTEP_CALL | IPMON_ORDER_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -455,8 +441,8 @@ PRECALL(open)
 	// TODO: Handle O_CREAT | O_EXCL in case we're executing a normal call
 
 	if (master)
-		return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
-	return IPMON_EXEC_ALL | IPMON_REPLICATE_MASTER | IPMON_ORDER_CALL;
+		return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER  | IPMON_LOCKSTEP_CALL;
+	return IPMON_EXEC_ALL | IPMON_REPLICATE_MASTER | IPMON_LOCKSTEP_CALL | IPMON_ORDER_CALL;
 }
 
 POSTCALL(open)
@@ -518,8 +504,8 @@ PRECALL(openat)
 	// TODO: Handle O_CREAT | O_EXCL in case we're executing a normal call
 
 	if (master)
-		return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
-	return IPMON_EXEC_ALL | IPMON_REPLICATE_MASTER | IPMON_ORDER_CALL;
+		return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER  | IPMON_LOCKSTEP_CALL;
+	return IPMON_EXEC_ALL | IPMON_REPLICATE_MASTER | IPMON_LOCKSTEP_CALL | IPMON_ORDER_CALL;
 }
 
 POSTCALL(openat)
@@ -1024,7 +1010,7 @@ PRECALL(chdir)
 {
 	CHECKPOINTER(ARG1);
 	CHECKSTRING(ARG1);
-	return IPMON_EXEC_ALL | IPMON_ORDER_CALL;
+	return IPMON_EXEC_ALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1039,7 +1025,7 @@ PRECALL(fchdir)
 {
 	CHECKREG(ARG1);
 	ARG1 = ipmon_get_slave_fd(ARG1);
-	return IPMON_EXEC_ALL | IPMON_ORDER_CALL;
+	return IPMON_EXEC_ALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1161,7 +1147,7 @@ PRECALL(ioctl)
     {
         if (ipmon_variant_num != 0)
 			ARG1 = ipmon_get_slave_fd(ARG1);
-        return IPMON_EXEC_ALL | IPMON_REPLICATE_MASTER | IPMON_ORDER_CALL;
+        return IPMON_EXEC_ALL | IPMON_REPLICATE_MASTER | IPMON_LOCKSTEP_CALL | IPMON_ORDER_CALL;
     }
 	return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
 }
@@ -1530,7 +1516,13 @@ PRECALL(getcwd)
 {
 	CHECKPOINTER(ARG1);
 	CHECKREG(ARG2);
-	return IPMON_EXEC_ALL | IPMON_ORDER_CALL;
+	return IPMON_EXEC_ALL | IPMON_REPLICATE_MASTER;
+}
+
+POSTCALL(getcwd)
+{
+	REPLICATEBUFFER(ARG1, ret);
+	return order;
 }
 
 /*-----------------------------------------------------------------------------
@@ -2949,6 +2941,56 @@ int ipmon_syscall_postcall(struct ipmon_syscall_args& args, struct ipmon_syscall
 }
 
 /*-----------------------------------------------------------------------------
+    ipmon_mutex_lock - based on locklessinc implementation
+-----------------------------------------------------------------------------*/
+void ipmon_mutex_lock(struct ipmon_mutex* mut)
+{
+	// We still assume low contention
+	for (int i = 0; i < 100; ++i)
+	{
+		// Set locked to 1. If the old value of locked was 0, we can return right away
+		if(!__atomic_exchange_n(&mut->locked, 1, __ATOMIC_ACQUIRE))
+			return;
+
+		cpu_relax();
+	}
+
+	// Set locked and contended using one xchg op. If the locked flag was
+	// set to 1, wait on the mutex using a private futex call
+	while (__atomic_exchange_n(&mut->hack, 0x101, __ATOMIC_ACQUIRE) & 1)
+		ipmon_unchecked_syscall(__NR_futex, &mut->hack, FUTEX_WAIT_PRIVATE, 0x101, NULL, NULL, 0);
+}
+
+/*-----------------------------------------------------------------------------
+    ipmon_mutex_unlock - 
+-----------------------------------------------------------------------------*/
+void ipmon_mutex_unlock(struct ipmon_mutex* mut)
+{
+	// test if the mutex is contended
+	if (mut->hack == 1 && 
+		// don't do the cmpxchg if it's definitely contended
+		// The cmpxchg succeeds only if there's no lock contention
+		__sync_bool_compare_and_swap(&mut->hack, 1, 0))
+		return;
+
+	mut->locked = 0;
+	__sync_synchronize();
+
+	// If someone takes the lock immediately, we can avoid the futex wake call
+	for (int i = 0; i < 200; ++i)
+	{
+		if (mut->locked)
+			return;
+		cpu_relax();
+	}
+
+	// Noone took the lock but there was contention
+	// => At least one other thread is waiting in a futex_wait op
+	mut->contended = 0;
+	ipmon_unchecked_syscall(__NR_futex, &mut->hack, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0);
+}
+
+/*-----------------------------------------------------------------------------
     ipmon_spin_lock - Used to order syscalls. We don't expect much contention
 	so this is not a super duper optimized lock
 -----------------------------------------------------------------------------*/
@@ -3088,24 +3130,27 @@ void ipmon_cond_broadcast(struct ipmon_condvar* cv)
 -----------------------------------------------------------------------------*/
 void ipmon_sync_on_syscall_entrance(struct ipmon_buffer* rb, struct ipmon_syscall_entry* entry)
 {
-//	if (entry->syscall_type & IPMON_LOCKSTEP_CALL)
-//		ipmon_barrier_wait(rb, &entry->syscall_lockstep_barrier);
+
+	if (entry->syscall_type & IPMON_LOCKSTEP_CALL)
+		ipmon_barrier_wait(rb, &entry->syscall_lockstep_barrier);
 
 	if (entry->syscall_type & IPMON_ORDER_CALL)
 	{
 		if (ipmon_variant_num == 0)
 		{
-			ipmon_spin_lock(&syscall_ordering_lock);
-			entry->syscall_order = syscall_ordering_clock++;
+			ipmon_mutex_lock(&syscall_ordering_mutex);
+			entry->syscall_order = syscall_ordering_clock;
 		}
 		else
 		{			
             // wait for preceding operations to complete
 			while (1)
 			{
-				if (*(volatile int*)&syscall_ordering_clock == entry->syscall_order)
+				if (syscall_ordering_clock == entry->syscall_order)
+				{
+					ipmon_mutex_lock(&syscall_ordering_mutex);
 					break;
-				cpu_relax();
+				}
 				ipmon_unchecked_syscall(__NR_sched_yield);
 			}			
 		}
@@ -3113,29 +3158,17 @@ void ipmon_sync_on_syscall_entrance(struct ipmon_buffer* rb, struct ipmon_syscal
 }
 
 /*-----------------------------------------------------------------------------
-    ipmon_sync_on_syscall_exit - Called just before we leave IP-MON. This
-	is where we can do lock-stepping at the syscall exit. This is called
-	AFTER the results have been copied into the local slave memory!
+    ipmon_sync_on_syscall_exit - This is called AFTER the results have been
+    copied into the local slave memory!
 
 	TODO: Rewrite in ASM to get rid of explicit pointer
 -----------------------------------------------------------------------------*/
 void ipmon_sync_on_syscall_exit(struct ipmon_buffer* rb, struct ipmon_syscall_entry* entry)
 {
-//	if (entry->syscall_type & IPMON_LOCKSTEP_CALL)
-//		ipmon_barrier_wait(rb, &entry->syscall_lockstep_barrier);
-
 	if (entry->syscall_type & IPMON_ORDER_CALL)
 	{
-		if (ipmon_variant_num == 0)
-		{
-			ipmon_spin_unlock(&syscall_ordering_lock);
-		}
-		else
-		{
-			// increment clock 
-			__sync_synchronize();
-			syscall_ordering_clock++;
-		}
+		syscall_ordering_clock++;
+		ipmon_mutex_unlock(&syscall_ordering_mutex);
 	}
 }
 
@@ -3188,9 +3221,7 @@ void ipmon_flush_buffer(struct ipmon_buffer* RB)
 #else
 	ipmon_barrier_wait(RB, &RB->pre_flush_barrier);
 	if (ipmon_variant_num == 0)
-	{
 		memset((void*)((unsigned long)RB + 64), 0, RB->numvariants * 64 + RB->usable_size);
-	}
 	ipmon_barrier_wait(RB, &RB->post_flush_barrier);
 #endif
 }
@@ -3292,7 +3323,7 @@ unsigned char ipmon_prepare_syscall (struct ipmon_buffer* RB, struct ipmon_sysca
 
 		ipmon_syscall_calcsize(args, syscall_no, &args_size, &ret_size);
 
-		entry_size = ROUND_UP(sizeof(struct ipmon_syscall_entry) + args_size + ret_size, sizeof(unsigned long));
+		entry_size = ROUND_UP(sizeof(struct ipmon_syscall_entry) + args_size + ret_size, ENTRY_ALIGNMENT);
 
 		if (RB->have_pending_signals || entry_size > RB->usable_size)
 			checked_call = 1;
@@ -3302,7 +3333,7 @@ unsigned char ipmon_prepare_syscall (struct ipmon_buffer* RB, struct ipmon_sysca
 		if (checked_call)
 		{
 			args_size = ret_size = 0;
-			entry_size = ROUND_UP(sizeof(struct ipmon_syscall_entry), sizeof(unsigned long));
+			entry_size = ROUND_UP(sizeof(struct ipmon_syscall_entry), ENTRY_ALIGNMENT);
 		}
 
 		// If the entry size (which can be just sizeof(ipmon_syscall_entry) when
@@ -3315,9 +3346,6 @@ unsigned char ipmon_prepare_syscall (struct ipmon_buffer* RB, struct ipmon_sysca
 		}
 
 		// OK. We have room to write the entry now
-#ifdef IPMON_FLUSH_LOCAL
-//		memset(entry, 0, sizeof(struct ipmon_syscall_entry));
-#endif
 		entry->syscall_no         = (unsigned short)syscall_no;
 		entry->syscall_entry_size = entry_size;
 		entry->syscall_args_size  = args_size;
@@ -3421,7 +3449,7 @@ long ipmon_finish_syscall (struct ipmon_buffer* RB, struct ipmon_syscall_args& a
 			// we need word-size alignment on all ipmon_syscall_entries
 			// because they contain variables that must be updated atomically
 			entry->syscall_entry_size = 
-				ROUND_UP(sizeof(struct ipmon_syscall_entry) + entry->syscall_args_size + true_ret_size, sizeof(long));
+				ROUND_UP(sizeof(struct ipmon_syscall_entry) + entry->syscall_args_size + true_ret_size, ENTRY_ALIGNMENT);
 
 			// Update our position in the buffer once more
 			RB->variant_info[0].pos += entry->syscall_args_size + true_ret_size;
@@ -3748,6 +3776,7 @@ void __attribute__((constructor)) init()
 	}
 
 	ipmon_initialized = true;
+	syscall_ordering_mutex.hack = 0;
 	IPMON_MASK_CLEAR(mask);
 	IPMON_MASK_SET(mask, __NR_ipmon_invoke);
 #if CURRENT_POLICY >= BASE_POLICY

@@ -68,7 +68,7 @@ extern "C" {
 // Allow all supported calls
 #define FULL_SYSCALLS        6
 
-#define CURRENT_POLICY       SOCKET_RW_POLICY
+#define CURRENT_POLICY       FULL_SYSCALLS
 
 /*-----------------------------------------------------------------------------
     Definitions and Generic Macros
@@ -103,7 +103,11 @@ extern "C" {
 #define IPMON_NOT_LEAVING_ENCLAVE 2 
 #define FUTEX_WAIT 0
 #define FUTEX_WAKE 1
+#define FUTEX_PRIVATE_FLAG 128
+#define FUTEX_WAIT_PRIVATE (FUTEX_WAIT | FUTEX_PRIVATE_FLAG)
+#define FUTEX_WAKE_PRIVATE (FUTEX_WAKE | FUTEX_PRIVATE_FLAG)
 #define INT_MAX 0x7fffffff
+#define ENTRY_ALIGNMENT sizeof(unsigned long)
 
 #define O_FILEFLAGSMASK                    (O_LARGEFILE | O_RSYNC | O_DSYNC | O_NOATIME | O_DIRECT | O_ASYNC | O_FSYNC | O_SYNC | O_NDELAY | O_NONBLOCK | O_APPEND | O_TRUNC | O_NOCTTY | O_EXCL | O_CREAT | O_ACCMODE)
 #define S_FILEMODEMASK                     (S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IWGRP | S_IXGRP | S_IROTH | S_IWOTH | S_IXOTH)
@@ -241,7 +245,7 @@ enum FileType
     IP-MON Data Structures
 -----------------------------------------------------------------------------*/
 //
-// 
+// Optimized non-pthreads barriers
 //
 struct ipmon_barrier
 {
@@ -257,7 +261,9 @@ struct ipmon_barrier
 };
 
 //
-//
+// Optimized non-pthreads condition variables
+// NOTE: The way we implement these currently does not allow for condvar reuse.
+// Once the cond var gets signaled, noone can wait on it again
 //
 struct ipmon_condvar
 {
@@ -267,6 +273,23 @@ struct ipmon_condvar
 		{
 			unsigned char have_waiters;
 			unsigned char signaled;
+			unsigned char padding[2];
+		};
+		unsigned int hack;
+	};
+};
+
+//
+// Optimized non-pthreads condition variables
+//
+struct ipmon_mutex
+{
+	union
+	{
+		struct
+		{
+			unsigned char locked;
+			unsigned char contended;
 			unsigned char padding[2];
 		};
 		unsigned int hack;
