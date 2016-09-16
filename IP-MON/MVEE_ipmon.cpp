@@ -166,7 +166,7 @@ void ipmon_arg_verify_failed
 	unsigned long tmp = (syscall_no << 8) | arg_no;
 
 	__asm __volatile ("movq %0, %%rax; movq %1, %%rbx; movq %%rax, (0)"
-					  : : "m" (tmp), "m" (arg_val));
+					  : : "m" (tmp), "m" (arg_val) : "rbx", "rax", "memory");
 }
 
 /*-----------------------------------------------------------------------------
@@ -175,7 +175,7 @@ void ipmon_arg_verify_failed
 void ipmon_set_slave_fd(int master_fd, int slave_fd)
 {
 	if (master_fd < 0 || master_fd > 4096)
-		ipmon_arg_verify_failed(-1, -1, master_fd);;
+		ipmon_arg_verify_failed(-1, -1, master_fd);
 	ipmon_master_fd_to_slave_fd[master_fd] = slave_fd;
 }
 
@@ -335,9 +335,7 @@ PRECALL(mmap)
 	if ((int)ARG5 != -1 && !(ARG4 & MAP_ANONYMOUS))
 	{
 		CHECKREG(ARG6);
-
-		if (ipmon_variant_num != 0)
-			ARG5 = ipmon_get_slave_fd(ARG5);
+		ARG5 = ipmon_get_slave_fd(ARG5);
 	}
 	return IPMON_EXEC_ALL | IPMON_LOCKSTEP_CALL | IPMON_ORDER_CALL;
 }
@@ -459,8 +457,7 @@ POSTCALL(open)
 		{
 			if (ipmon_variant_num == 0)
 				ipmon_set_file_type(ret, FT_REGULAR);
-			else
-				ipmon_set_slave_fd(ret, realret);
+			ipmon_set_slave_fd(ret, realret);
 		}
 	}
 	return order;
@@ -522,8 +519,7 @@ POSTCALL(openat)
 		{
 			if (ipmon_variant_num == 0)
 				ipmon_set_file_type(ret, FT_REGULAR);
-			else
-				ipmon_set_slave_fd(ret, realret);
+			ipmon_set_slave_fd(ret, realret);
 		}
 	}
 	return order;
@@ -1145,8 +1141,7 @@ PRECALL(ioctl)
 
     if (!is_master)
     {
-        if (ipmon_variant_num != 0)
-			ARG1 = ipmon_get_slave_fd(ARG1);
+		ARG1 = ipmon_get_slave_fd(ARG1);
         return IPMON_EXEC_ALL | IPMON_REPLICATE_MASTER | IPMON_LOCKSTEP_CALL | IPMON_ORDER_CALL;
     }
 	return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
@@ -1358,8 +1353,14 @@ CALCSIZE(futex)
 
 PRECALL(futex)
 {
+	unsigned long result = IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
+
 	CHECKREG(ARG2);
-	return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER | IPMON_BLOCKING_CALL /* | IPMON_LOCKSTEP_CALL */;
+
+	if (!(ARG2 & FUTEX_WAKE))
+		result |= IPMON_BLOCKING_CALL;
+
+	return result | IPMON_LOCKSTEP_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -3165,6 +3166,11 @@ void ipmon_sync_on_syscall_entrance(struct ipmon_buffer* rb, struct ipmon_syscal
 -----------------------------------------------------------------------------*/
 void ipmon_sync_on_syscall_exit(struct ipmon_buffer* rb, struct ipmon_syscall_entry* entry)
 {
+/*
+	if (entry->syscall_type & IPMON_LOCKSTEP_RETURN_TOO)
+		ipmon_barrier_wait(rb, &entry->syscall_lockstep_barrier);
+*/
+
 	if (entry->syscall_type & IPMON_ORDER_CALL)
 	{
 		syscall_ordering_clock++;
@@ -3898,6 +3904,7 @@ void __attribute__((constructor)) init()
 	// Directory management
 	IPMON_MASK_SET(mask, __NR_chdir);
 	IPMON_MASK_SET(mask, __NR_fchdir);
+	IPMON_MASK_SET(mask, __NR_mkdir);
 
 	// Socket Management
 	IPMON_MASK_SET(mask, __NR_socket);
