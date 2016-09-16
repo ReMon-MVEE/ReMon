@@ -205,8 +205,11 @@ Outgoing Stack:
 -----------------------------------------------------------------------------*/		
 FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint_alternative)
 		push rbp
-		push rsi				
+		.cfi_def_cfa_offset 16
+		push rsi
+		.cfi_def_cfa_offset 24
 		mov rbp, rsp
+		.cfi_def_cfa_register rbp
 		sub rsp, 16
 		and rsp, 0xfffffffffffffff0
 		sub rsp, 8
@@ -231,8 +234,11 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint_alternative)
 		pop r9
 		pop r12
 		mov rsp, rbp
+		.cfi_def_cfa_register rbp
 		pop rsi
+		.cfi_def_cfa_offset 16
 		pop rbp
+		.cfi_def_cfa_offset 8
 
 		retq
 FUNCTION_END(ipmon_enclave_entrypoint_alternative)
