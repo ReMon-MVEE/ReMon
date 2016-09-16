@@ -782,6 +782,9 @@ void monitor::shutdown(bool success)
     // see if we can control the damage
     if (!success)
     {
+		if (set_mmap_table)
+			set_mmap_table->grab_lock();
+
         // if we have other monitors that monitor different processes,
         // then just kill this local process
         // and let the other monitors continue
@@ -797,6 +800,7 @@ void monitor::shutdown(bool success)
         {
             // just kill this group
             debugf("GHUMVEE is monitoring multiple process groups => we're only shutting this group down\n");
+			debugf("set_mmap_table->thread_group_shutting_down = %d\n", set_mmap_table->thread_group_shutting_down);
 
 			if (!set_mmap_table->thread_group_shutting_down)
 			{
@@ -826,6 +830,9 @@ void monitor::shutdown(bool success)
 				log_ipmon_state();
 			}
 #endif
+			
+			if (set_mmap_table)
+				set_mmap_table->release_lock();
 
 
             // TODO: should we only do this if we shut down the last thread in the group???
@@ -1380,16 +1387,20 @@ void monitor::handle_exit_event(int index)
 	if (!index)
 		log_ipmon_state();
 #endif
+
     debugf("SIGTERM variant: %d\n", variants[index].variantpid);
+
+	// we treat this as an entrance to a sys_exit call so
+	// we can detect divergences where one variant is shut down
+	// while others are still trying to execute lockstepped calls
     variants[index].variant_terminated = true;
-    // pretending like we've reached the end of the syscall to keep our
-    // orchestra-like polling mechanism happy
-    variants[index].callnum          = NO_CALL;
+    variants[index].callnum          = __NR_exit;
+	variants[index].call_type        = MVEE_CALL_TYPE_NORMAL;
 
     bool bAllTerminated = true;
-    for (index = 0; index < mvee::numvariants; ++index)
+    for (int i = 0; i < mvee::numvariants; ++i)
     {
-        if (!variants[index].variant_terminated)
+        if (!variants[i].variant_terminated)
         {
             bAllTerminated = false;
             break;
@@ -1401,6 +1412,21 @@ void monitor::handle_exit_event(int index)
         debugf("All variant processes have terminated. Shutting down.\n");
         shutdown(true);
     }
+
+	// check if any of the other variants is waiting on the entrance of a lockstepped call
+	for (int i = 0; i < mvee::numvariants; ++i)
+	{
+		if (i != index &&
+			(variants[i].callnum != NO_CALL) &&
+			(variants[i].call_type & MVEE_CALL_TYPE_NORMAL) &&
+			(set_mmap_table && !set_mmap_table->thread_group_shutting_down))
+		{
+			warnf("Variant %d terminated while variant %d is at the entrance of a lockstepped call\n",
+				  index, i);
+			warnf("This is a deadlock - Shutting down the MVEE!\n");
+			shutdown(false);
+		}
+	}
 }
 
 /*-----------------------------------------------------------------------------
