@@ -40,7 +40,7 @@ extern "C" {
 #define IPMON_FLUSH_LOCAL
 
 #define IPMON_USE_FUTEXES_FOR_CONDVAR
-#define IPMON_SUPPORT_FUTEX
+// #define IPMON_SUPPORT_FUTEX
 #define IPMON_SUPPORT_EPOLL
 
 // don't do anything
@@ -197,6 +197,11 @@ typedef unsigned long rb_pointer;
 #define IPMON_BLOCKING_CALL  64  // The call is expected to block. This is not a distinct call type. It is ORed with one of the above call types.
 #define IPMON_ORDER_CALL     128 // All ordered calls must execute in the same order in all variants
 #define IPMON_LOCKSTEP_CALL  256 // 
+
+//
+// Signal Handling
+//
+#define IPMON_WAIT_FOR_SIGNAL_CALL 512 // Don't actually execute the call. Just wait for a signal delivery isntead
 
 #define IPMON_MAYBE_BLOCKING(fd) ((ipmon_get_file_type(fd) & MVEE_BLOCKING_FD) ? IPMON_BLOCKING_CALL : 0)
 #define IPMON_MAYBE_DISPATCH_MASTER(fd)							\

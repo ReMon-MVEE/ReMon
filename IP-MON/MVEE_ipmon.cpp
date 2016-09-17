@@ -3308,11 +3308,10 @@ void* ipmon_pos_to_pointer(struct ipmon_buffer* RB)
 
     If the metadata fits in the buffer, then the policy will be applied
 -----------------------------------------------------------------------------*/
-unsigned char ipmon_prepare_syscall (struct ipmon_buffer* RB, struct ipmon_syscall_args& args, unsigned long syscall_no)
+unsigned short ipmon_prepare_syscall (struct ipmon_buffer* RB, struct ipmon_syscall_args& args, unsigned long syscall_no)
 {
 	// Prepare the syscall here. The master needs to ensure that there's room to
 	// write the syscall info
-	unsigned char result;
 
 	// The structure we'll be writing/reading
 	struct ipmon_syscall_entry* entry = 
@@ -3325,18 +3324,21 @@ unsigned char ipmon_prepare_syscall (struct ipmon_buffer* RB, struct ipmon_sysca
 	if (ipmon_variant_num == 0)
 	{
 		unsigned int args_size = 0, ret_size = 0, entry_size;
-		unsigned char checked_call = 0;
 
 		ipmon_syscall_calcsize(args, syscall_no, &args_size, &ret_size);
 
 		entry_size = ROUND_UP(sizeof(struct ipmon_syscall_entry) + args_size + ret_size, ENTRY_ALIGNMENT);
 
-		if (RB->have_pending_signals || entry_size > RB->usable_size)
-			checked_call = 1;
+		if (RB->have_pending_signals)
+			entry->syscall_type = IPMON_WAIT_FOR_SIGNAL_CALL;
+		else if (entry_size > RB->usable_size)
+			entry->syscall_type = IPMON_EXEC_NO_IPMON;
+		else
+			entry->syscall_type = 0;
 
-		// If the call is checked, there is no need to reserve any room for the
-		// arguments and returns
-		if (checked_call)
+		// If the call is not actually going to get replicated by IP-MON, then
+		// don't reserve space for the arguments or return values
+		if (entry->syscall_type)
 		{
 			args_size = ret_size = 0;
 			entry_size = ROUND_UP(sizeof(struct ipmon_syscall_entry), ENTRY_ALIGNMENT);
@@ -3356,11 +3358,8 @@ unsigned char ipmon_prepare_syscall (struct ipmon_buffer* RB, struct ipmon_sysca
 		entry->syscall_entry_size = entry_size;
 		entry->syscall_args_size  = args_size;
 
-		if (!checked_call)
+		if (!entry->syscall_type)
 			entry->syscall_type = ipmon_syscall_precall(args, entry);
-		else
-			entry->syscall_type = IPMON_EXEC_NO_IPMON;
-
 
 		// Update the variant's current in-buffer position here.  NOTE: We will
 		// adjust this later, once we know the real size occupied by the return
@@ -3369,6 +3368,11 @@ unsigned char ipmon_prepare_syscall (struct ipmon_buffer* RB, struct ipmon_sysca
 		// We update the position here already to ease debugging in GHUMVEE
 		RB->variant_info[0].pos += 
 			((entry->syscall_type & IPMON_REPLICATE_MASTER) ? sizeof(struct ipmon_syscall_entry) : entry->syscall_entry_size);
+
+		// Skip sync if we're not going to execute the original call
+		if ((entry->syscall_type & IPMON_EXEC_NO_IPMON) ||
+			(entry->syscall_type & IPMON_WAIT_FOR_SIGNAL_CALL))
+			return entry->syscall_type;
 
 		// All relevant pre-syscall information has been logged into the buffer
 		// This is where we could sync with the slave variants to implement
@@ -3389,8 +3393,10 @@ unsigned char ipmon_prepare_syscall (struct ipmon_buffer* RB, struct ipmon_sysca
 		RB->variant_info[ipmon_variant_num].pos +=
 			((entry->syscall_type & IPMON_REPLICATE_MASTER) ? sizeof(struct ipmon_syscall_entry) : entry->syscall_entry_size);
 
-		// See if we need to report to CP-MON
-		if (entry->syscall_type & IPMON_EXEC_NO_IPMON)
+		// See if we're actually going to execute the call
+		// If not, skip all the checking and syncing
+		if ((entry->syscall_type & IPMON_EXEC_NO_IPMON) ||
+			(entry->syscall_type & IPMON_WAIT_FOR_SIGNAL_CALL))
 			return entry->syscall_type;
 
 		// Sanity Check 1: Compare the master's syscall number with ours
@@ -3567,9 +3573,6 @@ extern "C" long ipmon_enclave
 	args.arg6 = arg6;
 	args.entry = NULL;
 
-//	return ipmon_unchecked_syscall(syscall_no, arg1, arg2, arg3, arg4, arg5, arg6);
-//#if 0
-
 	// check if we need to reinitialize
 	if (!RB)
 		RB = (ipmon_buffer*)ipmon_register_thread();
@@ -3587,17 +3590,7 @@ extern "C" long ipmon_enclave
 	// and the IP-MON's replication logic. Examples of such calls are
 	// sys_sched_yield and sys_madvise
 	if (ipmon_syscall_is_unsynced(args, syscall_no))
-	{
-		if (RB->have_pending_signals)
-			syscall_no = (unsigned long)-1;
-
-		result = ipmon_unchecked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
-
-		if (ipmon_should_restart_call(result))
-			result = ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);		
-
-		return result;
-	}
+		return ipmon_unchecked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
 
 	// OK. At this point we know that the syscall could possibly bypass
 	// the ptracer and that it does have to go through the policy and
@@ -3605,7 +3598,8 @@ extern "C" long ipmon_enclave
 	//
 	// We invoke the policy manager here first through ipmon_prepare_syscall.
 	// The policy manager will then tell us what to do with it.
-	char syscall_type = ipmon_prepare_syscall(RB, args, syscall_no);
+restart_syscall:
+	unsigned short syscall_type = ipmon_prepare_syscall(RB, args, syscall_no);
 
 	// Only the master should invoke the original syscall
 	if (syscall_type & IPMON_EXEC_MASTER)
@@ -3613,15 +3607,12 @@ extern "C" long ipmon_enclave
 		// Execute and replicate in the master
 		if (ipmon_variant_num == 0)
 		{
-			if (RB->have_pending_signals)
-				syscall_no = (unsigned long)-1;
-
 			result = ipmon_unchecked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
 
 			long ret = ipmon_finish_syscall(RB, args, result);
 
 			if (ipmon_should_restart_call(result))
-				return ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
+				goto restart_syscall;
 
 			return ret;
 		}
@@ -3631,7 +3622,7 @@ extern "C" long ipmon_enclave
 			long ret = ipmon_finish_syscall(RB, args, 0);
 
 			if (ipmon_should_restart_call(ret))
-				ret = ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
+				goto restart_syscall;
 
 			return ret;
 		}
@@ -3639,15 +3630,12 @@ extern "C" long ipmon_enclave
 	// Execute and possibly replicate in all variants
 	else if (syscall_type & IPMON_EXEC_ALL)
 	{
-		if (RB->have_pending_signals)
-			syscall_no = (unsigned long)-1;
-
 		result = ipmon_unchecked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
 
 		long ret = ipmon_finish_syscall(RB, args, result);
 
 		if (ipmon_should_restart_call(result))
-			return ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
+			goto restart_syscall;
 
 		return ret;
 	}
@@ -3657,15 +3645,21 @@ extern "C" long ipmon_enclave
 		long ret = ipmon_finish_syscall(RB, args, 0);
 		
 		if (ipmon_should_restart_call(ret))
-			ret = ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
+			goto restart_syscall;
 		
 		return ret;
+	}
+	else if (syscall_type & IPMON_WAIT_FOR_SIGNAL_CALL)
+	{
+		// The master decided we shouldn't execute the call because a signal is pending
+		// Do a checked sys_getpid instead, then restart the original call
+		ipmon_checked_syscall(__NR_getpid);
+		goto restart_syscall;
 	}
 	else
 	{
 		return ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
 	}
-//#endif
 }
 
 /*-----------------------------------------------------------------------------

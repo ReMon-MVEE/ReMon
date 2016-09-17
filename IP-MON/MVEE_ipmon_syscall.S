@@ -83,15 +83,15 @@ FUNCTION_START(ipmon_checked_syscall)
 		
 		// We want to report this call to the ptracer so we will clear register
         // r12 (which contains the IP-MON key)
-		push r12
+		push r13
+		mov r13, r12
 		xor r12, r12
 		
 		syscall
 
 		// We might want to use the IP-MON key later (for futex etc)
-		mov r12, QWORD PTR[rsp]
-		mov QWORD PTR[rsp], 0
-		add rsp, 8
+		mov r12, r13
+		pop r13
 		
 		ret
 FUNCTION_END(ipmon_checked_syscall)
