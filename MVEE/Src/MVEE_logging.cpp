@@ -124,15 +124,17 @@ bool monitor::log_ipmon_entry
 )
 {
 	logfunc("\tsyscall           : %hu (%s)\n", (unsigned short)entry->syscall_no, getTextualSyscall((unsigned short)entry->syscall_no));
-	logfunc("\tchecked           : %d\n", (entry->syscall_type & IPMON_EXEC_NO_IPMON) ? 0 : 1);
+	logfunc("\tsyscall type (raw): %d\n", entry->syscall_type);
+	logfunc("\tchecked           : %d\n", (entry->syscall_type & IPMON_EXEC_NO_IPMON) ? 1 : 0);
+	logfunc("\tcanceled (signal) : %d\n", (entry->syscall_type & IPMON_WAIT_FOR_SIGNAL_CALL) ? 1 : 0);
 	logfunc("\torder             : %d\n", entry->syscall_order);
-	logfunc("\tmaster            : %d\n", (entry->syscall_type & IPMON_REPLICATE_MASTER) ? 1 : 0);
-	logfunc("\tblocking          : %d\n", (entry->syscall_type & IPMON_BLOCKING_CALL) ? 1 : 0);
+	logfunc("\treplicate master  : %d\n", (entry->syscall_type & IPMON_REPLICATE_MASTER) ? 1 : 0);
+	logfunc("\tblocking call     : %d\n", (entry->syscall_type & IPMON_BLOCKING_CALL) ? 1 : 0);
 	logfunc("\tresults waiters   : %d\n", entry->syscall_results_available.u.s.have_waiters);
 	logfunc("\tresults available : %d\n", entry->syscall_results_available.u.s.signaled);
 	logfunc("\tlockstep waiters  : %d\n", entry->syscall_lockstep_barrier.u.s.count);
 	logfunc("\tlockstep sequence : %d\n", entry->syscall_lockstep_barrier.u.s.seq >> 8);
-	logfunc("\treturn value      : %lu\n", entry->syscall_return_value);
+	logfunc("\treturn value      : %ld (%lx)\n", entry->syscall_return_value, entry->syscall_return_value);
 	logfunc("\tentrysize         : %d\n", entry->syscall_entry_size);
 
 	if (entry->syscall_entry_size == 0)
@@ -221,7 +223,7 @@ void monitor::log_ipmon_state()
 
 		debugf("================================================================================\n");
 		std::stringstream ss;
-		ss << "\tentry " << entry_num << " - offset: " << offset;
+		ss << "\tentry " << entry_num++ << " - offset: " << offset;
 		for (int i = 0; i < mvee::numvariants; ++i)
 		{
 			if (offsets[i] == offset)
@@ -555,6 +557,7 @@ was_interrupted:
     }
 
     log_registers(variantnum, logfunc);
+	log_stack(variantnum);
 }
 
 /*-----------------------------------------------------------------------------
@@ -1580,7 +1583,7 @@ void mvee::log_dwarf_rule (unsigned int reg_num, void* _rule)
     ss << " - reg num: " << rule->dw_regnum << " (";
     ss << getTextualDWARFReg(rule->dw_regnum) << ") - offset: " << STDHEXSTR(sizeof(unsigned long), rule->dw_offset_or_block_len);
 
-    warnf("DWARF: > %s\n", ss.str().c_str());
+    debugf("DWARF: > %s\n", ss.str().c_str());
 }
 
 /*-----------------------------------------------------------------------------
