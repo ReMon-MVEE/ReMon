@@ -575,11 +575,13 @@ int mmap_table::dwarf_step (int variantnum, pid_t variantpid, mvee_dwarf_context
     Dwarf_Fde         fde;
     Dwarf_Addr        row_pc, pc, low_pc, high_pc;
     Dwarf_Error       de;
-    regtable.rt3_rules = NULL;
 
 #ifdef MVEE_DWARF_DEBUG
+	unsigned long old_cfa;
     debugf("DWARF: stepping to the previous frame - variantnum: %d\n", variantnum);
 #endif
+
+    regtable.rt3_rules = NULL;
 
     // map EIP to a region
     found_region       = get_region_info(variantnum, IP(context->regs));
@@ -656,8 +658,17 @@ int mmap_table::dwarf_step (int variantnum, pid_t variantpid, mvee_dwarf_context
         goto out;
     }
 
+#ifdef MVEE_DWARF_DEBUG
+	old_cfa = context->cfa;
+#endif
+
     context->cfa = *regptr
                    + (long)regtable.rt3_cfa_rule.dw_offset_or_block_len;
+
+#ifdef MVEE_DWARF_DEBUG
+	debugf("DWARF: updated canonical frame address: " PTRSTR " => " PTRSTR "\n", old_cfa, context->cfa);
+#endif
+
     for (int i = 0; i <= DWARF_RAR; ++i)
     {
         if (regtable.rt3_rules[i].dw_value_type == DW_EXPR_OFFSET)
