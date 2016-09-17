@@ -179,15 +179,16 @@ mmap_table::mmap_table(const mmap_table& parent)
 {
     init();
 
-    mmap_execve_id            = parent.mmap_execve_id;
-	mmap_startup_info         = parent.mmap_startup_info;
-	have_diversified_variants = parent.have_diversified_variants;
+    mmap_execve_id             = parent.mmap_execve_id;
+	mmap_startup_info          = parent.mmap_startup_info;
+	have_diversified_variants  = parent.have_diversified_variants;
 #ifdef MVEE_FILTER_LOGGING
-    set_logging_enabled       = parent.set_logging_enabled;
+    set_logging_enabled        = parent.set_logging_enabled;
 #endif
-    enlarged_initial_stacks   = parent.enlarged_initial_stacks;
-    cached_instrs             = parent.cached_instrs;
-    cached_syms               = parent.cached_syms;
+    enlarged_initial_stacks    = parent.enlarged_initial_stacks;
+    cached_instrs              = parent.cached_instrs;
+    cached_syms                = parent.cached_syms;
+	thread_group_shutting_down = false;
 
     full_map.resize(mvee::numvariants);
 
