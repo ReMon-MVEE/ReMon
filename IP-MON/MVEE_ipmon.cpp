@@ -3028,6 +3028,9 @@ void ipmon_spin_unlock(volatile long* lock)
 -----------------------------------------------------------------------------*/
 void ipmon_barrier_wait(struct ipmon_buffer* RB, struct ipmon_barrier* barrier)
 {
+	// the upper byte of the sequence number represents the actual sequence number
+	// the lower byte is just used as a waiter flag
+	// if the lower byte is 1 => threads are waiting to be waked up at the barrier
 	unsigned short old_seq = __atomic_load_n(&barrier->seq, __ATOMIC_SEQ_CST);
 	unsigned short count   = __atomic_add_fetch(&barrier->count, 1, __ATOMIC_SEQ_CST);
 
@@ -3038,25 +3041,30 @@ void ipmon_barrier_wait(struct ipmon_buffer* RB, struct ipmon_barrier* barrier)
 
 		// We optimize for the case where the variants are in sync
 		// (i.e. we don't have to wait too long at the barrier)
-		for (int i = 0; i < 10000; ++i)
+		for (int i = 0; i < 1000; ++i)
 		{
+			// The sequence number can only change after all threads have
+			// reached the barrier
 			if ((__atomic_load_n(&barrier->seq, __ATOMIC_SEQ_CST) | 1) != old_seq)
-				return;			
+				return;	
+		
 			cpu_relax();
 		}
 
 		while ((__atomic_load_n(&barrier->seq, __ATOMIC_SEQ_CST) | 1) == old_seq)
 		{
+			// set the waiter flag
 			*(volatile char*)&barrier->seq = 1;
+			// and wait for the sequence number to change
 			ipmon_unchecked_syscall(__NR_futex, &barrier->hack, FUTEX_WAIT, old_seq, NULL, NULL, 0);
 		}
 	}
 	// last thread, wake everyone
-	else
+	else 
 	{
 		unsigned short old_seq = __atomic_load_n(&barrier->seq, __ATOMIC_SEQ_CST);
 		
-		if (__atomic_exchange_n(&barrier->hack, (old_seq | 1) + 255, __ATOMIC_SEQ_CST) & 1)
+		if (__atomic_exchange_n(&barrier->hack, (unsigned short)((old_seq | 1) + 0xFF), __ATOMIC_SEQ_CST) & 1)
 			ipmon_unchecked_syscall(__NR_futex, &barrier->hack, FUTEX_WAKE, INT_MAX, NULL, NULL, 0);
 	}
 }
@@ -3227,7 +3235,10 @@ void ipmon_flush_buffer(struct ipmon_buffer* RB)
 #else
 	ipmon_barrier_wait(RB, &RB->pre_flush_barrier);
 	if (ipmon_variant_num == 0)
+	{
 		memset((void*)((unsigned long)RB + 64), 0, RB->numvariants * 64 + RB->usable_size);
+		RB->flush_count++;
+	}
 	ipmon_barrier_wait(RB, &RB->post_flush_barrier);
 #endif
 }
@@ -3243,7 +3254,7 @@ unsigned char ipmon_wait_for_next_syscall(struct ipmon_buffer* RB)
 
 	while (1)
 	{
-		unsigned int master_pos = RB->variant_info[0].pos;
+		unsigned int master_pos = *(volatile unsigned int*)&RB->variant_info[0].pos;
 		unsigned int our_pos    = RB->variant_info[ipmon_variant_num].pos;
 
 		if (master_pos > our_pos)
@@ -3257,7 +3268,7 @@ unsigned char ipmon_wait_for_next_syscall(struct ipmon_buffer* RB)
 			// caught up with the master the master might indeed be flushing
 			// right now but it might have changed its offset since the time we
 			// read it!!!
-			master_pos = RB->variant_info[0].pos;
+			master_pos = *(volatile unsigned int*)&RB->variant_info[0].pos;
 			if (master_pos == our_pos)
 			{
 				ipmon_flush_buffer(RB);
@@ -3287,8 +3298,7 @@ unsigned char ipmon_wait_for_next_syscall(struct ipmon_buffer* RB)
 void* ipmon_pos_to_pointer(struct ipmon_buffer* RB)
 {
 	return (void*)((unsigned long)RB +
-				   offsetof(struct ipmon_buffer, variant_info) +
-				   sizeof(struct ipmon_variant_info) * RB->numvariants +
+				   64 * (RB->numvariants + 1) +
 				   RB->variant_info[ipmon_variant_num].pos);
 }
 
@@ -3324,21 +3334,22 @@ unsigned short ipmon_prepare_syscall (struct ipmon_buffer* RB, struct ipmon_sysc
 	if (ipmon_variant_num == 0)
 	{
 		unsigned int args_size = 0, ret_size = 0, entry_size;
+		unsigned short syscall_type;
 
 		ipmon_syscall_calcsize(args, syscall_no, &args_size, &ret_size);
 
 		entry_size = ROUND_UP(sizeof(struct ipmon_syscall_entry) + args_size + ret_size, ENTRY_ALIGNMENT);
 
 		if (RB->have_pending_signals)
-			entry->syscall_type = IPMON_WAIT_FOR_SIGNAL_CALL;
+			syscall_type = IPMON_WAIT_FOR_SIGNAL_CALL;
 		else if (entry_size > RB->usable_size)
-			entry->syscall_type = IPMON_EXEC_NO_IPMON;
+			syscall_type = IPMON_EXEC_NO_IPMON;
 		else
-			entry->syscall_type = 0;
+			syscall_type = 0;
 
 		// If the call is not actually going to get replicated by IP-MON, then
 		// don't reserve space for the arguments or return values
-		if (entry->syscall_type)
+		if (syscall_type)
 		{
 			args_size = ret_size = 0;
 			entry_size = ROUND_UP(sizeof(struct ipmon_syscall_entry), ENTRY_ALIGNMENT);
@@ -3357,6 +3368,7 @@ unsigned short ipmon_prepare_syscall (struct ipmon_buffer* RB, struct ipmon_sysc
 		entry->syscall_no         = (unsigned short)syscall_no;
 		entry->syscall_entry_size = entry_size;
 		entry->syscall_args_size  = args_size;
+		entry->syscall_type       = syscall_type;
 
 		if (!entry->syscall_type)
 			entry->syscall_type = ipmon_syscall_precall(args, entry);
@@ -3464,7 +3476,8 @@ long ipmon_finish_syscall (struct ipmon_buffer* RB, struct ipmon_syscall_args& a
 				ROUND_UP(sizeof(struct ipmon_syscall_entry) + entry->syscall_args_size + true_ret_size, ENTRY_ALIGNMENT);
 
 			// Update our position in the buffer once more
-			RB->variant_info[0].pos += entry->syscall_args_size + true_ret_size;
+			RB->variant_info[0].pos += 
+				entry->syscall_entry_size - sizeof(struct ipmon_syscall_entry);
 		}
 
 		// Tell the slaves that the syscall results are available
@@ -3487,7 +3500,8 @@ long ipmon_finish_syscall (struct ipmon_buffer* RB, struct ipmon_syscall_args& a
 
 			// And update our position in the buffer because the master might have
 			// changed the entry size.
-			RB->variant_info[ipmon_variant_num].pos += entry->syscall_entry_size - sizeof(struct ipmon_syscall_entry);
+			RB->variant_info[ipmon_variant_num].pos += 
+				entry->syscall_entry_size - sizeof(struct ipmon_syscall_entry);
 		}
 
 		// We could sync with the master here

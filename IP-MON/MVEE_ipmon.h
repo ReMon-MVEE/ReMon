@@ -40,7 +40,7 @@ extern "C" {
 #define IPMON_FLUSH_LOCAL
 
 #define IPMON_USE_FUTEXES_FOR_CONDVAR
-// #define IPMON_SUPPORT_FUTEX
+#define IPMON_SUPPORT_FUTEX
 #define IPMON_SUPPORT_EPOLL
 
 // don't do anything
@@ -97,7 +97,7 @@ extern "C" {
 #define MAX_FDS  4096
 #define PR_REGISTER_IPMON 		0xb00b135
 #define ENOIPMON 256
-#define RB ipmon_replication_buffer
+///#define RB ipmon_replication_buffer
 #define IPMON_STATUS_FLUSHING 1
 #define IPMON_YIELD_THRESHOLD 10000
 #define IPMON_NOT_LEAVING_ENCLAVE 2 
@@ -343,7 +343,8 @@ struct ipmon_buffer
 	unsigned long have_pending_signals;
 	struct ipmon_barrier pre_flush_barrier;
 	struct ipmon_barrier post_flush_barrier;
-	unsigned char padding[64 - sizeof(unsigned long) - sizeof(int)*2 - sizeof(struct ipmon_barrier) * 2];
+	unsigned long flush_count;
+	unsigned char padding[64 - 2*sizeof(unsigned long) - sizeof(int)*2 - sizeof(struct ipmon_barrier) * 2];
 
 	// Cachelines 1-n
 	struct ipmon_variant_info variant_info[1];
