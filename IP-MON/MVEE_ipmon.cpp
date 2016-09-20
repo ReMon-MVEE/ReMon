@@ -182,7 +182,7 @@ void ipmon_set_slave_fd(int master_fd, int slave_fd)
 int ipmon_get_slave_fd(int master_fd)
 {
 	if (master_fd < 0 || master_fd > 4096)
-		ipmon_arg_verify_failed(-1, -1, master_fd);
+		return master_fd;
 	return ipmon_master_fd_to_slave_fd[master_fd];
 }
 
