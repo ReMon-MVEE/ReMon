@@ -337,7 +337,9 @@ PRECALL(mmap)
 		CHECKREG(ARG6);
 		ARG5 = ipmon_get_slave_fd(ARG5);
 	}
-	return IPMON_EXEC_ALL | IPMON_LOCKSTEP_CALL | IPMON_ORDER_CALL;
+	if (ARG3 & PROT_EXEC)
+		return IPMON_EXEC_ALL | IPMON_ORDER_CALL | IPMON_LOCKSTEP_CALL;
+	return IPMON_EXEC_ALL | IPMON_ORDER_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -363,7 +365,9 @@ PRECALL(mprotect)
 	CHECKPOINTER(ARG1);
 	CHECKREG(ARG2);
 	CHECKREG(ARG3);
-	return IPMON_EXEC_ALL | IPMON_LOCKSTEP_CALL | IPMON_ORDER_CALL;
+	if (ARG3 & PROT_EXEC)
+		return IPMON_EXEC_ALL | IPMON_ORDER_CALL | IPMON_LOCKSTEP_CALL;
+	return IPMON_EXEC_ALL | IPMON_ORDER_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -386,7 +390,7 @@ PRECALL(mremap)
 	CHECKREG(ARG3);
 	CHECKREG(ARG4);
 	CHECKPOINTER(ARG5);
-	return IPMON_EXEC_ALL | IPMON_LOCKSTEP_CALL | IPMON_ORDER_CALL;
+	return IPMON_EXEC_ALL | IPMON_ORDER_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1142,7 +1146,7 @@ PRECALL(ioctl)
     if (!is_master)
     {
 		ARG1 = ipmon_get_slave_fd(ARG1);
-        return IPMON_EXEC_ALL | IPMON_REPLICATE_MASTER | IPMON_LOCKSTEP_CALL | IPMON_ORDER_CALL;
+        return IPMON_EXEC_ALL | IPMON_REPLICATE_MASTER | IPMON_ORDER_CALL;
     }
 	return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
 }
@@ -1353,14 +1357,14 @@ CALCSIZE(futex)
 
 PRECALL(futex)
 {
-	unsigned long result = IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
+	unsigned short result = IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
 
 	CHECKREG(ARG2);
 
 	if (!(ARG2 & FUTEX_WAKE))
 		result |= IPMON_BLOCKING_CALL;
 
-	return result | IPMON_LOCKSTEP_CALL;
+	return result;
 }
 
 /*-----------------------------------------------------------------------------
@@ -2912,7 +2916,7 @@ void ipmon_syscall_calcsize(struct ipmon_syscall_args& args, unsigned long sysca
     verification in the slaves and determines whether or not the call is a
     mastercall
 -----------------------------------------------------------------------------*/
-unsigned char ipmon_syscall_precall(struct ipmon_syscall_args& args, struct ipmon_syscall_entry* entry)
+unsigned short ipmon_syscall_precall(struct ipmon_syscall_args& args, struct ipmon_syscall_entry* entry)
 {
 	switch(entry->syscall_no)
 	{
@@ -3139,7 +3143,6 @@ void ipmon_cond_broadcast(struct ipmon_condvar* cv)
 -----------------------------------------------------------------------------*/
 void ipmon_sync_on_syscall_entrance(struct ipmon_buffer* rb, struct ipmon_syscall_entry* entry)
 {
-
 	if (entry->syscall_type & IPMON_LOCKSTEP_CALL)
 		ipmon_barrier_wait(rb, &entry->syscall_lockstep_barrier);
 
@@ -3174,11 +3177,6 @@ void ipmon_sync_on_syscall_entrance(struct ipmon_buffer* rb, struct ipmon_syscal
 -----------------------------------------------------------------------------*/
 void ipmon_sync_on_syscall_exit(struct ipmon_buffer* rb, struct ipmon_syscall_entry* entry)
 {
-/*
-	if (entry->syscall_type & IPMON_LOCKSTEP_RETURN_TOO)
-		ipmon_barrier_wait(rb, &entry->syscall_lockstep_barrier);
-*/
-
 	if (entry->syscall_type & IPMON_ORDER_CALL)
 	{
 		syscall_ordering_clock++;

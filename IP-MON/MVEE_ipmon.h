@@ -157,7 +157,7 @@ typedef unsigned long rb_pointer;
 // same type the master logged into the RB.
 //
 #define PRECALL(a)       \
-	unsigned long ipmon_handle_##a##_precall       (struct ipmon_syscall_args& args, struct ipmon_syscall_entry* entry, unsigned char order=0)
+	unsigned short ipmon_handle_##a##_precall       (struct ipmon_syscall_args& args, struct ipmon_syscall_entry* entry, unsigned char order=0)
 
 //
 // Handles the post-syscall logic. In the master variant, this is where the
