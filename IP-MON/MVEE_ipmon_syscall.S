@@ -19,16 +19,16 @@
 		.align 16;						\
 name:
 
-#define FUNCTION_START_EXPORTED(name)	\
-		.globl name;					\
-		.type name,@function;			\
-		.cfi_startproc;					\
-		.align 16;						\
-name:
-
-#define FUNCTION_END(name);				\
+#define FUNCTION_END(name);             \
 		.cfi_endproc;					\
 		.size name,.-name
+
+#define FUNCTION_START_EXPORTED(name)   \
+		.globl name;                    \
+		.type name,@function;           \
+		.cfi_startproc;                 \
+		.align 16;                      \
+name:
 
 /*-----------------------------------------------------------------------------
     Global Variables
@@ -134,21 +134,33 @@ Outgoing Stack:
 		+08 arg6
 -----------------------------------------------------------------------------*/
 FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint)
-		// This func needs to manually align the stack. The AMD64 ABI expects
-		// the stack to be aligned on a 16 byte boundary at the moment of the call.
+		// The callee (ipmon_enclave) will preserve registers rbp,rbx and r12-r15.
+		// We are responsible for preserving the rest of the registers except for:
+		// rcx,r11 because the kernel is allowed to clobber these
+		// rax because this is our syscall return value
+		// We must preserve: rdx, rsi, r8, r9, r10, rdi, rsp		
+	
 		push rbp
+		.cfi_def_cfa_offset 16
+		push rdx
+		.cfi_def_cfa_offset 24
 		push rsi
+		.cfi_def_cfa_offset 32
+		push r10
+		.cfi_def_cfa_offset 40
+		push rdi
+		.cfi_def_cfa_offset 48
 		mov rbp, rsp
+		.cfi_def_cfa_register rbp
 		sub rsp, 16
 		and rsp, 0xfffffffffffffff0
 		sub rsp, 8
-
-		push r13
 		
+		push r13	
 		push r12
+		push r9 // syscall arg6 must be arg7 for the enclave C function
 		mov r12, rcx // IP-MON key
 
-		push r9      // arg6		
 		mov r9, r8   // arg5
 		mov r8, r10  // arg4
 		mov rcx, rdx // arg3
@@ -158,7 +170,7 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint)
 		
 		call ipmon_enclave@plt
 
-		pop r9 
+		pop r9
 		pop r12
 		pop r13
 
@@ -166,10 +178,18 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint)
 		xor r11, r11
 
 		mov rsp, rbp
+		.cfi_def_cfa_register rbp
+		pop rdi
+		.cfi_def_cfa_offset 40
+		pop r10
+		.cfi_def_cfa_offset 32
 		pop rsi
+		.cfi_def_cfa_offset 24
+		pop rdx
+		.cfi_def_cfa_offset 16
 		pop rbp
-
-		retq		
+		retq
+		
 FUNCTION_END(ipmon_enclave_entrypoint)
 
 /*-----------------------------------------------------------------------------
@@ -206,20 +226,25 @@ Outgoing Stack:
 FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint_alternative)
 		push rbp
 		.cfi_def_cfa_offset 16
-		push rsi
+		push rdx
 		.cfi_def_cfa_offset 24
+		push rsi
+		.cfi_def_cfa_offset 32
+		push r10
+		.cfi_def_cfa_offset 40
+		push rdi
+		.cfi_def_cfa_offset 48
 		mov rbp, rsp
 		.cfi_def_cfa_register rbp
 		sub rsp, 16
 		and rsp, 0xfffffffffffffff0
 		sub rsp, 8
-
-		push r12
+		
+		push r12		
 		mov r12, rcx // IP-MON key
 
 		push r9 // arg6
 		push r8 // arg5
-		
 		mov r9, r10  // arg4
 		mov r8, rdx  // arg3
 		mov rcx, rsi // arg2
@@ -233,13 +258,20 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint_alternative)
 		pop r8
 		pop r9
 		pop r12
+
+		
 		mov rsp, rbp
 		.cfi_def_cfa_register rbp
+		pop rdi
+		.cfi_def_cfa_offset 40
+		pop r10
+		.cfi_def_cfa_offset 32
 		pop rsi
+		.cfi_def_cfa_offset 24
+		pop rdx
 		.cfi_def_cfa_offset 16
 		pop rbp
-		.cfi_def_cfa_offset 8
-
 		retq
+
 FUNCTION_END(ipmon_enclave_entrypoint_alternative)
 
