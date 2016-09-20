@@ -126,6 +126,7 @@ void fd_table::refresh_fd_table(std::vector<pid_t> variant_pids)
 	table.clear();
 	epoll_map.clear();
 	temporary_files.clear();
+	fd_cwd = "";
 
 // I'm not sure if it's really a good idea to repopulate the table
 // as we generally can't figure out the mapping between master and slave
@@ -590,7 +591,20 @@ std::string fd_table::get_full_path (int variantnum, pid_t variantpid, unsigned 
         // relative path... fetch the base path
         if (dirfd == (unsigned long)AT_FDCWD)
         {
-            ss << fd_cwd;
+			if (fd_cwd == "")
+			{
+				char proc_path[100];
+				char cwd_path[2048];
+
+				memset(cwd_path, 0, 2048);
+				sprintf(proc_path, "/proc/%d/cwd", variantpid);
+				if (readlink(proc_path, cwd_path, 2048) != -1)
+					ss << cwd_path;
+			}
+			else
+			{
+				ss << fd_cwd;
+			}
         }
         else
         {
