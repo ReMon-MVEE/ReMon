@@ -516,7 +516,11 @@ long monitor::call_call_dispatch ()
 
 					ipmon_buffer = new _shm_info();
 
-					if (!mvee::os_alloc_sysv_sharedmem(MVEE_IPMON_BUFFER_SIZE / (mvee::demo_has_many_threads ? 64 : 1),  &(ipmon_buffer->id), &(ipmon_buffer->sz), &(ipmon_buffer->ptr)))
+					if (!mvee::os_alloc_sysv_sharedmem(MVEE_IPMON_BUFFER_SIZE / 
+													   (mvee::demo_has_many_threads ? 64 : 1),
+													   &(ipmon_buffer->id), 
+													   &(ipmon_buffer->sz), 
+													   &(ipmon_buffer->ptr)))
 					{
 						result = MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(1);
 						break;

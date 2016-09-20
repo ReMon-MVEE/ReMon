@@ -621,25 +621,26 @@ long monitor::handle_open_precall(int variantnum)
     CHECKPOINTER(1);
     CHECKSTRING(1);
 
-    std::string full_path = set_fd_table->get_full_path(0, variants[0].variantpid, AT_FDCWD, (void*)ARG1(0));
-    if (full_path == "")
-        return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
+	if (!ipmon_fd_handling)
+	{
+		std::string full_path = set_fd_table->get_full_path(0, variants[0].variantpid, AT_FDCWD, (void*)ARG1(0));
+		if (full_path == "")
+			return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
 
-    variants[0].args[1].set_str(full_path);
+		if (full_path.find("/proc/self/") == 0
+			&& full_path != "/proc/self/maps"
+			&& full_path != "/proc/self/exe")
+		{
+			debugf("master sys_open for: %s\n", full_path.c_str());
+			return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+		}
 
-    if (full_path.find("/proc/self/") == 0
-        && full_path != "/proc/self/maps"
-        && full_path != "/proc/self/exe")
-    {
-        debugf("master sys_open for: %s\n", full_path.c_str());
-        return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-    }
-
-    if (full_path.find("/dev/") == 0)
-    {
-        debugf("master sys_open for: %s\n", full_path.c_str());
-        return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-    }
+		if (full_path.find("/dev/") == 0)
+		{
+			debugf("master sys_open for: %s\n", full_path.c_str());
+			return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+		}
+	}
 
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
@@ -650,24 +651,11 @@ long monitor::handle_open_call(int variantnum)
 		return MVEE_CALL_ALLOW | MVEE_CALL_HANDLED_UNSYNCED_CALL;
 
     int         i, result, old_flags, flags;
-    std::string str1 = STRINGARG(0, 1);
+    std::string str1 = set_fd_table->get_full_path(0, variants[0].variantpid, AT_FDCWD, (void*)ARG1(0));
 
     flags  = old_flags = ARG2(0);
     result = handle_check_open_call(str1.c_str(), &flags, ARG3(0));
 
-    /*
-     * LIBREOFFICE MADNESS: They use fcntl calls after
-     * open (with O_CREAT | O_EXCL) to check if the file was opened with the correct flags......
-     * ==> we should manipulate the call arguments but store the original flags in the fd_info...
-     if (flags != old_flags)
-     for (i = 0; i < mvee::numvariants; ++i)
-     SETARG2(i, flags);
-
-     => should be:
-     mvee_wrap_ptrace(PTRACE_POKEUSER, variants[i].variantpid, 4*ECX, (void*)flags);
-
-     for LibreOffice
-     */
     if (flags != old_flags)
         for (i = 0; i < mvee::numvariants; ++i)
             SETARG2(i, flags);
@@ -695,10 +683,7 @@ long monitor::handle_open_postcall(int variantnum)
 		unsigned char              unsynced = 0;
 		std::vector<unsigned long> fds      = call_postcall_get_result_vector();
 		char* resolved_path       = NULL;
-		std::string tmp_path      = STRINGARG(0, 1);
-
-		if (tmp_path.length() == 0)
-			tmp_path = set_fd_table->get_full_path(0, variants[0].variantpid, AT_FDCWD, (void*)ARG1(0));
+		std::string tmp_path      = set_fd_table->get_full_path(0, variants[0].variantpid, AT_FDCWD, (void*)ARG1(0));
 
 		if (tmp_path.find("/proc/") == 0)
 		{
@@ -717,6 +702,14 @@ long monitor::handle_open_postcall(int variantnum)
 		}
 
 		resolved_path = realpath(tmp_path.c_str(), NULL);
+
+		if (!resolved_path)
+		{
+			if (ipmon_fd_handling)
+				return 0;
+			warnf("Couldn't resolve path in postcall handler for sys_open - FIXME!\n");
+			return 0;
+		}
 
 		FileType type = (unsynced == 0) ? FT_REGULAR : FT_SPECIAL;
 		set_fd_table->create_fd_info(type, fds, resolved_path, ARG2(0), ARG2(0) & O_CLOEXEC, state == STATE_IN_MASTERCALL, unsynced);
@@ -1302,9 +1295,7 @@ long monitor::handle_getpid_postcall(int variantnum)
 		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 
     for (int i = 1; i < mvee::numvariants; ++i)
-    {
         WRITE_SYSCALL_RETURN(i, variants[0].varianttgid);
-    }
 	
 	return 0;
 }
@@ -1511,6 +1502,20 @@ long monitor::handle_rename_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_mkdir - (const char __user *pathname, int mode)
 -----------------------------------------------------------------------------*/
+long monitor::handle_mkdir_log_args(int variantnum)
+{
+    MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
+
+    for (int i = start; i < lim; ++i)
+    {
+        char* str = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
+        debugf("pid: %d - SYS_MKDIR(%s, %d)\n", variants[i].variantpid, str, ARG2(i));
+        SAFEDELETEARRAY(str);
+    }
+
+    return 0;
+}
+
 long monitor::handle_mkdir_precall(int variantnum)
 {
     CHECKPOINTER(1);
@@ -1722,6 +1727,8 @@ long monitor::handle_brk_postcall(int variantnum)
 			long              result      = call_postcall_get_variant_result(i);
 			mmap_region_info* heap_region = set_mmap_table->get_heap_region(i);
 			fd_info           backing_file;
+
+//			log_variant_backtrace(i);
 
 			// BRK only returns the current end of the heap, not the start.
 			// consequently, if we do not have the heap region in our maps yet, we have no choice
@@ -5204,7 +5211,10 @@ long monitor::handle_mmap_call(int variantnum)
         fd_info* info = set_fd_table->get_fd_info(ARG5(0));
 
         if (!info)
-        {
+        {		
+			if (ipmon_fd_handling)
+				return MVEE_CALL_ALLOW;
+
             warnf("mmap2 request with an unknown backing file!!!\n");
             return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
         }
@@ -6492,6 +6502,7 @@ long monitor::handle_exit_group_call(int variantnum)
     // I needed this for raytrace and some other parsecs. They do a sys_exit_group
     // while a bunch of threads are still running.
     // This can cause mismatches in those other threads because some variants might still perform syscalls while the others are dead
+//	warnf("thread group shutting down\n");
     set_mmap_table->thread_group_shutting_down = 1;
     __sync_synchronize();
     return MVEE_CALL_ALLOW;

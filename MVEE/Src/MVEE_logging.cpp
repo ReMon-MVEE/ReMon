@@ -200,6 +200,9 @@ void monitor::log_ipmon_state()
 	debugf("\tnumvariants = %d\n", buffer->ipmon_numvariants);
 	debugf("\tusable_size = %d\n", buffer->ipmon_usable_size);
 	debugf("\thave_pending_signals = %ld\n", buffer->ipmon_have_pending_signals);
+	debugf("\tflush_count = %d\n", buffer->flush_count);
+	debugf("\tpre_flush = [0x%04x,0x%04x]\n", buffer->pre_flush_barrier.u.s.seq, buffer->pre_flush_barrier.u.s.count);
+	debugf("\tpost_flush = [0x%04x,0x%04x]\n", buffer->post_flush_barrier.u.s.seq, buffer->post_flush_barrier.u.s.count);
 
 	for (int i = 0; i < mvee::numvariants; i++) 
 	{
@@ -1023,6 +1026,8 @@ void monitor::log_segfault(int variantnum)
 				{
 					entry = (struct ipmon_syscall_entry*)((unsigned long)buffer + data_start + offset);
 					if (offset + sizeof(struct ipmon_syscall_entry) > (unsigned int)buffer->ipmon_usable_size)
+						break;
+					if (entry->syscall_entry_size <= 0)
 						break;
 					offset += entry->syscall_entry_size;
 				}				

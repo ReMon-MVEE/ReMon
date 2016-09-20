@@ -59,13 +59,6 @@ enum MonitorState
     STATE_IN_MASTERCALL                                             // Waiting for mastercall to return
 };
 
-enum ArgType
-{
-    ARG_CSTRING,
-    ARG_STRING,
-    ARG_BUFFER,
-};
-
 /*-----------------------------------------------------------------------------
   Classes
 -----------------------------------------------------------------------------*/
@@ -105,23 +98,6 @@ public:
     siginfo_t      sig_info;
 };
 
-class syscall_arg
-{
-public:
-    ArgType     type;
-    void*       buf;
-    char*       cstr;
-    std::string str;
-    bool        valid;
-
-    syscall_arg();
-    ~syscall_arg();
-    void reset();
-    void set_buf(void* b);
-    void set_cstr(char* c);
-    void set_str(std::string& s);
-};
-
 // might have to optimize the layout even further for better cache performance
 // the user_regs struct is quite large, especially on AMD64...
 class variantstate
@@ -133,7 +109,6 @@ public:
     int           call_flags;                                       // Result of the call handler
     struct user_regs_struct
                   regs;                                             // Arguments for the syscall are copied into the variantstate just before entering the call
-    syscall_arg   args[7];                                          // Cached syscall arguments (Optional, rarely used)
     long          return_value;                                     // Return of the current syscall. Retrieved using PTRACE_PEEKUSER
     long          extended_value;                                   // Extended value to be returned through the EAX register.
 
@@ -1114,7 +1089,8 @@ struct ipmon_buffer
 	unsigned long ipmon_have_pending_signals;
 	struct ipmon_barrier pre_flush_barrier;
 	struct ipmon_barrier post_flush_barrier;
-	unsigned char ipmon_padding[64 - sizeof(unsigned long) - sizeof(int)*2 - sizeof(struct ipmon_barrier) * 2];
+	unsigned long flush_count;
+	unsigned char ipmon_padding[64 - 2*sizeof(unsigned long) - sizeof(int)*2 - sizeof(struct ipmon_barrier) * 2];
 
 	// Cachelines 1-n
 	struct ipmon_variant_info ipmon_variant_info[1];
@@ -1141,6 +1117,7 @@ struct ipmon_buffer
 //
 #define IPMON_UNSYNCED_CALL  32 // No lock-stepping for this call
 #define IPMON_BLOCKING_CALL  64 // The call is expected to block. This is not a distinct call type. It is ORed with one of the above call types.
+#define IPMON_WAIT_FOR_SIGNAL_CALL 512
 
 
 

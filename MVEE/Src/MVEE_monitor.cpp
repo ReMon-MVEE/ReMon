@@ -31,74 +31,6 @@
 #include "hde.h"
 
 /*-----------------------------------------------------------------------------
-    syscall_arg class - We use this to cache data arguments
------------------------------------------------------------------------------*/
-syscall_arg::syscall_arg()
-{
-    type  = ARG_BUFFER;
-    buf   = NULL;
-    cstr  = NULL;
-    str   = "";
-    valid = false;
-}
-
-syscall_arg::~syscall_arg()
-{
-    reset();
-}
-
-void syscall_arg::reset()
-{
-    if (!valid)
-        return;
-
-    switch(type)
-    {
-        case ARG_BUFFER:
-        {
-            if (buf)
-            {
-                delete[] ((unsigned char*)buf);
-                buf = NULL;
-            }
-            break;
-        }
-        case ARG_CSTRING:
-        {
-            SAFEDELETEARRAY(cstr);
-            break;
-        }
-        case ARG_STRING:
-        {
-            str = "";
-            break;
-        }
-    }
-    valid = false;
-}
-
-void syscall_arg::set_buf(void* b)
-{
-    type  = ARG_BUFFER;
-    buf   = b;
-    valid = true;
-}
-
-void syscall_arg::set_cstr(char* c)
-{
-    type  = ARG_CSTRING;
-    cstr  = c;
-    valid = true;
-}
-
-void syscall_arg::set_str(std::string& s)
-{
-    type  = ARG_STRING;
-    str   = s;
-    valid = true;
-}
-
-/*-----------------------------------------------------------------------------
     variantstate class
 -----------------------------------------------------------------------------*/
 variantstate::variantstate()
@@ -1418,8 +1350,10 @@ void monitor::handle_exit_event(int index)
 	{
 		if (i != index &&
 			(variants[i].callnum != NO_CALL) &&
+			(variants[i].callnum != __NR_exit) &&
 			(variants[i].call_type & MVEE_CALL_TYPE_NORMAL) &&
-			(set_mmap_table && !set_mmap_table->thread_group_shutting_down))
+			(set_mmap_table && !set_mmap_table->thread_group_shutting_down) &&
+			state <= STATE_NORMAL)
 		{
 			warnf("Variant %d terminated while variant %d is at the entrance of a lockstepped call\n",
 				  index, i);
@@ -1585,9 +1519,6 @@ void monitor::handle_syscall_entrance_event(int index)
 
     variants[index].regs_valid      = false;
     call_check_regs(index);
-
-    for (int i = 0; i < 7; ++i)
-        variants[index].args[i].reset();
 
     long  callnum = SYSCALL_NO(variants[index].regs);
 
