@@ -6831,7 +6831,25 @@ long monitor::handle_tgkill_precall(int variantnum)
     CHECKARG(1);
     CHECKARG(2);
     CHECKARG(3);
+
+	// Figure out if this signal is being sent to a process we're monitoring
+	std::vector<pid_t> slave_pids(mvee::numvariants);
+	if (mvee::map_master_to_slave_pids(ARG1(0), slave_pids))
+	{
+		// OK. We're going to dispatch this as a normal call
+		MAPPIDS(1);
+		MAPPIDS(2);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+	
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+}
+
+long monitor::handle_tgkill_postcall(int variantnum)
+{
+	UNMAPPIDS(1);
+	UNMAPPIDS(2);
+	return 0;
 }
 
 /*-----------------------------------------------------------------------------

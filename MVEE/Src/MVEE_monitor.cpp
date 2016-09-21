@@ -2294,7 +2294,7 @@ dont_resolve_segv_origin:
             bool insert_pending_sig = true;
             debugf("intercepted signal %s from pid: %d\n", getTextualSig(signal), siginfo.si_pid);
 
-            if (signal > 0 && signal < 32)
+            if (signal > 0 && signal <= 32)
             {
                 // do not store duplicates for non-real time signals
                 for (std::vector<mvee_pending_signal>::iterator it = pending_signals.begin();
