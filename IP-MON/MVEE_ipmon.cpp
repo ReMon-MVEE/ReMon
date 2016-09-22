@@ -3338,7 +3338,7 @@ unsigned short ipmon_prepare_syscall (struct ipmon_buffer* RB, struct ipmon_sysc
 
 		entry_size = ROUND_UP(sizeof(struct ipmon_syscall_entry) + args_size + ret_size, ENTRY_ALIGNMENT);
 
-		if (RB->have_pending_signals)
+		if (RB->have_pending_signals & 1)
 			syscall_type = IPMON_WAIT_FOR_SIGNAL_CALL;
 		else if (entry_size > RB->usable_size)
 			syscall_type = IPMON_EXEC_NO_IPMON;
@@ -3455,6 +3455,7 @@ long ipmon_finish_syscall (struct ipmon_buffer* RB, struct ipmon_syscall_args& a
 		gcc_barrier();
 
 		// We might have to restart the call if it was interrupted by a signal
+		// Don't replicate the return values in this case...
 		if (!ipmon_should_restart_call(ret))
 		{
 			nr_ret_elements = ipmon_syscall_postcall(args, entry, realret);
@@ -3467,16 +3468,16 @@ long ipmon_finish_syscall (struct ipmon_buffer* RB, struct ipmon_syscall_args& a
 															   entry->syscall_args_size + 
 															   true_ret_size))->len;
 			}
-
-			// we need word-size alignment on all ipmon_syscall_entries
-			// because they contain variables that must be updated atomically
-			entry->syscall_entry_size = 
-				ROUND_UP(sizeof(struct ipmon_syscall_entry) + entry->syscall_args_size + true_ret_size, ENTRY_ALIGNMENT);
-
-			// Update our position in the buffer once more
-			RB->variant_info[0].pos += 
-				entry->syscall_entry_size - sizeof(struct ipmon_syscall_entry);
 		}
+
+		// we need word-size alignment on all ipmon_syscall_entries
+		// because they contain variables that must be updated atomically
+		entry->syscall_entry_size = 
+			ROUND_UP(sizeof(struct ipmon_syscall_entry) + entry->syscall_args_size + true_ret_size, ENTRY_ALIGNMENT);
+
+		// Update our position in the buffer once more
+		RB->variant_info[0].pos += 
+			entry->syscall_entry_size - sizeof(struct ipmon_syscall_entry);
 
 		// Tell the slaves that the syscall results are available
 		ipmon_do_syscall_wake(entry);
@@ -3491,16 +3492,14 @@ long ipmon_finish_syscall (struct ipmon_buffer* RB, struct ipmon_syscall_args& a
 
 		ret = entry->syscall_return_value;
 
+		// Replicate the results
 		if (!ipmon_should_restart_call(ret))
-		{
-			// Replicate the results
 			ipmon_syscall_postcall(args, entry, realret);
 
-			// And update our position in the buffer because the master might have
-			// changed the entry size.
-			RB->variant_info[ipmon_variant_num].pos += 
-				entry->syscall_entry_size - sizeof(struct ipmon_syscall_entry);
-		}
+		// And update our position in the buffer because the master might have
+		// changed the entry size.
+		RB->variant_info[ipmon_variant_num].pos += 
+			entry->syscall_entry_size - sizeof(struct ipmon_syscall_entry);
 
 		// We could sync with the master here
 		ipmon_sync_on_syscall_exit(RB, entry);
@@ -3589,6 +3588,10 @@ extern "C" long ipmon_enclave
 	if (!RB)
 		RB = (ipmon_buffer*)ipmon_register_thread();
 
+	// In signal handler
+	if (RB->have_pending_signals & 2)
+		return ipmon_checked_syscall(syscall_no, arg1, arg2, arg3, arg4, arg5, arg6);
+
 	// If the syscall is not registered as a possibly unchecked syscall,
 	// then we can skip the policy checks and replication logic altogether.
 	//
@@ -3610,67 +3613,69 @@ extern "C" long ipmon_enclave
 	//
 	// We invoke the policy manager here first through ipmon_prepare_syscall.
 	// The policy manager will then tell us what to do with it.
-restart_syscall:
-	unsigned short syscall_type = ipmon_prepare_syscall(RB, args, syscall_no);
-
-	// Only the master should invoke the original syscall
-	if (syscall_type & IPMON_EXEC_MASTER)
+	while (true)
 	{
-		// Execute and replicate in the master
-		if (ipmon_variant_num == 0)
+		unsigned short syscall_type = ipmon_prepare_syscall(RB, args, syscall_no);
+
+		// Only the master should invoke the original syscall
+		if (syscall_type & IPMON_EXEC_MASTER)
+		{
+			// Execute and replicate in the master
+			if (ipmon_variant_num == 0)
+			{
+				result = ipmon_unchecked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
+
+				long ret = ipmon_finish_syscall(RB, args, result);
+
+				if (ipmon_should_restart_call(result))
+					continue;
+
+				return ret;
+			}
+			// Skip execution but do try replicating in the slaves
+			else
+			{
+				long ret = ipmon_finish_syscall(RB, args, 0);
+
+				if (ipmon_should_restart_call(ret))
+					continue;
+
+				return ret;
+			}
+		}
+		// Execute and possibly replicate in all variants
+		else if (syscall_type & IPMON_EXEC_ALL)
 		{
 			result = ipmon_unchecked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
 
 			long ret = ipmon_finish_syscall(RB, args, result);
 
 			if (ipmon_should_restart_call(result))
-				goto restart_syscall;
+				continue;
 
 			return ret;
 		}
-		// Skip execution but do try replicating in the slaves
+		else if (syscall_type & IPMON_EXEC_NOEXEC)
+		{
+			// Skip execution but do try replicating in all variants
+			long ret = ipmon_finish_syscall(RB, args, 0);
+		
+			if (ipmon_should_restart_call(ret))
+				continue;
+		
+			return ret;
+		}
+		else if (syscall_type & IPMON_WAIT_FOR_SIGNAL_CALL)
+		{
+			// The master decided we shouldn't execute the call because a signal is pending
+			// Do a checked sys_getpid instead, then restart the original call
+			ipmon_checked_syscall(__NR_getpid);
+			continue;
+		}
 		else
 		{
-			long ret = ipmon_finish_syscall(RB, args, 0);
-
-			if (ipmon_should_restart_call(ret))
-				goto restart_syscall;
-
-			return ret;
+			return ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
 		}
-	}
-	// Execute and possibly replicate in all variants
-	else if (syscall_type & IPMON_EXEC_ALL)
-	{
-		result = ipmon_unchecked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
-
-		long ret = ipmon_finish_syscall(RB, args, result);
-
-		if (ipmon_should_restart_call(result))
-			goto restart_syscall;
-
-		return ret;
-	}
-	else if (syscall_type & IPMON_EXEC_NOEXEC)
-	{
-		// Skip execution but do try replicating in all variants
-		long ret = ipmon_finish_syscall(RB, args, 0);
-		
-		if (ipmon_should_restart_call(ret))
-			goto restart_syscall;
-		
-		return ret;
-	}
-	else if (syscall_type & IPMON_WAIT_FOR_SIGNAL_CALL)
-	{
-		// The master decided we shouldn't execute the call because a signal is pending
-		// Do a checked sys_getpid instead, then restart the original call
-		ipmon_checked_syscall(__NR_getpid);
-		goto restart_syscall;
-	}
-	else
-	{
-		return ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
 	}
 }
 
@@ -3926,7 +3931,7 @@ void __attribute__((constructor)) init()
 #      endif
 
 	// Process Management
-	IPMON_MASK_SET(mask, __NR_exit_group);
+//	IPMON_MASK_SET(mask, __NR_exit_group);
 
 #     endif // >= FULL_SYSCALLS
 #    endif  // >= SOCKET_RW

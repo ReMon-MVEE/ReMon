@@ -340,7 +340,7 @@ struct ipmon_buffer
 	// Cacheline 0
 	int           numvariants;                        // 00-04: number of variants we're running with
 	int           usable_size;                        // 04-08: size that is usable for syscall entries
-	unsigned long have_pending_signals;
+	unsigned long have_pending_signals;               // 1 = signals are pending - 2 = in signal handler	
 	struct ipmon_barrier pre_flush_barrier;
 	struct ipmon_barrier post_flush_barrier;
 	unsigned long flush_count;
