@@ -407,7 +407,9 @@ long monitor::handle_restart_syscall_get_call_type(int variantnum)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_exit
+  sys_exit - this also shuts down the whole thread group but contrary to 
+  sys_exit_group, waiting on a thread that gets shut down by sys_exit might not
+  give you the right error code
 -----------------------------------------------------------------------------*/
 long monitor::handle_exit_precall(int variantnum)
 {
@@ -415,6 +417,12 @@ long monitor::handle_exit_precall(int variantnum)
 #ifdef MVEE_CALCULATE_CLOCK_SPREAD
 	log_calculate_clock_spread();
 #endif
+	
+#ifndef MVEE_BENCHMARK
+//	if (set_mmap_table->mmap_startup_info[0].image.find("ferret") != std::string::npos)
+//		sleep(5);
+#endif
+	set_mmap_table->thread_group_shutting_down = 1;
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
@@ -944,6 +952,9 @@ void monitor::handle_execve_get_args(int variantnum)
             }
         }
     }
+
+	if (ipmon_fd_handling)
+		set_fd_table->refresh_fd_table(getpids());
 
     set_mmap_table->mmap_startup_info[variantnum].image = 
 		mvee::os_normalize_path_name(set_fd_table->get_full_path(variantnum, variants[variantnum].variantpid, AT_FDCWD, (void*)ARG1(variantnum)));
@@ -6441,7 +6452,8 @@ long monitor::handle_epoll_create_postcall(int variantnum)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_exit_group -
+  sys_exit_group - NOTE: this syscall does not seem to complete until all
+  variants have exited
 -----------------------------------------------------------------------------*/
 #ifdef MVEE_DUMP_MEM_STATS
 static void handle_get_mem_size(int pid, unsigned long* phys_sz, unsigned long* virt_sz)
@@ -6503,8 +6515,14 @@ long monitor::handle_exit_group_call(int variantnum)
     // while a bunch of threads are still running.
     // This can cause mismatches in those other threads because some variants might still perform syscalls while the others are dead
 //	warnf("thread group shutting down\n");
+
+#ifndef MVEE_BENCHMARK
+//	if (set_mmap_table->mmap_startup_info[0].image.find("ferret") != std::string::npos)
+//		sleep(5);
+#endif
+
     set_mmap_table->thread_group_shutting_down = 1;
-    __sync_synchronize();
+//    __sync_synchronize();
     return MVEE_CALL_ALLOW;
 }
 
@@ -7937,6 +7955,8 @@ void mvee::init_syslocks()
     REG_LOCKS(__NR_mprotect,    MVEE_SYSLOCK_MMAN | MVEE_SYSLOCK_FULL);
     REG_LOCKS(__NR_munmap,      MVEE_SYSLOCK_MMAN | MVEE_SYSLOCK_FULL);
     REG_LOCKS(__NR_prctl,       MVEE_SYSLOCK_MMAN | MVEE_SYSLOCK_FULL);
+	REG_LOCKS(__NR_exit_group,  MVEE_SYSLOCK_MMAN | MVEE_SYSLOCK_PRECALL);
+	REG_LOCKS(__NR_exit,        MVEE_SYSLOCK_MMAN | MVEE_SYSLOCK_PRECALL);
 
     // non-blocking syscalls that read/modify the sighand table
 #ifdef __NR_signal

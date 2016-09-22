@@ -51,8 +51,8 @@ variantstate::variantstate()
     variant_attached(false),
     variant_resumed(false),
     current_signal_ready(false),
-	  fast_forward_to_entry_point(false),
-	  entry_point_bp_set(false),
+	fast_forward_to_entry_point(false),
+	entry_point_bp_set(false),
     last_lower_region_start(0),
     last_lower_region_size(0),
     last_upper_region_start(0),
@@ -129,7 +129,6 @@ void monitor::init()
     in_new_heap_allocation         = false;
     monitor_registered             = false;
     monitor_terminating            = false;
-    have_pending_signals           = false;
     ipmon_initialized              = false;
 	ipmon_mmap_handling            = false;
 	ipmon_fd_handling              = false;
@@ -1697,7 +1696,7 @@ void monitor::handle_syscall_exit_event(int index)
         || variants[index].return_value == -ERESTART_RESTARTBLOCK
         || variants[index].return_value == -ERESTARTNOINTR)
     {
-        if (current_signal && variants[index].return_value == -ERESTARTNOHAND)
+        if (in_signal_handler() && variants[index].return_value == -ERESTARTNOHAND)
         {
             debugf(">>> JUMPING TO SIGNAL HANDLER\n");
             variants[index].callnum = NO_CALL;
@@ -1796,7 +1795,7 @@ void monitor::handle_syscall_exit_event(int index)
     // Sync point reached... It's safe to let the variants return now
     if (all_synced_at_exit)
     {
-        if (current_signal && !current_signal_sent)
+        if (in_signal_handler() && !current_signal_sent)
         {
             debugf("All variants have returned and we can now deliver the signal.\n");
             sig_finish_delivery();
@@ -2029,31 +2028,44 @@ void monitor::handle_signal_event(int index, int status)
 }
 
 /*-----------------------------------------------------------------------------
-    mvee_sig_discard_pending_signal
+    discard_pending_signal
 -----------------------------------------------------------------------------*/
 std::vector<mvee_pending_signal>::iterator
 monitor::discard_pending_signal(std::vector<mvee_pending_signal>::iterator& it)
 {
     std::vector<mvee_pending_signal>::iterator ret = pending_signals.erase(it);
-    if (pending_signals.size() == 0)
-		sig_set_pending_signals(false);
     return ret;
+}
+
+/*-----------------------------------------------------------------------------
+    have_pending_signals
+-----------------------------------------------------------------------------*/
+bool monitor::have_pending_signals()
+{
+	return pending_signals.size() > 0;
+}
+
+/*-----------------------------------------------------------------------------
+    in_signal_handler
+-----------------------------------------------------------------------------*/
+bool monitor::in_signal_handler()
+{
+	return current_signal != 0;
 }
 
 /*-----------------------------------------------------------------------------
     sig_set_pending_signals
 -----------------------------------------------------------------------------*/
-void monitor::sig_set_pending_signals(bool pending_signals)
+void monitor::sig_set_pending_signals(bool pending_signals, bool entering_signal_handler)
 {
-	have_pending_signals = pending_signals;
-
 	// This is perhaps not optimal...
 	// We force IP-MON to dispatch all its syscalls as checked
 	// as long as we have pending signals...
 	if (ipmon_buffer)
 	{
 		struct ipmon_buffer* buffer = (struct ipmon_buffer*)(ipmon_buffer->ptr);
-		buffer->ipmon_have_pending_signals = (pending_signals ? 1 : 0);
+		buffer->ipmon_have_pending_signals  = pending_signals ? 1 : 0;
+		buffer->ipmon_have_pending_signals |= entering_signal_handler ? 2 : 0;
 	}
 }
 
@@ -2139,7 +2151,6 @@ void monitor::handle_sig_delivery_stop(int variantnum, int status)
     else if (WIFSTOPPED(status)) // stopped by the delivery of a signal
     {
         int signal    = WSTOPSIG(status);
-		bool skip_trapping_ins = false;
 
         if (signal == SIGALRM)
             debugf("caught SIGALRM in monitor %d - should_shutdown: %d\n", monitorid, should_shutdown);
@@ -2165,34 +2176,6 @@ void monitor::handle_sig_delivery_stop(int variantnum, int status)
 			std::string caller_info = set_mmap_table->get_caller_info(variantnum, variants[variantnum].variantpid, ip, 0);
 			debugf("variant %d crashed - trapping ins: %s\n", variantnum, caller_info.c_str());
 #endif
-
-			if ((unsigned long)siginfo.si_addr == 0x440 // intentional SEGV from the secure wall of clocks agent
-				|| (unsigned long)siginfo.si_addr == 0x3c0) // intentional SEGV from IP-MON
-				skip_trapping_ins = true;
-        }
-
-        if (skip_trapping_ins)
-        {
-			if (!ip) FETCH_IP_DIRECT(variantnum, ip);
-            unsigned long instr[2];
-			instr[0] = mvee_wrap_ptrace(PTRACE_PEEKTEXT, variants[variantnum].variantpid, ip, NULL);
-			instr[1] = mvee_wrap_ptrace(PTRACE_PEEKTEXT, variants[variantnum].variantpid, ip + sizeof(long), NULL);
-            HDE_INS(__instr);
-
-            // attempt to disassemble instr
-            HDE_DISAS(instr_len, &instr, &__instr);
-            if (instr_len > 0)
-            {
-				debugf("Offending instruction is %d bytes long.\n", instr_len);
-                WRITE_IP(variantnum, ip + instr_len);
-                mvee_wrap_ptrace(PTRACE_SYSCALL, variants[variantnum].variantpid, 0, NULL);
-            }
-            else
-            {
-                warnf("couldn't skip offending instruction...\n");
-            }
-
-			return;
         }
 
 #ifdef MVEE_ENABLE_VALGRIND_HACKS
@@ -2209,7 +2192,18 @@ dont_resolve_segv_origin:
 #endif
 
         if (signal == SIGSEGV || signal == SIGBUS)
+		{
             log_segfault(variantnum);
+
+			// segfault in signal handler. Pretend like nothing happened :)))
+			if (in_signal_handler())
+			{
+				warnf("A fatal signal was delivered while executing a signal handler.\n");
+				warnf("We're just quietly shutting down this variant set and moving on ;)\n");
+				shutdown(true);
+				return;
+			}
+		}
 
         if (sighand_table::is_control_flow_signal(signal))
         {
@@ -2253,7 +2247,7 @@ dont_resolve_segv_origin:
                 {
                     debugf("this is not a restarted call. We're expecting to see the signal handler right away!\n");
                     variants[variantnum].callnum = NO_CALL;
-                    state                    = STATE_NORMAL;
+                    state                        = STATE_NORMAL;
                 }
 
                 variants[variantnum].current_signal_ready = true;
@@ -2319,7 +2313,7 @@ dont_resolve_segv_origin:
                 tmp.sig_recv_mask    = (1 << variantnum);
                 memcpy(&tmp.sig_info, &siginfo, sizeof(siginfo_t));
                 pending_signals.push_back(tmp);
-				sig_set_pending_signals(true);
+				sig_set_pending_signals(true, in_signal_handler());
                 debugf("signal queued\n");
             }
 
@@ -2334,38 +2328,20 @@ dont_resolve_segv_origin:
 					{
 						// force the syscall to return to user-space
 						FETCH_SYSCALL_RETURN(0, ret);
+
+						// Check if this syscall would restart automatically
+						// if we resumed it as-is
 						if (ret <= -512	&& ret >= -516)
 						{
 							debugf("forcing IP-MON syscall to return to user-space\n");
 
 							// retarded hack. If we replace the orig_ax register by -1, 
 							// the kernel will just bail out (in arch/x86/kernel/signal.c)
-							// and return the fucking ERESTART error to user-space
+							// and return the ERESTART error to user-space
 							WRITE_SYSCALL_NO(0, -1);
 						}
 					}
-                    // The chances of triggering this race are astronomically low...					
-					/*else
-					{
-						std::string  caller_info = set_mmap_table->get_caller_info(variantnum, variants[variantnum].variantpid, ip, 0);					
-						// temporary hack to deal with this situation:
-						//
-						// master executes:
-						// movq %gs:( UTCB_HIDDEN(SIGNAL_PENDING) ), %r11
-						// <= signal arrives here
-						// cmpq $0, %r11
-						// jne utcb_execute_invalid_syscall
-						// syscall
-						//
-						// the master might indefinitely block in the syscall instr
-						// and the slaves will just wait for the result
-						if (caller_info.find("utcb_unchecked_syscall") != std::string::npos)
-						{
-							// TODO: check if the syscall no is in rax yet
-							debugf("RACE DETECTED - clearing syscall no\n");
-							WRITE_SYSCALL_NO(0, -1);
-						}
-					}*/				
+
 				}
 			}
 
@@ -2490,7 +2466,8 @@ bool monitor::sig_handle_sigchld_race(std::vector<mvee_pending_signal>::iterator
 -----------------------------------------------------------------------------*/
 bool monitor::sig_prepare_delivery ()
 {
-    if (current_signal || !have_pending_signals)
+    if (in_signal_handler() || 
+		!have_pending_signals())
         return false;
 
     bool result = true;
@@ -2535,6 +2512,7 @@ bool monitor::sig_prepare_delivery ()
             debugf("not delivering signal: %s (signal is currently ignored)\n", getTextualSig(it->sig_no));
             mvee::log_sigaction(&set_sighand_table->action_table[it->sig_no]);
             it = discard_pending_signal(it);
+			sig_set_pending_signals(have_pending_signals(), in_signal_handler());
             continue;
         }
 
@@ -2572,8 +2550,13 @@ bool monitor::sig_prepare_delivery ()
         current_signal      = it->sig_no;
         current_signal_info = tmp;
 
+		// reset handlers for SA_RESETHAND signals
+		if (set_sighand_table->action_table[it->sig_no].sa_flags & SA_RESETHAND)
+			set_sighand_table->action_table[it->sig_no].sa_handler = SIG_DFL;
+
         // delete from pending list
         it                  = discard_pending_signal(it);
+		sig_set_pending_signals(have_pending_signals(), true);
 
         // backup context
         for (int i = 0; i < mvee::numvariants; ++i)
@@ -2687,6 +2670,7 @@ void monitor::sig_return_from_sighandler ()
     current_signal      = 0;
     current_signal_sent = false;
     SAFEDELETE(current_signal_info);
+	sig_set_pending_signals(have_pending_signals(), false);
 
     if (variants[0].callnumbackup == __NR_rt_sigsuspend
 #ifdef __NR_sigsuspend

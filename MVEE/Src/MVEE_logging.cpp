@@ -119,6 +119,7 @@ struct ipmon_syscall_data* monitor::get_ipmon_ret(struct ipmon_syscall_entry* en
 -----------------------------------------------------------------------------*/
 bool monitor::log_ipmon_entry
 (
+	struct ipmon_buffer* buffer,
 	struct ipmon_syscall_entry* entry, 
 	void (*logfunc)(const char* format, ...)
 )
@@ -151,6 +152,14 @@ bool monitor::log_ipmon_entry
 		logfunc("========ARG %02d==================================================================\n", argnum);
 
 		logfunc("\tlen               : %ld\n", arg->len);
+
+		if (arg->len + (unsigned long)entry > 
+			(unsigned long)buffer + 64 * (1 + mvee::numvariants) + buffer->ipmon_usable_size)
+		{
+			logfunc("INVALID LENGTH!\n");
+			return false;
+		}
+
 		if (!arg->len)
 			break;
 
@@ -170,6 +179,14 @@ bool monitor::log_ipmon_entry
 		logfunc("========RET %02d==================================================================\n", retnum);
 
 		logfunc("\tlen               : %ld\n", ret->len);
+
+		if (ret->len + (unsigned long)entry > 
+			(unsigned long)buffer + 64 * (1 + mvee::numvariants) + buffer->ipmon_usable_size)
+		{
+			logfunc("INVALID LENGTH!\n");
+			return false;
+		}
+
 		if (!ret->len)
 			break;
 
@@ -241,12 +258,12 @@ void monitor::log_ipmon_state()
 		ss << "\n";
 		debugf(ss.str().c_str());
 
-		if (offset + sizeof(struct ipmon_syscall_entry) > buffer->ipmon_usable_size ||
+		if (offset + sizeof(struct ipmon_syscall_entry) > (unsigned long)buffer->ipmon_usable_size ||
 			offsets[0] == offset)
 			break;
 
 		debugf("================================================================================\n");
-		if (!log_ipmon_entry(entry, debugf))
+		if (!log_ipmon_entry(buffer, entry, debugf))
 			break;
 
 		offset += entry->syscall_entry_size;
@@ -426,7 +443,14 @@ void monitor::log_variant_backtrace(int variantnum, int max_depth, int calculate
 #endif 
 		variants[variantnum].callnum == __NR_rt_sigsuspend);
 
-//	MutexLock lock(&mvee::global_lock);
+	set_mmap_table->grab_lock();
+
+	if (set_mmap_table->thread_group_shutting_down)
+	{
+		logfunc("This thread group is shutting down - not backtracing\n");
+		set_mmap_table->release_lock();
+		return;
+	}
 
 #if defined(MVEE_BENCHMARK) && defined(MVEE_FORCE_ENABLE_BACKTRACING)
     logfunc = mvee::warnf;
@@ -473,6 +497,7 @@ void monitor::log_variant_backtrace(int variantnum, int max_depth, int calculate
             {
                 logfunc("pid: %d - > signal delivery failed... err = %d (%s)\n",
                         variants[variantnum].variantpid, errno, strerror(errno));
+				set_mmap_table->release_lock();
                 return;
             }
 
@@ -482,6 +507,7 @@ void monitor::log_variant_backtrace(int variantnum, int max_depth, int calculate
             {
                 logfunc("pid: %d - > error while waiting for variant: %d (%s)\n",
                         variants[variantnum].variantpid, errno, strerror(errno));
+				set_mmap_table->release_lock();
                 return;
             }
             else if (i != 0)
@@ -494,6 +520,7 @@ void monitor::log_variant_backtrace(int variantnum, int max_depth, int calculate
             {
                 logfunc("pid: %d - >>> Process %d exited. Status = %d\n",
                         variants[variantnum].variantpid, i, WEXITSTATUS(status));
+				set_mmap_table->release_lock();
                 return;
             }
             else if (WIFSIGNALED(status))
@@ -501,12 +528,16 @@ void monitor::log_variant_backtrace(int variantnum, int max_depth, int calculate
                 logfunc("pid: %d - >>> Process %d terminated by signal: %s\n",
                         variants[variantnum].variantpid, i, getTextualSig(WTERMSIG(status)));
                 if (WTERMSIG(status) != SIGSEGV)
+				{
+					set_mmap_table->release_lock();
                     return;
+				}
             }
             else if (WIFCONTINUED(status))
             {
                 logfunc("pid: %d - >>> Process %d continued! (this shouldn't happen!)\n",
                         variants[variantnum].variantpid, i);
+				set_mmap_table->release_lock();
                 return;
             }
             else if (WIFSTOPPED(status))
@@ -518,6 +549,7 @@ void monitor::log_variant_backtrace(int variantnum, int max_depth, int calculate
             {
                 logfunc(">>> Couldn't poll process status...\n",
                         variants[variantnum].variantpid);
+				set_mmap_table->release_lock();
                 return;
             }
         }
@@ -561,6 +593,7 @@ was_interrupted:
 
     log_registers(variantnum, logfunc);
 	log_stack(variantnum);
+	set_mmap_table->release_lock();
 }
 
 /*-----------------------------------------------------------------------------
@@ -1011,12 +1044,13 @@ void monitor::log_segfault(int variantnum)
 			unsigned char arg_no            = master_syscall_no & 0xff;
 			unsigned long slave_arg_val     = variants[variantnum].regs.rbx;
 			ipmon_syscall_entry* entry      = nullptr;			
+			struct ipmon_buffer* buffer     = nullptr;
 			master_syscall_no >>= 8;
 
 			// Get the relevant IP-MON entry
 			if (ipmon_buffer)
 			{
-				struct ipmon_buffer* buffer = (struct ipmon_buffer*) ipmon_buffer->ptr;
+				buffer = (struct ipmon_buffer*) ipmon_buffer->ptr;
 
 				// find the last valid entry before pos
 				unsigned int offset = 0;
@@ -1052,7 +1086,7 @@ void monitor::log_segfault(int variantnum)
 				if (entry)
 				{
 					warnf("========BUFFER ENTRY DUMP=======================================================\n");
-					log_ipmon_entry(entry, warnf);
+					log_ipmon_entry(buffer, entry, warnf);
 					warnf("================================================================================\n");
 				}
 			}
@@ -1092,7 +1126,7 @@ void monitor::log_segfault(int variantnum)
 					}
 
 					warnf("========BUFFER ENTRY DUMP=======================================================\n");
-					log_ipmon_entry(entry, warnf);
+					log_ipmon_entry(buffer, entry, warnf);
 					warnf("================================================================================\n");
 				}
 			}
@@ -1110,14 +1144,14 @@ void monitor::log_segfault(int variantnum)
     warnf("IP: " PTRSTR ", Address: " PTRSTR ", Code: %s (%d), Errno: %d\n",
                 eip, siginfo.si_addr, getTextualSEGVCode(siginfo.si_code),
                 siginfo.si_code, siginfo.si_errno);
-    log_registers(variantnum, mvee::logf);
+//    log_registers(variantnum, mvee::logf);
 //    set_mmap_table->print_mmap_table(mvee::logf);
 #if !defined(MVEE_ENABLE_VALGRIND_HACKS) && (!defined(MVEE_BENCHMARK) || defined(MVEE_FORCE_ENABLE_BACKTRACING))
     log_variant_backtrace(variantnum, 0, 1, 1);
 #endif
 
 	log_ipmon_state();
-	log_stack(variantnum);
+//	log_stack(variantnum);
 	set_mmap_table->print_mmap_table();
 }
 

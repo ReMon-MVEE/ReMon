@@ -142,7 +142,8 @@ bool sighand_table::is_default_ignored_signal (int signo)
     if (signo == SIGCHLD
         || signo == SIGWINCH
         || signo == SIGURG
-        || signo == SIGCLD)
+        || signo == SIGCLD
+		|| signo == SIGCANCEL)
         return true;
     return false;
 }

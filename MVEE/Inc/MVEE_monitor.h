@@ -643,6 +643,16 @@ private:
 	// preventing future delivery of said signal to the variants
 	//
     std::vector<mvee_pending_signal>::iterator discard_pending_signal              (std::vector<mvee_pending_signal>::iterator& it);
+	
+	//
+	// Checks if we have pending signals
+	//
+	bool                                       have_pending_signals                ();
+
+	//
+	// Checks if the variants are in a signal handler
+    //
+	bool                                       in_signal_handler                   ();
 
 	//
 	// Entrypoint for all signal related events. This handles all variant
@@ -691,7 +701,7 @@ private:
 	// Set the have_pending_signals flag, indicating that the sig_prepare_delivery
 	// function might have to initiate a signal delivery
 	//
-	void                                       sig_set_pending_signals             (bool pending_signals);
+	void                                       sig_set_pending_signals             (bool pending_signals, bool signal_handler);
 
 	// 
 	// Returns true if variant @variantnum's instruction pointer points to the
@@ -778,7 +788,7 @@ private:
 	// Visualizes the contents of IP-MON's Replication Buffer
 	//
     void log_ipmon_state                 ();
-	bool log_ipmon_entry                 (struct ipmon_syscall_entry* entry, void (*logfunc)(const char* format, ...));
+	bool log_ipmon_entry                 (struct ipmon_buffer* buffer, struct ipmon_syscall_entry* entry, void (*logfunc)(const char* format, ...));
 	struct ipmon_syscall_data* 
 		get_ipmon_data                   (struct ipmon_syscall_entry* entry, unsigned long start_offset, unsigned long end_offset, int data_num);
 	struct ipmon_syscall_data* 
@@ -923,7 +933,6 @@ private:
     bool                              in_new_heap_allocation; // are we inside the new_heap function in ptmalloc/arena.c ?
     bool                              monitor_registered;
     bool                              monitor_terminating;
-    bool                              have_pending_signals;
     bool                              ipmon_initialized;
 	bool                              ipmon_mmap_handling;
 	bool                              ipmon_fd_handling;
