@@ -718,6 +718,7 @@ void monitor::log_dump_queues(shm_table* shm_table)
                 master_pos = tmppos;
             fprintf(logfile, "> * Variant %d                                      \n", j);
             fprintf(logfile, ">   + pid               : %d                    \n",   variants[j].variantpid);
+			fprintf(logfile, ">   + pos               : %d                    \n", tmppos);
 
             if (it.first == MVEE_LIBC_LOCK_BUFFER_PARTIAL)
             {
