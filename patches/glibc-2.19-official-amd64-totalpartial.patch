@@ -25,8 +25,8 @@ diff -N -r --unified glibc-2.19/crypt/crypt_util.c glibc-2.19-totalpartial/crypt
      __libc_lock_unlock(_ufc_tables_lock);
 diff -N -r --unified glibc-2.19/csu/libc-start.c glibc-2.19-totalpartial/csu/libc-start.c
 --- glibc-2.19/csu/libc-start.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-totalpartial/csu/libc-start.c	2016-09-28 10:10:31.278557334 -0700
-@@ -104,6 +104,867 @@
++++ glibc-2.19-totalpartial/csu/libc-start.c	2016-09-29 17:47:31.158451386 -0700
+@@ -104,6 +104,873 @@
  # define MAIN_AUXVEC_PARAM
  #endif
  
@@ -615,24 +615,30 @@ diff -N -r --unified glibc-2.19/csu/libc-start.c glibc-2.19-totalpartial/csu/lib
 +		}
 +		else
 +		{
++			// we have to flush... figure out which thread does the flush
 +			unsigned short tid;
 +			MVEE_READ_QUEUE_DATA(lock, temppos, 0, tid);
 +
 +			if (tid == (unsigned short)mvee_master_thread_id)
 +			{
++				// we should do it...
 +				syscall(MVEE_FLUSH_SHARED_BUFFER, MVEE_LIBC_LOCK_BUFFER);
 +				*mvee_lock_buffer_pos = 0;
 +			}
 +			else if (!tid)
 +			{
-+				while (!tid)
++				// we don't know who should do it yet. wait for more info
++				while (temppos >= mvee_lock_buffer_slots && 
++					   !tid)
 +				{
 +					cpu_relax();
++					temppos = *(volatile int*)mvee_lock_buffer_pos;
 +					MVEE_READ_QUEUE_DATA(lock, temppos, 0, tid);					
 +				}
 +			}
 +			else
 +			{
++				// some other thread should do it. wait for the flush
 +				while (*mvee_lock_buffer_pos >= mvee_lock_buffer_slots)
 +					syscall(__NR_sched_yield);
 +			}
