@@ -165,8 +165,8 @@ struct mmap_arg_struct
     lim   = IS_SYNCED_CALL ? mvee::numvariants : variantnum + 1;	\
 																	\
 	/* manually update the register context */						\
-    if (IS_UNSYNCED_CALL)											\
-        call_check_regs(variantnum);
+    if IS_UNSYNCED_CALL												\
+	    call_check_regs(variantnum);
 
 //
 // Prologue for postcall handlers
@@ -183,7 +183,7 @@ struct mmap_arg_struct
 #define MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, results)		\
 	MVEE_HANDLER_POSTCALL(variantnum, start, lim);						\
     std::vector<unsigned long> results(mvee::numvariants);				\
-    if (IS_SYNCED_CALL)													\
+    if IS_SYNCED_CALL													\
         results = call_postcall_get_result_vector();					\
     else																\
 		results[variantnum] = call_postcall_get_variant_result(variantnum);
@@ -524,7 +524,7 @@ long monitor::handle_read_log_return(int variantnum)
 
 long monitor::handle_read_postcall(int variantnum)
 {
-	if (IS_SYNCED_CALL)
+	if IS_SYNCED_CALL
 	{
 		if (state == STATE_IN_MASTERCALL)
 		{
@@ -655,7 +655,7 @@ long monitor::handle_open_precall(int variantnum)
 
 long monitor::handle_open_call(int variantnum)
 {
-	if (IS_UNSYNCED_CALL)
+	if IS_UNSYNCED_CALL
 		return MVEE_CALL_ALLOW | MVEE_CALL_HANDLED_UNSYNCED_CALL;
 
     int         i, result, old_flags, flags;
@@ -686,7 +686,7 @@ long monitor::handle_open_postcall(int variantnum)
 	if (!call_succeeded)
 		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 
-	if (IS_SYNCED_CALL)
+	if IS_SYNCED_CALL
 	{
 		unsigned char              unsynced = 0;
 		std::vector<unsigned long> fds      = call_postcall_get_result_vector();
@@ -777,7 +777,7 @@ long monitor::handle_close_precall(int variantnum)
 
 long monitor::handle_close_postcall(int variantnum)
 {
-	if (IS_SYNCED_CALL)
+	if IS_SYNCED_CALL
 	{
 		if (state != STATE_IN_MASTERCALL)
 			UNMAPFDS(1);
@@ -893,7 +893,7 @@ long monitor::handle_unlink_precall(int variantnum)
 long monitor::handle_unlink_postcall(int variantnum)
 {
 #ifdef MVEE_ENABLE_VALGRIND_HACKS
-    if (IS_UNSYNCED_CALL)
+    if IS_UNSYNCED_CALL
     {
         char* unlink_fd = mvee_rw_read_string(variants[variantnum].variantpid, ARG1(variantnum));
         if (unlink_fd && strstr(unlink_fd, "/tmp/vgdb-pipe") == unlink_fd)
@@ -1017,7 +1017,7 @@ long monitor::handle_execve_precall(int variantnum)
 
 long monitor::handle_execve_call(int variantnum)
 {
-	if (IS_UNSYNCED_CALL)
+	if IS_UNSYNCED_CALL
 	{
 		warnf("unsynced execve dispatch - was this intentional?\n");
 		variants[variantnum].entry_point_bp_set = false;
@@ -1302,7 +1302,7 @@ long monitor::handle_setitimer_postcall(int variantnum)
 -----------------------------------------------------------------------------*/
 long monitor::handle_getpid_postcall(int variantnum)
 {
-	if (IS_UNSYNCED_CALL)
+	if IS_UNSYNCED_CALL
 		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 
     for (int i = 1; i < mvee::numvariants; ++i)
@@ -1392,7 +1392,7 @@ long monitor::handle_rt_sigsuspend_precall(int variantnum)
 
 long monitor::handle_rt_sigsuspend_call (int variantnum)
 {
-	if (IS_SYNCED_CALL)
+	if IS_SYNCED_CALL
 		variantnum = 0;
 
 	memcpy(&old_blocked_signals[variantnum], &blocked_signals[variantnum], sizeof(sigset_t));
@@ -1415,7 +1415,7 @@ long monitor::handle_rt_sigsuspend_call (int variantnum)
 
 long monitor::handle_rt_sigsuspend_postcall(int variantnum)
 {
-	if (IS_SYNCED_CALL)
+	if IS_SYNCED_CALL
 		variantnum = 0;
 
     memcpy(&blocked_signals[variantnum], &old_blocked_signals[variantnum], sizeof(sigset_t));
@@ -1731,7 +1731,7 @@ long monitor::handle_brk_log_return(int variantnum)
 
 long monitor::handle_brk_postcall(int variantnum)
 {	
-	if (IS_SYNCED_CALL)
+	if IS_SYNCED_CALL
 	{
 		for (int i = 0; i < mvee::numvariants; ++i)
 		{
@@ -2503,7 +2503,7 @@ long monitor::handle_rt_sigaction_postcall(int variantnum)
 {
 	// TODO/FIXME - stijn: We might see mismatches by not tracking sigactions
 	// while fast forwarding at some point
-	if (IS_UNSYNCED_CALL)
+	if IS_UNSYNCED_CALL
 		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 
     if (call_succeeded && ARG2(0))
@@ -2788,7 +2788,7 @@ long monitor::handle_munmap_precall(int variantnum)
     // of the region below the newly allocated heap.
     // Check the comments about ptmalloc in MVEE_private.h
     // for further information
-    if (IS_UNSYNCED_CALL)
+    if IS_UNSYNCED_CALL
         return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 
     if (in_new_heap_allocation)
@@ -2824,7 +2824,7 @@ long monitor::handle_munmap_postcall(int variantnum)
 
     if (call_succeeded)
     {
-		if (IS_UNSYNCED_CALL)
+		if IS_UNSYNCED_CALL
 		{
 			set_mmap_table->munmap_range(variantnum, ARG1(variantnum), ARG2(variantnum));
 			set_mmap_table->verify_mman_table(variantnum, variants[variantnum].variantpid);
@@ -4426,7 +4426,7 @@ long monitor::handle_mprotect_log_return(int variantnum)
 
 long monitor::handle_mprotect_postcall(int variantnum)
 {
-	if (IS_SYNCED_CALL)
+	if IS_SYNCED_CALL
 	{
 		if (call_succeeded)
 			for (int i = 0; i < mvee::numvariants; ++i)
@@ -5006,7 +5006,7 @@ long monitor::handle_rt_sigprocmask_precall(int variantnum)
 
 long monitor::handle_rt_sigprocmask_call(int variantnum)
 {
-	if (IS_SYNCED_CALL)
+	if IS_SYNCED_CALL
 		variantnum = 0;
 
 	variants[variantnum].last_sigset = call_get_sigset(variantnum, ARG2(variantnum), OLDCALLIFNOT(__NR_rt_sigprocmask));
@@ -5015,7 +5015,7 @@ long monitor::handle_rt_sigprocmask_call(int variantnum)
 
 long monitor::handle_rt_sigprocmask_postcall(int variantnum)
 {
-	if (IS_SYNCED_CALL)
+	if IS_SYNCED_CALL
 		variantnum = 0;
 
     if (call_succeeded && ARG2(variantnum))
@@ -5204,7 +5204,7 @@ long monitor::handle_mmap_precall(int variantnum)
 
 long monitor::handle_mmap_call(int variantnum)
 {
-	if (IS_UNSYNCED_CALL)
+	if IS_UNSYNCED_CALL
 		return MVEE_CALL_ALLOW | MVEE_CALL_HANDLED_UNSYNCED_CALL;
 
     for (int i = 0; i < mvee::numvariants; ++i)
@@ -5311,12 +5311,12 @@ long monitor::handle_mmap_postcall(int variantnum)
 {
 	if (!call_succeeded)
 	{
-		if (IS_SYNCED_CALL)
+		if IS_SYNCED_CALL
 			UNMAPFDS(5);
 		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 	}	
 
-	if (IS_SYNCED_CALL)
+	if IS_SYNCED_CALL
 	{
 		fd_info*                   info      = NULL;
 		int                        free_info = 0;
@@ -5538,7 +5538,7 @@ long monitor::handle_stat_precall(int variantnum)
 
 long monitor::handle_stat_postcall(int variantnum)
 {
-	if (IS_SYNCED_CALL)
+	if IS_SYNCED_CALL
 		REPLICATEBUFFERFIXEDLEN(2, sizeof(struct stat));
     return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
@@ -5733,7 +5733,7 @@ long monitor::handle_fstat_log_return(int variantnum)
 
 long monitor::handle_fstat_postcall(int variantnum)
 {
-	if (IS_SYNCED_CALL)
+	if IS_SYNCED_CALL
 	{
 		REPLICATEBUFFERFIXEDLEN(2, sizeof(struct stat));
 		if (state != STATE_IN_MASTERCALL)
@@ -5961,7 +5961,7 @@ long monitor::handle_gettid_call(int variantnum)
 #if !defined(MVEE_BENCHMARK) || defined(MVEE_FORCE_ENABLE_BACKTRACING)
     if (IS_UNSYNCED_CALL && ARG1(variantnum) == 1337 && ARG2(variantnum) == 10000001 && ARG3(variantnum) == 71)
         log_variant_backtrace(variantnum);
-    if (IS_UNSYNCED_CALL)
+    if IS_UNSYNCED_CALL
     {
         int i = variantnum;
         if (ARG1(i) == 1337 && ARG2(i) == 10000001)
@@ -6208,7 +6208,7 @@ long monitor::handle_futex_precall(int variantnum)
 
 long monitor::handle_futex_call(int variantnum)
 {
-	if (IS_UNSYNCED_CALL)
+	if IS_UNSYNCED_CALL
 		return MVEE_CALL_ALLOW | MVEE_CALL_HANDLED_UNSYNCED_CALL;
 
 #ifndef MVEE_DISABLE_SYNCHRONIZATION_REPLICATION
@@ -6242,7 +6242,7 @@ long monitor::handle_futex_log_return(int variantnum)
 long monitor::handle_futex_postcall(int variantnum)
 {
 #ifndef MVEE_DISABLE_SYNCHRONIZATION_REPLICATION
-	if (IS_SYNCED_CALL)
+	if IS_SYNCED_CALL
 	{
 		mvee_word master_word;
 		mvee_word slave_word;

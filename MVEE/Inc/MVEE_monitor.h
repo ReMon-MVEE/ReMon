@@ -396,7 +396,7 @@ private:
 	//
     sigset_t         call_get_sigset                     (int variantnum, unsigned long sigset_ptr, bool is_old_call);
     struct sigaction call_get_sigaction                  (int variantnum, unsigned long sigaction_ptr, bool is_old_call);
-    struct sockaddr* call_get_sockaddr                   (int variantnum, unsigned long ptr, socklen_t addr_len);
+    struct sockaddr* call_get_sockaddr                   (int variantnum, unsigned long ptr, __socklen_t addr_len);
 
 	// *************************************************************************
     // Specific Syscall handlers (these are all in MVEE_syscalls_handlers.cpp)
