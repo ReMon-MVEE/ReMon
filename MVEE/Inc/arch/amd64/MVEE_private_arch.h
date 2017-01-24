@@ -161,6 +161,9 @@
 #define PRINT_REG(variantnum, logfunc, reg) \
     mvee::log_register(#reg, (unsigned long*)&variants[variantnum].regs.reg, logfunc);
 
+#define PRINT_REG_DIRECT(regs, logfunc, reg) \
+    mvee::log_register(#reg, (unsigned long*)&regs.reg, logfunc);
+
 #define log_registers(variantnum, logfunc)			\
     {												\
         variants[variantnum].regs_valid = false;	\
@@ -184,6 +187,29 @@
         PRINT_REG(variantnum, logfunc, r14);		\
         PRINT_REG(variantnum, logfunc, r15);		\
     }												\
+
+#define log_registers_direct(regs, logfunc)			\
+    {												\
+        PRINT_REG_DIRECT(regs, logfunc, rax);		\
+        PRINT_REG_DIRECT(regs, logfunc, rbx);		\
+        PRINT_REG_DIRECT(regs, logfunc, rcx);		\
+        PRINT_REG_DIRECT(regs, logfunc, rdx);		\
+        PRINT_REG_DIRECT(regs, logfunc, rdi);		\
+        PRINT_REG_DIRECT(regs, logfunc, rsi);		\
+        PRINT_REG_DIRECT(regs, logfunc, rip);		\
+        PRINT_REG_DIRECT(regs, logfunc, eflags);	\
+        PRINT_REG_DIRECT(regs, logfunc, rsp);		\
+        PRINT_REG_DIRECT(regs, logfunc, rbp);		\
+        PRINT_REG_DIRECT(regs, logfunc, r8);		\
+        PRINT_REG_DIRECT(regs, logfunc, r9);		\
+        PRINT_REG_DIRECT(regs, logfunc, r10);		\
+        PRINT_REG_DIRECT(regs, logfunc, r11);		\
+        PRINT_REG_DIRECT(regs, logfunc, r12);		\
+        PRINT_REG_DIRECT(regs, logfunc, r13);		\
+        PRINT_REG_DIRECT(regs, logfunc, r14);		\
+        PRINT_REG_DIRECT(regs, logfunc, r15);		\
+    }												\
+
 
 
 #endif /* MVEE_PRIVATE_ARCH_H_ */

@@ -14,7 +14,7 @@ else
 end
 
 def md5(file)
-  ret=`md5sum #{file} | cut -d' ' -f1`
+  `md5sum #{file} | cut -d' ' -f1`
 end
 
 def replace_if_different(oldfile, newfile)
@@ -61,7 +61,7 @@ def write_handler(file, name, handler, default)
       file.write(sprintf("\t%s,\n", @handlers[name][handler]))
     else
       file.write(sprintf("\t&monitor::%s,\n", @handlers[name][handler]))
-end
+    end
   else
     file.write("\t#{default},\n")
   end
