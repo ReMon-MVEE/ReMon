@@ -74,11 +74,10 @@ extern "C" {
     Definitions and Generic Macros
 -----------------------------------------------------------------------------*/
 #ifndef __NR_syscalls
-#define __NR_syscalls 319
+#define __NR_syscalls 325
 #endif
 
-#define __NR_ipmon_invoke 318
-#define __NR_ipmon_return 319
+#define __NR_ipmon_invoke 511
 
 #ifndef ROUND_UP
 #define ROUND_UP(x, multiple) ( (((long)(x)) + multiple - 1) & (~(multiple - 1)) )
