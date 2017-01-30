@@ -100,7 +100,7 @@ OBJ				= $(SRCS:%.cpp=$(MVEE_BUILD)/%.o)
 endif
 
 
-STD_LIBS		= -ldl -lrt -lelf -lstdc++ -ldwarf -lpthread -lconfig -lz
+STD_LIBS		= -ldl -lrt -lelf -lstdc++ -ldwarf -lpthread -lconfig -lz 
 
 BIN = $(MVEE_OUT)/MVEE
 
