@@ -22,7 +22,7 @@ diff -r --unified linux-4.4.0.orig/fs/exec.c linux-4.4.0/fs/exec.c
  out:
 diff -r --unified linux-4.4.0.orig/include/linux/sched.h linux-4.4.0/include/linux/sched.h
 --- linux-4.4.0.orig/include/linux/sched.h	2017-01-24 12:55:38.000000000 -0800
-+++ linux-4.4.0/include/linux/sched.h	2017-01-24 11:53:25.525654223 -0800
++++ linux-4.4.0/include/linux/sched.h	2017-01-24 13:05:24.179771980 -0800
 @@ -1377,6 +1377,53 @@
  	bool writable;
  };
@@ -33,7 +33,7 @@ diff -r --unified linux-4.4.0.orig/include/linux/sched.h linux-4.4.0/include/lin
 +
 +#ifndef __NR_syscalls
 +  /* this is the highest known syscall no for x86_64 in this kernel... */
-+  #define __NR_syscalls __NR_finit_module
++  #define __NR_syscalls __NR_mlock2
 +#endif
 +
 +/* MVEE IP-MON patch */

@@ -20,7 +20,7 @@ endif
 
 BUILD		= Release
 #BUILD      = Release-syms
-BUILD		= Debug
+#BUILD		= Debug
 #BUILD		= Debug-sanitize
 
 # directories
@@ -100,7 +100,7 @@ OBJ				= $(SRCS:%.cpp=$(MVEE_BUILD)/%.o)
 endif
 
 
-STD_LIBS		= -ldl -lrt -lelf -lstdc++ -ldwarf -lpthread -lconfig
+STD_LIBS		= -ldl -lrt -lelf -lstdc++ -ldwarf -lpthread -lconfig -lz
 
 BIN = $(MVEE_OUT)/MVEE
 
