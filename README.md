@@ -82,13 +82,13 @@ To build IP-MON itself, navigate to /path/to/ReMon/IP-MON and type `./comp.sh`.
 
 ### Building the IP-MON kernel
 
-**IP-MON** requires some kernel modifications to run. **ReMon** ships with the necessary kernel patch for Linux 3.13. To build and install the custom kernel, use the following commands:
+**IP-MON** requires some kernel modifications to run. **ReMon** ships with the necessary kernel patch for Linux 4.40. To build and install the custom kernel, use the following commands:
 
 ```
 cd /wherever/you/want/to/download/the/kernel
 apt-get source linux
 cd linux-<insert version number here>
-patch -p1 < /path/to/ReMon/patches/linux-3.13-ipmon.patch
+patch -p1 < /path/to/ReMon/patches/linux-4.4.0-full-ipmon.patch
 make menuconfig 
 # while you're in the config menu, you might want to bump the kernel tick rate up to 1000Hz
 # you can do so by navigating to "Processor type and features" > "Timer Frequency"
@@ -107,7 +107,11 @@ To enable **IP-MON**, simply edit the MVEE.ini file in the output folder of your
 
 ### Running IP-MON
 
-You cannot run **IP-MON** directly. GHUMVEE will automatically load and run **IP-MON** when you enable it using the `use_ipmon` option described above. 
+You cannot run **IP-MON** directly. GHUMVEE will automatically load and run **IP-MON** when you enable it using the `use_ipmon` option described above.
+
+### Older IP-MON version
+
+Although we no longer support the version of IP-MON we presented at USENIX ATC, you can still find its source code in this repository in the IP-MON-atc folder.
 
 ## Further Tinkering
 
@@ -208,14 +212,22 @@ cp <arch>-pc-linux-gnu/libstdc++-v3/src/.libs/libstdc++.so.6.0.<ver> /path/to/Re
 
 Here are some of the publications that build on or use ReMon:
 
+Taming Parallelism in a Multi-Variant Execution Environment
+Stijn Volckaert, Bart Coppens, Bjorn De Sutter, Koen De Bosschere, Per Larsen, and Michael Franz.
+In 12th European Conference on Computer Systems (EuroSys'17). ACM, 2017.
+To appear.
+
+[Secure and Efficient Application Monitoring and Replication](http://ics.uci.edu/~stijnv/Papers/atc16-remon.pdf)
+Stijn Volckaert, Bart Coppens, Alexios Voulimeneas, Andrei Homescu, Per Larsen, Bjorn De Sutter, and Michael Franz.
+In 2016 USENIX Annual Technical Conference (ATC'16), pages 167-179. USENIX, 2016.
+
 [Advanced Techniques for Multi-Variant Execution](http://ics.uci.edu/~stijnv/Papers/thesis.pdf)
 Stijn Volckaert.
 PhD dissertation, Ghent University, 2015.
 
 [Cloning your Gadgets: Complete ROP Attack Immunity with Multi-Variant Execution](http://ics.uci.edu/~stijnv/Papers/cloning.pdf)
 Stijn Volckaert, Bart Coppens, and Bjorn De Sutter.
-To appear in IEEE Transactions on Dependable and Secure Computing (TDSC).
-DOI:10.1109/TDSC.2015.2411254.
+In IEEE Transactions on Dependable and Secure Computing (TDSC) (Volume 13, Issue 4, July-Aug 2016).
 
 [GHUMVEE: Efficient, effective, and flexible replication](http://ics.uci.edu/~stijnv/Papers/ghumvee.pdf)
 Stijn Volckaert, Bjorn De Sutter, Tim De Baets, and Koen De Bosschere.
