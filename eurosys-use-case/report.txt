@@ -1,0 +1,50 @@
+type (i): 18
+type (ii): 0
+type (iii): ?
+fences: 0
+
+
+
+
+-------------------------------------------------------------------------------------------
+type			name									decl					use
+-------------------------------------------------------------------------------------------
+ngx_atomic_t	ngx_temp_number							ngx_event.c				ngx_file.c
+																				ngx_event.c
+ngx_atomic_t	ngx_connection_counter					ngx_event.c				ngx_resolver.c
+																				ngx_event.c
+																				ngx_event_accept.c
+																				ngx_event_connect.c
+ngx_atomic_t	ngx_shmtx_t::lock						ngx_shmtx.h				ngx_shmtx.c
+ngx_atomic_t	ngx_shmtx_t::wait						ngx_shmtx.h				ngx_shmtx.c
+ngx_atomic_t	lock									ngx_spinlock.c			ngx_spinlock.c
+ngx_atomic_t	ngx_time_lock							ngx_times.c				ngx_times.c
+ngx_atomic_t	ngx_accept_mutex						ngx_event.c				ngx_event.c
+ngx_atomic_t	ngx_http_file_cache_t::sh->loading		ngx_http_cache.h		ngx_http_file_cache.c
+
+
+--------------------
+type (iii) accesses:
+--------------------
+
+ngx_connection_counter:
+	ngx_event.c:548
+
+ngx_shmtx_t::lock:
+	ngx_http_file_cache.c:{384,450}
+	ngx_event_connect.c:{111,112}
+	ngx_event_mutex.c:{17,19,40,50,59}
+	ngx_event_posted.c:{62,111,153}
+	ngx_shmtx.c:90
+
+ngx_shmtx_t::wait:
+	ngx_shmtx.c:{108,175}
+	
+lock:
+	ngx_spinlock.c:{22,34}
+
+ngx_http_file_cache_t::sh->loading:
+	ngx_http_file_cache.c:{101,130,1360,1364,1384,1389}
+
+various:
+	ngx_atomic.h (trylock, unlock)

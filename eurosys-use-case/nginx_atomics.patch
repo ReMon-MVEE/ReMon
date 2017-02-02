@@ -1,0 +1,211 @@
+diff --unified -r nginx-1.4.0.orig/src/core/ngx_file.c nginx-1.4.0/src/core/ngx_file.c
+--- nginx-1.4.0.orig/src/core/ngx_file.c	2017-01-31 18:07:17.052516241 -0800
++++ nginx-1.4.0/src/core/ngx_file.c	2017-02-01 16:05:41.256483162 -0800
+@@ -7,10 +7,11 @@
+ 
+ #include <ngx_config.h>
+ #include <ngx_core.h>
++#include <stdatomic.h>
+ 
+ 
+-static ngx_atomic_t   temp_number = 0;
+-ngx_atomic_t         *ngx_temp_number = &temp_number;
++static _Atomic ngx_atomic_t   temp_number = 0;
++_Atomic ngx_atomic_t  *ngx_temp_number = &temp_number;
+ ngx_atomic_int_t      ngx_random_number = 123456;
+ 
+ 
+@@ -229,7 +230,7 @@
+ 
+     add = collision ? ngx_random_number : 1;
+ 
+-    n = ngx_atomic_fetch_add(ngx_temp_number, add);
++    n = atomic_fetch_add(ngx_temp_number, add);
+ 
+     return n + add;
+ }
+diff --unified -r nginx-1.4.0.orig/src/core/ngx_file.h nginx-1.4.0/src/core/ngx_file.h
+--- nginx-1.4.0.orig/src/core/ngx_file.h	2017-01-31 18:07:17.052516241 -0800
++++ nginx-1.4.0/src/core/ngx_file.h	2017-02-01 15:53:39.167242074 -0800
+@@ -144,7 +144,7 @@
+ char *ngx_conf_set_access_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+ 
+ 
+-extern ngx_atomic_t      *ngx_temp_number;
++extern _Atomic ngx_atomic_t       *ngx_temp_number;
+ extern ngx_atomic_int_t   ngx_random_number;
+ 
+ 
+diff --unified -r nginx-1.4.0.orig/src/core/ngx_shmtx.h nginx-1.4.0/src/core/ngx_shmtx.h
+--- nginx-1.4.0.orig/src/core/ngx_shmtx.h	2017-01-31 18:07:17.052516241 -0800
++++ nginx-1.4.0/src/core/ngx_shmtx.h	2017-02-01 16:06:40.959998137 -0800
+@@ -14,18 +14,18 @@
+ 
+ 
+ typedef struct {
+-    ngx_atomic_t   lock;
++    _Atomic ngx_atomic_t   lock;
+ #if (NGX_HAVE_POSIX_SEM)
+-    ngx_atomic_t   wait;
++    _Atomic ngx_atomic_t   wait;
+ #endif
+ } ngx_shmtx_sh_t;
+ 
+ 
+ typedef struct {
+ #if (NGX_HAVE_ATOMIC_OPS)
+-    ngx_atomic_t  *lock;
++    _Atomic ngx_atomic_t  *lock;
+ #if (NGX_HAVE_POSIX_SEM)
+-    ngx_atomic_t  *wait;
++    _Atomic ngx_atomic_t  *wait;
+     ngx_uint_t     semaphore;
+     sem_t          sem;
+ #endif
+diff --unified -r nginx-1.4.0.orig/src/core/ngx_spinlock.c nginx-1.4.0/src/core/ngx_spinlock.c
+--- nginx-1.4.0.orig/src/core/ngx_spinlock.c	2017-01-31 18:07:17.051516249 -0800
++++ nginx-1.4.0/src/core/ngx_spinlock.c	2017-02-01 15:57:59.124200194 -0800
+@@ -10,7 +10,7 @@
+ 
+ 
+ void
+-ngx_spinlock(ngx_atomic_t *lock, ngx_atomic_int_t value, ngx_uint_t spin)
++ngx_spinlock(_Atomic ngx_atomic_t *lock, ngx_atomic_int_t value, ngx_uint_t spin)
+ {
+ 
+ #if (NGX_HAVE_ATOMIC_OPS)
+diff --unified -r nginx-1.4.0.orig/src/core/ngx_times.c nginx-1.4.0/src/core/ngx_times.c
+--- nginx-1.4.0.orig/src/core/ngx_times.c	2017-01-31 18:07:17.052516241 -0800
++++ nginx-1.4.0/src/core/ngx_times.c	2017-02-01 15:58:47.358816405 -0800
+@@ -21,7 +21,7 @@
+ #define NGX_TIME_SLOTS   64
+ 
+ static ngx_uint_t        slot;
+-static ngx_atomic_t      ngx_time_lock;
++static _Atomic ngx_atomic_t      ngx_time_lock;
+ 
+ volatile ngx_msec_t      ngx_current_msec;
+ volatile ngx_time_t     *ngx_cached_time;
+diff --unified -r nginx-1.4.0.orig/src/event/ngx_event.c nginx-1.4.0/src/event/ngx_event.c
+--- nginx-1.4.0.orig/src/event/ngx_event.c	2017-01-31 18:07:17.049516266 -0800
++++ nginx-1.4.0/src/event/ngx_event.c	2017-02-01 16:43:05.469270212 -0800
+@@ -45,11 +45,11 @@
+ ngx_event_actions_t   ngx_event_actions;
+ 
+ 
+-static ngx_atomic_t   connection_counter = 1;
+-ngx_atomic_t         *ngx_connection_counter = &connection_counter;
++static _Atomic ngx_atomic_t   connection_counter = 1;
++_Atomic ngx_atomic_t  *ngx_connection_counter = &connection_counter;
+ 
+ 
+-ngx_atomic_t         *ngx_accept_mutex_ptr;
++_Atomic ngx_atomic_t *ngx_accept_mutex_ptr;
+ ngx_shmtx_t           ngx_accept_mutex;
+ ngx_uint_t            ngx_use_accept_mutex;
+ ngx_uint_t            ngx_accept_events;
+@@ -529,7 +529,7 @@
+ 
+     shared = shm.addr;
+ 
+-    ngx_accept_mutex_ptr = (ngx_atomic_t *) shared;
++    ngx_accept_mutex_ptr = (_Atomic ngx_atomic_t *) shared;
+     ngx_accept_mutex.spin = (ngx_uint_t) -1;
+ 
+     if (ngx_shmtx_create(&ngx_accept_mutex, (ngx_shmtx_sh_t *) shared,
+@@ -539,7 +539,7 @@
+         return NGX_ERROR;
+     }
+ 
+-    ngx_connection_counter = (ngx_atomic_t *) (shared + 1 * cl);
++    ngx_connection_counter = (_Atomic ngx_atomic_t *) (shared + 1 * cl);
+ 
+     (void) ngx_atomic_cmp_set(ngx_connection_counter, 0, 1);
+ 
+@@ -547,7 +547,7 @@
+                    "counter: %p, %d",
+                    ngx_connection_counter, *ngx_connection_counter);
+ 
+-    ngx_temp_number = (ngx_atomic_t *) (shared + 2 * cl);
++    ngx_temp_number = (_Atomic ngx_atomic_t *) (shared + 2 * cl);
+ 
+     tp = ngx_timeofday();
+ 
+diff --unified -r nginx-1.4.0.orig/src/event/ngx_event.h nginx-1.4.0/src/event/ngx_event.h
+--- nginx-1.4.0.orig/src/event/ngx_event.h	2017-01-31 18:07:17.049516266 -0800
++++ nginx-1.4.0/src/event/ngx_event.h	2017-02-01 15:56:26.020937111 -0800
+@@ -492,9 +492,9 @@
+ } ngx_event_module_t;
+ 
+ 
+-extern ngx_atomic_t          *ngx_connection_counter;
++extern _Atomic ngx_atomic_t  *ngx_connection_counter;
+ 
+-extern ngx_atomic_t          *ngx_accept_mutex_ptr;
++extern _Atomic ngx_atomic_t  *ngx_accept_mutex_ptr;
+ extern ngx_shmtx_t            ngx_accept_mutex;
+ extern ngx_uint_t             ngx_use_accept_mutex;
+ extern ngx_uint_t             ngx_accept_events;
+diff --unified -r nginx-1.4.0.orig/src/http/ngx_http_cache.h nginx-1.4.0/src/http/ngx_http_cache.h
+--- nginx-1.4.0.orig/src/http/ngx_http_cache.h	2017-01-31 18:07:17.046516291 -0800
++++ nginx-1.4.0/src/http/ngx_http_cache.h	2017-02-01 15:59:35.211434459 -0800
+@@ -110,8 +110,8 @@
+     ngx_rbtree_t                     rbtree;
+     ngx_rbtree_node_t                sentinel;
+     ngx_queue_t                      queue;
+-    ngx_atomic_t                     cold;
+-    ngx_atomic_t                     loading;
++    _Atomic ngx_atomic_t             cold;
++    _Atomic ngx_atomic_t             loading;
+     off_t                            size;
+ } ngx_http_file_cache_sh_t;
+ 
+diff --unified -r nginx-1.4.0.orig/src/os/unix/ngx_atomic.h nginx-1.4.0/src/os/unix/ngx_atomic.h
+--- nginx-1.4.0.orig/src/os/unix/ngx_atomic.h	2017-01-31 18:07:17.051516249 -0800
++++ nginx-1.4.0/src/os/unix/ngx_atomic.h	2017-02-01 16:17:53.437499242 -0800
+@@ -11,6 +11,7 @@
+ 
+ #include <ngx_config.h>
+ #include <ngx_core.h>
++#include <stdatomic.h>
+ 
+ 
+ #if (NGX_HAVE_LIBATOMIC)
+@@ -105,12 +106,16 @@
+ 
+ typedef volatile ngx_atomic_uint_t  ngx_atomic_t;
+ 
+-
+-#define ngx_atomic_cmp_set(lock, old, set)                                    \
+-    __sync_bool_compare_and_swap(lock, old, set)
++static ngx_inline _Bool
++ngx_atomic_cmp_set(_Atomic ngx_atomic_t *lock, ngx_atomic_uint_t old,
++     ngx_atomic_uint_t set)
++{
++	ngx_atomic_uint_t _old = old;
++	return atomic_compare_exchange_strong(lock, &_old, set);
++}
+ 
+ #define ngx_atomic_fetch_add(value, add)                                      \
+-    __sync_fetch_and_add(value, add)
++    atomic_fetch_add(value, add)
+ 
+ #define ngx_memory_barrier()        __sync_synchronize()
+ 
+@@ -304,9 +309,14 @@
+ #endif
+ 
+ 
+-void ngx_spinlock(ngx_atomic_t *lock, ngx_atomic_int_t value, ngx_uint_t spin);
++void ngx_spinlock(_Atomic ngx_atomic_t *lock, ngx_atomic_int_t value, ngx_uint_t spin);
++
++static ngx_inline _Bool ngx_trylock(_Atomic ngx_atomic_t* lock)
++{
++	unsigned long zero = 0;
++	return (*(lock) == 0 && atomic_compare_exchange_strong(lock, &zero, 1));
++}
+ 
+-#define ngx_trylock(lock)  (*(lock) == 0 && ngx_atomic_cmp_set(lock, 0, 1))
+ #define ngx_unlock(lock)    *(lock) = 0
+ 
+ 
