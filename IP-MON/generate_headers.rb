@@ -48,7 +48,7 @@ File.open("/usr/include/x86_64-linux-gnu/asm/unistd_64.h").each { |line|
   end
 }
 
-IO.popen("gcc -E MVEE_ipmon.cpp") { |p|
+IO.popen("clang -E MVEE_ipmon.cpp") { |p|
   p.readlines.each { |line|
 
     add_to_array(@unsynced, line, "is_unsynced")
