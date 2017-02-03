@@ -153,17 +153,13 @@ diff -r --unified linux-4.4.0.orig/include/uapi/linux/prctl.h linux-4.4.0/includ
  #endif /* _LINUX_PRCTL_H */
 diff -r --unified linux-4.4.0.orig/kernel/fork.c linux-4.4.0/kernel/fork.c
 --- linux-4.4.0.orig/kernel/fork.c	2017-01-24 12:55:38.000000000 -0800
-+++ linux-4.4.0/kernel/fork.c	2017-01-24 11:50:05.831442903 -0800
-@@ -1338,6 +1338,13 @@
++++ linux-4.4.0/kernel/fork.c	2017-02-03 12:59:54.854198476 -0800
+@@ -1338,6 +1338,9 @@
  	if (!p)
  		goto fork_out;
  
-+	/* for IP-MON, invalidate the RB pointer in new threads but leave IP-MON enabled */
-+	if (clone_flags & CLONE_VM)	
-+		p->ipmon_info.ipmon_rb = NULL;	
-+	/* disable IP-MON in new processes - It will be reenabled automagically by the library constructor */
-+	else
-+		p->ipmon_info.ipmon_enabled = 0;
++	/* Invalidate IP-MON RB in new tasks but leave IP-MON enabled. */
++	p->ipmon_info.ipmon_rb = NULL;		
 +
  	ftrace_graph_init_task(p);
  
