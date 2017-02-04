@@ -1,18 +1,19 @@
-diff -r --unified linux-3.13/arch/x86/syscalls/syscall_64.tbl linux-3.13.0-full-ipmon/arch/x86/syscalls/syscall_64.tbl
---- linux-3.13/arch/x86/syscalls/syscall_64.tbl	2017-01-24 11:41:59.819887165 -0800
-+++ linux-3.13.0-full-ipmon/arch/x86/syscalls/syscall_64.tbl	2016-09-28 15:24:16.233007496 -0700
-@@ -324,6 +324,7 @@
- 315	common	sched_getattr		sys_ni_syscall
- 316	common	renameat2		sys_ni_syscall
- 317	common	seccomp			sys_seccomp
-+318	common	ipmon_invoke	sys_ipmon_invoke
- 
- #
+diff -r --unified linux-3.13.0.orig/arch/x86/syscalls/syscall_64.tbl linux-3.13.0-full-ipmon/arch/x86/syscalls/syscall_64.tbl
+--- linux-3.13.0.orig/arch/x86/syscalls/syscall_64.tbl	2016-02-02 13:14:15.000000000 -0800
++++ linux-3.13.0-full-ipmon/arch/x86/syscalls/syscall_64.tbl	2017-02-03 17:29:59.361944491 -0800
+@@ -329,6 +329,7 @@
  # x32-specific system call numbers start at 512 to avoid cache impact
-diff -r --unified linux-3.13/fs/exec.c linux-3.13.0-full-ipmon/fs/exec.c
---- linux-3.13/fs/exec.c	2017-01-24 11:42:00.407881611 -0800
-+++ linux-3.13.0-full-ipmon/fs/exec.c	2016-09-28 15:24:16.233007496 -0700
-@@ -1574,6 +1574,7 @@
+ # for native 64-bit operation.
+ #
++511	common	ipmon_invoke	sys_ipmon_invoke
+ 512	x32	rt_sigaction		compat_sys_rt_sigaction
+ 513	x32	rt_sigreturn		stub_x32_rt_sigreturn
+ 514	x32	ioctl			compat_sys_ioctl
+Only in linux-3.13.0-full-ipmon/arch/x86/syscalls: syscall_64.tbl.orig
+diff -r --unified linux-3.13.0.orig/fs/exec.c linux-3.13.0-full-ipmon/fs/exec.c
+--- linux-3.13.0.orig/fs/exec.c	2016-02-02 13:14:15.000000000 -0800
++++ linux-3.13.0-full-ipmon/fs/exec.c	2017-02-03 17:29:59.361944491 -0800
+@@ -1567,6 +1567,7 @@
  	free_bprm(bprm);
  	if (displaced)
  		put_files_struct(displaced);
@@ -20,10 +21,11 @@ diff -r --unified linux-3.13/fs/exec.c linux-3.13.0-full-ipmon/fs/exec.c
  	return retval;
  
  out:
-diff -r --unified linux-3.13/include/linux/sched.h linux-3.13.0-full-ipmon/include/linux/sched.h
---- linux-3.13/include/linux/sched.h	2017-01-24 11:42:00.463881081 -0800
-+++ linux-3.13.0-full-ipmon/include/linux/sched.h	2016-09-28 15:24:16.233007496 -0700
-@@ -1050,6 +1050,53 @@
+Only in linux-3.13.0-full-ipmon/fs: exec.c.orig
+diff -r --unified linux-3.13.0.orig/include/linux/sched.h linux-3.13.0-full-ipmon/include/linux/sched.h
+--- linux-3.13.0.orig/include/linux/sched.h	2016-02-02 13:14:15.000000000 -0800
++++ linux-3.13.0-full-ipmon/include/linux/sched.h	2017-02-03 17:31:14.402947058 -0800
+@@ -1048,6 +1048,53 @@
  	perf_nr_task_contexts,
  };
  
@@ -33,7 +35,7 @@ diff -r --unified linux-3.13/include/linux/sched.h linux-3.13.0-full-ipmon/inclu
 +
 +#ifndef __NR_syscalls
 +  /* this is the highest known syscall no for x86_64 in this kernel... */
-+  #define __NR_syscalls __NR_finit_module
++  #define __NR_syscalls __NR_seccomp
 +#endif
 +
 +/* MVEE IP-MON patch */
@@ -77,23 +79,23 @@ diff -r --unified linux-3.13/include/linux/sched.h linux-3.13.0-full-ipmon/inclu
  struct task_struct {
  	volatile long state;	/* -1 unrunnable, 0 runnable, >0 stopped */
  	void *stack;
-@@ -1112,6 +1159,7 @@
+@@ -1110,6 +1157,7 @@
  #endif
  
  	struct mm_struct *mm, *active_mm;
-+    struct ipmon_info ipmon_info;
++	struct ipmon_info ipmon_info;
  #ifdef CONFIG_COMPAT_BRK
  	unsigned brk_randomized:1;
  #endif
-@@ -1135,6 +1183,7 @@
+@@ -1133,6 +1181,7 @@
  	/* Revert to default priority/policy when forking */
  	unsigned sched_reset_on_fork:1;
  	unsigned sched_contributes_to_load:1;
-+    unsigned ptrace_ignored_current:1;
++	unsigned ptrace_ignored_current:1;
  
  	unsigned long atomic_flags; /* Flags needing atomic access. */
  
-@@ -1467,6 +1516,9 @@
+@@ -1465,6 +1514,9 @@
  #endif
  };
  
@@ -103,9 +105,10 @@ diff -r --unified linux-3.13/include/linux/sched.h linux-3.13.0-full-ipmon/inclu
  /* Future-safe accessor for struct task_struct's cpus_allowed. */
  #define tsk_cpus_allowed(tsk) (&(tsk)->cpus_allowed)
  
-diff -r --unified linux-3.13/include/linux/tracehook.h linux-3.13.0-full-ipmon/include/linux/tracehook.h
---- linux-3.13/include/linux/tracehook.h	2014-01-19 18:40:07.000000000 -0800
-+++ linux-3.13.0-full-ipmon/include/linux/tracehook.h	2016-09-28 15:24:16.233007496 -0700
+Only in linux-3.13.0-full-ipmon/include/linux: sched.h.orig
+diff -r --unified linux-3.13.0.orig/include/linux/tracehook.h linux-3.13.0-full-ipmon/include/linux/tracehook.h
+--- linux-3.13.0.orig/include/linux/tracehook.h	2014-01-19 18:40:07.000000000 -0800
++++ linux-3.13.0-full-ipmon/include/linux/tracehook.h	2017-02-03 17:29:59.363944491 -0800
 @@ -99,6 +99,11 @@
  static inline __must_check int tracehook_report_syscall_entry(
  	struct pt_regs *regs)
@@ -131,9 +134,10 @@ diff -r --unified linux-3.13/include/linux/tracehook.h linux-3.13.0-full-ipmon/i
  	ptrace_report_syscall(regs);
  }
  
-diff -r --unified linux-3.13/include/uapi/asm-generic/errno.h linux-3.13.0-full-ipmon/include/uapi/asm-generic/errno.h
---- linux-3.13/include/uapi/asm-generic/errno.h	2014-01-19 18:40:07.000000000 -0800
-+++ linux-3.13.0-full-ipmon/include/uapi/asm-generic/errno.h	2016-09-28 15:24:16.233007496 -0700
+Only in linux-3.13.0-full-ipmon/include/linux: tracehook.h.orig
+diff -r --unified linux-3.13.0.orig/include/uapi/asm-generic/errno.h linux-3.13.0-full-ipmon/include/uapi/asm-generic/errno.h
+--- linux-3.13.0.orig/include/uapi/asm-generic/errno.h	2014-01-19 18:40:07.000000000 -0800
++++ linux-3.13.0-full-ipmon/include/uapi/asm-generic/errno.h	2017-02-03 17:29:59.363944491 -0800
 @@ -110,4 +110,6 @@
  
  #define EHWPOISON	133	/* Memory page has hardware error */
@@ -141,9 +145,10 @@ diff -r --unified linux-3.13/include/uapi/asm-generic/errno.h linux-3.13.0-full-
 +#define ENOIPMON    256 /* MVEE IP-MON patch */
 +
  #endif
-diff -r --unified linux-3.13/include/uapi/linux/prctl.h linux-3.13.0-full-ipmon/include/uapi/linux/prctl.h
---- linux-3.13/include/uapi/linux/prctl.h	2014-01-19 18:40:07.000000000 -0800
-+++ linux-3.13.0-full-ipmon/include/uapi/linux/prctl.h	2016-09-28 15:24:16.233007496 -0700
+Only in linux-3.13.0-full-ipmon/include/uapi/asm-generic: errno.h.orig
+diff -r --unified linux-3.13.0.orig/include/uapi/linux/prctl.h linux-3.13.0-full-ipmon/include/uapi/linux/prctl.h
+--- linux-3.13.0.orig/include/uapi/linux/prctl.h	2014-01-19 18:40:07.000000000 -0800
++++ linux-3.13.0-full-ipmon/include/uapi/linux/prctl.h	2017-02-03 17:29:59.364944491 -0800
 @@ -149,4 +149,6 @@
  
  #define PR_GET_TID_ADDRESS	40
@@ -151,26 +156,24 @@ diff -r --unified linux-3.13/include/uapi/linux/prctl.h linux-3.13.0-full-ipmon/
 +#define PR_REGISTER_IPMON 0xb00b135 /* MVEE IP-MON patch */
 +
  #endif /* _LINUX_PRCTL_H */
-diff -r --unified linux-3.13/kernel/fork.c linux-3.13.0-full-ipmon/kernel/fork.c
---- linux-3.13/kernel/fork.c	2017-01-24 11:42:00.479880931 -0800
-+++ linux-3.13.0-full-ipmon/kernel/fork.c	2016-09-28 15:24:16.233007496 -0700
-@@ -1245,6 +1245,13 @@
+Only in linux-3.13.0-full-ipmon/include/uapi/linux: prctl.h.orig
+diff -r --unified linux-3.13.0.orig/kernel/fork.c linux-3.13.0-full-ipmon/kernel/fork.c
+--- linux-3.13.0.orig/kernel/fork.c	2016-02-02 13:14:15.000000000 -0800
++++ linux-3.13.0-full-ipmon/kernel/fork.c	2017-02-03 17:29:59.364944491 -0800
+@@ -1235,6 +1235,9 @@
  	if (!p)
  		goto fork_out;
  
-+	/* for IP-MON, invalidate the RB pointer in new threads but leave IP-MON enabled */
-+	if (clone_flags & CLONE_VM)	
-+		p->ipmon_info.ipmon_rb = NULL;	
-+	/* disable IP-MON in new processes - It will be reenabled automagically by the library constructor */
-+	else
-+		p->ipmon_info.ipmon_enabled = 0;
++	/* Invalidate IP-MON RB in new tasks but leave IP-MON enabled. */
++	p->ipmon_info.ipmon_rb = NULL;		
 +
  	ftrace_graph_init_task(p);
  
  	rt_mutex_init_task(p);
-diff -r --unified linux-3.13/kernel/sys.c linux-3.13.0-full-ipmon/kernel/sys.c
---- linux-3.13/kernel/sys.c	2017-01-24 11:42:00.487880855 -0800
-+++ linux-3.13.0-full-ipmon/kernel/sys.c	2016-09-28 15:24:16.233007496 -0700
+Only in linux-3.13.0-full-ipmon/kernel: fork.c.orig
+diff -r --unified linux-3.13.0.orig/kernel/sys.c linux-3.13.0-full-ipmon/kernel/sys.c
+--- linux-3.13.0.orig/kernel/sys.c	2016-02-02 13:14:15.000000000 -0800
++++ linux-3.13.0-full-ipmon/kernel/sys.c	2017-02-03 17:32:01.450948668 -0800
 @@ -53,6 +53,8 @@
  #include <linux/uidgid.h>
  #include <linux/cred.h>
@@ -437,3 +440,4 @@ diff -r --unified linux-3.13/kernel/sys.c linux-3.13.0-full-ipmon/kernel/sys.c
  	default:
  		error = -EINVAL;
  		break;
+Only in linux-3.13.0-full-ipmon/kernel: sys.c.orig
