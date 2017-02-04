@@ -996,6 +996,17 @@ public:
                   original_regs;                              // original contents of the registers
     unsigned long transfer_func;                              // pointer to the sys_pause loop
     void*         tid_address[2];                             // set if we should tell the variant what its thread id is (e.g. if the variant was created by clone(CLONE_CHILD_SETTID)
+	unsigned long should_sync_ptr;
+
+	detachedvariant()
+		: variantpid(0)
+		, new_monitor(nullptr)
+		, parentmonitorid(0)
+		, parent_has_detached(0)
+		, transfer_func(0)
+		, should_sync_ptr(0)
+	{
+	}
 };
 
 // Passed to sys_ptrace through the data field

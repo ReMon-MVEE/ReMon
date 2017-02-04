@@ -774,6 +774,9 @@ void monitor::shutdown(bool success)
         }
     }
 
+	debugf("Backtrace check - Should generate backtraces: %d - Thread group shutting down: %d\n",
+		 mvee::get_should_generate_backtraces(), set_mmap_table->thread_group_shutting_down);
+
     if (mvee::get_should_generate_backtraces() &&
 		!set_mmap_table->thread_group_shutting_down)
         log_backtraces();
@@ -1256,6 +1259,7 @@ void monitor::handle_resume_event(int index)
         }
 
         variants[index].infinite_loop_ptr = attached_variant->transfer_func;
+		variants[index].should_sync_ptr   = attached_variant->should_sync_ptr;
 //		attached_variant->original_regs.gs_base = 0;
         mvee_wrap_ptrace(PTRACE_SETREGS, variants[index].variantpid, 0, &attached_variant->original_regs);
         variants[index].tid_address[0]    = attached_variant->tid_address[0];
@@ -1421,12 +1425,13 @@ void monitor::handle_fork_event(int index, int event)
             memset(new_variant, 0, sizeof(detachedvariant));
 
             // init detachedvariant
-            new_variant->variantpid            = variants[i].pendingpid;
+            new_variant->variantpid          = variants[i].pendingpid;
             variants[i].pendingpid           = 0;
             new_variant->parentmonitorid     = monitorid;
             new_variant->parent_has_detached = 0;
             new_variant->transfer_func       = variants[i].infinite_loop_ptr;
             new_variant->new_monitor         = new_monitor;
+			new_variant->should_sync_ptr     = variants[i].should_sync_ptr;
 
             if (variants[0].callnum == __NR_clone)
             {
