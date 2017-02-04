@@ -74,7 +74,7 @@ extern "C" {
     Definitions and Generic Macros
 -----------------------------------------------------------------------------*/
 #ifndef __NR_syscalls
-#define __NR_syscalls 325
+#define __NR_syscalls 317
 #endif
 
 #define __NR_ipmon_invoke 511
