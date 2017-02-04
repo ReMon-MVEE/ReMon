@@ -298,7 +298,7 @@ std::map<unsigned long, fd_info>::iterator fd_table::free_fd_info (unsigned long
     if (it != table.end())
     {
         debugf("removed fd: %d (%s)\n", fd, it->second.path.c_str());
-        table.erase(it);
+        it = table.erase(it);
     }
 
     // check if it's an epoll fd
