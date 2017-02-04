@@ -111,6 +111,7 @@ all: main-build
 pre-build:
 	./generate_syscall_tables.rb
 	./compile_loader.rb
+	./compile_syncagent.rb
 main-build: pre-build
 	@$(MAKE) --no-print-directory target
 target: $(BIN) 
@@ -152,5 +153,6 @@ clean:
 	find $(MVEE_BUILD) -name *.bc | xargs rm -f
 	find $(MVEE_BUILD) -name *.o | xargs rm -f
 	find $(MVEE_BUILD) -name *.S | xargs rm -f
-	rm MVEE_LD_Loader/MVEE_LD_Loader
-	rm MVEE_LD_Loader/MVEE_LD_Loader_this*
+	rm -f MVEE_LD_Loader/MVEE_LD_Loader
+	rm -f MVEE_LD_Loader/MVEE_LD_Loader_this*
+	rm -f libsync/libclang*
