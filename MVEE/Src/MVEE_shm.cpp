@@ -96,7 +96,7 @@ void shm_table::update_lock_stats(unsigned char shm_type, _shm_info* info)
 {
 #ifdef MVEE_GENERATE_LOCKSTATS
 
-    if (shm_type != MVEE_LIBC_LOCK_LOCK_BUFFER
+    if (shm_type != MVEE_LIBC_LOCK_BUFFER_PARTIAL
         || !info->ptr)
         return;
 

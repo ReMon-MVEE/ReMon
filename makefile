@@ -8,10 +8,13 @@ ifndef _ARCH
   BITS := $(shell getconf LONG_BIT)
   ifeq ($(BITS),32)
     _ARCH := i386
+	_ALT_ARCH := i386
   else
     _ARCH := amd64
+	_ALT_ARCH := x86_64
   endif
   export _ARCH
+  export _ALT_ARCH
 endif
 
 #-----------------------------------------------------------------------------
@@ -110,12 +113,41 @@ all: main-build
 
 pre-build:
 	./generate_syscall_tables.rb
-	./compile_loader.rb
-	./compile_syncagent.rb
 main-build: pre-build
 	@$(MAKE) --no-print-directory target
-target: $(BIN) 
 
+target: $(BIN) 														\
+	patched_binaries/libc/$(_ARCH)/libc.so.6 						\
+	patched_binaries/libc/$(_ARCH)/libpthread.so.0 					\
+	patched_binaries/libc/$(_ARCH)/libclang_rt.sync-$(_ALT_ARCH).so \
+	MVEE_LD_Loader/MVEE_LD_Loader									\
+
+
+
+patched_binaries/libc/amd64/libc.so.6 : patched_binaries/libc/amd64/libc.so
+	@-echo "Creating symlink to GHUMVEE-ready libc"
+	ln -f -s libc.so patched_binaries/libc/amd64/libc.so.6
+
+patched_binaries/libc/amd64/libpthread.so.0 : patched_binaries/libc/amd64/libpthread.so
+	@-echo "Creating symlink to GHUMVEE-ready libpthread"
+	ln -f -s libpthread.so patched_binaries/libc/amd64/libpthread.so.0
+
+patched_binaries/libc/i386/libc.so.6 : patched_binaries/libc/i386/libc.so
+	@-echo "Creating symlink to GHUMVEE-ready libc"
+	ln -f -s libc.so patched_binaries/libc/i386/libc.so.6
+
+patched_binaries/libc/i386/libpthread.so.0 : patched_binaries/libc/i386/libpthread.so
+	@-echo "Creating symlink to GHUMVEE-ready libpthread"
+	ln -f -s libpthread.so patched_binaries/libc/i386/libpthread.so.0
+
+patched_binaries/libc/amd64/libclang_rt.sync-x86_64.so : libsync/libsync.cpp
+	./compile_syncagent.rb
+
+patched_binaries/libc/i386/libclang_rt.sync-i386.so : libsync/libsync.cpp
+	@-echo "The standalone sync agent is not supported on i386 at the moment."
+
+MVEE_LD_Loader/MVEE_LD_Loader : MVEE_LD_Loader/MVEE_LD_Loader.c MVEE_LD_Loader/$(_ARCH)/MVEE_LD_Loader.h
+	./compile_loader.rb
 
 # rules for clang -O3 builds
 ifdef BC
