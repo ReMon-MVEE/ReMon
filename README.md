@@ -25,15 +25,15 @@ The following command installs all of the required packages:
 
 ### Building GHUMVEE
 
-Building GHUMVEE is really easy. Just navigate to ReMon's root folder and type `make`. 
+Building GHUMVEE is really easy. Just navigate to ReMon's root folder and type `make -f makefile.release`.
+This will build an optimized and statically linked version of the GHUMVEE binary.
 
-GHUMVEE's **makefile** currently supports four types of builds. You can select the build you want by manually editing the **BUILD** variable in the **makefile** (I'm too lazy to write a proper makefile, sorry!). 
+Alternatively, you can also use these build configurations:
+- `Release-syms`: link-time optimized version of GHUMVEE (with symbol tables intact). Suitable for people who want to debug the Release build for some obscure reason. Build using `make -f makefile.release-with-syms`.
+- `Debug`: unoptimized version of GHUMVEE. This builds really fast and is suitable for people who want to debug GHUMVEE. Build using `make -f makefile.debug`.
+- `Debug-sanitize`: unoptimized version of GHUMVEE with address-sanitizer enabled. Might be useful to debug memory corruption bugs. Build using `make -f make.debug-sanitize`
 
-The supported build types are:
-- `Release`: link-time optimized version of GHUMVEE (with stripped symbol tables). Suitable to run benchmarks
-- `Release-syms`: link-time optimized version of GHUMVEE (with symbol tables intact). Suitable for people who want to debug the Release build for some obscure reason.
-- `Debug`: unoptimized version of GHUMVEE. This builds really fast and is suitable for people who want to debug GHUMVEE.
-- `Debug-sanitize`: unoptimized version of GHUMVEE with address-sanitizer enabled. Might be useful to debug memory corruption bugs.
+You will find the compiled GHUMVEE binary in the MVEE/bin/<your configuration>/ folder.
  
 ### Configuring GHUMVEE
 
