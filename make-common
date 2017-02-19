@@ -55,7 +55,8 @@ ifndef BC
 OBJ		:= $(SRCS:%.cpp=$(MVEE_BUILD)/%.o)
 endif
 
-PRE_BUILD := $(shell ./generate_syscall_tables.rb)
+PRE_BUILD_TABLES := $(shell ./generate_syscall_tables.rb)
+PRE_BUILD_DEPS := $(shell make -f make.deps)
 
 BIN = $(MVEE_OUT)/MVEE
 
