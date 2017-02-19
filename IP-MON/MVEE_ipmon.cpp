@@ -1,11 +1,8 @@
 /*
  * GHent University Multi-Variant Execution Environment (GHUMVEE)
- * Copyright (C) 2010-2015 Stijn Volckaert, Ghent University
- *                   <svolckae@elis.ugent.be>
- *                     All rights reserved.
  *
- * This software package is licensed to University of California, Irvine
- * under the terms and conditions found in LICENSE.txt.
+ * This source file is distributed under the terms and conditions 
+ * found in IPMONLICENSE.txt.
  */
 
 /*-----------------------------------------------------------------------------
@@ -3585,6 +3582,7 @@ extern "C" long ipmon_enclave
 	args.entry = NULL;
 
 	// check if we need to reinitialize
+	// The kernel resets the RB pointer after every fork/clone
 	if (!RB)
 		RB = (ipmon_buffer*)ipmon_register_thread();
 
@@ -3795,7 +3793,7 @@ void __attribute__((constructor)) init()
 	ipmon_initialized = true;
 	syscall_ordering_mutex.hack = 0;
 	IPMON_MASK_CLEAR(mask);
-	IPMON_MASK_SET(mask, __NR_ipmon_invoke);
+//	IPMON_MASK_SET(mask, __NR_ipmon_invoke);
 #if CURRENT_POLICY >= BASE_POLICY
 	IPMON_MASK_SET(mask, __NR_getegid);
 	IPMON_MASK_SET(mask, __NR_geteuid);
