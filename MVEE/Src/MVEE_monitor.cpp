@@ -68,7 +68,8 @@ variantstate::variantstate()
     infinite_loop_ptr(0),
     should_sync_ptr(0),
     callnumbackup(0),
-    orig_controllen(0)
+    orig_controllen(0),
+    config(NULL)
 #ifdef __NR_socketcall
     , orig_arg1(0)
 #endif
@@ -141,9 +142,7 @@ void monitor::init()
     current_signal                 = 0;
     current_signal_sent            = 0;
     current_signal_info            = NULL;
-#ifdef MVEE_ALLOW_PERF
     perf                           = false;
-#endif
     monitor_tid                    = 0;
 	master_core                    = -1;
 
@@ -266,9 +265,13 @@ int monitor::init_ptrace_options(int variantnum)
 -----------------------------------------------------------------------------*/
 void monitor::init_variant(int variantnum, pid_t variantpid, pid_t varianttgid)
 {
-    variants[variantnum].callnum   = NO_CALL;
+    variants[variantnum].callnum     = NO_CALL;
     variants[variantnum].variantpid  = variantpid;
     variants[variantnum].varianttgid = varianttgid ? varianttgid : variantpid;
+	if (!mvee::config["variant"]["specs"] ||
+		!mvee::config["variant"]["specs"][mvee::variant_ids[variantnum]])
+		return;
+	variants[variantnum].config      = &mvee::config["variant"]["specs"][mvee::variant_ids[variantnum]];
 }
 
 /*-----------------------------------------------------------------------------
@@ -395,24 +398,19 @@ void monitor::rewrite_execve_args(int variantnum, bool write_to_stack, bool rewr
 	}
 
 	// insert custom library path
-    if (mvee::custom_library_path.length() > 0)
+	std::string lib_path;
+    if (!(*mvee::config_variant_exec)["library_path"].isNull())
     {
-		std::stringstream ss;
-        if (mvee::custom_library_path.size() > 0)
-        {
-            if (ss.gcount() > 0)
-                ss << ":";
-            ss << mvee::custom_library_path;
-        }
-
-		argv.push_front(mvee::strdup(ss.str().c_str()));
+		lib_path = (*mvee::config_variant_exec)["library_path"].asString();
+		argv.push_front(mvee::strdup(lib_path.c_str()));
 		argv.push_front(mvee::strdup("--library-path"));
     }
 
 	// insert ELF interpreter if necessary
-	if (mvee::custom_library_path.length() > 0)
+	if (lib_path.length() > 0)
 	{
-		if (mvee::config.mvee_hide_vdso || mvee::config.mvee_use_dcl)
+		if ((*mvee::config_variant_global)["hide_vdso"].asBool() ||
+			(*mvee::config_variant_global)["non_overlapping_mmaps"].asInt())
 		{
 			argv.push_front(mvee::strdup(MVEE_LD_LOADER_NAME));
 			image = mvee::os_get_mvee_ld_loader();
@@ -832,7 +830,6 @@ nobacktrace:
 		}
 	}
 
-#ifdef MVEE_ALLOW_PERF
     for (int i = 0; i < mvee::numvariants; ++i)
     {
         if (variants[i].perf_out.length() > 0)
@@ -842,7 +839,6 @@ nobacktrace:
         }
         variants[i].perf_out.erase();
     }
-#endif
 
     // Successful return. Unregister the monitor from all mappings
     log_fini();
@@ -2322,7 +2318,7 @@ dont_resolve_segv_origin:
                 debugf("signal queued\n");
             }
 
-			if (mvee::config.mvee_use_ipmon && variantnum == 0)
+			if (variantnum == 0 && (*mvee::config_variant_global)["use_ipmon"].asBool())
 			{
 				if (!ip) 
 					FETCH_IP_DIRECT(variantnum, ip);		

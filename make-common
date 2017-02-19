@@ -31,16 +31,16 @@ MVEE_BUILD		= ./MVEE/$(BUILD)-$(_ARCH)
 # Source config
 #-----------------------------------------------------------------------------
 
-SRC 	 = $(shell find $(MVEE_SRC) -maxdepth 1 -name *.c*)
-ARCH_SRC = $(shell find $(MVEE_ARCH_SRC) -maxdepth 1 -name *.c*)
+SRC 	 = $(shell find $(MVEE_SRC) -maxdepth 1 -name *.c* | egrep -v "~|\#")
+ARCH_SRC = $(shell find $(MVEE_ARCH_SRC) -maxdepth 1 -name *.c*  | egrep -v "~|\#")
 SRCS	 = $(SRC) $(ARCH_SRC)
 
 #-----------------------------------------------------------------------------
 # Common build config
 #-----------------------------------------------------------------------------
 
-STD_CXXFLAGS = -D__LINUX_X86__ -Wall
-STD_LDFLAGS  = -ldl -lrt -lelf -lstdc++ -ldwarf -lpthread -lconfig -lz  
+STD_CXXFLAGS = -D__LINUX_X86__ -Wall -Ideps/jsoncpp/include/
+STD_LDFLAGS  = deps/jsoncpp/build/src/lib_json/libjsoncpp.a -ldl -lrt -lelf -lstdc++ -ldwarf -lpthread -lz 
 
 #-----------------------------------------------------------------------------
 # Targets
@@ -131,6 +131,7 @@ clean:
 	find $(MVEE_BUILD) -name *.bc | xargs rm -f
 	find $(MVEE_BUILD) -name *.o | xargs rm -f
 	find $(MVEE_BUILD) -name *.S | xargs rm -f
+	find $(MVEE_BUILD) -name *.d | xargs rm -f
 	rm -f MVEE_LD_Loader/MVEE_LD_Loader
 	rm -f MVEE_LD_Loader/MVEE_LD_Loader_this*
 	rm -f libsync/libclang*

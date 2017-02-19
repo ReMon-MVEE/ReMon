@@ -15,7 +15,7 @@
 #include <string>
 #include <map>
 #include <pthread.h>
-#include "MVEE_config.h"
+#include "MVEE_build_config.h"
 #include "MVEE_shm.h"
 
 /*-----------------------------------------------------------------------------

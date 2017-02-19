@@ -59,7 +59,7 @@
 // In BENCHMARK mode, GHUMVEE disables all logging.
 //
 // BENCHMARK mode can be enabled by defining the MVEE_BENCHMARK preprocessor
-// flag in MVEE/Inc/MVEE_config.h.
+// flag in MVEE/Inc/MVEE_build_config.h.
 //
 // *****************************************************************************
 // There are _SIX_ types of syscall handlers:
@@ -148,7 +148,7 @@
 /*-----------------------------------------------------------------------------
     Includes
 -----------------------------------------------------------------------------*/
-#include "MVEE_config.h"
+#include "MVEE_build_config.h"
 
 /*-----------------------------------------------------------------------------
     Syscall Handler Definitions

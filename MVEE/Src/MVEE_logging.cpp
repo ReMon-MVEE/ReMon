@@ -1386,7 +1386,7 @@ void mvee::logf(const char* format, ...)
     }
 
     MutexLock lock(&mvee::loglock);
-    if (mvee::print_to_stdout)
+    if ((*mvee::config_monitor)["log_to_stdout"].asBool())
     {
         va_list va;
         va_start(va, format);
@@ -1404,7 +1404,7 @@ void mvee::logf(const char* format, ...)
     }
 #endif
 #if defined(MVEE_BENCHMARK) && defined(MVEE_FORCE_ENABLE_BACKTRACING)
-    if (mvee::print_to_stdout)
+    if ((*mvee::config_monitor)["log_to_stdout"].asBool())
     {
         va_list va;
         va_start(va, format);

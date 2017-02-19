@@ -470,10 +470,14 @@ long monitor::call_call_dispatch ()
 
                     if (!atomic_buffer)
                     {
+						bool have_many_threads =
+							!(*mvee::config_variant_global)["have_many_threads"].isNull() &&
+							(*mvee::config_variant_global)["have_many_threads"].asBool();
+						
                         info                = new _shm_info();
                         atomic_buffer       = info;
                         requested_slot_size = sizeof(unsigned long);
-                        alloc_size          = requested_slot_size * SHARED_QUEUE_SLOTS / (mvee::demo_has_many_threads ? 64 : 1);
+                        alloc_size          = requested_slot_size * SHARED_QUEUE_SLOTS / (have_many_threads ? 64 : 1);
 						if (buffer_type == MVEE_LIBC_ATOMIC_BUFFER_HIDDEN)
 							atomic_buffer_hidden = true;
                     }
@@ -514,10 +518,14 @@ long monitor::call_call_dispatch ()
 						break;
 					}
 
+					bool have_many_threads =
+						!(*mvee::config_variant_global)["have_many_threads"].isNull() &&
+						(*mvee::config_variant_global)["have_many_threads"].asBool();
+
 					ipmon_buffer = new _shm_info();
 
 					if (!mvee::os_alloc_sysv_sharedmem(MVEE_IPMON_BUFFER_SIZE / 
-													   (mvee::demo_has_many_threads ? 64 : 1),
+													   (have_many_threads ? 64 : 1),
 													   &(ipmon_buffer->id), 
 													   &(ipmon_buffer->sz), 
 													   &(ipmon_buffer->ptr)))

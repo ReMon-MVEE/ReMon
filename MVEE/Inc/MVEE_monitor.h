@@ -19,7 +19,7 @@
 #include <vector>
 #include <deque>
 #include <sstream>
-#include "MVEE_config.h"
+#include "MVEE_build_config.h"
 #include "MVEE_private_arch.h"
 
 /*-----------------------------------------------------------------------------
@@ -180,9 +180,8 @@ public:
     int           sync_primitives_bitmask;                          // copied over from the variant's address space using sync_primitives_ptr
     void*         sync_primitives_ptr;                              //
 #endif
-#ifdef MVEE_ALLOW_PERF
-    std::string   perf_out;                                         //
-#endif
+    std::string   perf_out;                                         // Output of the perf program
+	Json::Value*  config;                                           // Variant-specific config
 
     variantstate();
 };
@@ -966,10 +965,7 @@ private:
                                       pending_signals;
     std::vector<variantstate>
                                       variants;               // State for all variant processes being traced by this monitor
-#ifdef MVEE_ALLOW_PERF
     bool                              perf;                   // is this monitor tracking the perf process
-#endif
-
     pid_t                             monitor_tid;
 
     // set of signals which are currently blocked for this thread set.

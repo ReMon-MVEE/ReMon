@@ -5,8 +5,8 @@
  * found in GHUMVEELICENSE.txt.
  */
 
-#ifndef MVEE_CONFIG_H_
-#define MVEE_CONFIG_H_
+#ifndef MVEE_BUILD_CONFIG_H_
+#define MVEE_BUILD_CONFIG_H_
 
 /*-----------------------------------------------------------------------------
   Monitor Definitions
@@ -67,7 +67,7 @@
 
 // MVEE_ALLOW_MONITOR_SCHEDULING: if defined, the monitor might pin variant threads
 // and their respective thread monitors onto the same physical cpu
-// We have predefined scheduling rules in Src/MVEE_demos.cpp
+// We have predefined scheduling rules in Src/MVEE_variant_launch.cpp
 // #define MVEE_ALLOW_MONITOR_SCHEDULING
 
 // MVEE_DUMP_MEM_STATS: When defined, the MVEE will calculate an estimate of the
@@ -110,10 +110,6 @@
 // MVEE_DWARF_DEBUG: adds debugging messages to the DWARF debugging support code
 // #define MVEE_DWARF_DEBUG
 
-// MVEE_ALLOW_PERF: allow the use of the -p commandline parameter, which enables
-// performance counting for the variants
-// #define MVEE_ALLOW_PERF
-
 /*-----------------------------------------------------------------------------
   Constants
 -----------------------------------------------------------------------------*/
@@ -128,4 +124,4 @@
 // This must match the MVEE_TOTAL_CLOCK_COUNT value in glibc/csu/libc-start.c
 #define MVEE_COUNTERS         2048
 
-#endif /* MVEE_CONFIG_H_ */
+#endif /* MVEE_BUILD_CONFIG_H_ */

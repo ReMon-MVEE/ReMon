@@ -22,7 +22,7 @@
 #include <deque>
 #include <vector>
 #include <map>
-#include "MVEE_config.h"
+#include "MVEE_build_config.h"
 
 /*-----------------------------------------------------------------------------
     Enumerations

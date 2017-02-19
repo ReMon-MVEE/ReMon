@@ -13,7 +13,7 @@
 -----------------------------------------------------------------------------*/
 #include <sched.h>
 #include <string>
-#include "MVEE_config.h"
+#include "MVEE_build_config.h"
 
 /*-----------------------------------------------------------------------------
     Logging Prototypes

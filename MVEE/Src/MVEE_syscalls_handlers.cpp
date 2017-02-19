@@ -564,7 +564,6 @@ long monitor::handle_write_precall(int variantnum)
     CHECKFD(1);
     CHECKPOINTER(2);
 
-#ifdef MVEE_ALLOW_PERF
     std::vector<unsigned long> argarray(mvee::numvariants);
     FILLARGARRAY(2, argarray);
 
@@ -580,7 +579,6 @@ long monitor::handle_write_precall(int variantnum)
 
         return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
     }
-#endif
 
     CHECKARG(3);
     CHECKBUFFER(2, ARG3(0));
@@ -1044,14 +1042,14 @@ long monitor::handle_execve_call(int variantnum)
 	}
 #endif
 
-#ifdef MVEE_ALLOW_PERF
     if (set_mmap_table->mmap_startup_info[0].image.find("perf/perf") != std::string::npos)
         perf = 1;
-#endif
 
-	if (!mvee::config.mvee_hide_vdso && 
-		!mvee::config.mvee_use_dcl && 
-		mvee::custom_library_path.length() == 0)
+	// return immediately if we don't have to use the MVEE_LD_Loader
+	if (!(*mvee::config_variant_global)["hide_vdso"].asBool() && 
+		!(*mvee::config_variant_global)["non_overlapping_mmaps"].asInt() && 
+		(!(*mvee::config_variant_exec)["library_path"]
+		 || (*mvee::config_variant_exec)["library_path"].asString().length() == 0))
 		return MVEE_CALL_ALLOW;
 
 	for (int i = 0; i < mvee::numvariants; ++i)
@@ -1103,7 +1101,7 @@ long monitor::handle_execve_postcall(int variantnum)
         for (i = 0; i < mvee::numvariants; ++i)
             set_mmap_table->verify_mman_table(i, variants[i].variantpid);
 
-        if (mvee::config.mvee_use_dcl)
+        if ((*mvee::config_variant_global)["non_overlapping_mmaps"].asInt())
         {
             // We need to check whether the initial VDSO pages overlap since we have
             // no control over where these are mapped...
@@ -5276,11 +5274,11 @@ long monitor::handle_mmap_call(int variantnum)
         }
         else if ((ARG3(0) & PROT_EXEC))
         {
-            if (mvee::config.mvee_use_dcl)
+            if ((*mvee::config_variant_global)["non_overlapping_mmaps"].asInt())
             {
                 if (ARG4(0) & MAP_FIXED)
                 {
-                    warnf("GHUMVEE is running with use_dcl enabled but the following binary is not position independent: %s\n", info->path.c_str());
+                    warnf("GHUMVEE is running with non_overlapping_mmaps enabled but the following binary is not position independent: %s\n", info->path.c_str());
                     warnf("> We cannot enforce disjunct code within this address space!!!\n");
                 }
                 else
@@ -6286,59 +6284,59 @@ long monitor::handle_sched_setaffinity_log_args(int variantnum)
 
 long monitor::handle_sched_setaffinity_precall(int variantnum)
 {
-#ifdef MVEE_ALLOW_SETAFFINITY
-    // manipulate the mask so that each variant runs on its own "virtual" cpu
-    CHECKPOINTER(3);
+	if ((*mvee::config_variant_global)["allow_setaffinity"].asBool())
+	{
+		// manipulate the mask so that each variant runs on its own "virtual" cpu
+		CHECKPOINTER(3);
 
-    if (ARG3(0))
-    {
-        for (int i = 0; i < mvee::numvariants; ++i)
-        {
-            cpu_set_t available_cores;
-            int       num_cores_total      = mvee_env_get_num_cores();
-            int       num_cores_variant      = num_cores_total / mvee::numvariants;
-            int       first_core_available = num_cores_variant * i;
-            int       modified_mask        = 0;
+		if (ARG3(0))
+		{
+			for (int i = 0; i < mvee::numvariants; ++i)
+			{
+				cpu_set_t available_cores;
+				int       num_cores_total      = mvee::os_get_num_cores();
+				int       num_cores_variant      = num_cores_total / mvee::numvariants;
+				int       first_core_available = num_cores_variant * i;
+				int       modified_mask        = 0;
 
-            if (!mvee_rw_read_struct(variants[i].variantpid, ARG3(i), sizeof(cpu_set_t), &available_cores))
-            {
-                warnf("couldn't read cpu_set_t\n");
-                return 0;
-            }
+				if (!mvee_rw_read_struct(variants[i].variantpid, ARG3(i), sizeof(cpu_set_t), &available_cores))
+				{
+					warnf("couldn't read cpu_set_t\n");
+					return 0;
+				}
 
-            for (int j = 0; j < sizeof(cpu_set_t) * 8; ++j)
-            {
-                if (CPU_ISSET(j, &available_cores) &&
-                    (j < first_core_available || j >= first_core_available + num_cores_variant))
-                {
-                    CPU_CLR(j, &available_cores);
-                    if (j < num_cores_variant)
-                        CPU_SET(j + first_core_available, &available_cores);
-                    modified_mask = 1;
-                }
-            }
+				for (int j = 0; j < sizeof(cpu_set_t) * 8; ++j)
+				{
+					if (CPU_ISSET(j, &available_cores) &&
+						(j < first_core_available || j >= first_core_available + num_cores_variant))
+					{
+						CPU_CLR(j, &available_cores);
+						if (j < num_cores_variant)
+							CPU_SET(j + first_core_available, &available_cores);
+						modified_mask = 1;
+					}
+				}
 
-            if (modified_mask)
-            {
+				if (modified_mask)
+				{
 #ifndef MVEE_BENCHMARK
-                debugf("manipulated virtual CPU mask for the variant: %d - %s\n", i,
+					debugf("manipulated virtual CPU mask for the variant: %d - %s\n", i,
                            getTextualCPUSet(&available_cores).c_str());
 #endif
-                mvee_rw_write_data(variants[i].variantpid, ARG3(i), sizeof(cpu_set_t), (unsigned char*)&available_cores);
-            }
-        }
-    }
-#endif
+					mvee_rw_write_data(variants[i].variantpid, ARG3(i), sizeof(cpu_set_t), (unsigned char*)&available_cores);
+				}
+			}
+		}
+	}
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
 long monitor::handle_sched_setaffinity_call(int variantnum)
 {
-#ifndef MVEE_ALLOW_SETAFFINITY
-    return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
-#else
+	if (!(*mvee::config_variant_global)["allow_setaffinity"].asBool())
+		return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
     return MVEE_CALL_ALLOW;
-#endif
 }
 
 long monitor::handle_sched_setaffinity_log_return(int variantnum)
@@ -7729,14 +7727,10 @@ long monitor::handle_perf_event_open_precall(int variantnum)
     CHECKARG(4);
     CHECKARG(5);
 
-#ifdef MVEE_ALLOW_PERF
     if (ARG2(0))
         MAPPIDS(2);
 
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
-#else
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-#endif
 }
 
 long monitor::handle_perf_event_open_postcall(int variantnum)
@@ -7748,21 +7742,11 @@ long monitor::handle_perf_event_open_postcall(int variantnum)
         if (ARG5(0) & PERF_FLAG_FD_CLOEXEC)
             cloexec = true;
 #endif
-        if (state != STATE_IN_MASTERCALL)
-        {
-            UNMAPFDS(2);
-            std::vector<unsigned long> fds = call_postcall_get_result_vector();
-            REPLICATEFDRESULT();
-            set_fd_table->create_fd_info(FT_SPECIAL, fds, "perf_event", 0, cloexec, false, true);
-            set_fd_table->verify_fd_table(getpids());
-        }
-        else
-        {
-            std::vector<unsigned long> fds(mvee::numvariants);
-            std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
-            set_fd_table->create_fd_info(FT_SPECIAL, fds, "perf_event", 0, cloexec, true, false);
-            set_fd_table->verify_fd_table(getpids());
-        }
+		UNMAPFDS(2);
+		std::vector<unsigned long> fds = call_postcall_get_result_vector();
+		REPLICATEFDRESULT();
+		set_fd_table->create_fd_info(FT_SPECIAL, fds, "perf_event", 0, cloexec, false, true);
+		set_fd_table->verify_fd_table(getpids());
     }
 
     return 0;

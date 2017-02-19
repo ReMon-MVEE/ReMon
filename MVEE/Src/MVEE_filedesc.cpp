@@ -273,7 +273,7 @@ void fd_table::create_fd_info
     auto it = table.find(fds[0]);
     if (it != table.end())
     {
-		if (!mvee::config.mvee_use_ipmon)
+		if (!(*mvee::config_variant_global)["use_ipmon"].asBool())
 			warnf("fd override!!! FIXME (unless IP-MON is managing fds, in which case you can safely ignore this warning)\n");
         it->second.print_fd_info();
         free_fd_info(it->second.fds[0]);
