@@ -5,6 +5,6 @@ MVEE_ipmon_maybe_checked.h
 MVEE_ipmon_calcsize.h
 *.o
 *.s
-*.S
+*_preprocessed.S
 *.p
 *.so
