@@ -2205,6 +2205,7 @@ dont_resolve_segv_origin:
 			{
 				warnf("A fatal signal was delivered while executing a signal handler.\n");
 				warnf("We're just quietly shutting down this variant set and moving on ;)\n");
+				variants[variantnum].variant_terminated = true;
 				shutdown(true);
 				return;
 			}

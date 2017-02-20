@@ -20,6 +20,7 @@
 #include <iomanip>
 #include <vector>
 #include <algorithm>
+#include <numeric>
 #include <execinfo.h>
 #include "MVEE.h"
 #include "MVEE_monitor.h"
