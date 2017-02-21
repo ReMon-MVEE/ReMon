@@ -56,6 +56,7 @@ void shm_table::init()
 #ifdef MVEE_GENERATE_LOCKSTATS
     op_cnt_total   = 0;
     prev_thread_id = 0;
+	bounce_cnt     = 0;
 #endif
 }
 

@@ -33,6 +33,17 @@
 #include "MVEE_memory.h"
 
 /*-----------------------------------------------------------------------------
+    Static Variable Initialization
+-----------------------------------------------------------------------------*/
+FILE*             mvee::logfile              = NULL;
+FILE*             mvee::ptrace_logfile       = NULL;
+FILE*             mvee::datatransfer_logfile = NULL;
+FILE*             mvee::lockstats_logfile    = NULL;
+double            mvee::startup_time         = 0.0;
+pthread_mutex_t   mvee::loglock              = PTHREAD_MUTEX_INITIALIZER;
+
+
+/*-----------------------------------------------------------------------------
     cache_mismatch_info
 -----------------------------------------------------------------------------*/
 void monitor::cache_mismatch_info(const char* format, ...)
@@ -1224,7 +1235,7 @@ void mvee::log_init()
 
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    mvee::initialtime          = tv.tv_sec + tv.tv_usec / 1000000.0;
+    mvee::startup_time          = tv.tv_sec + tv.tv_usec / 1000000.0;
 
 #ifdef MVEE_GENERATE_EXTRA_STATS
     printf("Opening PTRACE Log @ %s\n", PTRACE_LOGNAME);
@@ -1258,9 +1269,9 @@ void mvee::log_fini(bool terminated)
         double currenttime = tv.tv_sec + tv.tv_usec / 1000000.0;
 
 #ifndef MVEE_BENCHMARK
-        printf("Program terminated after: %lf seconds\n", currenttime - mvee::initialtime);
+        printf("Program terminated after: %lf seconds\n", currenttime - mvee::startup_time);
 #else
-        fprintf(stderr, "%lf\n", currenttime - mvee::initialtime);
+        fprintf(stderr, "%lf\n", currenttime - mvee::startup_time);
 #endif
     }
 
@@ -1305,7 +1316,7 @@ void mvee::warnf(const char* format, ...)
     struct timeval tv;
     double curtime;
     gettimeofday(&tv, NULL);
-    curtime = tv.tv_sec + tv.tv_usec / 1000000.0 - mvee::initialtime;
+    curtime = tv.tv_sec + tv.tv_usec / 1000000.0 - mvee::startup_time;
     if (mvee::active_monitor && mvee::active_monitor->monitor_log)
     {
         va_list va;
@@ -1374,7 +1385,7 @@ void mvee::logf(const char* format, ...)
 #endif
 
     gettimeofday(&tv, NULL);
-    curtime = tv.tv_sec + tv.tv_usec / 1000000.0 - mvee::initialtime;
+    curtime = tv.tv_sec + tv.tv_usec / 1000000.0 - mvee::startup_time;
 
     if (mvee::active_monitor && mvee::active_monitor->monitor_log)
     {

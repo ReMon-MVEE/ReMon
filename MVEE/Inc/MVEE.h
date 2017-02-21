@@ -153,11 +153,9 @@ public:
     //
     static void init_config                 ();
 	static void init_config_set_defaults    ();
+	static bool process_opts                (int argc, char** argv, bool add_args);
+	static void add_argv                    (const char* arg);
 
-	// 
-	// Parse a commandline option for the MVEE
-	//
-    static int  process_opt                 (char* opt);
 
 	//
 	// Asynchronously request a shutdown of the entire MVEE
@@ -168,7 +166,7 @@ public:
 	// Implemented in MVEE_config.cpp. Sets up the config to launch a known
 	// variant set. We mainly use this to create shortcuts for benchmarks
 	//
-	static void        set_builtin_config     (int builtin, bool native);
+	static void        set_builtin_config     (int builtin);
 
 
     // *************************************************************************
@@ -461,6 +459,8 @@ public:
 
     // Configuration read from MVEE.ini
 	static std::string              config_file_name;
+	static std::string              config_variant_set;
+	static bool                     config_show;
     static Json::Value              config;
 	static Json::Value*             config_variant_global;
 	static Json::Value*             config_variant_exec;
@@ -633,7 +633,7 @@ private:
     static FILE*                                ptrace_logfile;
     static FILE*                                datatransfer_logfile;
     static FILE*                                lockstats_logfile;
-    static double                               initialtime;
+    static double                               startup_time;
     static pthread_mutex_t                      loglock;
 };
 

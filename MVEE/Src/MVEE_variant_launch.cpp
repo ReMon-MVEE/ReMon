@@ -73,6 +73,8 @@ void mvee::start_variant(int variantnum)
 	std::deque<const char*> args;
 	Json::Value* variant_config = NULL;
 
+//	printf("My variant id is: %s\n", mvee::variant_ids[variantnum].c_str());
+
 	if (!mvee::config["variant"]["specs"].isNull() &&
 		!mvee::config["variant"]["specs"][mvee::variant_ids[variantnum]].isNull())
 		variant_config = &mvee::config["variant"]["specs"][mvee::variant_ids[variantnum]];	   		

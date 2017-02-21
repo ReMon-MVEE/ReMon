@@ -128,8 +128,6 @@ void mvee::init_config()
 		Json::Reader reader(Json::Features::all());
 		if (!reader.parse(file, config, false))
 			warnf("Couldn't parse config file: %s\n", config_file_name.c_str());
-		else
-			warnf("Using config: %s\n", config_file_name.c_str());
 	}
 	else
 	{
@@ -137,10 +135,6 @@ void mvee::init_config()
 	}
 
 	init_config_set_defaults();
-
-	// initialize variant ids
-	mvee::variant_ids.resize(mvee::numvariants);
-	std::fill(mvee::variant_ids.begin(), mvee::variant_ids.end(), "null");
 }
 
 /*-----------------------------------------------------------------------------
@@ -156,13 +150,27 @@ const char* mvee::get_spec_profile(bool native)
 /*-----------------------------------------------------------------------------
     set_builtin_config - 
 -----------------------------------------------------------------------------*/
-void mvee::set_builtin_config(int builtin, bool native)
+void mvee::set_builtin_config(int builtin)
 {
     const char* parsec_bench  = NULL;
     const char* parsec_config = NULL;
     const char* splash_bench  = NULL;
     const char* spec_bench    = NULL;
 	char parsec_ver = 2;
+	bool native = (*mvee::config_variant_global)["disable_syscall_checks"].asBool();
+
+	// discard any conflicting args we may have read from the config
+	config["variant"]["sets"].clear();
+	config["variant"]["specs"].clear();
+	if (!(*config_variant_exec)["path"].isNull() &&
+		(*config_variant_exec)["path"].isArray()) // it shouldn't be, but who knows...
+		(*config_variant_exec)["path"];
+	if (!(*config_variant_exec)["argv"].isNull() &&
+		(*config_variant_exec)["argv"].isArray())
+		(*config_variant_exec)["argv"].clear();
+	if (!(*config_variant_exec)["env"].isNull() &&
+		(*config_variant_exec)["env"].isArray())
+		(*config_variant_exec)["env"].clear();
 
     switch(builtin)
     {

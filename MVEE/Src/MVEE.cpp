@@ -28,6 +28,7 @@
 #include <libgen.h>
 #include <stdarg.h>
 #include <iostream>
+#include <ctype.h>
 #include "MVEE.h"
 #include "MVEE_monitor.h"
 #include "MVEE_memory.h"
@@ -73,14 +74,10 @@ __thread pid_t                         mvee::thread_pid                         
 std::map<std::string, std::string>     mvee::interp_map;
 std::vector<pid_t>                     mvee::shutdown_kill_list;
 bool                                   mvee::shutdown_should_generate_backtraces = false;
-FILE*                                  mvee::logfile                             = NULL;
-FILE*                                  mvee::ptrace_logfile                      = NULL;
-FILE*                                  mvee::datatransfer_logfile                = NULL;
-FILE*                                  mvee::lockstats_logfile                   = NULL;
-double                                 mvee::initialtime                         = 0.0;
-pthread_mutex_t                        mvee::loglock                             = PTHREAD_MUTEX_INITIALIZER;
 volatile unsigned long                 mvee::can_run                             = 0;
 std::string                            mvee::config_file_name                    = "MVEE.ini";
+bool                                   mvee::config_show                         = false;
+std::string                            mvee::config_variant_set                  = "default";
 Json::Value                            mvee::config;
 Json::Value*                           mvee::config_monitor                      = NULL;
 Json::Value*                           mvee::config_variant_global               = NULL;
@@ -1103,10 +1100,10 @@ void mvee::register_variants(std::vector<pid_t>& pids)
 -----------------------------------------------------------------------------*/
 void mvee::register_monitor(monitor* mon)
 {
-//    std::vector<pid_t> pids = mon->getpids();
-
-    {   MutexLock lock(&mvee::global_lock);
-        mvee::monitor_id_mapping.insert(std::pair<int, monitor*>(mon->monitorid, mon)); }
+    {
+		MutexLock lock(&mvee::global_lock);
+        mvee::monitor_id_mapping.insert(std::pair<int, monitor*>(mon->monitorid, mon));
+	}
 
     mon->signal_registration();
 }
@@ -1119,7 +1116,8 @@ void mvee::unregister_monitor(monitor* mon)
     std::map<int, monitor*>::iterator it;
     bool                              should_shutdown = false;
 
-    {   MutexLock lock(&mvee::global_lock);
+    {
+		MutexLock lock(&mvee::global_lock);
         it                           = monitor_id_mapping.find(mon->monitorid);
         if (it != monitor_id_mapping.end())
             monitor_id_mapping.erase(it);
@@ -1133,36 +1131,11 @@ void mvee::unregister_monitor(monitor* mon)
         pthread_cond_signal(&mvee::global_cond);
 
         if (mon == mvee::active_monitor)
-            mvee::active_monitor = NULL; }
+            mvee::active_monitor = NULL;
+	}
 
     if (should_shutdown)
         mvee::request_shutdown(false);
-}
-
-/*-----------------------------------------------------------------------------
-    process_opt
------------------------------------------------------------------------------*/
-int mvee::process_opt(char* opt)
-{
-    if (!strcasecmp(opt, "-s"))
-        (*mvee::config_monitor)["log_to_stdout"] = true;
-    else if (!strcasecmp(opt, "-n"))
-        (*mvee::config_variant_global)["disable_syscall_checks"] = true;
-    else if (!strcasecmp(opt, "-p"))
-        (*mvee::config_variant_global)["performance_counting_enabled"] = true;
-	// These have already been processed.
-	else if (!strcasecmp(opt, "-f"))
-		return 1; // skip the next one
-	// treat all unrecognized args as argvs
-    else
-	{
-		if (!(*mvee::config_variant_exec)["argv"])
-			(*mvee::config_variant_exec)["argv"][0] = std::string(opt);
-		else
-			(*mvee::config_variant_exec)["argv"].append(std::string(opt));
-	}
-
-	return 0;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1437,80 +1410,153 @@ void mvee::start_monitored()
 }
 
 /*-----------------------------------------------------------------------------
-    Main
+    usage
+-----------------------------------------------------------------------------*/
+static void usage()
+{
+	printf("======================================================\n");
+	printf("   Ghent University Computer Systems Lab MVEE v4.0    \n");
+	printf("                 aka \"GHUMVEE\"                      \n");
+	printf("======================================================\n\n");
+	printf("Legacy Mode Syntax:\n");
+	printf("./MVEE [Builtin Configuration Number (see MVEE_config.cpp)] [Number of Variants] [MVEE Options]\n\n");
+	printf("RAVEN Mode Syntax:\n");
+	printf("./MVEE -s <variant set> -f <config file> [MVEE Options] -- [Program Args]\n\n");
+	printf("MVEE Options:\n");
+	printf("> -s <variant set> : run the specified variant set. If this option is omitted, GHUMVEE will launch variant set \"default\". NOTE: This option is ignored in legacy mode.\n");
+	printf("> -f <file name>   : use the monitor config in the specified file. If this option is omitted, the config will be read from MVEE.ini. NOTE: If the MVEE is run in legacy mode, then any options in the builtin config take precedence over the settings in the config file.\n");
+	printf("> -n : no monitoring. Variant processes are executed without supervision. Useful for benchmarking.\n");
+	printf("> -p : use performance counters to track cache and synchronization behavior of the variants.\n");
+	printf("> -o : log everything to stdout, as well as the log files. This flag is ignored if the MVEE is compiled with MVEE_BENCHMARK defined in MVEE_build_config.h\n");
+	printf("> -c : show the contents of the json config file after command line processing.\n");
+	printf("> In legacy mode, all arguments including and following the first non-option are passed as program arguments to the variants\n");
+}
+
+/*-----------------------------------------------------------------------------
+    add_argv
+-----------------------------------------------------------------------------*/
+void mvee::add_argv(const char* arg)
+{
+	if (!(*mvee::config_variant_exec)["argv"])
+		(*mvee::config_variant_exec)["argv"][0] = std::string(arg);
+	else
+		(*mvee::config_variant_exec)["argv"].append(std::string(arg));
+
+	// TODO: consider adding this to variant.specs too
+}
+
+/*-----------------------------------------------------------------------------
+    process_opts
+-----------------------------------------------------------------------------*/
+bool mvee::process_opts(int argc, char** argv, bool add_args)
+{
+	int opt;
+	bool stop = false;
+	while ((opt = getopt(argc, argv, ":s:f:npoc")) != -1 && !stop)
+	{
+		switch(opt)
+		{
+			case ':': // missing arg
+				if (!strcmp(argv[optind+1], "--"))
+				{
+					stop = true;
+					break;
+				}
+				else
+				{
+					usage();
+					return false;
+				}
+			case 's':
+				mvee::config_variant_set = std::string(optarg);
+				break;
+			case 'o':
+				(*mvee::config_monitor)["log_to_stdout"] = true;
+				break;
+			case 'n':
+				(*mvee::config_variant_global)["disable_syscall_checks"] = true;
+				break;
+			case 'p':
+				(*mvee::config_variant_global)["performance_counting_enabled"] = true;
+				break;
+			case 'f': // we've already parsed the config file name
+				break;
+			case 'c':
+				mvee::config_show = true;
+				break;
+			default:
+				stop = true;
+				break;				
+		}
+	}
+
+	if (add_args)
+	{
+		for (int i = optind; i < argc; ++i)
+			add_argv(argv[i]);
+	}
+
+	return true;
+}
+
+/*-----------------------------------------------------------------------------
+    isnumeric
+-----------------------------------------------------------------------------*/
+static bool isnumeric(const char* str)
+{
+	while(*str)
+	{
+		char c = *str;
+		if (c < '0' || c > '9')
+			return false;
+		str++;
+	}
+	return true;
+}
+
+/*-----------------------------------------------------------------------------
+    Main - parse command line opts and launch monitor/variants
 -----------------------------------------------------------------------------*/
 int main(int argc, char *argv[])
 {
-    //
-    // Parse commandline options
-    //
+	bool legacy_mode = true;
+
     if (argc <= 2)
     {
-        printf("======================================================\n");
-        printf("   Ghent University Computer Systems Lab MVEE v4.0    \n");
-        printf("                 aka \"GHUMVEE\"                      \n");
-        printf("======================================================\n");
-        printf("> Syntax:\n\n");
-        printf("> ./MVEE [Builtin Configuration Number] [Number of Variants] [MVEE Options]\n");
-        printf("> OR\n");
-        printf("> ./MVEE [Number of Variants] [MVEE Options] -- [Program] [Program Args]\n");
-        printf("\n");
-        printf("> MVEE Options:\n");
-        printf("> -s : log to stdout. All logfile output is also printed to stdout.\n");
-        printf("> -n : no monitoring. Variant processes are executed without supervision. Useful for benchmarking.\n");
-        printf("> -p : use performance counters to track cache and synchronization behavior of the variants.\n");
-		printf("> -f <file name> : use the monitor config in the specified file.\n   If this option is not used, the configuration will be read from MVEE.ini.\n   NOTE: If a builtin configuration is also selected, it will take precedence over any settings in the specified config file.\n");
-        return 0;
+		usage();
+		return 0;
     }
     else
-    {		
+    {
 		mvee::os_check_ptrace_scope();
 		mvee::os_check_kernel_cmdline();
 		mvee::init_syslocks();
 		
-        int i = 1, j, builtin = 0;
+        int dash_pos, i = 1, builtin = 0;
 
 		// Determine the mode we're launching in
-        for (; i < argc; ++i)
+        for (dash_pos = 0; dash_pos < argc; ++dash_pos)
         {
-            if (!strcmp(argv[i], "--"))
+            if (!strcmp(argv[dash_pos], "--"))
             {
-                mvee::numvariants = builtin;
-                builtin           = -1;
+				legacy_mode = false;
                 break;
             }
         }
 
 		// look for -f first and initialize the config
-		if (builtin == -1)
-        {
-			// Process all args before the "--" as MVEE options
-            for (j = 2; j < i; ++j)
+		i = legacy_mode ? 3 : 1;
+		for (; i < argc; ++i)
+		{
+			if (!strcmp(argv[i], "-f"))
 			{
-                if (!strcmp(argv[j], "-f"))
-				{
-					if (j + 1 < i)
-						mvee::config_file_name = std::string(argv[j + 1]);
-					else
-						warnf("You must pass a filename after -f! Using MVEE.ini instead.\n");
-					break;
-				}
+				if (i + 1 < argc)
+					mvee::config_file_name = std::string(argv[i + 1]);
+				else
+					warnf("You must pass a filename after -f! Using MVEE.ini instead.\n");
+				break;
 			}
-        }
-        else
-        {
-            for (i = 3; i < argc; ++i)
-			{
-				if (!strcmp(argv[i], "-f"))
-				{
-					if (i + 1 < argc)
-						mvee::config_file_name = std::string(argv[i + 1]);
-					else
-						warnf("You must pass a filename after -f! Using MVEE.ini instead.\n");
-					break;
-				}
-			}
-        }
+		}
 
 		// Initialize the config before processing further cmdline options
 		mvee::init_config();
@@ -1518,38 +1564,78 @@ int main(int argc, char *argv[])
 		mvee::os_get_mvee_root_dir();
 		mvee::os_reset_envp();
 
-        if (builtin == -1)
+        if (!legacy_mode)
         {
-			// Process all args before the "--" as MVEE options
-            for (j = 2; j < i; ++j)
-                j += mvee::process_opt(argv[j]);
+			// process all options before the --
+			if (!mvee::process_opts(argc, argv, false))
+				return -1;
+			
 			// Process everything after the "--" as program arguments
-            for (i = i + 1; i < argc; ++i)
-			{
-				if (!(*mvee::config_variant_exec)["argv"])
-					(*mvee::config_variant_exec)["argv"][0] = std::string(argv[i]);
-				else
-					(*mvee::config_variant_exec)["argv"].append(std::string(argv[i]));
-			}
+            for (i = dash_pos + 1; i < argc; ++i)
+				mvee::add_argv(argv[i]);
         }
         else
         {
+			if (!isnumeric(argv[1]) || !isnumeric(argv[2]))
+			{
+				usage();
+				return -1;
+			}
+			
 			builtin = atoi(argv[1]);
             mvee::numvariants = atoi(argv[2]);
-            for (i = 3; i < argc; ++i)
-                i += mvee::process_opt(argv[i]);
-			mvee::set_builtin_config(builtin, (*mvee::config_variant_global)["disable_syscall_checks"].asBool());
+			mvee::set_builtin_config(builtin);
+
+			// Pretend that argv[2] is the new argv[0]
+			if (!mvee::process_opts(argc - 2, &argv[2], true))
+				return -1;
         }
     }
 
+	// select variants
+	if (!legacy_mode)
+	{
+		if (!mvee::config["variant"]["sets"][mvee::config_variant_set])
+		{
+			printf("Couldn't find variant set %s\n", mvee::config_variant_set.c_str());
+			return -1;
+		}
+
+		for (auto variant : mvee::config["variant"]["sets"][mvee::config_variant_set])
+		{
+			// check if a variant.specs config exists for the specified variant
+			if (!mvee::config["variant"]["specs"][variant.asString()])
+			{
+				printf("Couldn't find config for variant %s in set %s\n",
+					   variant.asString().c_str(), mvee::config_variant_set.c_str());
+				return -1;
+			}
+			mvee::variant_ids.push_back(variant.asString());
+		}
+
+		mvee::numvariants = mvee::variant_ids.size();
+	}
+	else
+	{
+		// initialize variant ids
+		if (mvee::numvariants != 0)
+		{
+			mvee::variant_ids.resize(mvee::numvariants);
+			std::fill(mvee::variant_ids.begin(), mvee::variant_ids.end(), "null");
+		}
+	}
+	
 	if (mvee::numvariants <= 0)
 	{
 		printf("Can't run GHUMVEE with %d variants!\n", mvee::numvariants);
 		return -1;
 	}
 
-	Json::StyledWriter writer;
-	std::cout << "Using config: " << writer.write(mvee::config) << "\n";
+	if (mvee::config_show)
+	{
+		Json::StyledWriter writer;
+		std::cout << "Using config: " << writer.write(mvee::config) << "\n";
+	}
 
     if ((*mvee::config_variant_global)["disable_syscall_checks"].asBool())
         mvee::start_unmonitored();

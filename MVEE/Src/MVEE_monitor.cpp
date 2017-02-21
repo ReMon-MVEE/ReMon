@@ -269,7 +269,7 @@ void monitor::init_variant(int variantnum, pid_t variantpid, pid_t varianttgid)
     variants[variantnum].variantpid  = variantpid;
     variants[variantnum].varianttgid = varianttgid ? varianttgid : variantpid;
 	if (!mvee::config["variant"]["specs"] ||
-		!mvee::config["variant"]["specs"][mvee::variant_ids[variantnum]])
+		!mvee::config["variant"]["specs"]["test"])
 		return;
 	variants[variantnum].config      = &mvee::config["variant"]["specs"][mvee::variant_ids[variantnum]];
 }
