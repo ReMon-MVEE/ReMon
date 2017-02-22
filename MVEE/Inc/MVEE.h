@@ -277,7 +277,9 @@ public:
 	// Check if the specified variant has an alias for the specified path.
 	// If so, return that alias. If not, return ""
 	//
+	static bool        are_aliases                   (std::vector<std::string> paths);
 	static std::string get_alias                     (int variant_num, std::string path_name);
+	static void        init_aliases                  ();
 
     // *************************************************************************
     // OS/Environment configuration
@@ -456,6 +458,10 @@ public:
 	static std::vector<
 		std::map<std::string, std::string>>
 		aliases;
+	// Maps aliases onto their source path names
+	static std::vector<
+		std::map<std::string, std::string>>
+		reverse_aliases;
 
     // Configuration read from MVEE.ini
 	static std::string              config_file_name;

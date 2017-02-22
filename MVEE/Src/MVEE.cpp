@@ -43,6 +43,9 @@
 std::vector<
 	std::map<std::string,
 			 std::string>>             mvee::aliases;
+std::vector<
+	std::map<std::string,
+			 std::string>>             mvee::reverse_aliases;
 int                                    mvee::numvariants                         = 0;
 std::vector<std::string>               mvee::variant_ids;
 __thread monitor*                      mvee::active_monitor                      = NULL;
@@ -158,11 +161,74 @@ sigset_t mvee::old_sigset_to_new_sigset(unsigned long old_sigset)
 }
 
 /*-----------------------------------------------------------------------------
-    get_alias - RAVEN-style aliasing - TODO: Implement me
+    get_alias - RAVEN-style aliasing
 -----------------------------------------------------------------------------*/
 std::string mvee::get_alias(int variantnum, std::string path)
 {
+	auto alias = aliases[variantnum].find(path);
+	if (alias != aliases[variantnum].end())
+		return alias->second;
 	return "";
+}
+
+/*-----------------------------------------------------------------------------
+    init_aliases
+-----------------------------------------------------------------------------*/
+void mvee::init_aliases()
+{
+	aliases.resize(mvee::numvariants);
+	reverse_aliases.resize(mvee::numvariants);
+
+	for (int i = 0; i < mvee::numvariants; ++i)
+	{
+		Json::Value& variant_config =
+			mvee::config["variant"]["specs"][mvee::variant_ids[i]]["exec"];
+
+		if (!variant_config["alias"])
+			continue;
+
+		for (auto alias : variant_config["alias"])
+		{
+			auto str = alias.asString();
+			int pos = str.find("=");
+			if (pos != std::string::npos)
+			{
+				std::string pattern     = str.substr(0, pos);
+				std::string replacement = str.substr(pos + 1);
+
+				aliases[i].insert(std::make_pair(pattern, replacement));
+				reverse_aliases[i].insert(std::make_pair(pattern, replacement));
+			}	
+		}
+	}
+}
+
+/*-----------------------------------------------------------------------------
+    are_aliases - check if all of these paths are aliases of the same source path
+-----------------------------------------------------------------------------*/
+bool mvee::are_aliases(std::vector<std::string> paths)
+{
+	std::string cmp;
+	
+	for (int i = 0; i < mvee::numvariants; ++i)
+	{
+		auto source = reverse_aliases[i].find(paths[i]);
+		if (source == reverse_aliases[i].end())
+			return false;
+
+		if (cmp == "")
+		{
+			cmp = source->second;
+			continue;
+		}
+		else
+		{
+			if (cmp != source->second)
+				return false;
+		}			 
+	}
+
+	return true;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1624,13 +1690,17 @@ int main(int argc, char *argv[])
 			std::fill(mvee::variant_ids.begin(), mvee::variant_ids.end(), "null");
 		}
 	}
-	
+
 	if (mvee::numvariants <= 0)
 	{
 		printf("Can't run GHUMVEE with %d variants!\n", mvee::numvariants);
+		usage();
 		return -1;
 	}
 
+	// Everything is set up so we can initialize the alias maps now
+	mvee::init_aliases();
+	
 	if (mvee::config_show)
 	{
 		Json::StyledWriter writer;

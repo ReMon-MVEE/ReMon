@@ -116,7 +116,7 @@ void mvee::start_variant(int variantnum)
 		_args[i++] = _arg;
 
 	// this should not return
-	execv(binary.c_str(), (char* const*)_args);
+	execv(alias.c_str(), (char* const*)_args);
 
 	printf("ERROR: Failed to start variant: %s (argv: [", binary.c_str());
 	i = 0;
