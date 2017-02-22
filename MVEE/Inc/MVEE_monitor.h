@@ -26,6 +26,7 @@
     Typedefs
 -----------------------------------------------------------------------------*/
 typedef long (monitor:: *mvee_syscall_handler)(int);
+typedef void (monitor:: *mvee_syscall_logger)(int);
 
 /*-----------------------------------------------------------------------------
   Constants
@@ -286,6 +287,8 @@ public:
 	//
     long handle_donthave                     (int variantnum);
     long handle_dontneed                     (int variantnum);
+	void log_donthave                        (int variantnum);
+	void log_dontneed                        (int variantnum);
 
 	//
 	// Include an automatically generated syscall handler table. All of these
@@ -915,8 +918,8 @@ private:
     //
     // Syscall handler tables
     //
-    static const mvee_syscall_handler syscall_handler_table[MAX_CALLS][4];
-    static const mvee_syscall_handler syscall_logger_table[MAX_CALLS][2];
+    static const mvee_syscall_handler syscall_handler_table [MAX_CALLS][4];
+    static const mvee_syscall_logger  syscall_logger_table  [MAX_CALLS][2];
 
     //
     // Variables

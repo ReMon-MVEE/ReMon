@@ -23,20 +23,6 @@
 // #define MVEE_FORCE_ENABLE_BACKTRACING
 
 //
-// MVEE_MINIMAL_MONITORING: dispatches all calls as unsynced, without any logging
-// Useful for benchmarking syscall overhead in different monitor modes
-//
-// >>> DO NOT ENABLE THIS UNLESS YOU KNOW WHAT YOU'RE DOING !!!! <<<
-//
-// >>> DO NOT ENABLE THIS UNLESS YOU KNOW WHAT YOU'RE DOING !!!! <<<
-//
-// >>> DO NOT ENABLE THIS UNLESS YOU KNOW WHAT YOU'RE DOING !!!! <<<
-//
-// >>> DO NOT ENABLE THIS UNLESS YOU KNOW WHAT YOU'RE DOING !!!! <<<
-//
-// #define MVEE_MINIMAL_MONITORING
-
-//
 // MVEE_DISABLE_SYNCHRONIZATION_REPLICATION: if defined, no user-space sync will
 // be replicated from master to slave
 // #define MVEE_DISABLE_SYNCHRONIZATION_REPLICATION

@@ -195,6 +195,9 @@
 
 #define MVEE_HANDLER_DONTHAVE             (&monitor::handle_donthave)
 #define MVEE_HANDLER_DONTNEED             (&monitor::handle_dontneed)
+#define MVEE_LOGGER_DONTHAVE              (&monitor::log_donthave)
+#define MVEE_LOGGER_DONTNEED              (&monitor::log_dontneed)
+
 
 // Types of locks a system call handler might need - these are managed from MVEE/Src/MVEE_syscalls.cpp
 #define MVEE_SYSLOCK_MMAN                 (1 << 0)                  // syscall needs mman lock
@@ -204,5 +207,78 @@
 #define MVEE_SYSLOCK_FULL                 (1 << 4)                  // syslocks need to be held accross the call
 #define MVEE_SYSLOCK_PRECALL              (1 << 5)                  // syslocks need to be held before the call only
 #define MVEE_SYSLOCK_POSTCALL             (1 << 6)                  // syslocks need to be held after the call only
+
+//
+// Function declaration macros
+//
+#define GET_CALL_TYPE(syscall_name) \
+	long monitor::handle_##syscall_name##_get_call_type(int variantnum)
+
+#define LOG_ARGS(syscall_name) \
+	void monitor::handle_##syscall_name##_log_args(int variantnum)
+
+#define PRECALL(syscall_name) \
+	long monitor::handle_##syscall_name##_precall(int variantnum)
+
+#define CALL(syscall_name) \
+	long monitor::handle_##syscall_name##_call(int variantnum)
+
+#define POSTCALL(syscall_name) \
+	long monitor::handle_##syscall_name##_postcall(int variantnum)
+
+#define LOG_RETURN(syscall_name) \
+	void monitor::handle_##syscall_name##_log_return(int variantnum)
+
+//
+// Call type checking macros
+//
+
+//
+// if true, the call we're looking at was not subject to lockstepping
+//
+#define IS_UNSYNCED_CALL						\
+	(variantnum != -1)
+
+//
+// similarly, if this is true, we're looking at a call that is subject to
+// lockstepping
+//
+#define IS_SYNCED_CALL							\
+	(variantnum == -1)
+
+
+//
+// Prologue for our syscall arguments logging functions
+//
+#define MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)			\
+    int start, lim;													\
+																	\
+    start = IS_SYNCED_CALL ? 0 : variantnum;						\
+    lim   = IS_SYNCED_CALL ? mvee::numvariants : variantnum + 1;	\
+																	\
+	/* manually update the register context */						\
+    if IS_UNSYNCED_CALL												\
+	    call_check_regs(variantnum);
+
+//
+// Prologue for postcall handlers
+//
+#define MVEE_HANDLER_POSTCALL(variantnum, start, lim)					\
+	int start, lim;														\
+																		\
+    start = IS_SYNCED_CALL ? 0 : variantnum;							\
+    lim   = IS_SYNCED_CALL ? (state == STATE_IN_MASTERCALL ? 1 : mvee::numvariants) : variantnum + 1;
+
+//
+// Prologue for our syscall return logging functions
+//
+#define MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, results)		\
+	MVEE_HANDLER_POSTCALL(variantnum, start, lim);						\
+    std::vector<unsigned long> results(mvee::numvariants);				\
+    if IS_SYNCED_CALL													\
+        results = call_postcall_get_result_vector();					\
+    else																\
+		results[variantnum] = call_postcall_get_variant_result(variantnum);
+
 
 #endif // MVEE_SYSCALLS_H_INCLUDED

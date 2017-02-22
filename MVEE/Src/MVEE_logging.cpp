@@ -571,12 +571,11 @@ was_interrupted:
         logfunc("pid: %d - > variant is currently suspended\n", variants[variantnum].variantpid);
         //sync();
 
-        mvee_syscall_handler handler;
+        mvee_syscall_logger logger;
         if (variants[variantnum].callnum > 0 && variants[variantnum].callnum <= MAX_CALLS)
         {
-            handler = monitor::syscall_logger_table[variants[variantnum].callnum][MVEE_LOG_ARGS];
-            if (handler != MVEE_HANDLER_DONTHAVE && handler != MVEE_HANDLER_DONTNEED)
-                (this->*handler)(variantnum);
+            logger = monitor::syscall_logger_table[variants[variantnum].callnum][MVEE_LOG_ARGS];
+			(this->*logger)(variantnum);
         }
     }
 
@@ -975,18 +974,16 @@ void monitor::log_call_mismatch(int index1, int index2)
     warnf("call2    : %ld (%s)\n", variants[index2].callnum, getTextualSyscall(variants[index2].callnum));
     warnf("type2    : %d\n",       variants[index2].call_type);
     warnf("==================================\n");
-    mvee_syscall_handler handler;
+    mvee_syscall_logger logger;
     if (variants[index1].callnum > 0 && variants[index1].callnum <= MAX_CALLS)
     {
-        handler = monitor::syscall_logger_table[variants[index1].callnum][MVEE_LOG_ARGS];
-        if (handler != MVEE_HANDLER_DONTHAVE && handler != MVEE_HANDLER_DONTNEED)
-            (this->*handler)(index1);
+        logger = monitor::syscall_logger_table[variants[index1].callnum][MVEE_LOG_ARGS];
+		(this->*logger)(index1);
     }
     if (variants[index2].callnum > 0 && variants[index2].callnum <= MAX_CALLS)
     {
-        handler = monitor::syscall_logger_table[variants[index2].callnum][MVEE_LOG_ARGS];
-        if (handler != MVEE_HANDLER_DONTHAVE && handler != MVEE_HANDLER_DONTNEED)
-            (this->*handler)(index2);
+        logger = monitor::syscall_logger_table[variants[index2].callnum][MVEE_LOG_ARGS];
+		(this->*logger)(index2);
     }
     log_monitor_state_short(0);
     warnf("==================================\n");

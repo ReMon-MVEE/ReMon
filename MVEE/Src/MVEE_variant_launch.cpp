@@ -73,8 +73,7 @@ void mvee::start_variant(int variantnum)
 	std::deque<const char*> args;
 	Json::Value* variant_config = NULL;
 
-//	printf("My variant id is: %s\n", mvee::variant_ids[variantnum].c_str());
-
+	// See if we have a variant-specific config that might contain program args
 	if (!mvee::config["variant"]["specs"].isNull() &&
 		!mvee::config["variant"]["specs"][mvee::variant_ids[variantnum]].isNull())
 		variant_config = &mvee::config["variant"]["specs"][mvee::variant_ids[variantnum]];	   		
@@ -104,12 +103,14 @@ void mvee::start_variant(int variantnum)
 	if (alias.length() == 0)
 		alias = binary;
 
-	int pos = alias.rfind("/");
+	// push the basename of the original binary name as argv[0]
+	int pos = binary.rfind("/");
 	if (pos != std::string::npos)
-		args.push_front(alias.substr(pos+1).c_str());
+		args.push_front(binary.substr(pos+1).c_str());
 	else
-		args.push_front(alias.c_str());
+		args.push_front(binary.c_str());
 
+	// Build arg array
 	const char** _args = new const char*[args.size()];
 	int i = 0;
 	for (auto _arg : args)
@@ -122,8 +123,7 @@ void mvee::start_variant(int variantnum)
 	i = 0;
 	for (auto _arg : args)
 	{
-		if (i++ > 0)
-			printf(", ");
+		if (i++ > 0) printf(", ");
 		printf("%s", _arg);
 	}
 	printf("])\n");
