@@ -1289,7 +1289,13 @@ int mmap_table::check_vdso_overlap(int variantnum)
     find_writable_region - find a PROT_WRITE region of at least len bytes
     long in the address space of variant variantnum
 -----------------------------------------------------------------------------*/
-mmap_region_info* mmap_table::find_writable_region(int variantnum, unsigned long len, pid_t look_for_thread, bool is_main_thread)
+mmap_region_info* mmap_table::find_writable_region
+(
+	int variantnum,
+	unsigned long len,
+	pid_t look_for_thread,
+	bool is_main_thread
+)
 {
     std::set<mmap_region_info*, region_sort>::iterator region_iterator;
     std::set<mmap_region_info*, region_sort> *         region_table

@@ -570,7 +570,7 @@ std::string fd_table::get_full_path (int variantnum, pid_t variantpid, unsigned 
     std::stringstream ss;
 
     // fetch the path and check if it's absolute...
-    char* tmp_path = mvee_rw_read_string(variantpid, (unsigned long)path_ptr, 0);
+    char* tmp_path = mvee_rw_read_string(variantpid, path_ptr, 0);
     if (!tmp_path)
     {
         warnf("couldn't get full path\n");

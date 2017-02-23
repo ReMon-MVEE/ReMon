@@ -57,7 +57,7 @@ mmap_addr2line_proc::mmap_addr2line_proc(std::string& file, int variantnum, pid_
                 addr2line_status = ADDR2LINE_FILE_NO_DEBUG_SYMS;
                 return;
             }
-            unsigned char* vdso_data = mvee_rw_read_data(variantpid, region_address,
+            unsigned char* vdso_data = mvee_rw_read_data(variantpid, (void*)region_address,
                                                          region_size, 0);
             if (!vdso_data)
             {
@@ -343,7 +343,7 @@ dwarf_info::dwarf_info(std::string& file, int variantnum, pid_t variantpid, mmap
     if (dwarf_in_memory)
     {
         dwarf_data.dwarf_buffer =
-            mvee_rw_read_data(variantpid, region_info->region_base_address, region_info->region_size, true);
+            mvee_rw_read_data(variantpid, (void*)region_info->region_base_address, region_info->region_size, true);
 
         if (dwarf_data.dwarf_buffer)
             dwarf_elf = elf_memory((char*)dwarf_data.dwarf_buffer, region_info->region_size);

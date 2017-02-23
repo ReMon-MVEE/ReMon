@@ -196,7 +196,7 @@ bool monitor::handle_is_known_false_positive(const char* program_name, long call
 
         for (int i = 0; i < mvee::numvariants; ++i)
         {
-            if ((data[i] = (char*)mvee_rw_read_data(variants[i].variantpid, ARG2(i), ARG3(i))) == NULL)
+            if ((data[i] = (char*)mvee_rw_read_data(variants[i].variantpid, (void*) ARG2(i), ARG3(i))) == NULL)
             {
                 warnf("couldn't get buffer for variant %d\n", i);
                 goto out;
@@ -249,7 +249,7 @@ bool monitor::handle_is_known_false_positive(const char* program_name, long call
 
 		for (int i = 0; i < mvee::numvariants; ++i)
 		{
-			char* str = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
+			char* str = mvee_rw_read_string(variants[i].variantpid, (void*) ARG1(i));
 			if (str)
 			{
 				files[i] = std::string(str);
@@ -462,7 +462,7 @@ LOG_RETURN(read)
     {
         if (call_succeeded)
         {
-            std::string result_str = call_serialize_io_buffer(i, ARG2(i), result[i]);
+            std::string result_str = call_serialize_io_buffer(i, (const unsigned char*) ARG2(i), result[i]);
             debugf("pid: %d - SYS_READ RETURN: %d => %s\n", variants[i].variantpid, result[i], result_str.c_str());
         }
         else
@@ -501,7 +501,7 @@ LOG_ARGS(write)
 
     for (int i = start; i < lim; ++i)
     {
-        std::string buf_str = call_serialize_io_buffer(i, ARG2(i), ARG3(i));
+        std::string buf_str = call_serialize_io_buffer(i, (const unsigned char*) ARG2(i), ARG3(i));
         debugf("pid: %d - SYS_WRITE(%d, 0x" PTRSTR " (%s), %d)\n",
                    variants[i].variantpid, ARG1(i), ARG2(i), buf_str.c_str(), ARG3(i));
     }
@@ -519,7 +519,7 @@ PRECALL(write)
     {
         for (int i = 0; i < mvee::numvariants; ++i)
         {
-            unsigned char* buf = mvee_rw_read_data(variants[i].variantpid, ARG2(i), ARG3(i), 1);
+            unsigned char* buf = mvee_rw_read_data(variants[i].variantpid, (void*)ARG2(i), ARG3(i), 1);
             if (buf)
                 variants[i].perf_out += std::string((char*)buf);
             SAFEDELETEARRAY(buf);
@@ -546,7 +546,7 @@ LOG_ARGS(open)
 
     for (i = start; i < lim; ++i)
     {
-        str1 = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
+        str1 = mvee_rw_read_string(variants[i].variantpid, (void*)ARG1(i));
         debugf("pid: %d - SYS_OPEN(%s, 0x%08X = %s, 0x%08X = %s)\n", variants[i].variantpid,
                    str1,
                    ARG2(i), getTextualFileFlags(ARG2(i)).c_str(),
@@ -606,6 +606,21 @@ CALL(open)
     if (flags != old_flags)
         for (i = 0; i < mvee::numvariants; ++i)
             SETARG2(i, flags);
+
+	// Apply aliasing
+	if (result & MVEE_CALL_ALLOW)
+	{
+		for (i = 0; i < mvee::numvariants; ++i)
+		{
+			auto alias = mvee::get_alias(i, str1);
+			if (alias != "")
+			{
+				debugf("Variant %d: File %s is aliased to %s\n",
+					  i, str1.c_str(), alias.c_str());
+				call_overwrite_arg_data(i, 1, str1.length() + 1, (void*) alias.c_str(), alias.length() + 1, true);
+			}
+		}
+	}
 
     return result;
 }
@@ -803,7 +818,7 @@ LOG_ARGS(unlink)
 
     for (int i = start; i < lim; ++i)
     {
-        char* unlink_fd = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
+        char* unlink_fd = mvee_rw_read_string(variants[i].variantpid, (void*) ARG1(i));
         debugf("pid: %d - SYS_UNLINK(%s)\n", variants[i].variantpid,
                    unlink_fd);
 
@@ -870,7 +885,7 @@ void monitor::handle_execve_get_args(int variantnum)
                 unsigned long argvp = mvee_wrap_ptrace(PTRACE_PEEKDATA, variants[variantnum].variantpid,
                                                        ARG2(variantnum) + sizeof(long)*i, NULL);
 //				warnf("Reading argv[%d] data\n", i);
-                char*         tmp   = mvee_rw_read_string(variants[variantnum].variantpid, argvp);
+                char*         tmp   = mvee_rw_read_string(variants[variantnum].variantpid, (void*)argvp);
 //				warnf("done\n");
                 if (tmp)
                 {
@@ -1133,7 +1148,7 @@ POSTCALL(chdir)
 
     if (call_succeeded)
     {
-        str = mvee_rw_read_string(variants[0].variantpid, ARG1(0));
+        str = mvee_rw_read_string(variants[0].variantpid, (void*) ARG1(0));
         if (str)
             set_fd_table->chdir(str);
     }
@@ -1307,7 +1322,7 @@ LOG_ARGS(rt_sigsuspend)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_RT_SIGSUSPEND(%s)\n", variants[i].variantpid, 
-			   getTextualSigSet(call_get_sigset(i, ARG1(i), OLDCALLIFNOT(__NR_rt_sigsuspend))).c_str());
+			   getTextualSigSet(call_get_sigset(i, (void*)ARG1(i), OLDCALLIFNOT(__NR_rt_sigsuspend))).c_str());
 }
 
 PRECALL(rt_sigsuspend)
@@ -1327,7 +1342,7 @@ CALL(rt_sigsuspend)
 
     if (ARG1(variantnum))
     {
-        sigset_t _set = call_get_sigset(variantnum, ARG1(variantnum), OLDCALLIFNOT(__NR_rt_sigsuspend));
+        sigset_t _set = call_get_sigset(variantnum, (void*)ARG1(variantnum), OLDCALLIFNOT(__NR_rt_sigsuspend));
 
         for (int i = SIGINT; i < __SIGRTMAX; ++i)
             if (sigismember(&_set, i))
@@ -1388,7 +1403,7 @@ LOG_ARGS(access)
 
     for (int i = start; i < lim; ++i)
     {
-        char* str1 = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
+        char* str1 = mvee_rw_read_string(variants[i].variantpid, (void*)ARG1(i));
         debugf("pid: %d - SYS_ACCESS(%s, 0x%08X = %s)\n", variants[i].variantpid,
                    str1, ARG2(i), getTextualAccessMode(ARG2(i)).c_str());
         SAFEDELETEARRAY(str1);
@@ -1442,7 +1457,7 @@ LOG_ARGS(mkdir)
 
     for (int i = start; i < lim; ++i)
     {
-        char* str = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
+        char* str = mvee_rw_read_string(variants[i].variantpid, (void*)ARG1(i));
         debugf("pid: %d - SYS_MKDIR(%s, %d)\n", variants[i].variantpid, str, ARG2(i));
         SAFEDELETEARRAY(str);
     }
@@ -1475,7 +1490,7 @@ LOG_ARGS(creat)
 
     for (int i = start; i < lim; ++i)
     {
-        char* str = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
+        char* str = mvee_rw_read_string(variants[i].variantpid, (void*)ARG1(i));
         debugf("pid: %d - SYS_CREAT(%s, %d)\n", variants[i].variantpid, str, ARG2(i));
         SAFEDELETEARRAY(str);
     }
@@ -1494,7 +1509,7 @@ POSTCALL(creat)
     if (call_succeeded)
     {
         std::vector<unsigned long> fds = call_postcall_get_result_vector();
-        char*                      str = mvee_rw_read_string(variants[0].variantpid, ARG1(0));
+        char*                      str = mvee_rw_read_string(variants[0].variantpid, (void*)ARG1(0));
 
         set_fd_table->create_fd_info(FT_REGULAR, fds, str, O_WRONLY, false, false, false, 0);
         set_fd_table->verify_fd_table(getpids());
@@ -1585,7 +1600,7 @@ POSTCALL(pipe)
         std::vector<unsigned long> read_fds(mvee::numvariants);
         std::vector<unsigned long> write_fds(mvee::numvariants);
 
-        if (!mvee_rw_read_struct(variants[0].variantpid, ARG1(0), 2 * sizeof(int), fildes))
+        if (!mvee_rw_read_struct(variants[0].variantpid, (void*)ARG1(0), 2 * sizeof(int), fildes))
         {
             warnf("couldn't read fds\n");
             return 0;
@@ -1744,7 +1759,7 @@ LOG_RETURN(syslog)
             ARG1(0) == SYSLOG_ACTION_READ_ALL ||
             ARG1(0) == SYSLOG_ACTION_READ_CLEAR)
         {
-            char* str = (rets[i] > 0) ? mvee_rw_read_string(variants[i].variantpid, ARG2(i), rets[i]) : NULL;
+            char* str = (rets[i] > 0) ? mvee_rw_read_string(variants[i].variantpid, (void*)ARG2(i), rets[i]) : NULL;
             debugf("pid: %d - SYS_SYSLOG return: %s\n", variants[i].variantpid, str);
             SAFEDELETEARRAY(str);
         }
@@ -2221,7 +2236,7 @@ LOG_RETURN(getgroups)
             if (ARG2(i))
             {
                 gid_t* grouplist = (gid_t*)mvee_rw_safe_alloc(sizeof(gid_t) * rets[i]);
-                if (!mvee_rw_read_struct(variants[i].variantpid, ARG2(i), sizeof(gid_t) * rets[i], grouplist))
+                if (!mvee_rw_read_struct(variants[i].variantpid, (void*)ARG2(i), sizeof(gid_t) * rets[i], grouplist))
                 {
                     warnf("couldn't read grouplist\n");
                     SAFEDELETEARRAY(grouplist);
@@ -2254,7 +2269,7 @@ LOG_ARGS(setgroups)
         {
             gid_t* grouplist = (gid_t*)mvee_rw_safe_alloc(sizeof(gid_t) * ARG1(i));
             memset(grouplist, 0, sizeof(gid_t) * ARG1(i));
-            if (!mvee_rw_read_struct(variants[i].variantpid, ARG2(i), sizeof(gid_t) * ARG1(i), grouplist))
+            if (!mvee_rw_read_struct(variants[i].variantpid, (void*) ARG2(i), sizeof(gid_t) * ARG1(i), grouplist))
             {
                 warnf("couldn't read grouplist\n");
                 SAFEDELETEARRAY(grouplist);
@@ -2336,7 +2351,7 @@ LOG_ARGS(rt_sigaction)
 
     for (int i = start; i < lim; ++i)
     {
-        struct sigaction action DEBUGVAR = call_get_sigaction(i, ARG2(i), OLDCALLIFNOT(__NR_rt_sigaction));
+        struct sigaction action DEBUGVAR = call_get_sigaction(i, (void*) ARG2(i), OLDCALLIFNOT(__NR_rt_sigaction));
 
         debugf("pid: %d - SYS_RT_SIGACTION(%d - %s - %s)\n", variants[i].variantpid, ARG1(i), getTextualSig(ARG1(i)),
                    (action.sa_handler == SIG_DFL) ? "SIG_DFL" :
@@ -2365,7 +2380,7 @@ POSTCALL(rt_sigaction)
 
     if (call_succeeded && ARG2(0))
     {
-        struct sigaction action = call_get_sigaction(0, ARG2(0), OLDCALLIFNOT(__NR_rt_sigaction));
+        struct sigaction action = call_get_sigaction(0, (void*) ARG2(0), OLDCALLIFNOT(__NR_rt_sigaction));
         set_sighand_table->set_sigaction(ARG1(0), &action);
     }
 
@@ -2401,7 +2416,7 @@ LOG_ARGS(setrlimit)
     for (int i = start; i < lim; ++i)
     {
         struct rlimit  rlim;
-        unsigned char* tmp = mvee_rw_read_data(variants[i].variantpid, ARG2(i), sizeof(struct rlimit));
+        unsigned char* tmp = mvee_rw_read_data(variants[i].variantpid, (void*) ARG2(i), sizeof(struct rlimit));
         if (!tmp)
         {
             warnf("couldn't read rlimit\n");
@@ -2507,7 +2522,7 @@ PRECALL(readlink)
 
 CALL(readlink)
 {
-	char* str = mvee_rw_read_string(variants[0].variantpid, ARG1(0));
+	char* str = mvee_rw_read_string(variants[0].variantpid, (void*) ARG1(0));
 
 	// ridiculous hack for java and other shit
 	if (str && !strcmp(str, "/proc/self/exe"))
@@ -2516,9 +2531,9 @@ CALL(readlink)
 		{
 			for (int i = 0; i < mvee::numvariants; ++i)
 			{
-				mvee_rw_write_data(variants[i].variantpid, ARG2(i), 
+				mvee_rw_write_data(variants[i].variantpid, (void*) ARG2(i), 
 								   set_mmap_table->mmap_startup_info[0].image.length(), 
-								   (unsigned char*)set_mmap_table->mmap_startup_info[0].image.c_str());
+								   (void*) set_mmap_table->mmap_startup_info[0].image.c_str());
 			}
 
 			return MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(set_mmap_table->mmap_startup_info[0].image.length());
@@ -2586,15 +2601,15 @@ bool monitor::handle_munmap_precall_callback(mmap_table* table, std::vector<mmap
         info.writeback_buffer_size = writeback_size;
         info.writeback_buffer      = new unsigned char[writeback_size];
 
-        mvee_rw_copy_data(variants[0].variantpid, actual_base, mvee::os_getpid(), (unsigned long)info.writeback_buffer, writeback_size);
+        mvee_rw_copy_data(variants[0].variantpid, (void*) actual_base, mvee::os_getpid(), info.writeback_buffer, writeback_size);
 
         bool                    mismatch       = false;
 
         for (int i = 1; i < mvee::numvariants; ++i)
         {
             unsigned char* variant_region = new unsigned char[writeback_size];
-            mvee_rw_copy_data(variants[i].variantpid, MAX(infos[i]->region_base_address, (unsigned long)ARG1(i)),
-                              mvee::os_getpid(), (unsigned long)variant_region, writeback_size);
+            mvee_rw_copy_data(variants[i].variantpid, (void*) MAX(infos[i]->region_base_address, (unsigned long)ARG1(i)),
+                              mvee::os_getpid(), variant_region, writeback_size);
 
             if (memcmp(info.writeback_buffer, variant_region, writeback_size))
             {
@@ -3140,7 +3155,7 @@ LOG_ARGS(sendto)
     for (int i = start; i < lim; ++i)
     {
         GETTEXTADDRDIRECT(i, text_addr, 5, ARG6(i));
-        std::string buf_str = call_serialize_io_buffer(i, ARG2(i), ARG3(i));
+        std::string buf_str = call_serialize_io_buffer(i, (const unsigned char*) ARG2(i), ARG3(i));
         debugf("pid: %d - SYS_SENDTO(%d, " PTRSTR " (%s), %d, %d = %s, 0x" PTRSTR " (%s), %d)\n",
                    variants[i].variantpid,
                    ARG1(i), ARG2(i), buf_str.c_str(),
@@ -3260,7 +3275,7 @@ LOG_ARGS(setsockopt)
 
     for (int i = start; i < lim; ++i)
     {
-        std::string str = call_serialize_io_buffer(i, ARG4(i), ARG5(i));
+        std::string str = call_serialize_io_buffer(i, (const unsigned char*) ARG4(i), ARG5(i));
         debugf("pid: %d - SYS_SETSOCKOPT(%d, %d, %d, %s, %d)\n",
                    variants[i].variantpid,
                    ARG1(i), ARG2(i), ARG3(i), str.c_str(), ARG5(i));
@@ -3321,7 +3336,7 @@ LOG_ARGS(sendmsg)
     for (int i = start; i < lim; ++i)
     {
         struct msghdr msg;
-        if (!mvee_rw_read_struct(variants[i].variantpid, ARG2(i), sizeof(struct msghdr), &msg))
+        if (!mvee_rw_read_struct(variants[i].variantpid, (void*) ARG2(i), sizeof(struct msghdr), &msg))
         {
             warnf("couldn't read msghdr\n");
             return;
@@ -3409,7 +3424,7 @@ LOG_RETURN(recvmsg)
     for (int i = start; i < lim; ++i)
     {
         struct msghdr msg;
-        if (!mvee_rw_read_struct(variants[i].variantpid, ARG2(i), sizeof(struct msghdr), &msg))
+        if (!mvee_rw_read_struct(variants[i].variantpid, (void*) ARG2(i), sizeof(struct msghdr), &msg))
         {
             warnf("couldn't read msghdr\n");
             return;
@@ -4137,7 +4152,7 @@ POSTCALL(clone)
         {
             debugf("setting TID of the newly created thread in the address space of the parent\n");
             for (int i = 1; i < mvee::numvariants; ++i)
-				mvee_rw_write_pid(variants[i].variantpid, ARG3(i), 
+				mvee_rw_write_pid(variants[i].variantpid, (void*)ARG3(i), 
 								  (pid_t)call_postcall_get_variant_result(0));
         }
 
@@ -4452,7 +4467,7 @@ LOG_ARGS(writev)
     for (int i = start; i < lim; ++i)
     {
         debugf("pid: %d - SYS_WRITEV(%d, 0x" PTRSTR ", %d)\n", variants[i].variantpid, ARG1(i), ARG2(i), ARG3(i));
-        struct iovec* vec = (struct iovec*)mvee_rw_read_data(variants[i].variantpid, ARG2(i), sizeof(struct iovec) * ARG3(i));
+        struct iovec* vec = (struct iovec*)mvee_rw_read_data(variants[i].variantpid, (void*) ARG2(i), sizeof(struct iovec) * ARG3(i));
         if (!vec)
         {
             warnf("couldn't read iovec\n");
@@ -4606,7 +4621,7 @@ LOG_RETURN(poll)
         for (unsigned int j = 0; j < rets[i]; ++j)
         {
             struct pollfd fds;
-            if (!mvee_rw_read_struct(variants[i].variantpid, ARG1(i) + j * sizeof(struct pollfd), sizeof(struct pollfd), &fds))
+            if (!mvee_rw_read_struct(variants[i].variantpid, (struct pollfd*)ARG1(i) + j, sizeof(struct pollfd), &fds))
             {
                 warnf("couldn't read pollfd\n");
                 return;
@@ -4683,7 +4698,7 @@ CALL(prctl)
 	else if (ARG1(0) == PR_REGISTER_IPMON)
 	{
 		// inspect the list of syscalls
-		unsigned char* ipmon_mask = mvee_rw_read_data(variants[0].variantpid, ARG2(0), ARG3(0));
+		unsigned char* ipmon_mask = mvee_rw_read_data(variants[0].variantpid, (void*) ARG2(0), ARG3(0));
 
 		if (ipmon_mask)
 		{
@@ -4753,7 +4768,7 @@ LOG_ARGS(rt_sigprocmask)
     {
         debugf("pid: %d - SYS_RT_SIGPROCMASK(%s, 0x" PTRSTR " - %s)\n", variants[i].variantpid,
 			   getTextualSigHow(ARG1(i)), ARG2(i), 
-			   getTextualSigSet(call_get_sigset(i, ARG2(i), OLDCALLIFNOT(__NR_rt_sigprocmask))).c_str());
+			   getTextualSigSet(call_get_sigset(i, (void*) ARG2(i), OLDCALLIFNOT(__NR_rt_sigprocmask))).c_str());
     }
 }
 
@@ -4771,7 +4786,7 @@ CALL(rt_sigprocmask)
 	if IS_SYNCED_CALL
 		variantnum = 0;
 
-	variants[variantnum].last_sigset = call_get_sigset(variantnum, ARG2(variantnum), OLDCALLIFNOT(__NR_rt_sigprocmask));
+	variants[variantnum].last_sigset = call_get_sigset(variantnum, (void*) ARG2(variantnum), OLDCALLIFNOT(__NR_rt_sigprocmask));
 	return MVEE_CALL_ALLOW | MVEE_CALL_HANDLED_UNSYNCED_CALL;
 }
 
@@ -4853,7 +4868,7 @@ LOG_ARGS(pwrite64)
 
     for (int i = start; i < lim; ++i)
     {
-        std::string buf_str = call_serialize_io_buffer(i, ARG2(i), ARG3(i));
+        std::string buf_str = call_serialize_io_buffer(i, (const unsigned char*) ARG2(i), ARG3(i));
         debugf("pid: %d - SYS_PWRITE64(%d, %s, %d, %d)\n", variants[i].variantpid, ARG1(i), buf_str.c_str(), ARG3(i), ARG4(i));
     }
 }
@@ -5274,7 +5289,7 @@ LOG_ARGS(stat)
 
     for (int i = start; i < lim; ++i)
     {
-        char* str1 = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
+        char* str1 = mvee_rw_read_string(variants[i].variantpid, (void*) ARG1(i));
         debugf("pid: %d - SYS_STAT(%s)\n", variants[i].variantpid, str1);
         SAFEDELETEARRAY(str1);
     }
@@ -5301,7 +5316,7 @@ LOG_ARGS(stat64)
 
     for (int i = start; i < lim; ++i)
     {
-        char* str1 = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
+        char* str1 = mvee_rw_read_string(variants[i].variantpid, (void*) ARG1(i));
         debugf("pid: %d - SYS_STAT64(%s)\n", variants[i].variantpid, str1);
         SAFEDELETEARRAY(str1);
     }
@@ -5328,7 +5343,7 @@ LOG_ARGS(lstat)
 
     for (int i = start; i < lim; ++i)
     {
-        char* str1 = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
+        char* str1 = mvee_rw_read_string(variants[i].variantpid, (void*) ARG1(i));
         debugf("pid: %d - SYS_LSTAT(%s)\n", variants[i].variantpid, str1);
         SAFEDELETEARRAY(str1);
     }
@@ -5361,7 +5376,7 @@ LOG_ARGS(lstat64)
 
     for (int i = start; i < lim; ++i)
     {
-        char* str1 = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
+        char* str1 = mvee_rw_read_string(variants[i].variantpid, (void*) ARG1(i));
         debugf("pid: %d - SYS_LSTAT64(%s)\n", variants[i].variantpid, str1);
         SAFEDELETEARRAY(str1);
     }
@@ -5414,7 +5429,7 @@ LOG_RETURN(fstat)
         FILLARGARRAY(2, argarray);
         for (int i = 0; i < mvee::numvariants; ++i)
         {
-            struct stat* sb = (struct stat*)mvee_rw_read_data(variants[i].variantpid, argarray[i], sizeof(struct stat));
+            struct stat* sb = (struct stat*)mvee_rw_read_data(variants[i].variantpid, (void*) argarray[i], sizeof(struct stat));
             if (sb)
             {
                 /*
@@ -5520,7 +5535,7 @@ LOG_RETURN(fstat64)
         FILLARGARRAY(2, argarray);
         for (int i = 0; i < mvee::numvariants; ++i)
         {
-            struct stat64* sb = (struct stat64*)mvee_rw_read_data(variants[i].variantpid, argarray[i], sizeof(struct stat64));
+            struct stat64* sb = (struct stat64*)mvee_rw_read_data(variants[i].variantpid, (void*) argarray[i], sizeof(struct stat64));
             if (sb)
             {
                 /*
@@ -5663,7 +5678,7 @@ LOG_ARGS(gettid)
             if (ARG3(i) == 74)
             {
                 struct mvee_malloc_error err;
-                mvee_rw_read_struct(variants[i].variantpid, ARG4(i), sizeof(mvee_malloc_error), &err);
+                mvee_rw_read_struct(variants[i].variantpid, (void*) ARG4(i), sizeof(mvee_malloc_error), &err);
                 warnf("[PID:%05d] - [MALLOC_MISMATCH - MASTER INFO] - [FUNC: %s] - [MSG: %d (%s)] - [CHUNKSIZE: %ld] - [ARENA PTR: 0x" PTRSTR "] - [CHUNK PTR: 0x" PTRSTR "]\n",
                             variants[i].variantpid,
                             getTextualAllocType(err.alloc_type),
@@ -5677,7 +5692,7 @@ LOG_ARGS(gettid)
             else if (ARG3(i) == 75)
             {
                 struct mvee_malloc_error err;
-                mvee_rw_read_struct(variants[i].variantpid, ARG4(i), sizeof(mvee_malloc_error), &err);
+                mvee_rw_read_struct(variants[i].variantpid, (void*) ARG4(i), sizeof(mvee_malloc_error), &err);
                 warnf("[PID:%05d] - [MALLOC_MISMATCH - SLAVE INFO] - [FUNC: %s] - [MSG: %d (%s)] - [CHUNKSIZE: %ld] - [ARENA PTR: 0x" PTRSTR "] - [CHUNK PTR: 0x" PTRSTR "]\n",
                             variants[i].variantpid,
                             getTextualAllocType(err.alloc_type),
@@ -5784,8 +5799,8 @@ LOG_ARGS(setxattr)
 
     for (int i = start; i < lim; ++i)
     {
-        char*       path  = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
-        char*       name  = mvee_rw_read_string(variants[i].variantpid, ARG2(i));
+        char*       path  = mvee_rw_read_string(variants[i].variantpid, (void*) ARG1(i));
+        char*       name  = mvee_rw_read_string(variants[i].variantpid, (void*) ARG2(i));
         debugf("pid: %d - SYS_SETXATTR(%s, %s, %d, 0x" PTRSTR ", %d, %s)\n",
                    variants[i].variantpid, path, name, ARG3(i), ARG4(i), getTextualXattrFlags(ARG5(i)));
         SAFEDELETEARRAY(path);
@@ -5816,7 +5831,7 @@ LOG_ARGS(fsetxattr)
 
     for (int i = start; i < lim; ++i)
     {
-        char*       name  = mvee_rw_read_string(variants[i].variantpid, ARG2(i));
+        char*       name  = mvee_rw_read_string(variants[i].variantpid, (void*) ARG2(i));
         debugf("pid: %d - SYS_FSETXATTR(%d, %s, %d, 0x" PTRSTR ", %d, %s)\n",
                    variants[i].variantpid, ARG1(i), name, ARG3(i), ARG4(i), getTextualXattrFlags(ARG5(i)));
         SAFEDELETEARRAY(name);
@@ -5845,8 +5860,8 @@ LOG_ARGS(getxattr)
 
     for (int i = start; i < lim; ++i)
     {
-        char* path = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
-        char* name = mvee_rw_read_string(variants[i].variantpid, ARG2(i));
+        char* path = mvee_rw_read_string(variants[i].variantpid, (void*) ARG1(i));
+        char* name = mvee_rw_read_string(variants[i].variantpid, (void*) ARG2(i));
         debugf("pid: %d - SYS_GETXATTR(%s, %s, %d, 0x" PTRSTR ", %d)\n",
                    variants[i].variantpid, path, name, ARG3(i), ARG4(i));
         SAFEDELETEARRAY(path);
@@ -5881,7 +5896,7 @@ LOG_ARGS(fgetxattr)
 
     for (int i = start; i < lim; ++i)
     {
-        char* name = mvee_rw_read_string(variants[i].variantpid, ARG2(i));
+        char* name = mvee_rw_read_string(variants[i].variantpid, (void*) ARG2(i));
         debugf("pid: %d - SYS_FGETXATTR(%d, %s, %d, 0x" PTRSTR ", %d)\n",
                    variants[i].variantpid, ARG1(i), name, ARG3(i), ARG4(i));
         SAFEDELETEARRAY(name);
@@ -5953,7 +5968,7 @@ CALL(futex)
     {
         // clear it for the slaves too and deny the call
         for (int i = 1; i < mvee::numvariants; ++i)
-			mvee_rw_write_uint(variants[i].variantpid, ARG1(i), 0);
+			mvee_rw_write_uint(variants[i].variantpid, (void*) ARG1(i), 0);
         return MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
     }
 #endif
@@ -6006,7 +6021,7 @@ LOG_ARGS(sched_setaffinity)
     for (int i = start; i < lim; ++i)
     {
         cpu_set_t mask;
-        if (!mvee_rw_read_struct(variants[i].variantpid, ARG3(i), sizeof(cpu_set_t), &mask))
+        if (!mvee_rw_read_struct(variants[i].variantpid, (void*) ARG3(i), sizeof(cpu_set_t), &mask))
         {
             warnf("couldn't read cpu_set_t\n");
             return;
@@ -6034,7 +6049,7 @@ PRECALL(sched_setaffinity)
 				int       first_core_available = num_cores_variant * i;
 				int       modified_mask        = 0;
 
-				if (!mvee_rw_read_struct(variants[i].variantpid, ARG3(i), sizeof(cpu_set_t), &available_cores))
+				if (!mvee_rw_read_struct(variants[i].variantpid, (void*) ARG3(i), sizeof(cpu_set_t), &available_cores))
 				{
 					warnf("couldn't read cpu_set_t\n");
 					return 0;
@@ -6058,7 +6073,7 @@ PRECALL(sched_setaffinity)
 					debugf("manipulated virtual CPU mask for the variant: %d - %s\n", i,
                            getTextualCPUSet(&available_cores).c_str());
 #endif
-					mvee_rw_write_data(variants[i].variantpid, ARG3(i), sizeof(cpu_set_t), (unsigned char*)&available_cores);
+					mvee_rw_write_data(variants[i].variantpid, (void*) ARG3(i), sizeof(cpu_set_t), (unsigned char*)&available_cores);
 				}
 			}
 		}
@@ -6117,7 +6132,7 @@ POSTCALL(sched_getaffinity)
 
         CPU_ZERO(&available_cores);
 
-        if (!mvee_rw_read_struct(variants[variantnum].variantpid, ARG3(variantnum), ROUND_UP(num_cores_total, 8) / 8, &available_cores))
+        if (!mvee_rw_read_struct(variants[variantnum].variantpid, (void*) ARG3(variantnum), ROUND_UP(num_cores_total, 8) / 8, &available_cores))
         {
             warnf("couldn't read cpu_set_t\n");
             return 0;
@@ -6135,7 +6150,7 @@ POSTCALL(sched_getaffinity)
         }
 
         if (modified_mask)
-            mvee_rw_write_data(variants[variantnum].variantpid, ARG3(variantnum), ROUND_UP(num_cores_total, 8) / 8, (unsigned char*)&available_cores);
+            mvee_rw_write_data(variants[variantnum].variantpid, (void*) ARG3(variantnum), ROUND_UP(num_cores_total, 8) / 8, (unsigned char*)&available_cores);
     }
 
 
@@ -6419,7 +6434,7 @@ LOG_RETURN(epoll_wait)
         if ((int)rets[i] > 0)
         {
             struct epoll_event* events = (struct epoll_event*)mvee_rw_safe_alloc(sizeof(struct epoll_event) * rets[i]);
-            if (!mvee_rw_read_struct(variants[i].variantpid, ARG2(i), sizeof(struct epoll_event) * rets[i], events))
+            if (!mvee_rw_read_struct(variants[i].variantpid, (void*) ARG2(i), sizeof(struct epoll_event) * rets[i], events))
             {
                 warnf("couldn't read epoll_event\n");
                 return;
@@ -6442,7 +6457,7 @@ POSTCALL(epoll_wait)
         if (master_result > 0)
         {
             struct epoll_event* master_events = (struct epoll_event*)mvee_rw_safe_alloc(sizeof(struct epoll_event) * master_result);
-            if (!mvee_rw_read_struct(variants[0].variantpid, ARG2(0), sizeof(struct epoll_event) * master_result, master_events))
+            if (!mvee_rw_read_struct(variants[0].variantpid, (void*) ARG2(0), sizeof(struct epoll_event) * master_result, master_events))
             {
                 warnf("couldn't replicate epoll_events\n");
                 return 0;
@@ -6468,7 +6483,7 @@ POSTCALL(epoll_wait)
 					}
                 }
 
-                if (!mvee_rw_write_data(variants[j].variantpid, ARG2(j), sizeof(epoll_event) * master_result, (unsigned char*)slave_events))
+                if (!mvee_rw_write_data(variants[j].variantpid, (void*) ARG2(j), sizeof(epoll_event) * master_result, (unsigned char*)slave_events))
                     warnf("failed to replicate epoll_events to slave variant %d\n", j);
                 SAFEDELETEARRAY(slave_events);
             }
@@ -6494,7 +6509,7 @@ LOG_ARGS(epoll_ctl)
         memset(&event, 0, sizeof(struct epoll_event));
         if (ARG4(i))
         {
-            if (!mvee_rw_read_struct(variants[i].variantpid, ARG4(i), sizeof(struct epoll_event), &event))
+            if (!mvee_rw_read_struct(variants[i].variantpid, (void*) ARG4(i), sizeof(struct epoll_event), &event))
             {
                 warnf("couldn't read epoll_event\n");
                 return;
@@ -6534,7 +6549,7 @@ POSTCALL(epoll_ctl)
             {
                 struct epoll_event event;
                 memset(&event, 0, sizeof(struct epoll_event));
-                if (!mvee_rw_read_struct(variants[i].variantpid, ARG4(i), sizeof(struct epoll_event), &event))
+                if (!mvee_rw_read_struct(variants[i].variantpid, (void*) ARG4(i), sizeof(struct epoll_event), &event))
                 {
                     warnf("couldn't read epoll_event\n");
                     return 0;
@@ -6600,11 +6615,11 @@ LOG_ARGS(utimes)
     for (int i = start; i < lim; ++i)
     {
         struct timeval utimes[2];
-        char*          str1 = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
+        char*          str1 = mvee_rw_read_string(variants[i].variantpid, (void*) ARG1(i));
 
         if (ARG2(i))
         {
-            if (!mvee_rw_read_struct(variants[i].variantpid, ARG2(i), 2 * sizeof(struct timeval), utimes))
+            if (!mvee_rw_read_struct(variants[i].variantpid, (void*) ARG2(i), 2 * sizeof(struct timeval), utimes))
             {
                 warnf("couldn't read utimes\n");
                 return;
@@ -6741,7 +6756,7 @@ LOG_ARGS(openat)
 
     for (int i = start; i < lim; ++i)
     {
-        char* filename = mvee_rw_read_string(variants[i].variantpid, ARG2(i));
+        char* filename = mvee_rw_read_string(variants[i].variantpid, (void*)ARG2(i));
         debugf("pid: %d - SYS_OPENAT(%d, %s, 0x%08X, 0x%08X)\n", variants[i].variantpid, ARG1(i), filename, ARG3(i), ARG4(i));
         SAFEDELETEARRAY(filename);
     }
@@ -6858,7 +6873,7 @@ LOG_ARGS(newfstatat)
 
     for (int i = start; i < lim; ++i)
     {
-        char* path = mvee_rw_read_string(variants[i].variantpid, ARG2(i));
+        char* path = mvee_rw_read_string(variants[i].variantpid, (void*)ARG2(i));
         debugf("pid: %d - SYS_NEWFSTATAT(%d, %s, 0x" PTRSTR ", 0x%08X)\n", variants[i].variantpid, ARG1(i), path, ARG3(i), ARG4(i));
         SAFEDELETEARRAY(path);
     }
@@ -6886,7 +6901,7 @@ LOG_ARGS(fstatat64)
 
     for (int i = start; i < lim; ++i)
     {
-        char* path = mvee_rw_read_string(variants[i].variantpid, ARG2(i));
+        char* path = mvee_rw_read_string(variants[i].variantpid, (void*) ARG2(i));
         debugf("pid: %d - SYS_FSTATAT64(%d, %s, 0x" PTRSTR ", 0x%08X)\n", variants[i].variantpid, ARG1(i), path, ARG3(i), ARG4(i));
         SAFEDELETEARRAY(path);
     }
@@ -6910,7 +6925,7 @@ LOG_RETURN(fstatat64)
         FILLARGARRAY(3, argarray);
         for (int i = 0; i < mvee::numvariants; ++i)
         {
-            struct stat64* sb = (struct stat64*)mvee_rw_read_data(variants[i].variantpid, argarray[i], sizeof(struct stat64));
+            struct stat64* sb = (struct stat64*)mvee_rw_read_data(variants[i].variantpid, (void*)argarray[i], sizeof(struct stat64));
             if (sb)
             {
                 debugf("pid: %d - SYS_FSTATAT64 return\n", variants[i].variantpid);
@@ -7054,7 +7069,7 @@ LOG_ARGS(faccessat)
 
     for (int i = start; i < lim; ++i)
     {
-        char* str1 = mvee_rw_read_string(variants[i].variantpid, ARG2(i));
+        char* str1 = mvee_rw_read_string(variants[i].variantpid, (void*)ARG2(i));
         debugf("pid: %d - SYS_FACCESSAT(%d, %s, 0x%08X = %s, 0x%08x)\n",
                    variants[i].variantpid, ARG1(i), str1, ARG3(i),
                    getTextualAccessMode(ARG3(i)).c_str(), ARG4(i));
@@ -7077,7 +7092,7 @@ PRECALL(faccessat)
 -----------------------------------------------------------------------------*/
 PRECALL(utimensat)
 {
-    std::vector<unsigned long> argarray(mvee::numvariants);
+    std::vector<const char*> argarray(mvee::numvariants);
 
     CHECKPOINTER(2);
     CHECKPOINTER(3);
@@ -7094,7 +7109,7 @@ PRECALL(utimensat)
 
     if (ARG3(0))
     {
-        unsigned char* master_times = mvee_rw_read_data(variants[0].variantpid, ARG3(0), sizeof(struct timespec)*2);
+        unsigned char* master_times = mvee_rw_read_data(variants[0].variantpid, (void*)ARG3(0), sizeof(struct timespec)*2);
         if (!master_times)
         {
             cache_mismatch_info("couldn't read master times\n");
@@ -7103,7 +7118,7 @@ PRECALL(utimensat)
         bool           mismatch     = false;
         for (int i = 1; i < mvee::numvariants; ++i)
         {
-            unsigned char* slave_times = mvee_rw_read_data(variants[i].variantpid, ARG3(i), sizeof(struct timespec)*2);
+            unsigned char* slave_times = mvee_rw_read_data(variants[i].variantpid, (void*)ARG3(i), sizeof(struct timespec)*2);
             if (!slave_times)
             {
                 cache_mismatch_info("couldn't read slave times\n");
@@ -7314,7 +7329,7 @@ POSTCALL(pipe2)
 		std::vector<unsigned long> read_fds(mvee::numvariants);
 		std::vector<unsigned long> write_fds(mvee::numvariants);
 
-        if (!mvee_rw_read_struct(variants[0].variantpid, ARG1(0), 2 * sizeof(int), fildes))
+        if (!mvee_rw_read_struct(variants[0].variantpid, (void*)ARG1(0), 2 * sizeof(int), fildes))
         {
             warnf("couldn't read master fds\n");
             return 0;

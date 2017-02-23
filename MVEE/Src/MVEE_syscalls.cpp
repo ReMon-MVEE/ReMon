@@ -256,7 +256,7 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 				
 				// dirty hack: we need to write an unsigned short-sized value
 				// but ptrace always writes a full word
-				mvee_rw_write_ushort(variants[variantnum].variantpid, ARG1(variantnum), variantnum);
+				mvee_rw_write_ushort(variants[variantnum].variantpid, (void*)ARG1(variantnum), variantnum);
 				result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(mvee::numvariants);
                 break;
             }
@@ -279,14 +279,14 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
             //
             case MVEE_RESOLVE_SYMBOL:
             {
-                char*         sym      = mvee_rw_read_string(variants[variantnum].variantpid, ARG1(variantnum));
+                char*         sym      = mvee_rw_read_string(variants[variantnum].variantpid, (void*)ARG1(variantnum));
                 if (!sym)
                 {
                     warnf("couldn't read sym\n");
                     result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
                     break;
                 }
-                char*         lib_name = mvee_rw_read_string(variants[variantnum].variantpid, ARG2(variantnum));
+                char*         lib_name = mvee_rw_read_string(variants[variantnum].variantpid, (void*)ARG2(variantnum));
                 if (!lib_name)
                 {
                     warnf("couldn't read lib_name\n");
@@ -297,7 +297,7 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
                 unsigned long ptr      = set_mmap_table->resolve_symbol(variantnum, (const char*)sym, (const char*)lib_name);
 
                 SAFEDELETEARRAY(sym);
-                mvee_rw_write_data(variants[variantnum].variantpid, ARG3(variantnum), sizeof(unsigned long), (unsigned char*)&ptr);
+                mvee_rw_write_data(variants[variantnum].variantpid, (void*)ARG3(variantnum), sizeof(unsigned long), (unsigned char*)&ptr);
                 result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
                 break;
             }
@@ -346,13 +346,13 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 				variants[variantnum].infinite_loop_ptr = ARG2(variantnum);
 
 				if (ARG3(variantnum))
-					mvee_rw_write_ushort(variants[variantnum].variantpid, ARG3(variantnum), mvee::numvariants);
+					mvee_rw_write_ushort(variants[variantnum].variantpid, (void*)ARG3(variantnum), mvee::numvariants);
 
 				if (ARG4(variantnum))
-					mvee_rw_write_ushort(variants[variantnum].variantpid, ARG4(variantnum), variantnum);
+					mvee_rw_write_ushort(variants[variantnum].variantpid, (void*)ARG4(variantnum), variantnum);
 
 				if (variantnum == 0 && ARG5(variantnum))
-					mvee_rw_write_uchar(variants[variantnum].variantpid, ARG5(variantnum), 1);
+					mvee_rw_write_uchar(variants[variantnum].variantpid, (void*)ARG5(variantnum), 1);
 
 #ifdef MVEE_DISABLE_SYNCHRONIZATION_REPLICATION
                 result = MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(1);
@@ -581,7 +581,7 @@ long monitor::call_call_dispatch ()
                     // return size of the buffer
                     for (i = 0; i < mvee::numvariants; ++i)
                         if (ARG3(i))
-							mvee_rw_write_uint(variants[i].variantpid, ARG3(i), *size_ptr);
+							mvee_rw_write_uint(variants[i].variantpid, (void*)ARG3(i), *size_ptr);
 
                     // deny the call and return id of the buffer
                     for (i = 0; i < mvee::numvariants; ++i)

@@ -165,6 +165,7 @@ sigset_t mvee::old_sigset_to_new_sigset(unsigned long old_sigset)
 -----------------------------------------------------------------------------*/
 std::string mvee::get_alias(int variantnum, std::string path)
 {
+//	warnf("Looking for alias of %s in variant %d\n", path.c_str(), variantnum);
 	auto alias = aliases[variantnum].find(path);
 	if (alias != aliases[variantnum].end())
 		return alias->second;

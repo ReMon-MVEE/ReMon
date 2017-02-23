@@ -668,7 +668,7 @@ void monitor::log_dump_queues(shm_table* shm_table)
                     i, variants[i].variantpid);
 
             struct mvee_counter* counters = (struct mvee_counter*)mvee_rw_read_data(variants[i].variantpid,
-                                                                                    (unsigned long)atomic_counters[i], MVEE_COUNTERS * sizeof(struct mvee_counter), 0);
+                                                                                    atomic_counters[i], MVEE_COUNTERS * sizeof(struct mvee_counter), 0);
 
             if (counters)
                 for (int j = 0; j < MVEE_COUNTERS; ++j)
@@ -902,7 +902,7 @@ void monitor::log_calculate_clock_spread()
 	std::vector<double> cntrs(MVEE_COUNTERS);
 
 	struct mvee_counter* counters = (struct mvee_counter*)mvee_rw_read_data(variants[0].variantpid,
-		(unsigned long)atomic_counters[0], MVEE_COUNTERS * sizeof(struct mvee_counter), 0);
+		atomic_counters[0], MVEE_COUNTERS * sizeof(struct mvee_counter), 0);
 
 	for (int j = 0; j < MVEE_COUNTERS; ++j)
 	{
@@ -1114,7 +1114,7 @@ void monitor::log_segfault(int variantnum)
 					{
 						// try to read the slave block from mem
 						unsigned char* slave_arg = mvee_rw_read_data(variants[variantnum].variantpid,
-																	 slave_arg_val,
+																	 (void*)slave_arg_val,
 																	 arg->len - sizeof(unsigned long),
 																	 0);
 																 
@@ -1675,7 +1675,7 @@ void mvee_log_local_backtrace()
 /*-----------------------------------------------------------------------------
   mvee_wrap_ptrace - wrapper around ptrace that logs when something went wrong
 -----------------------------------------------------------------------------*/
-long mvee_wrap_ptrace(unsigned short request, pid_t pid, unsigned long addr, void *data, int allow_even_if_shutting_down)
+long mvee_wrap_ptrace(unsigned short request, pid_t pid, unsigned long addr, void *data)
 {
 //	debugf("PTRACE(%s, %d, 0x" PTRSTR ", 0x" PTRSTR ")\n",
 //			   getTextualRequest(request), pid, addr, data);

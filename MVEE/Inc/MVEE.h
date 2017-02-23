@@ -53,7 +53,7 @@ public:
     }
 };
 
-long mvee_wrap_ptrace                 (unsigned short request, pid_t pid, unsigned long addr, void *data, int allow_even_if_shutting_down=0);
+long mvee_wrap_ptrace                 (unsigned short request, pid_t pid, unsigned long addr, void* data);
 
 /*-----------------------------------------------------------------------------
     Constants

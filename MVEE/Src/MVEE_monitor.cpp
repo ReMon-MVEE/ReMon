@@ -31,6 +31,25 @@
 #include "hde.h"
 
 /*-----------------------------------------------------------------------------
+    overwritten_syscall_arg
+-----------------------------------------------------------------------------*/
+overwritten_syscall_arg::overwritten_syscall_arg()
+	: syscall_arg_num (0)
+	, arg_old_value (0)
+	, restore_data (false)
+	, data_loc (NULL)
+	, data_content (NULL)
+	, data_len (0)
+{
+}
+
+overwritten_syscall_arg::~overwritten_syscall_arg()
+{
+	if (data_content)
+		delete[] (unsigned char*)data_content;
+}
+
+/*-----------------------------------------------------------------------------
     variantstate class
 -----------------------------------------------------------------------------*/
 variantstate::variantstate()
@@ -53,6 +72,7 @@ variantstate::variantstate()
     current_signal_ready(false),
 	fast_forward_to_entry_point(false),
 	entry_point_bp_set(false),
+    have_overwritten_args(false),  
     last_lower_region_start(0),
     last_lower_region_size(0),
     last_upper_region_start(0),
@@ -490,11 +510,11 @@ void monitor::rewrite_execve_args(int variantnum, bool write_to_stack, bool rewr
 		serialize_and_relocate_arr(envp, serialized_envp, relocated_envp, envp_target_address);
 
     debugf("Writing new execve arguments...\n");
-    if (mvee_rw_copy_data(mvee::os_gettid(), (unsigned long)image.c_str(), pid, image_target_address, image.length() + 1) == -1
-        || mvee_rw_copy_data(mvee::os_gettid(), (unsigned long)relocated_argv, pid, relocated_argv_target_address, sizeof(char*) * argv.size()) == -1
-        || (rewrite_envp && mvee_rw_copy_data(mvee::os_gettid(), (unsigned long)relocated_envp, pid, relocated_envp_target_address, sizeof(char*) * envp.size()) == -1)
-        || mvee_rw_copy_data(mvee::os_gettid(), (unsigned long)serialized_argv, pid, argv_target_address, argv_len) == -1
-        || (rewrite_envp && mvee_rw_copy_data(mvee::os_gettid(), (unsigned long)serialized_envp, pid, envp_target_address, envp_len) == -1))
+    if (mvee_rw_copy_data(mvee::os_gettid(), (void*)image.c_str(), pid, (void*)image_target_address, image.length() + 1) == -1
+        || mvee_rw_copy_data(mvee::os_gettid(), (void*)relocated_argv, pid, (void*)relocated_argv_target_address, sizeof(char*) * argv.size()) == -1
+        || (rewrite_envp && mvee_rw_copy_data(mvee::os_gettid(), (void*)relocated_envp, pid, (void*)relocated_envp_target_address, sizeof(char*) * envp.size()) == -1)
+        || mvee_rw_copy_data(mvee::os_gettid(), (void*)serialized_argv, pid, (void*)argv_target_address, argv_len) == -1
+        || (rewrite_envp && mvee_rw_copy_data(mvee::os_gettid(), (void*)serialized_envp, pid, (void*)envp_target_address, envp_len) == -1))
     {
         warnf("Couldn't copy execve arguments to address space of variant: %d (PID: %d) => execve arguments writing\n", variantnum, pid);
         shutdown(false);
@@ -1294,7 +1314,7 @@ void monitor::handle_resume_event(int index)
                         debugf("setting master tid for variant: %d\n", variants[i].variantpid);
 						
 						mvee_rw_write_pid(variants[i].variantpid, 
-										  (unsigned long)variants[i].tid_address[j], 
+										  variants[i].tid_address[j], 
 										  variants[0].variantpid);
                     }
                 }
@@ -1713,6 +1733,9 @@ void monitor::handle_syscall_exit_event(int index)
     variants[index].prevcallnum       = variants[index].callnum;
     variants[index].callnum           = NO_CALL;
     variants[index].restarted_syscall = false;
+
+	if (variants[index].have_overwritten_args)
+		call_restore_args(index);
 
     // if the last syscall we've entered was an unsynced call
     // then dispatch the return right away...
@@ -2491,7 +2514,7 @@ bool monitor::sig_prepare_delivery ()
                 )
             {
                 // sigsuspend might be about to unblock the signal we're checking
-                sigset_t _set = call_get_sigset(0, ARG1(0), OLDCALLIFNOT(__NR_rt_sigsuspend));
+                sigset_t _set = call_get_sigset(0, (void*)ARG1(0), OLDCALLIFNOT(__NR_rt_sigsuspend));
 
                 if (!sigismember(&_set, it->sig_no))
                     dont_block = true;

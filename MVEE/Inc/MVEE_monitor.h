@@ -99,6 +99,20 @@ public:
     siginfo_t      sig_info;
 };
 
+class overwritten_syscall_arg
+{
+public:
+	int   syscall_arg_num; // 1 to 6
+	long  arg_old_value;   // old value in the register. may be a pointer
+	bool  restore_data;    // true if we also have to restore memory contents
+	void* data_loc;        // location of the data that needs to be restored
+	void* data_content;    // content of the data
+	long  data_len;        //
+
+	overwritten_syscall_arg();
+	~overwritten_syscall_arg();
+};
+
 // might have to optimize the layout even further for better cache performance
 // the user_regs struct is quite large, especially on AMD64...
 class variantstate
@@ -126,6 +140,7 @@ public:
     bool          current_signal_ready;
 	bool          fast_forward_to_entry_point;                      // Are we dispatching all syscalls as unsynced calls until we reach the entry point?
 	bool          entry_point_bp_set;                               // Have we set the breakpoint on the program entry point?
+	bool          have_overwritten_args;                            // Do we have any overwritten syscall args that need to be restored?
 
     // ptmalloc2 heap allocation hacks
     //
@@ -183,6 +198,9 @@ public:
 #endif
     std::string   perf_out;                                         // Output of the perf program
 	Json::Value*  config;                                           // Variant-specific config
+
+	std::vector<overwritten_syscall_arg>
+       	  	      overwritten_args;
 
     variantstate();
 };
@@ -362,16 +380,17 @@ private:
 	// accept a pointer to a data structure for each variant. If the data
 	// matches, the comparison function returns true.
 	// 
-    bool             call_compare_variant_strings        (std::vector<unsigned long>& stringptrs, size_t maxlength=0);
-    bool             call_compare_variant_buffers        (std::vector<unsigned long>& bufferptrs, size_t size);
+    bool             call_compare_variant_strings        (std::vector<const char*>& stringptrs, size_t maxlength=0);
+    bool             call_compare_variant_buffers        (std::vector<const unsigned char*>& bufferptrs, size_t size);
     bool             call_compare_wait_pids              (std::vector<pid_t>& pids);
     bool             call_compare_signal_handlers        (std::vector<unsigned long>& handlers);
     bool             call_compare_sigactions             (std::vector<unsigned long>& handlers, std::vector<unsigned long>& sa_flags);
     bool             call_compare_sigsets                (sigset_t* set1, sigset_t* set2);
-    unsigned char    call_compare_pointers               (std::vector<unsigned long>& pointers);
-    bool             call_compare_io_vectors             (std::vector<unsigned long>& addresses, size_t len, bool layout_only=false);
-    bool             call_compare_msgvectors             (std::vector<unsigned long>& addresses, bool layout_only=false);
-	bool             call_compare_fd_sets                (std::vector<unsigned long>& addresses, int nfds);
+    unsigned char    call_compare_pointers               (std::vector<void*>& pointers);
+    bool             call_compare_io_vectors             (std::vector<struct iovec*>& addresses, size_t len, bool layout_only=false);
+    bool             call_compare_msgvectors             (std::vector<struct msghdr*>& addresses, bool layout_only=false);
+	bool             call_compare_mmsgvectors            (std::vector<struct mmsghdr*>& addresses, bool layout_only=false);
+	bool             call_compare_fd_sets                (std::vector<fd_set*>& addresses, int nfds);
 
 	//
 	// Serialization Functions. These are helper functions for the syscall
@@ -379,26 +398,33 @@ private:
 	// 
     std::string      call_serialize_io_vector            (int variantnum, struct iovec* vec, unsigned int vecsz);
     std::string      call_serialize_msgvector            (int variantnum, struct msghdr* msg);
-    std::string      call_serialize_io_buffer            (int variantnum, unsigned long buf, unsigned long buflen);
+    std::string      call_serialize_io_buffer            (int variantnum, const unsigned char* buf, unsigned long buflen);
 
 	// 
 	// Replication functions. These accept a pointer to a data structure for
 	// each variant. The data structure is deep copied from the address space of
 	// the master variant to the address spaces of the slaves
 	//
-    void             call_replicate_io_vector            (std::vector<unsigned long>& addresses, long bytes_copied);
-    void             call_replicate_msgvector            (std::vector<unsigned long>& addresses, long bytes_sent);
-    void             call_replicate_mmsgvector           (std::vector<unsigned long>& addresses, int vlen);
-    void             call_replicate_mmsgvectorlens       (std::vector<unsigned long>& addresses, int sent, int attempted);
-    void             call_replicate_buffer               (std::vector<unsigned long>& addresses, int size);
+    void             call_replicate_io_vector            (std::vector<struct iovec*>& addresses, long bytes_copied);
+    void             call_replicate_msgvector            (std::vector<struct msghdr*>& addresses, long bytes_sent);
+    void             call_replicate_mmsgvector           (std::vector<struct mmsghdr*>& addresses, int vlen);
+    void             call_replicate_mmsgvectorlens       (std::vector<struct mmsghdr*>& addresses, int sent, int attempted);
+    void             call_replicate_buffer               (std::vector<const unsigned char*>& addresses, int size);
 
 	//
 	// getter functions. These accept pointers to a specific data structure and
 	// do a deep copy to a local data structure.
 	//
-    sigset_t         call_get_sigset                     (int variantnum, unsigned long sigset_ptr, bool is_old_call);
-    struct sigaction call_get_sigaction                  (int variantnum, unsigned long sigaction_ptr, bool is_old_call);
-    struct sockaddr* call_get_sockaddr                   (int variantnum, unsigned long ptr, __socklen_t addr_len);
+    sigset_t         call_get_sigset                     (int variantnum, void* sigset_ptr, bool is_old_call);
+    struct sigaction call_get_sigaction                  (int variantnum, void* sigaction_ptr, bool is_old_call);
+    struct sockaddr* call_get_sockaddr                   (int variantnum, struct sockaddr* ptr, __socklen_t addr_len);
+
+	//
+	// Argument overwriting support. Mainly used for aliasing
+	//
+	void             call_overwrite_arg_value            (int variantnum, int argnum, long new_value, bool needs_restore);
+	void             call_overwrite_arg_data             (int variantnum, int argnum, int old_len, void* data, int len, bool needs_restore);
+	void             call_restore_args                   (int variantnum);
 
 	// *************************************************************************
     // Specific Syscall handlers (these are all in MVEE_syscalls_handlers.cpp)
