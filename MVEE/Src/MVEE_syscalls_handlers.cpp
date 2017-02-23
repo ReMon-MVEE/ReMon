@@ -6815,6 +6815,22 @@ CALL(openat)
         for (i = 0; i < mvee::numvariants; ++i)
             SETARG3(i, flags);
 
+	// apply aliasing - we don't have to worry about the dirfd. If the filename
+	// is absolute, the dirfd will be ignored
+	if (result & MVEE_CALL_ALLOW)
+	{
+		for (i = 0; i < mvee::numvariants; ++i)
+		{
+			auto alias = mvee::get_alias(i, str1);
+			if (alias != "")
+			{
+				debugf("Variant %d: File %s is aliased to %s\n",
+					  i, str1.c_str(), alias.c_str());
+				call_overwrite_arg_data(i, 2, str1.length() + 1, (void*) alias.c_str(), alias.length() + 1, true);
+			}
+		}
+	}
+
     return result;
 }
 
