@@ -215,9 +215,10 @@ bool monitor::log_ipmon_entry
 void monitor::log_ipmon_state()
 {
 #ifndef MVEE_BENCHMARK
-	debugf("Dumping IPMON buffer " PTRSTR " ...\n", ipmon_buffer);
 	if (! ipmon_buffer)
 		return;
+
+	debugf("Dumping IPMON buffer " PTRSTR " ...\n", ipmon_buffer);
 
 	std::vector<unsigned int> offsets(mvee::numvariants);
 	unsigned int highest = 0;
@@ -633,7 +634,7 @@ void monitor::log_dump_queues(shm_table* shm_table)
         if (!logfile)
             return;
 
-        warnf("dumping queue: %s\n", getTextualBufferType(MVEE_LIBC_ATOMIC_BUFFER));
+        debugf("dumping queue: %s\n", getTextualBufferType(MVEE_LIBC_ATOMIC_BUFFER));
 
 //        warnf("dumping queue: %s - FILE: %s (%d - %s)\n",
 //                    getTextualBufferType(MVEE_LIBC_ATOMIC_BUFFER), logname, logfile, strerror(errno));

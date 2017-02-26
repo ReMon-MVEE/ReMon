@@ -67,7 +67,7 @@ void mvee::init_config_set_defaults()
 	WEAK_INIT_KEY(config["monitor"]["libc_path"]["is_absolute"], false);
 	WEAK_INIT_KEY(config["monitor"]["libgomp_path"]["path"], "/patched_binaries/libgomp/");
 	WEAK_INIT_KEY(config["monitor"]["libgomp_path"]["is_absolute"], false);
-	WEAK_INIT_KEY(config["monitor"]["libstdcpp_path"]["path"], "/patched_binaries/libstdcpp/");
+	WEAK_INIT_KEY(config["monitor"]["libstdcpp_path"]["path"], "/patched_binaries/libstdc++/");
 	WEAK_INIT_KEY(config["monitor"]["libstdcpp_path"]["is_absolute"], false);	
 	WEAK_INIT_KEY(config["monitor"]["libgfortran_path"]["path"], "/patched_binaries/libgfortran/");
 	WEAK_INIT_KEY(config["monitor"]["libgfortran_path"]["is_absolute"], false);

@@ -19,7 +19,7 @@
 -----------------------------------------------------------------------------*/
 static void parse_and_setenv(std::string env)
 {
-	int pos = env.find("=");
+	size_t pos = env.find("=");
 	if (pos != std::string::npos)
 	{
 		std::string key   = env.substr(0, pos);
@@ -104,7 +104,7 @@ void mvee::start_variant(int variantnum)
 		alias = binary;
 
 	// push the basename of the original binary name as argv[0]
-	int pos = binary.rfind("/");
+	size_t pos = binary.rfind("/");
 	if (pos != std::string::npos)
 		args.push_front(binary.substr(pos+1).c_str());
 	else

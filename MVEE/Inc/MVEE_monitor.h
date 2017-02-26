@@ -423,7 +423,7 @@ private:
 	// Argument overwriting support. Mainly used for aliasing
 	//
 	void             call_overwrite_arg_value            (int variantnum, int argnum, long new_value, bool needs_restore);
-	void             call_overwrite_arg_data             (int variantnum, int argnum, int old_len, void* data, int len, bool needs_restore);
+	void             call_overwrite_arg_data             (int variantnum, int argnum, unsigned old_len, void* data, unsigned len, bool needs_restore);
 	void             call_restore_args                   (int variantnum);
 
 	// *************************************************************************

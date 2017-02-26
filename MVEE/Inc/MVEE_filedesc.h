@@ -92,6 +92,7 @@ public:
     void          grab_lock           ();
     void          release_lock        ();
     void          full_release_lock   ();
+    bool          have_unlocked       ();
 
 	//
     // Creating/Deleting file descriptors. These are the functions we use for

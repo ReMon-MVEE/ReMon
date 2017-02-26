@@ -191,7 +191,7 @@ void mvee::init_aliases()
 		for (auto alias : variant_config["alias"])
 		{
 			auto str = alias.asString();
-			int pos = str.find("=");
+			size_t pos = str.find("=");
 			if (pos != std::string::npos)
 			{
 				std::string pattern     = str.substr(0, pos);

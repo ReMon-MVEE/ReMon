@@ -147,7 +147,6 @@ long monitor::call_precall ()
     long                 result = MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
     long                 callnum;
     mvee_syscall_handler handler;
-	mvee_syscall_logger  logger;
 
     // We already know that the syscall number matches so this is safe
     callnum = variants[0].callnum;
@@ -159,7 +158,7 @@ long monitor::call_precall ()
     #ifdef MVEE_GENERATE_EXTRA_STATS
         mvee::in_logging_handler = true;
     #endif
-        logger                   = monitor::syscall_logger_table[callnum][MVEE_LOG_ARGS];
+        mvee_syscall_logger logger = monitor::syscall_logger_table[callnum][MVEE_LOG_ARGS];
         if (logger != MVEE_LOGGER_DONTHAVE && logger != MVEE_LOGGER_DONTNEED)
             (this->*logger)(-1);
     #ifdef MVEE_GENERATE_EXTRA_STATS
@@ -190,7 +189,6 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 {
     long                 result  = 0;
     mvee_syscall_handler handler;
-	mvee_syscall_logger  logger;
     long                 callnum = variants[variantnum].callnum;
 	
     call_grab_syslocks(variantnum, callnum, MVEE_SYSLOCK_PRECALL | MVEE_SYSLOCK_FULL);
@@ -200,7 +198,7 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
     #ifdef MVEE_GENERATE_EXTRA_STATS
         mvee::in_logging_handler = true;
     #endif
-        logger                   = monitor::syscall_logger_table[callnum][MVEE_LOG_ARGS];
+        mvee_syscall_logger logger = monitor::syscall_logger_table[callnum][MVEE_LOG_ARGS];
         if (logger != MVEE_LOGGER_DONTHAVE && logger != MVEE_LOGGER_DONTNEED)
             (this->*logger)(variantnum);
     #ifdef MVEE_GENERATE_EXTRA_STATS
@@ -720,7 +718,6 @@ long monitor::call_postcall_return_unsynced (int variantnum)
 {
     long                 result  = 0;
     mvee_syscall_handler handler;
-	mvee_syscall_logger  logger;
     long                 callnum = variants[variantnum].prevcallnum;
 	
     call_grab_syslocks(variantnum, callnum, MVEE_SYSLOCK_POSTCALL);
@@ -730,7 +727,7 @@ long monitor::call_postcall_return_unsynced (int variantnum)
     #ifdef MVEE_GENERATE_EXTRA_STATS
         mvee::in_logging_handler = true;
     #endif
-        logger                   = monitor::syscall_logger_table[callnum][MVEE_LOG_RETURN];
+        mvee_syscall_logger logger = monitor::syscall_logger_table[callnum][MVEE_LOG_RETURN];
         if (logger != MVEE_LOGGER_DONTHAVE && logger != MVEE_LOGGER_DONTNEED)
             (this->*logger)(variantnum);		
     #ifdef MVEE_GENERATE_EXTRA_STATS
@@ -782,7 +779,6 @@ long monitor::call_postcall_return ()
 {
     long                 result  = 0;
     mvee_syscall_handler handler;
-	mvee_syscall_logger  logger;
     long                 callnum = variants[0].prevcallnum;
 	
     call_grab_syslocks(-1, callnum, MVEE_SYSLOCK_POSTCALL);
@@ -792,7 +788,7 @@ long monitor::call_postcall_return ()
     #ifdef MVEE_GENERATE_EXTRA_STATS
         mvee::in_logging_handler = true;
     #endif
-        logger                   = monitor::syscall_logger_table[callnum][MVEE_LOG_RETURN];
+        mvee_syscall_logger logger = monitor::syscall_logger_table[callnum][MVEE_LOG_RETURN];
         if (logger != MVEE_LOGGER_DONTHAVE && logger != MVEE_LOGGER_DONTNEED)
             (this->*logger)(-1);
     #ifdef MVEE_GENERATE_EXTRA_STATS

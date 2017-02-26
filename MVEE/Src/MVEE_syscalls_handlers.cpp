@@ -76,6 +76,8 @@
 #include <linux/perf_event.h>
 #include <linux/hw_breakpoint.h>
 #include <linux/net.h>
+#include <linux/seccomp.h>
+#include <linux/filter.h>
 #include <asm/prctl.h>
 #include <sys/prctl.h>
 #include <sys/timerfd.h>
@@ -376,7 +378,7 @@ PRECALL(exit)
 	log_calculate_clock_spread();
 #endif
 	
-	set_mmap_table->thread_group_shutting_down = 1;
+//	set_mmap_table->thread_group_shutting_down = 1;
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
@@ -661,6 +663,13 @@ POSTCALL(open)
 			unsynced = 1;
 		}
 
+		if (tmp_path.find("/proc/self") == 0)
+		{
+			std::stringstream pathbuilder;
+			pathbuilder << "/proc/" << variants[0].variantpid << tmp_path.substr(strlen("/proc/self/"));
+			tmp_path = pathbuilder.str();
+		}
+
 		resolved_path = realpath(tmp_path.c_str(), NULL);
 
 		if (!resolved_path)
@@ -673,8 +682,9 @@ POSTCALL(open)
 
 		FileType type = (unsynced == 0) ? FT_REGULAR : FT_SPECIAL;
 		set_fd_table->create_fd_info(type, fds, resolved_path, ARG2(0), ARG2(0) & O_CLOEXEC, state == STATE_IN_MASTERCALL, unsynced);
+#ifdef MVEE_FD_DEBUG
 		set_fd_table->verify_fd_table(getpids());
-
+#endif
 		free(resolved_path);
 		REPLICATEFDRESULT();
 	}
@@ -734,7 +744,9 @@ POSTCALL(close)
 
 		if (call_succeeded)
 			set_fd_table->free_fd_info(ARG1(0));
+#ifdef MVEE_FD_DEBUG
 		set_fd_table->verify_fd_table(getpids());
+#endif
 	}
 	else
 	{
@@ -830,7 +842,6 @@ PRECALL(unlink)
 {
     CHECKPOINTER(1);
     CHECKSTRING(1);
-
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -847,6 +858,10 @@ POSTCALL(unlink)
 		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
     }
 #endif
+#ifndef MVEE_FD_DEBUG
+	set_fd_table->verify_fd_table(getpids());
+#endif
+
     return 0;
 }
 
@@ -860,10 +875,13 @@ void monitor::handle_execve_get_args(int variantnum)
 {
     set_mmap_table->mmap_execve_id = monitorid;
     unsigned int      argc = 0;
+	unsigned int      envc = 0;
 
     std::stringstream args;
+	std::stringstream envs;
 
     set_mmap_table->mmap_startup_info[variantnum].argv.clear();
+	set_mmap_table->mmap_startup_info[variantnum].envp.clear();
 
     // determine number of arguments
     if (ARG2(variantnum))
@@ -878,19 +896,46 @@ void monitor::handle_execve_get_args(int variantnum)
             }
         }
 
+		if (ARG3(variantnum))
+		{
+			while (true)
+			{
+				long res = mvee_wrap_ptrace(PTRACE_PEEKDATA, variants[variantnum].variantpid, ARG3(variantnum) + sizeof(long)*envc++, NULL);
+				if (res == 0 || res == -1)
+				{
+					envc--;
+					break;
+				}
+			}
+		}
+
         if (argc > 0)
         {
             for (unsigned int i = 0; i < argc; ++i)
             {
                 unsigned long argvp = mvee_wrap_ptrace(PTRACE_PEEKDATA, variants[variantnum].variantpid,
                                                        ARG2(variantnum) + sizeof(long)*i, NULL);
-//				warnf("Reading argv[%d] data\n", i);
                 char*         tmp   = mvee_rw_read_string(variants[variantnum].variantpid, (void*)argvp);
-//				warnf("done\n");
                 if (tmp)
                 {
                     set_mmap_table->mmap_startup_info[variantnum].argv.push_back(std::string(tmp));
                     args << tmp << " ";
+                }
+                SAFEDELETEARRAY(tmp);
+            }
+        }
+
+        if (envc > 0)
+        {
+            for (unsigned int i = 0; i < envc; ++i)
+            {
+                unsigned long envp  = mvee_wrap_ptrace(PTRACE_PEEKDATA, variants[variantnum].variantpid,
+                                                       ARG3(variantnum) + sizeof(long)*i, NULL);
+                char*         tmp   = mvee_rw_read_string(variants[variantnum].variantpid, (void*)envp);
+                if (tmp)
+                {
+                    set_mmap_table->mmap_startup_info[variantnum].envp.push_back(std::string(tmp));
+                    envs << tmp << " ";
                 }
                 SAFEDELETEARRAY(tmp);
             }
@@ -903,6 +948,7 @@ void monitor::handle_execve_get_args(int variantnum)
     set_mmap_table->mmap_startup_info[variantnum].image = 
 		mvee::os_normalize_path_name(set_fd_table->get_full_path(variantnum, variants[variantnum].variantpid, AT_FDCWD, (void*)ARG1(variantnum)));
     set_mmap_table->mmap_startup_info[variantnum].serialized_argv = args.str();
+	set_mmap_table->mmap_startup_info[variantnum].serialized_envp = envs.str();
 
 #if defined(MVEE_FILTER_LOGGING) && !defined(MVEE_BENCHMARK)
     if (set_mmap_table->mmap_startup_info[variantnum].image.find("parsec-2.1") != std::string::npos
@@ -923,12 +969,15 @@ LOG_ARGS(execve)
     {
         handle_execve_get_args(i);
 
-        debugf("pid: %d - SYS_EXECVE(%s (0x" PTRSTR ") -- %s (0x" PTRSTR ")\n",
-                   variants[i].variantpid,
-                   set_mmap_table->mmap_startup_info[i].image.c_str(),
-                   ARG1(i),
-                   set_mmap_table->mmap_startup_info[i].serialized_argv.c_str(),
-                   ARG2(i));
+        debugf("pid: %d - SYS_EXECVE(%s (0x" PTRSTR ") -- %s (0x" PTRSTR ") -- %s (0x" PTRSTR ")\n",
+			   variants[i].variantpid,
+			   set_mmap_table->mmap_startup_info[i].image.c_str(),
+			   ARG1(i),
+			   set_mmap_table->mmap_startup_info[i].serialized_argv.c_str(),
+			   ARG2(i),
+			   set_mmap_table->mmap_startup_info[i].serialized_envp.c_str(),
+			   ARG3(i)
+			);
     }
 }
 
@@ -969,7 +1018,25 @@ CALL(execve)
 		variants[variantnum].entry_point_bp_set = false;
 		return MVEE_CALL_ALLOW;
 	}
-	
+
+	// check if the file exists first
+	for (int i = 0; i < mvee::numvariants; ++i)
+	{
+		std::string alias = mvee::get_alias(i, set_mmap_table->mmap_startup_info[i].image);
+		if (alias == "" && access(set_mmap_table->mmap_startup_info[i].image.c_str(), F_OK) == -1)
+		{
+			debugf("variant %d is trying to launch a non-existing program: %s\n", 
+				   i, set_mmap_table->mmap_startup_info[i].image.c_str());
+			return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOENT);
+		}
+		else if (alias != "" && access(alias.c_str(), F_OK) == -1)
+		{
+			debugf("variant %d is trying to launch a non-existing program alias: %s\n", 
+				   i, alias.c_str());
+			return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOENT);
+		}					
+	}
+
 #ifndef MVEE_BENCHMARK
 	if (set_mmap_table->have_diversified_variants)
 	{
@@ -1512,7 +1579,9 @@ POSTCALL(creat)
         char*                      str = mvee_rw_read_string(variants[0].variantpid, (void*)ARG1(0));
 
         set_fd_table->create_fd_info(FT_REGULAR, fds, str, O_WRONLY, false, false, false, 0);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
+#endif
         SAFEDELETEARRAY(str);
     }
 
@@ -1577,7 +1646,9 @@ POSTCALL(dup)
             return 0;
 
         set_fd_table->create_fd_info(fd_info->file_type, fds, fd_info->path.c_str(), fd_info->access_flags, false, master_file, fd_info->unsynced_reads, fd_info->original_file_size);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
+#endif
     }
 
     return 0;
@@ -1614,7 +1685,9 @@ POSTCALL(pipe)
         // add new file descriptor mappings for the created pipe
         set_fd_table->create_fd_info(FT_PIPE_BLOCKING, read_fds,  "pipe:read",  O_RDONLY, false, true);
         set_fd_table->create_fd_info(FT_PIPE_BLOCKING, write_fds, "pipe:write", O_WRONLY, false, true);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
+#endif
     }
 
     return 0;
@@ -1894,9 +1967,15 @@ PRECALL(ioctl)
         case FIONCLEX:
             break;
         default:
+		{
+			// TODO: Remove this. temporary whitelist of nvidia ioctls
+			fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0));
+			if (fd_info->path.find("nvidia") != std::string::npos)
+				break;
             warnf("unknown ioctl: %d (0x%08x)\n", ARG2(0), ARG2(0));
             shutdown(false);
             break;
+		}
     }
 
     if (!is_master)
@@ -2026,7 +2105,9 @@ POSTCALL(fcntl)
                     return 0;
 
                 set_fd_table->create_fd_info(fd_info->file_type, fds, fd_info->path.c_str(), fd_info->access_flags, (ARG2(0) == F_DUPFD_CLOEXEC) ? true : fd_info->close_on_exec, state == STATE_IN_MASTERCALL, fd_info->unsynced_reads, fd_info->original_file_size);
+#ifdef MVEE_FD_DEBUG
                 set_fd_table->verify_fd_table(getpids());
+#endif
             }
 			else if (ARG2(0) == F_SETFL)
 			{
@@ -2160,7 +2241,9 @@ POSTCALL(dup2)
                 return 0;
 
             set_fd_table->create_fd_info(fd_info->file_type, fds, fd_info->path.c_str(), fd_info->access_flags, false, fd_info->master_file, fd_info->unsynced_reads, fd_info->original_file_size);
+#ifdef MVEE_FD_DEBUG
             set_fd_table->verify_fd_table(getpids());
+#endif
         }
     }
 
@@ -2908,7 +2991,9 @@ POSTCALL(socket)
 		
 		FileType type = (ARG2(0) & SOCK_NONBLOCK) ? FT_SOCKET_NON_BLOCKING : FT_SOCKET_BLOCKING;
         set_fd_table->create_fd_info(type, fds, "sock:unnamed", 0, (ARG2(0) & SOCK_CLOEXEC) ? true : false, true);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
+#endif
     }
     return 0;
 }
@@ -3128,7 +3213,9 @@ POSTCALL(socketpair)
 		FileType type = (ARG2(0) & SOCK_NONBLOCK) ? FT_SOCKET_NON_BLOCKING : FT_SOCKET_BLOCKING;
         set_fd_table->create_fd_info(type, fds,  "sock:unnamed", 0, (ARG2(0) & SOCK_CLOEXEC) ? true : false, true);
         set_fd_table->create_fd_info(type, fds2, "sock:unnamed", 0, (ARG2(0) & SOCK_CLOEXEC) ? true : false, true);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
+#endif
 
         for (int i = 1; i < mvee::numvariants; ++i)
         {
@@ -3504,13 +3591,17 @@ POSTCALL(accept4)
 
 			FileType type = (ARG4(0) & SOCK_NONBLOCK) ? FT_SOCKET_NON_BLOCKING : FT_SOCKET_BLOCKING;
             set_fd_table->create_fd_info(type, fds, text_addr, 0, (ARG4(0) & SOCK_CLOEXEC) ? true : false, true, 0);
+#ifdef MVEE_FD_DEBUG
             set_fd_table->verify_fd_table(getpids());
+#endif
         }
         else
         {
 			FileType type = (ARG4(0) & SOCK_NONBLOCK) ? FT_SOCKET_NON_BLOCKING : FT_SOCKET_BLOCKING;
             set_fd_table->create_fd_info(type, fds, "sock:unknown", 0, (ARG4(0) & SOCK_CLOEXEC) ? true : false, true);
+#ifdef MVEE_FD_DEBUG
             set_fd_table->verify_fd_table(getpids());
+#endif
         }
     }
     return 0;
@@ -3551,7 +3642,9 @@ POSTCALL(eventfd2)
 
 		FileType type = (ARG2(0) & EFD_NONBLOCK) ? FT_POLL_NON_BLOCKING : FT_POLL_BLOCKING;
         set_fd_table->create_fd_info(type, fds, "eventfd", 0, (ARG2(0) & EFD_CLOEXEC) ? true : false, true);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
+#endif
     }
     return 0;
 }
@@ -3589,7 +3682,9 @@ POSTCALL(epoll_create1)
         std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
 
         set_fd_table->create_fd_info(FT_POLL_BLOCKING, fds, "epoll_sock", 0, (ARG1(0) & EPOLL_CLOEXEC) ? true : false, true);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
+#endif
     }
     return 0;
 }
@@ -4969,6 +5064,10 @@ PRECALL(mmap)
     if ((int)ARG5(0) !=-1 || (ARG4(0) & MAP_ANONYMOUS))
         CHECKARG(6);
 
+#ifdef MVEE_FD_DEBUG
+	set_fd_table->verify_fd_table(getpids());
+#endif
+
     MAPFDS(5);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
@@ -4992,13 +5091,42 @@ CALL(mmap)
     {
         fd_info* info = set_fd_table->get_fd_info(ARG5(0));
 
+		// Handle firefox shm corner case here.  FF has threads that create
+		// temporary shm backing files.  These files are created, unlinked,
+		// dupped, mmaped, and then closed (both the original and the dupped
+		// version).  At some point, a copy of the file pops up in the fd table.
+		// I don't know precisely why, but I'm assuming it happens when the file
+		// is written to for the first time.  Unfortunately, we currently have
+		// no way to see when/where this fd gets created.  As a temporary
+		// workaround, we can resynchronize the MVEE fd table with the fd table
+		// in /proc/pid/fd here.
+		//
+		// A better workaround would probably be to install an inotify_watch
+		// on the /proc/pid/fd folders for all of our variants.
+		if (!info && !ipmon_fd_handling)
+		{
+			// This is not fully implemented yet
+			set_fd_table->refresh_fd_table(getpids());
+			info = set_fd_table->get_fd_info(ARG5(0));
+		}
+
         if (!info)
         {		
 			if (ipmon_fd_handling)
 				return MVEE_CALL_ALLOW;
 
             warnf("mmap2 request with an unknown backing file!!!\n");
+
+#ifndef MVEE_BENCHMARK
+			set_fd_table->print_fd_table_proc(variants[0].variantpid);
+			log_variant_backtrace(0);
+#endif
+
+#ifndef MVEE_ALLOW_SHM
             return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
+#else
+			return MVEE_CALL_ALLOW;
+#endif
         }
 
         if ((info->access_flags & O_RDWR) && (ARG4(0) & MAP_SHARED))
@@ -5009,6 +5137,7 @@ CALL(mmap)
             warnf("> map prot flags = %s\n", getTextualProtectionFlags(ARG3(0)).c_str());
 //#endif
 
+#ifndef MVEE_ALLOW_SHM
             if (ARG3(0) & PROT_WRITE)
             {
                 if (info->path != "")
@@ -5072,6 +5201,7 @@ CALL(mmap)
                     }
                 }
             }
+#endif
         }
     }
 
@@ -5086,6 +5216,10 @@ POSTCALL(mmap)
 			UNMAPFDS(5);
 		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 	}	
+
+#ifdef MVEE_FD_DEBUG
+	set_fd_table->verify_fd_table(getpids());
+#endif
 
 	if IS_SYNCED_CALL
 	{
@@ -5102,6 +5236,9 @@ POSTCALL(mmap)
 			if (!info)
 			{
 				warnf("mmap2 request with backing file but backing file info not found!\n");
+#ifdef MVEE_ALLOW_SHM
+				return 0;
+#endif
 				shutdown(false);
 				return 0;
 			}
@@ -6055,7 +6192,7 @@ PRECALL(sched_setaffinity)
 					return 0;
 				}
 
-				for (int j = 0; j < sizeof(cpu_set_t) * 8; ++j)
+				for (int j = 0; j < (int)(sizeof(cpu_set_t) * 8); ++j)
 				{
 					if (CPU_ISSET(j, &available_cores) &&
 						(j < first_core_available || j >= first_core_available + num_cores_variant))
@@ -6189,7 +6326,9 @@ POSTCALL(epoll_create)
         std::vector<unsigned long> fds(mvee::numvariants);
         std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
         set_fd_table->create_fd_info(FT_POLL_BLOCKING, fds, "epoll_sock", 0, false, true);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
+#endif
     }
     return 0;
 }
@@ -6723,7 +6862,9 @@ POSTCALL(inotify_init)
         std::vector<unsigned long> fds(mvee::numvariants);
         std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
         set_fd_table->create_fd_info(FT_POLL_BLOCKING, fds, "inotify_init", 0, false, true);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
+#endif
     }
 
     return 0;
@@ -6857,8 +6998,9 @@ POSTCALL(openat)
         std::vector<unsigned long> fds           = call_postcall_get_result_vector();
         REPLICATEFDRESULT();
         set_fd_table->create_fd_info(FT_REGULAR, fds, resolved_path, ARG3(0), ARG3(0) & O_CLOEXEC, state == STATE_IN_MASTERCALL, false);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
-
+#endif
         free(resolved_path);
     }
 
@@ -7103,6 +7245,60 @@ PRECALL(faccessat)
 }
 
 /*-----------------------------------------------------------------------------
+  sys_unshare - reverses the effect of sharing certain kernel data structures
+  through sys_clone
+-----------------------------------------------------------------------------*/
+LOG_ARGS(unshare)
+{
+    MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
+
+    for (int i = start; i < lim; ++i)
+    {
+        debugf("pid: %d - SYS_UNSHARE(%d)\n",
+			   variants[i].variantpid, ARG1(i));
+	}
+}
+
+PRECALL(unshare)
+{
+	CHECKARG(1);
+	return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+}
+
+CALL(unshare)
+{
+	// 
+	// This may be downright impossible to do in the general case as we do not
+	// have a stop-the-world primitive in the MVEE.  There are two cases that we
+	// COULD handle right now:
+	// 
+	// 1) Unshare is called with arg 0. This is a no-op 
+	// 2) Unshare is called by a single-threaded process. In this case, we leave
+	// the tables of the parent process intact, and we create new copies of
+	// whatever tables are being unshared by this process
+	//
+
+	if (ARG1(0) == 0)
+	{
+		// this is a no-op... fine
+		return MVEE_CALL_ALLOW;
+	}
+	else if (!is_program_multithreaded())
+	{
+		// We can handle this...
+		warnf("Unshare called by singlethreaded process. This is not implemented yet!\n");
+		return MVEE_CALL_ALLOW;
+	}
+	else
+	{
+		// Program is multithreaded and tables are being unshared.
+		// No way to handle this right now
+		warnf("Unshare called by multithreaded process. This is not implemented yet!\n");
+		return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
+	}
+}
+
+/*-----------------------------------------------------------------------------
   sys_utimensat - (int dirfd, const char *pathname,
   const struct timespec times[2], int flags)
 -----------------------------------------------------------------------------*/
@@ -7193,7 +7389,9 @@ POSTCALL(timerfd_create)
     {
 		FileType type = (ARG2(0) & TFD_NONBLOCK) ? FT_POLL_NON_BLOCKING : FT_POLL_BLOCKING;
         set_fd_table->create_fd_info(type, fds, "timer", O_RDWR, (ARG2(0) & TFD_CLOEXEC) ? true : false, true);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
+#endif
     }
 
     return 0;
@@ -7321,7 +7519,9 @@ POSTCALL(dup3)
                 return 0;
 
             set_fd_table->create_fd_info(fd_info->file_type, fds, fd_info->path.c_str(), fd_info->access_flags, (ARG3(0) != 0) ? true : false, fd_info->master_file, fd_info->unsynced_reads, fd_info->original_file_size);
+#ifdef MVEE_FD_DEBUG
             set_fd_table->verify_fd_table(getpids());
+#endif
         }
     }
     return 0;
@@ -7360,7 +7560,9 @@ POSTCALL(pipe2)
 		FileType type = (ARG2(0) & O_NONBLOCK) ? FT_PIPE_NON_BLOCKING : FT_PIPE_BLOCKING;
         set_fd_table->create_fd_info(type, read_fds,  "pipe2:read",  O_RDONLY, ARG2(0) & O_CLOEXEC, true);
         set_fd_table->create_fd_info(type, write_fds, "pipe2:write", O_WRONLY, ARG2(0) & O_CLOEXEC, true);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
+#endif
     }
 
     return 0;
@@ -7384,7 +7586,9 @@ POSTCALL(inotify_init1)
 
 		FileType type = (ARG1(0) & IN_NONBLOCK) ? FT_POLL_NON_BLOCKING : FT_POLL_BLOCKING;
         set_fd_table->create_fd_info(type, fds, "inotify_init1", 0, (ARG1(0) & IN_CLOEXEC) ? true : false, false);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
+#endif
     }
 
     return 0;
@@ -7431,10 +7635,39 @@ POSTCALL(perf_event_open)
 		std::vector<unsigned long> fds = call_postcall_get_result_vector();
 		REPLICATEFDRESULT();
 		set_fd_table->create_fd_info(FT_SPECIAL, fds, "perf_event", 0, cloexec, false, true);
+#ifdef MVEE_FD_DEBUG
 		set_fd_table->verify_fd_table(getpids());
+#endif
     }
 
     return 0;
+}
+
+/*-----------------------------------------------------------------------------
+  sys_seccomp
+-----------------------------------------------------------------------------*/
+LOG_ARGS(seccomp)
+{
+
+}
+
+PRECALL(seccomp)
+{
+	CHECKARG(1);
+	switch(ARG1(0))
+	{
+		// only allow read/write/exit
+		case SECCOMP_SET_MODE_STRICT:
+			break;
+		// allow a specific set of syscalls
+		case SECCOMP_SET_MODE_FILTER:
+			break;
+		default:
+			warnf("unknown seccomp option used: %d\n", ARG1(0));
+			return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
+
+	}
+	return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -7534,8 +7767,11 @@ void mvee::init_syslocks()
     REG_LOCKS(__NR_execve,              MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN | MVEE_SYSLOCK_SHM | MVEE_SYSLOCK_FULL);
     REG_LOCKS(__NR_clone,               MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN | MVEE_SYSLOCK_SHM | MVEE_SYSLOCK_FULL);
 
+	// Special case that affects all tables
+    REG_LOCKS(__NR_unshare,             MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN | MVEE_SYSLOCK_SHM | MVEE_SYSLOCK_FULL);
+
     // normal syscalls that create/destroy/modify file descriptors
-    REG_LOCKS(__NR_open,                MVEE_SYSLOCK_FD | MVEE_SYSLOCK_FULL);
+    REG_LOCKS(__NR_open,                MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL | MVEE_SYSLOCK_POSTCALL);
     REG_LOCKS(__NR_openat,              MVEE_SYSLOCK_FD | MVEE_SYSLOCK_FULL);
     REG_LOCKS(__NR_dup,                 MVEE_SYSLOCK_FD | MVEE_SYSLOCK_FULL);
     REG_LOCKS(__NR_dup2,                MVEE_SYSLOCK_FD | MVEE_SYSLOCK_FULL);

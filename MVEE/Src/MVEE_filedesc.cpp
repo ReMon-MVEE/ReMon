@@ -328,7 +328,7 @@ std::map<unsigned long, fd_info>::iterator fd_table::free_fd_info (unsigned long
 -----------------------------------------------------------------------------*/
 void fd_table::free_cloexec_fds ()
 {
-    for (auto it = table.begin(); it != table.end(); it++)
+    for (auto it = table.begin(); it != table.end(); )
     {
         /*
          * POSIX.1-2001 says that if file
@@ -348,6 +348,10 @@ void fd_table::free_cloexec_fds ()
             debugf("removing cloexec fd: %d (%s)\n", it->second.fds[0], it->second.path.c_str());
             it = free_fd_info(it->second.fds[0]);
         }
+		else
+		{
+			it++;
+		}
     }
 }
 
@@ -455,12 +459,27 @@ bool fd_table::verify_path(std::string& mvee_path, const char* proc_path)
         return true;
 
     if (strstr(proc_path, "socket:") == proc_path
-        && mvee_path.find("sock:") == 0)
+        && (mvee_path.find("sock:") == 0 || mvee_path.find("clientsock:") == 0 || mvee_path.find("srvsock:") == 0))
         return true;
 
     if (strcmp(proc_path, "anon_inode:[eventfd]") == 0
         && mvee_path == "eventfd")
         return true;
+
+    if (strcmp(proc_path, "anon_inode:[eventpoll]") == 0
+        && mvee_path == "epoll_sock")
+        return true;
+
+    if (strcmp(proc_path, "anon_inode:inotify") == 0
+        && mvee_path.find("inotify_init") == 0)
+        return true;
+
+	if (strstr(proc_path, "/proc/") == proc_path && 
+		mvee_path.find("/proc/") == 0)
+		return true;
+
+	if (strstr(proc_path, ".mozilla/firefox/Crash"))
+		return true;
 
     return false;
 }
@@ -494,6 +513,16 @@ void fd_table::verify_fd_table(std::vector<pid_t> pids)
             strcpy(path, it->second.c_str());
 
             fd_info* info = get_fd_info(fd, i);
+
+			if (!info && strstr(path, "socket:") != path)
+			{
+				warnf("FD TABLE VERIFICATION FAILED - A wild FD appeared! - variant: %d (PID: %d)\n",
+					  i, pids[i]);
+				warnf("> fd seen in /proc: %d - %s\n", fd, path);
+				print_fd_table();
+				print_fd_table_proc(pids[i]);
+				return;
+			}
 
             if (info && !verify_path(info->path, path))
             {
@@ -645,6 +674,16 @@ void fd_table::full_release_lock()
 {
     while (lock.__data.__owner == syscall(__NR_gettid))
         release_lock();
+}
+
+/*-----------------------------------------------------------------------------
+    have_unlocked
+-----------------------------------------------------------------------------*/
+bool fd_table::have_unlocked()
+{
+	if (lock.__data.__owner == syscall(__NR_gettid))
+		return false;
+	return true;
 }
 
 /*-----------------------------------------------------------------------------

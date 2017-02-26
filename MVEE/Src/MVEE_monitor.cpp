@@ -377,6 +377,17 @@ void monitor::rewrite_execve_args(int variantnum, bool write_to_stack, bool rewr
     std::deque<char*> argv   = get_original_argv(variantnum);
 	std::deque<char*> envp;
 	pid_t pid = variants[variantnum].variantpid;
+	std::string lib_path_from_env;
+
+	// See if we have any LD_LIBRARY_PATH in the envp vars
+	for (auto envp : set_mmap_table->mmap_startup_info[variantnum].envp)
+	{
+		if (envp.find("LD_LIBRARY_PATH=") == 0)
+		{
+			lib_path_from_env = envp.substr(strlen("LD_LIBRARY_PATH="));
+			break;
+		}
+	}
 
 	// We might want to do this if we want to restart a variant altogether
 	if (rewrite_envp)
@@ -418,16 +429,18 @@ void monitor::rewrite_execve_args(int variantnum, bool write_to_stack, bool rewr
 	}
 
 	// insert custom library path
-	std::string lib_path;
+	std::stringstream lib_path;
     if (!(*mvee::config_variant_exec)["library_path"].isNull())
     {
-		lib_path = (*mvee::config_variant_exec)["library_path"].asString();
-		argv.push_front(mvee::strdup(lib_path.c_str()));
+		lib_path << (*mvee::config_variant_exec)["library_path"].asString();
+		if (lib_path_from_env.length() > 0)
+			lib_path << ":" << lib_path_from_env;
+		argv.push_front(mvee::strdup(lib_path.str().c_str()));
 		argv.push_front(mvee::strdup("--library-path"));
     }
 
 	// insert ELF interpreter if necessary
-	if (lib_path.length() > 0)
+	if (lib_path.str().length() > 0)
 	{
 		if ((*mvee::config_variant_global)["hide_vdso"].asBool() ||
 			(*mvee::config_variant_global)["non_overlapping_mmaps"].asInt())
@@ -1791,6 +1804,13 @@ void monitor::handle_syscall_exit_event(int index)
                    variants[index].variantpid,
                    variants[index].prevcallnum,
                    getTextualSyscall(variants[index].prevcallnum));
+#ifndef MVEE_BENCHMARK
+		if (!set_fd_table->have_unlocked())
+		{
+			warnf("FD table deadlock detected. Shutting down\n");
+			shutdown(false);
+		}
+#endif
         return;
     }
 
@@ -1856,6 +1876,13 @@ void monitor::handle_syscall_exit_event(int index)
             }
             state = STATE_NORMAL;
             call_resume_all();
+#ifndef MVEE_BENCHMARK
+			if (!set_fd_table->have_unlocked())
+			{
+				warnf("FD table deadlock detected. Shutting down\n");
+				shutdown(false);
+			}
+#endif
             return;
         }
 
@@ -1897,6 +1924,15 @@ void monitor::handle_syscall_exit_event(int index)
     {
         sig_restart_partially_interrupted_syscall();
     }
+
+#ifndef MVEE_BENCHMARK
+	if (!set_fd_table->have_unlocked())
+	{
+		warnf("FD table deadlock detected. Shutting down\n");
+		shutdown(false);
+	}
+#endif
+	
 }
 
 /*-----------------------------------------------------------------------------

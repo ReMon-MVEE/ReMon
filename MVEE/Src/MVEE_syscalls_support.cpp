@@ -441,10 +441,9 @@ bool monitor::call_compare_msgvectors(std::vector<struct msghdr*>& addresses, bo
     memset(&master_msg, 0, sizeof(struct msghdr));
     memset(&msg,        0, sizeof(struct msghdr));
 
-    if (!mvee_rw_read_struct(variants[0].variantpid, addresses[0], sizeof(struct msghdr), &master_msg)
-        || master_msg.msg_iovlen <= 0)
+    if (!mvee_rw_read_struct(variants[0].variantpid, addresses[0], sizeof(struct msghdr), &master_msg))
     {
-        warnf("couldn't read master msgvector - master iovlen: %d\n", master_msg.msg_iovlen);
+        warnf("couldn't read master msgvector\n");
         return false;
     }
 
@@ -1062,7 +1061,7 @@ std::string monitor::call_serialize_io_buffer(int variantnum, const unsigned cha
 #ifdef MVEE_NO_RW_LOGGING
     return std::string("<rw logging disabled>");
 #else
-    char* result = (char*)mvee_rw_read_data(variants[variantnum].variantpid, buf, buflen, 1);
+    char* result = (char*)mvee_rw_read_data(variants[variantnum].variantpid, (void*) buf, buflen, 1);
 
     if (result)
     {
@@ -1156,9 +1155,9 @@ void monitor::call_overwrite_arg_data
 (
 	int variantnum,
 	int argnum,
-	int old_len,
+	unsigned old_len,
 	void* data,
-	int new_len,
+	unsigned new_len,
 	bool needs_restore
 )
 {
