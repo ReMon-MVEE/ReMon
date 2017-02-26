@@ -5064,10 +5064,6 @@ PRECALL(mmap)
     if ((int)ARG5(0) !=-1 || (ARG4(0) & MAP_ANONYMOUS))
         CHECKARG(6);
 
-#ifdef MVEE_FD_DEBUG
-	set_fd_table->verify_fd_table(getpids());
-#endif
-
     MAPFDS(5);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
@@ -5105,8 +5101,8 @@ CALL(mmap)
 		// on the /proc/pid/fd folders for all of our variants.
 		if (!info && !ipmon_fd_handling)
 		{
-			// This is not fully implemented yet
-			set_fd_table->refresh_fd_table(getpids());
+			if (!set_fd_table->add_missing_fds(getpids()))
+				shutdown(false);
 			info = set_fd_table->get_fd_info(ARG5(0));
 		}
 

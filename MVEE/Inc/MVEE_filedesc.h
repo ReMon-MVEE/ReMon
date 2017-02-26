@@ -106,6 +106,7 @@ public:
 	//
 	// Wipe the fd table and repopulate it using /proc/<pid>/fd
     //
+    bool          add_missing_fds     (std::vector<pid_t> variant_pids);
 	void          refresh_fd_table    (std::vector<pid_t> variant_pids);
 
 	// Temporary files management. These functions are used for unsynchronized
