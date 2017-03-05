@@ -1,211 +1,252 @@
-diff --unified -r nginx-1.4.0.orig/src/core/ngx_file.c nginx-1.4.0/src/core/ngx_file.c
---- nginx-1.4.0.orig/src/core/ngx_file.c	2017-01-31 18:07:17.052516241 -0800
-+++ nginx-1.4.0/src/core/ngx_file.c	2017-02-01 16:05:41.256483162 -0800
-@@ -7,10 +7,11 @@
+diff -r --unified nginx-1.8.0.orig/src/core/ngx_connection.c nginx-1.8.0-new/src/core/ngx_connection.c
+--- nginx-1.8.0.orig/src/core/ngx_connection.c	2015-04-21 07:11:59.000000000 -0700
++++ nginx-1.8.0-new/src/core/ngx_connection.c	2017-03-02 16:27:17.264257822 -0800
+@@ -1005,7 +1005,7 @@
+         /* need cast as ngx_cycle is volatile */
  
- #include <ngx_config.h>
- #include <ngx_core.h>
-+#include <stdatomic.h>
+         ngx_queue_insert_head(
+-            (ngx_queue_t *) &ngx_cycle->reusable_connections_queue, &c->queue);
++            (ngx_queue_t __attribute__((nonsync)) *) &ngx_cycle->reusable_connections_queue, &c->queue);
  
- 
--static ngx_atomic_t   temp_number = 0;
--ngx_atomic_t         *ngx_temp_number = &temp_number;
-+static _Atomic ngx_atomic_t   temp_number = 0;
-+_Atomic ngx_atomic_t  *ngx_temp_number = &temp_number;
- ngx_atomic_int_t      ngx_random_number = 123456;
- 
- 
-@@ -229,7 +230,7 @@
- 
-     add = collision ? ngx_random_number : 1;
- 
--    n = ngx_atomic_fetch_add(ngx_temp_number, add);
-+    n = atomic_fetch_add(ngx_temp_number, add);
- 
-     return n + add;
- }
-diff --unified -r nginx-1.4.0.orig/src/core/ngx_file.h nginx-1.4.0/src/core/ngx_file.h
---- nginx-1.4.0.orig/src/core/ngx_file.h	2017-01-31 18:07:17.052516241 -0800
-+++ nginx-1.4.0/src/core/ngx_file.h	2017-02-01 15:53:39.167242074 -0800
-@@ -144,7 +144,7 @@
- char *ngx_conf_set_access_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+ #if (NGX_STAT_STUB)
+         (void) ngx_atomic_fetch_add(ngx_stat_waiting, 1);
+diff -r --unified nginx-1.8.0.orig/src/core/ngx_cycle.c nginx-1.8.0-new/src/core/ngx_cycle.c
+--- nginx-1.8.0.orig/src/core/ngx_cycle.c	2015-04-21 07:11:59.000000000 -0700
++++ nginx-1.8.0-new/src/core/ngx_cycle.c	2017-03-02 16:33:09.220251520 -0800
+@@ -17,7 +17,7 @@
+ static void ngx_clean_old_cycles(ngx_event_t *ev);
  
  
--extern ngx_atomic_t      *ngx_temp_number;
-+extern _Atomic ngx_atomic_t       *ngx_temp_number;
- extern ngx_atomic_int_t   ngx_random_number;
+-volatile ngx_cycle_t  *ngx_cycle;
++volatile __attribute__((nonsync)) ngx_cycle_t  *ngx_cycle;
+ ngx_array_t            ngx_old_cycles;
+ 
+ static ngx_pool_t     *ngx_temp_pool;
+@@ -43,7 +43,7 @@
+     char               **senv, **env;
+     ngx_uint_t           i, n;
+     ngx_log_t           *log;
+-    ngx_time_t          *tp;
++    volatile ngx_time_t          *tp;
+     ngx_conf_t           conf;
+     ngx_pool_t          *pool;
+     ngx_cycle_t         *cycle, **old;
+diff -r --unified nginx-1.8.0.orig/src/core/ngx_cycle.h nginx-1.8.0-new/src/core/ngx_cycle.h
+--- nginx-1.8.0.orig/src/core/ngx_cycle.h	2015-04-21 07:11:59.000000000 -0700
++++ nginx-1.8.0-new/src/core/ngx_cycle.h	2017-03-02 16:32:54.293251787 -0800
+@@ -135,7 +135,7 @@
+     size_t size, void *tag);
  
  
-diff --unified -r nginx-1.4.0.orig/src/core/ngx_shmtx.h nginx-1.4.0/src/core/ngx_shmtx.h
---- nginx-1.4.0.orig/src/core/ngx_shmtx.h	2017-01-31 18:07:17.052516241 -0800
-+++ nginx-1.4.0/src/core/ngx_shmtx.h	2017-02-01 16:06:40.959998137 -0800
-@@ -14,18 +14,18 @@
+-extern volatile ngx_cycle_t  *ngx_cycle;
++extern volatile __attribute__((nonsync)) ngx_cycle_t  *ngx_cycle;
+ extern ngx_array_t            ngx_old_cycles;
+ extern ngx_module_t           ngx_core_module;
+ extern ngx_uint_t             ngx_test_config;
+diff -r --unified nginx-1.8.0.orig/src/core/ngx_times.h nginx-1.8.0-new/src/core/ngx_times.h
+--- nginx-1.8.0.orig/src/core/ngx_times.h	2015-04-21 07:12:00.000000000 -0700
++++ nginx-1.8.0-new/src/core/ngx_times.h	2017-03-02 16:28:09.703256883 -0800
+@@ -34,7 +34,7 @@
+ extern volatile ngx_time_t  *ngx_cached_time;
  
+ #define ngx_time()           ngx_cached_time->sec
+-#define ngx_timeofday()      (ngx_time_t *) ngx_cached_time
++#define ngx_timeofday()      (volatile ngx_time_t *) ngx_cached_time
  
- typedef struct {
--    ngx_atomic_t   lock;
-+    _Atomic ngx_atomic_t   lock;
- #if (NGX_HAVE_POSIX_SEM)
--    ngx_atomic_t   wait;
-+    _Atomic ngx_atomic_t   wait;
+ extern volatile ngx_str_t    ngx_cached_err_log_time;
+ extern volatile ngx_str_t    ngx_cached_http_time;
+diff -r --unified nginx-1.8.0.orig/src/event/ngx_event_accept.c nginx-1.8.0-new/src/event/ngx_event_accept.c
+--- nginx-1.8.0.orig/src/event/ngx_event_accept.c	2015-04-21 07:12:00.000000000 -0700
++++ nginx-1.8.0-new/src/event/ngx_event_accept.c	2017-03-02 16:29:46.355255152 -0800
+@@ -33,7 +33,7 @@
  #endif
- } ngx_shmtx_sh_t;
  
+     if (ev->timedout) {
+-        if (ngx_enable_accept_events((ngx_cycle_t *) ngx_cycle) != NGX_OK) {
++        if (ngx_enable_accept_events((ngx_cycle_t __attribute__((nonsync)) *) ngx_cycle) != NGX_OK) {
+             return;
+         }
  
- typedef struct {
- #if (NGX_HAVE_ATOMIC_OPS)
--    ngx_atomic_t  *lock;
-+    _Atomic ngx_atomic_t  *lock;
- #if (NGX_HAVE_POSIX_SEM)
--    ngx_atomic_t  *wait;
-+    _Atomic ngx_atomic_t  *wait;
-     ngx_uint_t     semaphore;
-     sem_t          sem;
- #endif
-diff --unified -r nginx-1.4.0.orig/src/core/ngx_spinlock.c nginx-1.4.0/src/core/ngx_spinlock.c
---- nginx-1.4.0.orig/src/core/ngx_spinlock.c	2017-01-31 18:07:17.051516249 -0800
-+++ nginx-1.4.0/src/core/ngx_spinlock.c	2017-02-01 15:57:59.124200194 -0800
-@@ -10,7 +10,7 @@
+@@ -112,7 +112,7 @@
+             }
  
+             if (err == NGX_EMFILE || err == NGX_ENFILE) {
+-                if (ngx_disable_accept_events((ngx_cycle_t *) ngx_cycle)
++                if (ngx_disable_accept_events((ngx_cycle_t __attribute__((nonsync)) *) ngx_cycle)
+                     != NGX_OK)
+                 {
+                     return;
+diff -r --unified nginx-1.8.0.orig/src/event/ngx_event.c nginx-1.8.0-new/src/event/ngx_event.c
+--- nginx-1.8.0.orig/src/event/ngx_event.c	2015-04-21 07:12:00.000000000 -0700
++++ nginx-1.8.0-new/src/event/ngx_event.c	2017-03-02 16:28:58.431256011 -0800
+@@ -433,7 +433,7 @@
+     u_char              *shared;
+     size_t               size, cl;
+     ngx_shm_t            shm;
+-    ngx_time_t          *tp;
++    volatile ngx_time_t          *tp;
+     ngx_core_conf_t     *ccf;
+     ngx_event_conf_t    *ecf;
  
- void
--ngx_spinlock(ngx_atomic_t *lock, ngx_atomic_int_t value, ngx_uint_t spin)
-+ngx_spinlock(_Atomic ngx_atomic_t *lock, ngx_atomic_int_t value, ngx_uint_t spin)
+diff -r --unified nginx-1.8.0.orig/src/http/modules/ngx_http_autoindex_module.c nginx-1.8.0-new/src/http/modules/ngx_http_autoindex_module.c
+--- nginx-1.8.0.orig/src/http/modules/ngx_http_autoindex_module.c	2015-04-21 07:12:00.000000000 -0700
++++ nginx-1.8.0-new/src/http/modules/ngx_http_autoindex_module.c	2017-03-02 16:37:04.221247311 -0800
+@@ -435,7 +435,7 @@
+     ngx_buf_t                      *b;
+     ngx_int_t                       size;
+     ngx_uint_t                      i, utf8;
+-    ngx_time_t                     *tp;
++    volatile ngx_time_t                     *tp;
+     ngx_http_autoindex_entry_t     *entry;
+     ngx_http_autoindex_loc_conf_t  *alcf;
+ 
+diff -r --unified nginx-1.8.0.orig/src/http/modules/ngx_http_limit_req_module.c nginx-1.8.0-new/src/http/modules/ngx_http_limit_req_module.c
+--- nginx-1.8.0.orig/src/http/modules/ngx_http_limit_req_module.c	2015-04-21 07:12:00.000000000 -0700
++++ nginx-1.8.0-new/src/http/modules/ngx_http_limit_req_module.c	2017-03-02 16:37:29.601246857 -0800
+@@ -362,7 +362,7 @@
  {
- 
- #if (NGX_HAVE_ATOMIC_OPS)
-diff --unified -r nginx-1.4.0.orig/src/core/ngx_times.c nginx-1.4.0/src/core/ngx_times.c
---- nginx-1.4.0.orig/src/core/ngx_times.c	2017-01-31 18:07:17.052516241 -0800
-+++ nginx-1.4.0/src/core/ngx_times.c	2017-02-01 15:58:47.358816405 -0800
-@@ -21,7 +21,7 @@
- #define NGX_TIME_SLOTS   64
- 
- static ngx_uint_t        slot;
--static ngx_atomic_t      ngx_time_lock;
-+static _Atomic ngx_atomic_t      ngx_time_lock;
- 
- volatile ngx_msec_t      ngx_current_msec;
- volatile ngx_time_t     *ngx_cached_time;
-diff --unified -r nginx-1.4.0.orig/src/event/ngx_event.c nginx-1.4.0/src/event/ngx_event.c
---- nginx-1.4.0.orig/src/event/ngx_event.c	2017-01-31 18:07:17.049516266 -0800
-+++ nginx-1.4.0/src/event/ngx_event.c	2017-02-01 16:43:05.469270212 -0800
-@@ -45,11 +45,11 @@
- ngx_event_actions_t   ngx_event_actions;
- 
- 
--static ngx_atomic_t   connection_counter = 1;
--ngx_atomic_t         *ngx_connection_counter = &connection_counter;
-+static _Atomic ngx_atomic_t   connection_counter = 1;
-+_Atomic ngx_atomic_t  *ngx_connection_counter = &connection_counter;
- 
- 
--ngx_atomic_t         *ngx_accept_mutex_ptr;
-+_Atomic ngx_atomic_t *ngx_accept_mutex_ptr;
- ngx_shmtx_t           ngx_accept_mutex;
- ngx_uint_t            ngx_use_accept_mutex;
- ngx_uint_t            ngx_accept_events;
-@@ -529,7 +529,7 @@
- 
-     shared = shm.addr;
- 
--    ngx_accept_mutex_ptr = (ngx_atomic_t *) shared;
-+    ngx_accept_mutex_ptr = (_Atomic ngx_atomic_t *) shared;
-     ngx_accept_mutex.spin = (ngx_uint_t) -1;
- 
-     if (ngx_shmtx_create(&ngx_accept_mutex, (ngx_shmtx_sh_t *) shared,
-@@ -539,7 +539,7 @@
-         return NGX_ERROR;
-     }
- 
--    ngx_connection_counter = (ngx_atomic_t *) (shared + 1 * cl);
-+    ngx_connection_counter = (_Atomic ngx_atomic_t *) (shared + 1 * cl);
- 
-     (void) ngx_atomic_cmp_set(ngx_connection_counter, 0, 1);
- 
-@@ -547,7 +547,7 @@
-                    "counter: %p, %d",
-                    ngx_connection_counter, *ngx_connection_counter);
- 
--    ngx_temp_number = (ngx_atomic_t *) (shared + 2 * cl);
-+    ngx_temp_number = (_Atomic ngx_atomic_t *) (shared + 2 * cl);
+     size_t                      size;
+     ngx_int_t                   rc, excess;
+-    ngx_time_t                 *tp;
++    volatile ngx_time_t                 *tp;
+     ngx_msec_t                  now;
+     ngx_msec_int_t              ms;
+     ngx_rbtree_node_t          *node, *sentinel;
+@@ -483,7 +483,7 @@
+     ngx_uint_t *ep, ngx_http_limit_req_limit_t **limit)
+ {
+     ngx_int_t                   excess;
+-    ngx_time_t                 *tp;
++    volatile ngx_time_t                 *tp;
+     ngx_msec_t                  now, delay, max_delay;
+     ngx_msec_int_t              ms;
+     ngx_http_limit_req_ctx_t   *ctx;
+@@ -549,7 +549,7 @@
+ ngx_http_limit_req_expire(ngx_http_limit_req_ctx_t *ctx, ngx_uint_t n)
+ {
+     ngx_int_t                   excess;
+-    ngx_time_t                 *tp;
++    volatile ngx_time_t                 *tp;
+     ngx_msec_t                  now;
+     ngx_queue_t                *q;
+     ngx_msec_int_t              ms;
+diff -r --unified nginx-1.8.0.orig/src/http/modules/ngx_http_log_module.c nginx-1.8.0-new/src/http/modules/ngx_http_log_module.c
+--- nginx-1.8.0.orig/src/http/modules/ngx_http_log_module.c	2015-04-21 07:12:00.000000000 -0700
++++ nginx-1.8.0-new/src/http/modules/ngx_http_log_module.c	2017-03-02 16:34:46.108249784 -0800
+@@ -821,7 +821,7 @@
+ static u_char *
+ ngx_http_log_msec(ngx_http_request_t *r, u_char *buf, ngx_http_log_op_t *op)
+ {
+-    ngx_time_t  *tp;
++    volatile ngx_time_t  *tp;
  
      tp = ngx_timeofday();
  
-diff --unified -r nginx-1.4.0.orig/src/event/ngx_event.h nginx-1.4.0/src/event/ngx_event.h
---- nginx-1.4.0.orig/src/event/ngx_event.h	2017-01-31 18:07:17.049516266 -0800
-+++ nginx-1.4.0/src/event/ngx_event.h	2017-02-01 15:56:26.020937111 -0800
-@@ -492,9 +492,9 @@
- } ngx_event_module_t;
+@@ -833,7 +833,7 @@
+ ngx_http_log_request_time(ngx_http_request_t *r, u_char *buf,
+     ngx_http_log_op_t *op)
+ {
+-    ngx_time_t      *tp;
++    volatile ngx_time_t      *tp;
+     ngx_msec_int_t   ms;
  
+     tp = ngx_timeofday();
+diff -r --unified nginx-1.8.0.orig/src/http/modules/ngx_http_ssi_filter_module.c nginx-1.8.0-new/src/http/modules/ngx_http_ssi_filter_module.c
+--- nginx-1.8.0.orig/src/http/modules/ngx_http_ssi_filter_module.c	2015-04-21 07:12:00.000000000 -0700
++++ nginx-1.8.0-new/src/http/modules/ngx_http_ssi_filter_module.c	2017-03-02 16:36:24.180248028 -0800
+@@ -2723,7 +2723,7 @@
+     ngx_http_variable_value_t *v, uintptr_t gmt)
+ {
+     ngx_http_ssi_ctx_t  *ctx;
+-    ngx_time_t          *tp;
++    volatile ngx_time_t          *tp;
+     ngx_str_t           *timefmt;
+     struct tm            tm;
+     char                 buf[NGX_HTTP_SSI_DATE_LEN];
+diff -r --unified nginx-1.8.0.orig/src/http/ngx_http_core_module.c nginx-1.8.0-new/src/http/ngx_http_core_module.c
+--- nginx-1.8.0.orig/src/http/ngx_http_core_module.c	2015-04-21 07:12:00.000000000 -0700
++++ nginx-1.8.0-new/src/http/ngx_http_core_module.c	2017-03-02 16:33:47.257250838 -0800
+@@ -2450,7 +2450,7 @@
+     ngx_str_t *uri, ngx_str_t *args, ngx_http_request_t **psr,
+     ngx_http_post_subrequest_t *ps, ngx_uint_t flags)
+ {
+-    ngx_time_t                    *tp;
++    volatile ngx_time_t                    *tp;
+     ngx_connection_t              *c;
+     ngx_http_request_t            *sr;
+     ngx_http_core_srv_conf_t      *cscf;
+diff -r --unified nginx-1.8.0.orig/src/http/ngx_http_request.c nginx-1.8.0-new/src/http/ngx_http_request.c
+--- nginx-1.8.0.orig/src/http/ngx_http_request.c	2015-04-21 07:12:01.000000000 -0700
++++ nginx-1.8.0-new/src/http/ngx_http_request.c	2017-03-02 16:34:06.389250496 -0800
+@@ -504,7 +504,7 @@
+ ngx_http_create_request(ngx_connection_t *c)
+ {
+     ngx_pool_t                 *pool;
+-    ngx_time_t                 *tp;
++    volatile ngx_time_t                 *tp;
+     ngx_http_request_t         *r;
+     ngx_http_log_ctx_t         *ctx;
+     ngx_http_connection_t      *hc;
+diff -r --unified nginx-1.8.0.orig/src/http/ngx_http_upstream.c nginx-1.8.0-new/src/http/ngx_http_upstream.c
+--- nginx-1.8.0.orig/src/http/ngx_http_upstream.c	2015-04-21 07:12:01.000000000 -0700
++++ nginx-1.8.0-new/src/http/ngx_http_upstream.c	2017-03-02 16:35:55.131248548 -0800
+@@ -1300,7 +1300,7 @@
+ ngx_http_upstream_connect(ngx_http_request_t *r, ngx_http_upstream_t *u)
+ {
+     ngx_int_t          rc;
+-    ngx_time_t        *tp;
++    volatile ngx_time_t        *tp;
+     ngx_connection_t  *c;
  
--extern ngx_atomic_t          *ngx_connection_counter;
-+extern _Atomic ngx_atomic_t  *ngx_connection_counter;
+     r->connection->log->action = "connecting to upstream";
+@@ -2017,7 +2017,7 @@
+ {
+     ssize_t            n;
+     ngx_int_t          rc;
+-    ngx_time_t        *tp;
++    volatile ngx_time_t        *tp;
+     ngx_connection_t  *c;
  
--extern ngx_atomic_t          *ngx_accept_mutex_ptr;
-+extern _Atomic ngx_atomic_t  *ngx_accept_mutex_ptr;
- extern ngx_shmtx_t            ngx_accept_mutex;
- extern ngx_uint_t             ngx_use_accept_mutex;
- extern ngx_uint_t             ngx_accept_events;
-diff --unified -r nginx-1.4.0.orig/src/http/ngx_http_cache.h nginx-1.4.0/src/http/ngx_http_cache.h
---- nginx-1.4.0.orig/src/http/ngx_http_cache.h	2017-01-31 18:07:17.046516291 -0800
-+++ nginx-1.4.0/src/http/ngx_http_cache.h	2017-02-01 15:59:35.211434459 -0800
-@@ -110,8 +110,8 @@
-     ngx_rbtree_t                     rbtree;
-     ngx_rbtree_node_t                sentinel;
-     ngx_queue_t                      queue;
--    ngx_atomic_t                     cold;
--    ngx_atomic_t                     loading;
-+    _Atomic ngx_atomic_t             cold;
-+    _Atomic ngx_atomic_t             loading;
-     off_t                            size;
- } ngx_http_file_cache_sh_t;
+     c = u->peer.connection;
+@@ -3924,7 +3924,7 @@
+     ngx_http_upstream_t *u, ngx_int_t rc)
+ {
+     ngx_uint_t   flush;
+-    ngx_time_t  *tp;
++    volatile ngx_time_t  *tp;
  
-diff --unified -r nginx-1.4.0.orig/src/os/unix/ngx_atomic.h nginx-1.4.0/src/os/unix/ngx_atomic.h
---- nginx-1.4.0.orig/src/os/unix/ngx_atomic.h	2017-01-31 18:07:17.051516249 -0800
-+++ nginx-1.4.0/src/os/unix/ngx_atomic.h	2017-02-01 16:17:53.437499242 -0800
-@@ -11,6 +11,7 @@
+     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                    "finalize http upstream request: %i", rc);
+diff -r --unified nginx-1.8.0.orig/src/http/ngx_http_variables.c nginx-1.8.0-new/src/http/ngx_http_variables.c
+--- nginx-1.8.0.orig/src/http/ngx_http_variables.c	2015-04-21 07:12:01.000000000 -0700
++++ nginx-1.8.0-new/src/http/ngx_http_variables.c	2017-03-02 16:35:17.034249231 -0800
+@@ -2041,7 +2041,7 @@
+     ngx_http_variable_value_t *v, uintptr_t data)
+ {
+     u_char          *p;
+-    ngx_time_t      *tp;
++    volatile ngx_time_t      *tp;
+     ngx_msec_int_t   ms;
  
- #include <ngx_config.h>
- #include <ngx_core.h>
-+#include <stdatomic.h>
+     p = ngx_pnalloc(r->pool, NGX_TIME_T_LEN + 4);
+@@ -2161,7 +2161,7 @@
+     ngx_http_variable_value_t *v, uintptr_t data)
+ {
+     u_char      *p;
+-    ngx_time_t  *tp;
++    volatile ngx_time_t  *tp;
  
+     p = ngx_pnalloc(r->pool, NGX_TIME_T_LEN + 4);
+     if (p == NULL) {
+diff -r --unified nginx-1.8.0.orig/src/os/unix/ngx_process.c nginx-1.8.0-new/src/os/unix/ngx_process.c
+--- nginx-1.8.0.orig/src/os/unix/ngx_process.c	2015-04-21 07:12:01.000000000 -0700
++++ nginx-1.8.0-new/src/os/unix/ngx_process.c	2017-03-02 16:30:53.804253945 -0800
+@@ -565,7 +565,7 @@
+      * process
+      */
  
- #if (NGX_HAVE_LIBATOMIC)
-@@ -105,12 +106,16 @@
+-    part = (ngx_list_part_t *) &ngx_cycle->shared_memory.part;
++    part = (ngx_list_part_t __attribute__((nonsync)) *) &ngx_cycle->shared_memory.part;
+     shm_zone = part->elts;
  
- typedef volatile ngx_atomic_uint_t  ngx_atomic_t;
- 
--
--#define ngx_atomic_cmp_set(lock, old, set)                                    \
--    __sync_bool_compare_and_swap(lock, old, set)
-+static ngx_inline _Bool
-+ngx_atomic_cmp_set(_Atomic ngx_atomic_t *lock, ngx_atomic_uint_t old,
-+     ngx_atomic_uint_t set)
-+{
-+	ngx_atomic_uint_t _old = old;
-+	return atomic_compare_exchange_strong(lock, &_old, set);
-+}
- 
- #define ngx_atomic_fetch_add(value, add)                                      \
--    __sync_fetch_and_add(value, add)
-+    atomic_fetch_add(value, add)
- 
- #define ngx_memory_barrier()        __sync_synchronize()
- 
-@@ -304,9 +309,14 @@
- #endif
- 
- 
--void ngx_spinlock(ngx_atomic_t *lock, ngx_atomic_int_t value, ngx_uint_t spin);
-+void ngx_spinlock(_Atomic ngx_atomic_t *lock, ngx_atomic_int_t value, ngx_uint_t spin);
-+
-+static ngx_inline _Bool ngx_trylock(_Atomic ngx_atomic_t* lock)
-+{
-+	unsigned long zero = 0;
-+	return (*(lock) == 0 && atomic_compare_exchange_strong(lock, &zero, 1));
-+}
- 
--#define ngx_trylock(lock)  (*(lock) == 0 && ngx_atomic_cmp_set(lock, 0, 1))
- #define ngx_unlock(lock)    *(lock) = 0
- 
- 
+     for (i = 0; /* void */ ; i++) {
