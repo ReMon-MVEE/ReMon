@@ -82,7 +82,11 @@ mmap_addr2line_proc::mmap_addr2line_proc(std::string& file, int variantnum, pid_
     }
     else
     {
-        pipe_create(file.c_str());
+		// test if file exists
+		if (access(file.c_str(), R_OK) != 0)
+			addr2line_status = ADDR2LINE_FILE_NO_DEBUG_SYMS;
+		else
+			pipe_create(file.c_str());
     }
 }
 
@@ -134,7 +138,7 @@ std::string mmap_addr2line_proc::read_internal(const std::string& cmd)
     else
     {
         tmp              = "";
-        warnf("couldn't read from proc pipe! - command was: %s\n", cmd.c_str());
+        debugf("couldn't read from proc pipe! - command was: %s\n", cmd.c_str());
         addr2line_status = ADDR2LINE_PROC_TERMINATED;
     }
 
