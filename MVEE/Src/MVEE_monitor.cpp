@@ -379,6 +379,15 @@ void monitor::rewrite_execve_args(int variantnum, bool write_to_stack, bool rewr
 	pid_t pid = variants[variantnum].variantpid;
 	std::string lib_path_from_env;
 
+	// Sanity check
+	if (!mvee::os_can_load_indirect(image))
+	{
+		warnf("File %s is statically linked and position dependent. We will not be able to use"
+			  "any of our GHUMVEE goodies (DCL, custom libraries, ...)\n", image.c_str());
+
+		return; 
+	}
+
 	// See if we have any LD_LIBRARY_PATH in the envp vars
 	for (auto envp : set_mmap_table->mmap_startup_info[variantnum].envp)
 	{
@@ -1804,13 +1813,6 @@ void monitor::handle_syscall_exit_event(int index)
                    variants[index].variantpid,
                    variants[index].prevcallnum,
                    getTextualSyscall(variants[index].prevcallnum));
-#ifndef MVEE_BENCHMARK
-		if (!set_fd_table->have_unlocked())
-		{
-			warnf("FD table deadlock detected. Shutting down\n");
-			shutdown(false);
-		}
-#endif
         return;
     }
 
@@ -1876,13 +1878,6 @@ void monitor::handle_syscall_exit_event(int index)
             }
             state = STATE_NORMAL;
             call_resume_all();
-#ifndef MVEE_BENCHMARK
-			if (!set_fd_table->have_unlocked())
-			{
-				warnf("FD table deadlock detected. Shutting down\n");
-				shutdown(false);
-			}
-#endif
             return;
         }
 
@@ -1925,14 +1920,6 @@ void monitor::handle_syscall_exit_event(int index)
         sig_restart_partially_interrupted_syscall();
     }
 
-#ifndef MVEE_BENCHMARK
-	if (!set_fd_table->have_unlocked())
-	{
-		warnf("FD table deadlock detected. Shutting down\n");
-		shutdown(false);
-	}
-#endif
-	
 }
 
 /*-----------------------------------------------------------------------------

@@ -519,6 +519,33 @@ std::string mvee::os_get_interp()
 }
 
 /*-----------------------------------------------------------------------------
+    os_can_load_indirect - TODO: Add cache here
+-----------------------------------------------------------------------------*/
+bool mvee::os_can_load_indirect(std::string& file)
+{	
+    std::string cmd = "/usr/bin/readelf -d " + file + " 2>&1";
+    std::string dyn = mvee::log_read_from_proc_pipe(cmd.c_str(), NULL);
+
+	// invalid ELF file
+	if (dyn.find("Error") != std::string::npos)
+		return true;
+
+	// dynamic section found => We can use the LD_Loader
+	if (dyn.find("There is no dynamic section in this file.") == std::string::npos)
+		return true;
+
+	cmd = "/usr/bin/readelf -h " + file + " | grep Type 2>&1";
+	std::string header = mvee::log_read_from_proc_pipe(cmd.c_str(), NULL);
+
+	// statically linked, but PIE compiled
+	if (header.find("DYN") != std::string::npos)
+		return true;
+
+	// statically linked and position dependent => can't use LD_Loader
+	return false;
+}
+
+/*-----------------------------------------------------------------------------
     os_get_interp_for_file - if file is a script, return the interpreter for
     that script
 -----------------------------------------------------------------------------*/

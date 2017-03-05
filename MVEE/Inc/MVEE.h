@@ -346,6 +346,11 @@ public:
 	// 
     static std::string   os_get_interp               ();
 
+	//
+	// Test if the specified binary is dynamically linked and/or PIE
+	//
+	static bool          os_can_load_indirect        (std::string& image);
+
 	// 
 	// Determine the name of the interpreter to be used to execute @file
 	// and add it to the @add_to_list deque.
