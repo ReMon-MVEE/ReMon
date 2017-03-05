@@ -457,12 +457,14 @@ void monitor::log_variant_backtrace(int variantnum, int max_depth, int calculate
 
 	set_mmap_table->grab_lock();
 
+/*
 	if (set_mmap_table->thread_group_shutting_down)
 	{
 		logfunc("This thread group is shutting down - not backtracing\n");
 		set_mmap_table->release_lock();
 		return;
 	}
+*/
 
 #if defined(MVEE_BENCHMARK) && defined(MVEE_FORCE_ENABLE_BACKTRACING)
     logfunc = mvee::warnf;
@@ -1676,6 +1678,7 @@ void mvee_log_local_backtrace()
 /*-----------------------------------------------------------------------------
   mvee_wrap_ptrace - wrapper around ptrace that logs when something went wrong
 -----------------------------------------------------------------------------*/
+static __thread bool saw_ptrace_fail = false;
 long mvee_wrap_ptrace(unsigned short request, pid_t pid, unsigned long addr, void *data)
 {
 //	debugf("PTRACE(%s, %d, 0x" PTRSTR ", 0x" PTRSTR ")\n",
@@ -1691,9 +1694,11 @@ long mvee_wrap_ptrace(unsigned short request, pid_t pid, unsigned long addr, voi
     if (unlikely(result == -1)
         && errno != 0
         && mvee::active_monitor
-        && !mvee::active_monitor->is_group_shutting_down())
+        && !mvee::active_monitor->is_group_shutting_down()
+		&& !saw_ptrace_fail)
     {
         int err = errno;
+		saw_ptrace_fail = true;
         warnf("==================================\n");
         warnf("ERROR: ptrace request failed\n");
         warnf("request  : %d (%s)\n",      request, getTextualRequest(request));
