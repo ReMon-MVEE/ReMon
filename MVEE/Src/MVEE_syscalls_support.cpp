@@ -13,6 +13,7 @@
 #include <string.h>
 #include <signal.h>
 #include <sstream>
+#include <net/if.h>
 #include "MVEE.h"
 #include "MVEE_monitor.h"
 #include "MVEE_logging.h"
@@ -849,6 +850,48 @@ void monitor::call_replicate_mmsgvector(std::vector<struct mmsghdr*>& addresses,
                 addresses[i]++;
         }
     }
+}
+
+/*-----------------------------------------------------------------------------
+    call_replicate_ifconfs
+-----------------------------------------------------------------------------*/
+void monitor::call_replicate_ifconfs(std::vector<struct ifconf*>& addresses)
+{
+	std::vector<struct ifconf> real_ifconfs(mvee::numvariants);
+	
+	for (int i = 0; i < mvee::numvariants; ++i)
+	{
+		if (!mvee_rw_read_struct(variants[i].variantpid, addresses[i], sizeof(struct ifconf), &real_ifconfs[i]))
+		{
+			warnf("Couldn't read ifconf\n");
+			return;
+		}
+	}
+
+	struct ifreq* master_reqs = (struct ifreq*)mvee_rw_read_data(variants[0].variantpid, real_ifconfs[0].ifc_ifcu.ifcu_req, real_ifconfs[0].ifc_len);
+
+	if (!master_reqs)
+	{
+		warnf("couldn't read master ifcu_reqs\n");
+		return;
+	}
+
+	for (int i = 1; i < mvee::numvariants; ++i)
+	{
+		if (!mvee_rw_write_data(variants[i].variantpid, &addresses[i]->ifc_len, sizeof(int), &real_ifconfs[0].ifc_len))
+		{
+			warnf("Couldn't replicate master ifc_len\n");
+			break;
+		}
+
+		if (!mvee_rw_write_data(variants[i].variantpid, real_ifconfs[i].ifc_ifcu.ifcu_req, real_ifconfs[0].ifc_len, master_reqs))
+		{
+			warnf("Couldn't replicate master ifcu_reqs\n");
+			break;
+		}
+	}
+
+	delete[] (unsigned char*)master_reqs;
 }
 
 /*-----------------------------------------------------------------------------

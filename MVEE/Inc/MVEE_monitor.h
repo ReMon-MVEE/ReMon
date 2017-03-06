@@ -410,6 +410,7 @@ private:
     void             call_replicate_mmsgvector           (std::vector<struct mmsghdr*>& addresses, int vlen);
     void             call_replicate_mmsgvectorlens       (std::vector<struct mmsghdr*>& addresses, int sent, int attempted);
     void             call_replicate_buffer               (std::vector<const unsigned char*>& addresses, int size);
+	void             call_replicate_ifconfs              (std::vector<struct ifconf*>& addresses);
 
 	//
 	// getter functions. These accept pointers to a specific data structure and

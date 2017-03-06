@@ -538,6 +538,21 @@
     }
 
 //
+// Replicate struct ifconf
+//
+#define REPLICATEIFCONF(numarg)										\
+	{																\
+	if (call_succeeded &&											\
+		state == STATE_IN_MASTERCALL &&								\
+		ARG ## numarg(0))											\
+	{																\
+		std::vector<struct ifconf*> argarray(mvee::numvariants);	\
+		FILLARGARRAY(numarg, argarray);								\
+		call_replicate_ifconfs(argarray);							\
+	}																\
+	}
+
+//
 // Get sockaddr from arg sockarg with length from arg lenarg
 // and convert to textual form
 //

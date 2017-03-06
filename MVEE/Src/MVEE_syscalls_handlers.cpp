@@ -2050,23 +2050,7 @@ POSTCALL(ioctl)
             }
             break;
 		case SIOCGIFCONF:
-			if (call_succeeded)
-			{
-				int len;
-				if (!mvee_rw_read_int(variants[0].variantpid, (void*)ARG3(0), &len))
-				{
-					warnf("ioctl replication failed\n");
-					shutdown(true);
-					return 0;
-				}
-
-				REPLICATEBUFFERFIXEDLEN(3, sizeof(int));
-
-				for (int i = 0; i < mvee::numvariants; ++i)
-					ARG3(i) += sizeof(int);
-
-				REPLICATEBUFFERFIXEDLEN(3, len);				
-			}
+			REPLICATEIFCONF(3);
 			break;
     }
 
