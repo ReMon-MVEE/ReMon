@@ -2228,11 +2228,13 @@ dont_resolve_segv_origin:
 		if (skip_segv)
 		{
 			unsigned long instr[2];
-			if (mvee_wrap_ptrace(PTRACE_PEEKTEXT, variants[variantnum].variantpid, ip, NULL) ||
-				mvee_wrap_ptrace(PTRACE_PEEKTEXT, variants[variantnum].variantpid, ip + sizeof(unsigned long), NULL))
+			instr[0] = (unsigned long)mvee_wrap_ptrace(PTRACE_PEEKTEXT, variants[variantnum].variantpid, ip, NULL);
+			instr[1] = (unsigned long)mvee_wrap_ptrace(PTRACE_PEEKTEXT, variants[variantnum].variantpid, ip + sizeof(unsigned long), NULL);
+
+			if (instr[0] == (unsigned long)-1 || instr[1] == (unsigned long)-1)
 			{
 				warnf("couldn't skip SEGV\n");
-				shutdown(true);
+				shutdown(false);
 				return;
 			}		
 
