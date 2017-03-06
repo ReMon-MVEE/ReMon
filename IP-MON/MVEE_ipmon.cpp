@@ -1097,6 +1097,14 @@ CALCSIZE(ioctl)
 			COUNTBUFFER(RET, ARG3, ((struct ifconf*)ARG3)->ifc_len);
 			break;
 		}
+
+	    // IN+OUT: struct ifreq*
+		case SIOCGIFHWADDR:
+		{
+			COUNTBUFFER(ARG, ARG3, IFNAMSIZ);
+			COUNTBUFFER(RET, ARG3, sizeof(struct ifreq));
+			break;
+		}
 	}
 }
 
@@ -1147,6 +1155,11 @@ PRECALL(ioctl)
 			is_master = 1;
 			break;
 
+		case SIOCGIFHWADDR:
+			CHECKBUFFER(ARG3, IFNAMSIZ);
+			is_master = 1;
+			break;
+
         default:
             // Unknown IOCTL
 			ipmon_arg_verify_failed(__NR_ioctl, 2, ARG2);
@@ -1182,7 +1195,9 @@ POSTCALL(ioctl)
 			REPLICATEBUFFER(ARG3, sizeof(int));
 			REPLICATEBUFFER(&((struct ifconf*)ARG3)->ifc_ifcu.ifcu_req, ((struct ifconf*)ARG3)->ifc_len);
 			break;
-
+		case SIOCGIFHWADDR:
+			REPLICATEBUFFER(ARG3, sizeof(struct ifreq));
+			break;
     }
 
     return order;

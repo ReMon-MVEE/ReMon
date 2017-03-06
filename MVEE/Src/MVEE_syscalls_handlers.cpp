@@ -78,6 +78,7 @@
 #include <linux/net.h>
 #include <linux/seccomp.h>
 #include <linux/filter.h>
+#include <net/if.h>
 #include <asm/prctl.h>
 #include <sys/prctl.h>
 #include <sys/timerfd.h>
@@ -1946,11 +1947,10 @@ PRECALL(ioctl)
 
     unsigned char is_master = 0;
     switch(ARG2(0))
-    {
+    {	
         case TCGETS:     // struct termios *
             is_master = set_fd_table->is_fd_master_file(ARG1(0));
             break;
-
         case FIONREAD:   // int*
         case TIOCGWINSZ: // struct winsize *
         case TIOCGPGRP:  // pid_t *
@@ -1992,6 +1992,40 @@ PRECALL(ioctl)
 			CHECKBUFFER(3, sizeof(int)); // check if the length is equal
 			is_master = 1;
 			break;
+		// struct ifreq * (in+out)
+		//
+		// struct ifreq
+		// {
+		// # define IFHWADDRLEN    6
+		// # define IFNAMSIZ   IF_NAMESIZE
+		//   union
+		//	 {
+		//     char ifrn_name[IFNAMSIZ];   /* Interface name, e.g. "en0".  */
+		//   } ifr_ifrn;
+		//   union
+		//   {
+		//     struct sockaddr ifru_addr;
+		//     struct sockaddr ifru_dstaddr;
+		//     struct sockaddr ifru_broadaddr;
+		//     struct sockaddr ifru_netmask;
+		//     struct sockaddr ifru_hwaddr;
+		//     short int ifru_flags;
+		//     int ifru_ivalue;
+		//     int ifru_mtu;
+		//     struct ifmap ifru_map;
+		//     char ifru_slave[IFNAMSIZ];  /* Just fits the size */
+		//     char ifru_newname[IFNAMSIZ];
+		//     __caddr_t ifru_data;
+		//   } ifr_ifru;
+		// };			
+		// Not documented in the man pages but as far as I can tell:
+		// * The kernel loads the necessary network module based on the ifrn_name
+		// * The MAC address of the specified interface is returned in the ifr_ifru.ifru_hwaddr field		
+		case SIOCGIFHWADDR:
+			CHECKBUFFER(3, IFNAMSIZ);
+			is_master = 1;
+			break;
+
         default:
 		{
 			// TODO: Remove this. temporary whitelist of nvidia ioctls
@@ -2051,6 +2085,9 @@ POSTCALL(ioctl)
             break;
 		case SIOCGIFCONF:
 			REPLICATEIFCONF(3);
+			break;
+		case SIOCGIFHWADDR:
+			REPLICATEBUFFERFIXEDLEN(3, sizeof(struct ifreq));
 			break;
     }
 
