@@ -379,15 +379,6 @@ void monitor::rewrite_execve_args(int variantnum, bool write_to_stack, bool rewr
 	pid_t pid = variants[variantnum].variantpid;
 	std::string lib_path_from_env;
 
-	// Sanity check
-	if (!mvee::os_can_load_indirect(image))
-	{
-		warnf("File %s is statically linked and position dependent. We will not be able to use"
-			  "any of our GHUMVEE goodies (DCL, custom libraries, ...)\n", image.c_str());
-
-		return; 
-	}
-
 	// See if we have any LD_LIBRARY_PATH in the envp vars
 	for (auto envp : set_mmap_table->mmap_startup_info[variantnum].envp)
 	{
@@ -2178,6 +2169,7 @@ void monitor::handle_sig_delivery_stop(int variantnum, int status)
 {
     siginfo_t siginfo = {0};
 	unsigned long ip = 0;
+	bool skip_segv = false;
 
     // Terminated by unhandled signal
     if (WIFSIGNALED(status))
@@ -2222,6 +2214,8 @@ void monitor::handle_sig_delivery_stop(int variantnum, int status)
 			if (!ip) FETCH_IP_DIRECT(variantnum, ip);
 			std::string caller_info = set_mmap_table->get_caller_info(variantnum, variants[variantnum].variantpid, ip, 0);
 			debugf("variant %d crashed - trapping ins: %s\n", variantnum, caller_info.c_str());
+			if (caller_info.find("mvee_log_stack at") != std::string::npos)
+				skip_segv = true;
 #endif
         }
 
@@ -2231,11 +2225,34 @@ dont_resolve_segv_origin:
         debugf("Signal %s (%d) received by variant %d.\n", getTextualSig(signal), signal, variants[variantnum].variantpid);
 
 #ifndef MVEE_BENCHMARK
-		if (!ip) FETCH_IP_DIRECT(variantnum, ip);		
-		std::string caller_info = set_mmap_table->get_caller_info(variantnum, variants[variantnum].variantpid, ip, 0);
-		debugf("signal arrived while variant was executing ins: %s\n", caller_info.c_str());
-		FETCH_SYSCALL_RETURN(variantnum, ret);
-		debugf("ret is currently: %ld\n", ret);
+		if (skip_segv)
+		{
+			unsigned long instr[2];
+			if (mvee_wrap_ptrace(PTRACE_PEEKTEXT, variants[variantnum].variantpid, ip, NULL) ||
+				mvee_wrap_ptrace(PTRACE_PEEKTEXT, variants[variantnum].variantpid, ip + sizeof(unsigned long), NULL))
+			{
+				warnf("couldn't skip SEGV\n");
+				shutdown(true);
+				return;
+			}		
+
+			HDE_INS(disas_ins);
+			HDE_DISAS(disas_ins_len, &instr, &disas_ins);
+			if (disas_ins_len > 0)
+			{
+				WRITE_IP(variantnum, ip + disas_ins_len);
+				debugf("skipped SIGSEGV in variant %d\n", variantnum);
+				return;
+			}
+		}
+		else
+		{
+			if (!ip) FETCH_IP_DIRECT(variantnum, ip);		
+			std::string caller_info = set_mmap_table->get_caller_info(variantnum, variants[variantnum].variantpid, ip, 0);
+			debugf("signal arrived while variant was executing ins: %s\n", caller_info.c_str());
+			FETCH_SYSCALL_RETURN(variantnum, ret);
+			debugf("ret is currently: %ld\n", ret);
+		}
 #endif
 
         if (signal == SIGSEGV || signal == SIGBUS)
