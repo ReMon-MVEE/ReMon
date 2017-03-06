@@ -53,6 +53,7 @@
 #include <sys/mman.h>
 #include <termios.h>
 #include <sys/inotify.h>
+#include <net/if.h>
 #include "MVEE_ipmon.h"
 #include "MVEE_ipmon_memory.h"
 #include "../MVEE/Inc/MVEE_fake_syscall.h"
@@ -1088,6 +1089,14 @@ CALCSIZE(ioctl)
 			COUNTBUFFER(RET, ARG3, sizeof(struct winsize));
 			break;
 		}
+
+		// IN+OUT: struct ifconf*
+		case SIOCGIFCONF:
+		{
+			COUNTBUFFER(ARG, ARG3, sizeof(struct ifconf));
+			COUNTBUFFER(RET, ARG3, ((struct ifconf*)ARG3)->ifc_len);
+			break;
+		}
 	}
 }
 
@@ -1133,6 +1142,11 @@ PRECALL(ioctl)
         case FIONCLEX:
             break;
 
+		case SIOCGIFCONF: 
+			CHECKBUFFER(ARG3, sizeof(int));
+			is_master = 1;
+			break;
+
         default:
             // Unknown IOCTL
 			ipmon_arg_verify_failed(__NR_ioctl, 2, ARG2);
@@ -1164,6 +1178,11 @@ POSTCALL(ioctl)
         case TIOCGWINSZ:
             REPLICATEBUFFER(ARG3, sizeof(struct winsize));
             break;
+		case SIOCGIFCONF:
+			REPLICATEBUFFER(ARG3, sizeof(int));
+			REPLICATEBUFFER(&((struct ifconf*)ARG3)->ifc_ifcu.ifcu_req, ((struct ifconf*)ARG3)->ifc_len);
+			break;
+
     }
 
     return order;
