@@ -1067,6 +1067,15 @@ CALL(execve)
 		 || (*mvee::config_variant_exec)["library_path"].asString().length() == 0))
 		return MVEE_CALL_ALLOW;
 
+	// check if we can load indirectly
+	if (!mvee::os_can_load_indirect(set_mmap_table->mmap_startup_info[0].image))
+	{
+		warnf("File %s is statically linked and position dependent. We will not be able to use"
+			  " any of our GHUMVEE goodies (DCL, custom libraries, ...)\n", 
+			  set_mmap_table->mmap_startup_info[0].image.c_str());
+		return MVEE_CALL_ALLOW; 
+	}
+
 	for (int i = 0; i < mvee::numvariants; ++i)
 	{
 		rewrite_execve_args(i, true, false);
@@ -1966,6 +1975,23 @@ PRECALL(ioctl)
         case FIOCLEX:
         case FIONCLEX:
             break;
+		// takes a struct ifconf *.  The ifc_buf field points to a buffer of
+		// length ifc_len bytes, into which the kernel writes a list of type
+		// struct ifreq [].
+		// 
+		// struct ifconf
+		// {
+		// 	int ifc_len;
+		// 	union
+		// 	{
+		// 		__caddr_t ifcu_buf;
+		// 		struct ifreq *ifcu_req;
+		// 	} ifc_ifcu;
+		// };
+		case SIOCGIFCONF: // struct ifconf*
+			CHECKBUFFER(3, sizeof(int)); // check if the length is equal
+			is_master = 1;
+			break;
         default:
 		{
 			// TODO: Remove this. temporary whitelist of nvidia ioctls
@@ -2023,6 +2049,25 @@ POSTCALL(ioctl)
                     fd_info->close_on_exec = false;
             }
             break;
+		case SIOCGIFCONF:
+			if (call_succeeded)
+			{
+				int len;
+				if (!mvee_rw_read_int(variants[0].variantpid, (void*)ARG3(0), &len))
+				{
+					warnf("ioctl replication failed\n");
+					shutdown(true);
+					return 0;
+				}
+
+				REPLICATEBUFFERFIXEDLEN(3, sizeof(int));
+
+				for (int i = 0; i < mvee::numvariants; ++i)
+					ARG3(i) += sizeof(int);
+
+				REPLICATEBUFFERFIXEDLEN(3, len);				
+			}
+			break;
     }
 
     if (state != STATE_IN_MASTERCALL)

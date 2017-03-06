@@ -44,6 +44,7 @@ void           mvee_rw_write_uchar          (pid_t pid, void* addr, unsigned cha
 void           mvee_rw_write_ushort         (pid_t pid, void* addr, unsigned short val);
 void           mvee_rw_write_uint           (pid_t pid, void* addr, unsigned int val);
 void           mvee_rw_write_pid            (pid_t pid, void* addr, pid_t val);
+bool           mvee_rw_read_int             (pid_t pid, void* addr, int* val);
 unsigned char* mvee_rw_safe_alloc           (long int alloc_size);
 
 #endif // MVEE_MEMORY_H_INCLUDED

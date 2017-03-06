@@ -60,6 +60,18 @@ void mvee_rw_write_uint(pid_t pid, void* addr, unsigned int val)
 	mvee_wrap_ptrace(PTRACE_POKEDATA, pid, (unsigned long)addr, (void*)word._long);
 }
 
+bool mvee_rw_read_int(pid_t pid, void* addr, int* val)
+{
+	mvee_word word;
+	word._long = mvee_wrap_ptrace(PTRACE_PEEKDATA, pid, (unsigned long)addr, NULL);
+	if (word._long != -1)
+	{
+		*val = word._int;
+		return true;
+	}
+	return false;		
+}
+
 void mvee_rw_write_pid(pid_t pid, void* addr, pid_t val)
 {
 	mvee_word word;
