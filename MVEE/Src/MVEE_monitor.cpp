@@ -2243,6 +2243,7 @@ dont_resolve_segv_origin:
 			if (disas_ins_len > 0)
 			{
 				WRITE_IP(variantnum, ip + disas_ins_len);
+				mvee_wrap_ptrace(PTRACE_SYSCALL, variants[variantnum].variantpid, 0, NULL);
 				debugf("skipped SIGSEGV in variant %d\n", variantnum);
 				return;
 			}
