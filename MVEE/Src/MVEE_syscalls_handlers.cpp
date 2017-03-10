@@ -330,7 +330,12 @@ long monitor::handle_check_open_call(const std::string& full_path, int* flags, i
         cache_mismatch_info("The program is trying to do direct rendering (open(%s)). This call has been denied.\n", full_path.c_str());
         return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
     }
-    else
+    else if (full_path.find("/dev/nvidia") == 0)
+	{
+		warnf("refusing nvidia diver request\n");
+		return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
+	}
+	else
     {
         //
         // open() with O_CREAT and O_EXCL will fail if the file already exists.
@@ -2029,9 +2034,9 @@ PRECALL(ioctl)
         default:
 		{
 			// TODO: Remove this. temporary whitelist of nvidia ioctls
-			fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0));
-			if (fd_info->path.find("nvidia") != std::string::npos)
-				break;
+			// fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0));
+			// if (fd_info->path.find("nvidia") != std::string::npos)
+			//	break;
             warnf("unknown ioctl: %d (0x%08x)\n", ARG2(0), ARG2(0));
             shutdown(false);
             break;
@@ -5944,6 +5949,13 @@ CALL(gettid)
 			warnf("[PID:%05d] - [INVALID_LOCK_TYPE] - [SLOT_SIZE:%d] - TMPPOS:%d\n",
 				  variants[i].variantpid, ARG4(i), ARG5(i));
 		}
+		else if (ARG3(i) == 61)
+		{
+			warnf("[PID:%05d] - [INVALID_LOCK_PTR] - [SLAVE_PTR:0x" PTRSTR "] - TMPPOS:%d\n",
+				  variants[i].variantpid, ARG4(i), ARG5(i));
+			shutdown(false);
+			
+		}
 		else if (ARG3(i) == 90)
 		{
 			std::string master_callee = set_mmap_table->get_caller_info(0, variants[0].variantpid, ARG5(i));
@@ -7654,6 +7666,20 @@ POSTCALL(inotify_init1)
     }
 
     return 0;
+}
+
+/*-----------------------------------------------------------------------------
+  sys_rt_tgsigqueueinfo - (pid_t tgid, pid_t pid, int sig, siginfo_t* uinfo)
+-----------------------------------------------------------------------------*/
+PRECALL(rt_tgsigqueueinfo)
+{
+	CHECKARG(1);
+	CHECKARG(2);
+	CHECKARG(3);
+	// there might be uninitialized data in the siginfo_t struct so we probably
+	// can't do a plain memcmp
+	CHECKBUFFER(4, 3 * sizeof(int)); // compare signo, errno, code
+	return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
