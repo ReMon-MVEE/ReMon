@@ -876,6 +876,12 @@ void monitor::log_dump_queues(shm_table* shm_table)
                 }
             }
         }
+		
+		warnf("Queue dump finished\n");
+		
+		if (logfile)
+			fclose(logfile);
+
 #ifndef MVEE_ALWAYS_DUMP_QUEUES
     }
     else
