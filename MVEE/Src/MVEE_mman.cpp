@@ -117,11 +117,7 @@ dwarf_info* mmap_region_info::get_dwarf_info(int variantnum, pid_t variantpid)
     if (!region_dwarf_info)
     {
         region_dwarf_info = std::shared_ptr<dwarf_info>(new dwarf_info(region_backing_file_path, variantnum, variantpid, this));
-
-        if (!region_dwarf_info->info_valid)
-            region_dwarf_info.reset();  // this will also dealloc it
-        else
-            mvee::dwarf_cache.insert(std::pair<std::string, std::weak_ptr<dwarf_info> >(region_backing_file_path, region_dwarf_info));
+		mvee::dwarf_cache.insert(std::pair<std::string, std::weak_ptr<dwarf_info> >(region_backing_file_path, region_dwarf_info));
     }
 
     return region_dwarf_info.get();
