@@ -159,19 +159,6 @@ void mvee::set_builtin_config(int builtin)
 	char parsec_ver = 2;
 	bool native = (*mvee::config_variant_global)["disable_syscall_checks"].asBool();
 
-	// discard any conflicting args we may have read from the config
-	config["variant"]["sets"].clear();
-	config["variant"]["specs"].clear();
-	if (!(*config_variant_exec)["path"].isNull() &&
-		(*config_variant_exec)["path"].isArray()) // it shouldn't be, but who knows...
-		(*config_variant_exec)["path"];
-	if (!(*config_variant_exec)["argv"].isNull() &&
-		(*config_variant_exec)["argv"].isArray())
-		(*config_variant_exec)["argv"].clear();
-	if (!(*config_variant_exec)["env"].isNull() &&
-		(*config_variant_exec)["env"].isArray())
-		(*config_variant_exec)["env"].clear();
-
     switch(builtin)
     {
         // Simply runs the ls command. Orchestra can't handle this demo because of the ioctl syscall...
