@@ -60,9 +60,17 @@ sudo reboot
 
 Depending on which build type you selected, you'll find GHUMVEE in either /path/to/ReMon/MVEE/bin/Release/ or /path/to/ReMon/MVEE/bin/Debug/. Navigate to this folder and you'll find the MVEE executable.
 
-You can launch the MVEE in two ways:
-- The **EASY** way: Use `./MVEE <number of variants> -- <some command>`. Example: `./MVEE 2 -- ls -al`.
-- The **HARD** way: Use `./MVEE <demo number> <number of variants>`. You'll find a list of demos in /path/to/ReMon/MVEE/Src/MVEE_demos.cpp.
+You can launch the MVEE in two modes:
+- Legacy Mode: Use `./MVEE [Builtin Configuration Number (see MVEE_config.cpp)] [Number of Variants] [MVEE Options]`.
+- RAVEN Mode: Use `./MVEE -s [Variant Set (default: default)] -f [Config File (default: MVEE.ini)] [MVEE Options] -- [Additional Program Args]`
+
+To see a full list of supported option, just launch the MVEE using `./MVEE`.
+The config file format is (mostly) compatible with RAVEN. 
+A full overview of RAVEN's options is available in `RAVEN-config.pdf`.
+
+**NOTES:** 
+- The `--` is mandatory in RAVEN mode, even if no program args are passed.
+- The default config file is set up to launch two variants of `/bin/bash -c` by default. Thus, if you were to launch ReMon like this: `./MVEE -- "echo test"`, this would end up executing `/bin/bash -c echo lol`.
  
 ### Shutting GHUMVEE down
 
