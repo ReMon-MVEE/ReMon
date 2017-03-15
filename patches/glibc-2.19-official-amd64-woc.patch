@@ -25,8 +25,8 @@ diff -N -r --unified glibc-2.19/crypt/crypt_util.c glibc-2.19-woc/crypt/crypt_ut
      __libc_lock_unlock(_ufc_tables_lock);
 diff -N -r --unified glibc-2.19/csu/libc-start.c glibc-2.19-woc/csu/libc-start.c
 --- glibc-2.19/csu/libc-start.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/csu/libc-start.c	2017-03-15 11:20:23.982015531 -0700
-@@ -104,6 +104,305 @@
++++ glibc-2.19-woc/csu/libc-start.c	2017-03-15 14:27:40.486773914 -0700
+@@ -104,6 +104,298 @@
  # define MAIN_AUXVEC_PARAM
  #endif
  
@@ -66,20 +66,13 @@ diff -N -r --unified glibc-2.19/csu/libc-start.c glibc-2.19-woc/csu/libc-start.c
 +#define unlikely(x)     __builtin_expect((x),0)
 +
 +/* MVEE PATCH:
-+   Checks wether or not all variants got HEAP_MAX_SIZE aligned heaps from
++   Checks wether or not all variants got ALIGNMENT aligned heaps from
 +   the previous mmap request. If some of them have not, ALL variants
 +   have to bail out and fall back to another heap allocation method.
 +   This ensures that the variants stay in sync with respect to future mm
 +   requests.
 +*/
-+#define HEAP_MIN_SIZE (32 * 1024)
-+#ifndef HEAP_MAX_SIZE
-+# ifdef DEFAULT_MMAP_THRESHOLD_MAX
-+#  define HEAP_MAX_SIZE (2 * DEFAULT_MMAP_THRESHOLD_MAX)
-+# else
-+#  define HEAP_MAX_SIZE (1024 * 1024) /* must be a power of two */
-+# endif
-+#endif
++#define ALIGNMENT 0x4000000
 +
 +int
 +mvee_all_heaps_aligned(char* heap)
@@ -88,7 +81,7 @@ diff -N -r --unified glibc-2.19/csu/libc-start.c glibc-2.19-woc/csu/libc-start.c
 +  // just check the alignment of the current heap
 +  if (!mvee_thread_local_queue)
 +  {
-+      if ((unsigned long)heap & (HEAP_MAX_SIZE-1))
++      if ((unsigned long)heap & (ALIGNMENT-1))
 +		  return 0;
 +      return 1;
 +  }
@@ -96,7 +89,7 @@ diff -N -r --unified glibc-2.19/csu/libc-start.c glibc-2.19-woc/csu/libc-start.c
 +  // We ARE running under MVEE control
 +  // => ask the MVEE to check the alignments
 +  // of ALL heaps
-+  return syscall(MVEE_ALL_HEAPS_ALIGNED, heap, HEAP_MAX_SIZE);
++  return syscall(MVEE_ALL_HEAPS_ALIGNED, heap, ALIGNMENT);
 +}
 +
 +/* 
@@ -4289,7 +4282,7 @@ diff -N -r --unified glibc-2.19/intl/plural.y glibc-2.19-woc/intl/plural.y
  }
 diff -N -r --unified glibc-2.19/malloc/arena.c glibc-2.19-woc/malloc/arena.c
 --- glibc-2.19/malloc/arena.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/malloc/arena.c	2017-03-07 18:07:30.709256084 -0800
++++ glibc-2.19-woc/malloc/arena.c	2017-03-15 14:09:48.970701595 -0700
 @@ -526,7 +526,7 @@
  new_heap (size_t size, size_t top_pad)
  {
@@ -4338,7 +4331,7 @@ diff -N -r --unified glibc-2.19/malloc/arena.c glibc-2.19-woc/malloc/arena.c
          {
            __munmap (p2, HEAP_MAX_SIZE);
            p2 = MAP_FAILED;
-@@ -558,6 +580,16 @@
+@@ -558,6 +580,17 @@
      }
    if (p2 == MAP_FAILED)
      {
@@ -4352,10 +4345,11 @@ diff -N -r --unified glibc-2.19/malloc/arena.c glibc-2.19-woc/malloc/arena.c
 +	 sequence is atomic and cannot block (=> we should _NOT_ grab
 +	 ANY locks until after the last munmap)	
 +       */
++	  (void)mvee_all_heaps_aligned(0);
        p1 = (char *) MMAP (0, HEAP_MAX_SIZE << 1, PROT_NONE, MAP_NORESERVE);
        if (p1 != MAP_FAILED)
          {
-@@ -566,9 +598,10 @@
+@@ -566,9 +599,10 @@
            ul = p2 - p1;
            if (ul)
              __munmap (p1, ul);
@@ -4368,7 +4362,7 @@ diff -N -r --unified glibc-2.19/malloc/arena.c glibc-2.19-woc/malloc/arena.c
          }
        else
          {
-@@ -578,7 +611,8 @@
+@@ -578,7 +612,8 @@
            if (p2 == MAP_FAILED)
              return 0;
  
@@ -4378,7 +4372,7 @@ diff -N -r --unified glibc-2.19/malloc/arena.c glibc-2.19-woc/malloc/arena.c
              {
                __munmap (p2, HEAP_MAX_SIZE);
                return 0;
-@@ -661,8 +695,8 @@
+@@ -661,8 +696,8 @@
  
  #define delete_heap(heap) \
    do {									      \
@@ -4389,7 +4383,7 @@ diff -N -r --unified glibc-2.19/malloc/arena.c glibc-2.19-woc/malloc/arena.c
        __munmap ((char *) (heap), HEAP_MAX_SIZE);			      \
      } while (0)
  
-@@ -786,14 +820,10 @@
+@@ -786,14 +821,10 @@
  static mstate
  get_free_list (void)
  {
@@ -4405,7 +4399,7 @@ diff -N -r --unified glibc-2.19/malloc/arena.c glibc-2.19-woc/malloc/arena.c
  
        if (result != NULL)
          {
-@@ -802,7 +832,8 @@
+@@ -802,7 +833,8 @@
            tsd_setspecific (arena_key, (void *) result);
            THREAD_STAT (++(result->stat_lock_loop));
          }
@@ -4415,7 +4409,7 @@ diff -N -r --unified glibc-2.19/malloc/arena.c glibc-2.19-woc/malloc/arena.c
  
    return result;
  }
-@@ -858,24 +889,24 @@
+@@ -858,24 +890,24 @@
    if (a == NULL)
      {
        /* Nothing immediately available, so generate a new arena.  */
@@ -4446,7 +4440,7 @@ diff -N -r --unified glibc-2.19/malloc/arena.c glibc-2.19-woc/malloc/arena.c
        /* NB: the following depends on the fact that (size_t)0 - 1 is a
           very large number and that the underflow is OK.  If arena_max
           is set the value of arena_test is irrelevant.  If arena_test
-@@ -883,7 +914,7 @@
+@@ -883,7 +915,7 @@
           narenas_limit is 0.  There is no possibility for narenas to
           be too big for the test to always fail since there is not
           enough address space to create that many arenas.  */
@@ -12808,7 +12802,7 @@ diff -N -r --unified glibc-2.19/sysdeps/unix/sysv/linux/malloc-sysdep.h glibc-2.
  #define HAVE_MREMAP 1
 diff -N -r --unified glibc-2.19/sysdeps/x86_64/bits/atomic.h glibc-2.19-woc/sysdeps/x86_64/bits/atomic.h
 --- glibc-2.19/sysdeps/x86_64/bits/atomic.h	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/sysdeps/x86_64/bits/atomic.h	2017-03-07 18:07:30.719256085 -0800
++++ glibc-2.19-woc/sysdeps/x86_64/bits/atomic.h	2017-03-15 14:17:16.949731830 -0700
 @@ -55,10 +55,71 @@
  # endif
  #endif
