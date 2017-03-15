@@ -5509,30 +5509,47 @@ POSTCALL(mmap)
 			set_mmap_table->map_range(i, results[i], ARG2(0), ARG4(0), ARG3(0), info, actual_offset);
 		}
 
-		// 2 * 2 * (4 * 1024 * 1024 * sizeof(long))
-		// check if this was a new heap allocation by ptmalloc
+		//
+		// Check if this is an aligned mmap request
+        //
+		// If we want to map a block of x bytes, aligned to a y-byte boundary,
+		// and we cannot use MAP_ALIGN, then we extend the allocation size by y
+		// to ensure that the heap crosses an alignment boundary.
+		//
+		// We then unmap the lower region and the upper region.  The lower
+		// region is the part below the alignment boundary.  Since the OS MIGHT
+		// give us a y-aligned block, there might not be a lower region.  The
+		// upper region is the excess memory we still have after unmapping the
+		// lower region.
+		//
 		if (ARG1(0) == 0                                                // no base address
-			&& ARG2(0) == 2 * HEAP_MAX_SIZE                             // size = 2*HEAP_MAX_SIZE
-			&& ARG3(0) == PROT_NONE                                     // no protection flags yet
-			&& ARG4(0) == (MAP_PRIVATE | MAP_NORESERVE | MAP_ANONYMOUS) //
+			&& variants[0].last_mmap_desired_alignment                  // syscall(MVEE_ALL_HEAPS_ALIGNED) must have been called prior to this mmap
+			&& (ARG4(0) & (MAP_PRIVATE | MAP_ANONYMOUS))                // must be a private anonymous mapping
 			&& (int)ARG5(0) == -1                                       // backed by /dev/zero
 			&& !ipmon_mmap_handling)
 		{
 			in_new_heap_allocation = true;
 
-			debugf("this seems to be a heap allocation by ptmalloc\n");
+			debugf("this seems to be an aligned heap allocation\n");
 
-			// bump the lock counter for the fd/mman locks - we'll unlock when we see the last munmap
+			// bump the lock counter for the fd/mman locks - we'll unlock when we see the munmap of the upper region
 			call_grab_locks(MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN);
 
-			// pre-calculate the parameters for the next munmap calls
+			unsigned long desired_alignment = variants[0].last_mmap_desired_alignment;
+
+			// We can now calculate the lower and upper region bounds
 			for (int i = 0; i < mvee::numvariants; ++i)
 			{
-				unsigned long start_of_heap = (results[i] + (HEAP_MAX_SIZE - 1)) & ~(HEAP_MAX_SIZE - 1);
+				variants[i].last_mmap_desired_alignment = 0;
+				unsigned long start_of_aligned_heap = (results[i] + (desired_alignment - 1)) & ~(desired_alignment - 1);
 				variants[i].last_lower_region_start = results[i];
-				variants[i].last_lower_region_size  = start_of_heap - results[i];
-				variants[i].last_upper_region_start = start_of_heap + HEAP_MAX_SIZE;
-				variants[i].last_upper_region_size  = results[i] + HEAP_MAX_SIZE - start_of_heap;
+				variants[i].last_lower_region_size  = start_of_aligned_heap - results[i];
+				variants[i].last_upper_region_start = start_of_aligned_heap + ARG2(i) - desired_alignment;
+				variants[i].last_upper_region_size  = results[i] + ARG2(i) - start_of_aligned_heap;
+
+				debugf("Variant %d: LOWER REGION [0x" PTRSTR "-0x" PTRSTR "] - UPPER REGION [0x" PTRSTR "-0x" PTRSTR "]\n",
+					   i, variants[i].last_lower_region_start, variants[i].last_lower_region_start + variants[i].last_lower_region_size,
+					   variants[i].last_upper_region_start, variants[i].last_upper_region_start + variants[i].last_upper_region_size);
 			}
 		}
 

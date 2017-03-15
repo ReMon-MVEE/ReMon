@@ -162,6 +162,7 @@ public:
     unsigned long last_upper_region_start;
     unsigned long last_upper_region_size;
     unsigned long last_mmap_result;
+	unsigned long last_mmap_desired_alignment;
 
 	// Fast forwarding support
 	unsigned long entry_point_address;                              // relative to the base address of the first PT_LOAD segment of the main program binary

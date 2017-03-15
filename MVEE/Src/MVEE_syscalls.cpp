@@ -664,37 +664,27 @@ long monitor::call_call_dispatch ()
                 break;
             }
 
+			// 
+			// Called by the variants to check if the heaps have the desired
+			// alignment 
+			//
+            // syntax: syscall(MVEE_ALL_HEAPS_ALIGNED, heap pointer, desired
+			// alignment);
+			//
+			// If the heaps are not aligned in any of the variants, then this
+			// call should return false, even for variants that DO have an
+			// aligned heap. The variants can then unmap the heap and fall back
+			// to the forced alignment method.
+			//
             case MVEE_ALL_HEAPS_ALIGNED:
             {
-				// if IP-MON manages mmap calls, we need a libc that passes
-				// us the last mmap result explicitly
-				if (ipmon_mmap_handling)
+				for (int i = 0; i < mvee::numvariants; ++i)
 				{
-					for (int i = 0; i < mvee::numvariants; ++i)
+					if (ARG1(i) & (ARG2(i) - 1))
 					{
-						if (!ARG1(i))
-						{
-							warnf("IP-MON is active and managing mmap calls but glibc isn't reporting mmap results through sys_mvee_all_heaps_aligned. FIXME!!!\n");
-							result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
-							break;
-						}
-
-						if (ARG1(i) & (HEAP_MAX_SIZE - 1))
-						{
-							result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
-							break;
-						}
-					}
-				}
-				else
-				{
-					for (int i = 0; i < mvee::numvariants; ++i)
-					{
-						if (variants[i].last_mmap_result & (HEAP_MAX_SIZE - 1))
-						{
-							result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
-							break;
-						}
+						variants[i].last_mmap_desired_alignment = ARG2(i);
+						result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
+						break;
 					}
 				}
                 if (!result)
