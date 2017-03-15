@@ -5530,12 +5530,12 @@ POSTCALL(mmap)
 		{
 			in_new_heap_allocation = true;
 
-			debugf("this seems to be an aligned heap allocation\n");
-
 			// bump the lock counter for the fd/mman locks - we'll unlock when we see the munmap of the upper region
 			call_grab_locks(MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN);
 
 			unsigned long desired_alignment = variants[0].last_mmap_desired_alignment;
+
+			debugf("this seems to be an aligned heap allocation - desired alignment: 0x" PTRSTR " - alloc size: 0x" PTRSTR "\n", desired_alignment, ARG2(0));
 
 			// We can now calculate the lower and upper region bounds
 			for (int i = 0; i < mvee::numvariants; ++i)
@@ -5545,7 +5545,7 @@ POSTCALL(mmap)
 				variants[i].last_lower_region_start = results[i];
 				variants[i].last_lower_region_size  = start_of_aligned_heap - results[i];
 				variants[i].last_upper_region_start = start_of_aligned_heap + ARG2(i) - desired_alignment;
-				variants[i].last_upper_region_size  = results[i] + ARG2(i) - start_of_aligned_heap;
+				variants[i].last_upper_region_size  = results[i] + ARG2(i) - (start_of_aligned_heap + ARG2(i) - desired_alignment);
 
 				debugf("Variant %d: LOWER REGION [0x" PTRSTR "-0x" PTRSTR "] - UPPER REGION [0x" PTRSTR "-0x" PTRSTR "]\n",
 					   i, variants[i].last_lower_region_start, variants[i].last_lower_region_start + variants[i].last_lower_region_size,

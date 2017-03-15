@@ -680,7 +680,10 @@ long monitor::call_call_dispatch ()
             {
 				for (int i = 0; i < mvee::numvariants; ++i)
 				{
-					if (ARG1(i) & (ARG2(i) - 1))
+					debugf("pid: %d - SYS_MVEE_ALL_HEAPS_ALIGNED(0x" PTRSTR ", 0x" PTRSTR ")\n", 
+						   variants[i].variantpid, ARG1(i), ARG2(i));
+
+					if (!ARG1(i) || (ARG1(i) & (ARG2(i) - 1)))
 					{
 						variants[i].last_mmap_desired_alignment = ARG2(i);
 						result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
