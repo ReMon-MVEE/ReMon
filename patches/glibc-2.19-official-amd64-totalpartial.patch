@@ -25,7 +25,7 @@ diff -N -r --unified glibc-2.19/crypt/crypt_util.c glibc-2.19-totalpartial/crypt
      __libc_lock_unlock(_ufc_tables_lock);
 diff -N -r --unified glibc-2.19/csu/libc-start.c glibc-2.19-totalpartial/csu/libc-start.c
 --- glibc-2.19/csu/libc-start.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-totalpartial/csu/libc-start.c	2017-03-13 18:23:15.980065196 -0700
++++ glibc-2.19-totalpartial/csu/libc-start.c	2017-03-15 11:16:11.015998457 -0700
 @@ -104,6 +104,896 @@
  # define MAIN_AUXVEC_PARAM
  #endif
@@ -90,7 +90,7 @@ diff -N -r --unified glibc-2.19/csu/libc-start.c glibc-2.19-totalpartial/csu/lib
 +	// We ARE running under MVEE control
 +	// => ask the MVEE to check the alignments
 +	// of ALL heaps
-+	return syscall(MVEE_ALL_HEAPS_ALIGNED, heap);
++	return syscall(MVEE_ALL_HEAPS_ALIGNED, heap, HEAP_MAX_SIZE);
 +}
 +
 +/* 
