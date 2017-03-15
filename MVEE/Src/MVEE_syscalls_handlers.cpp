@@ -82,6 +82,7 @@
 #include <asm/prctl.h>
 #include <sys/prctl.h>
 #include <sys/timerfd.h>
+#include <iomanip>
 #include "MVEE.h"
 #include "MVEE_monitor.h"
 #include "MVEE_macros.h"
@@ -95,6 +96,7 @@
 #include "MVEE_shm.h"
 #include "MVEE_signals.h"
 #include "MVEE_fake_syscall.h"
+#include "hde.h"
 
 /*-----------------------------------------------------------------------------
   old_kernel_stat
@@ -4395,6 +4397,167 @@ POSTCALL(mprotect)
 
 		for (int i = 0; i < mvee::numvariants; ++i)
 			set_mmap_table->verify_mman_table(i, variants[i].variantpid);
+
+#ifdef MVEE_DUMP_JIT_CACHES
+		if (ARG3(0) & PROT_EXEC)
+		{
+			mmap_region_info* region = set_mmap_table->get_region_info(0, ARG1(0), 0);
+			
+			if (region && (region->region_map_flags & MAP_ANONYMOUS))
+			{
+				std::vector<unsigned char*> raw_bytes(mvee::numvariants);
+				std::vector<std::string> disas(mvee::numvariants);
+				std::vector<std::map<unsigned long, unsigned long>> indirect_jmp_targets(mvee::numvariants);
+
+				// Read raw JIT bytes
+				for (int i = 0; i < mvee::numvariants; ++i)
+				{
+					raw_bytes[i] = mvee_rw_read_data(variants[i].variantpid, (void*)ARG1(i), ARG2(i));
+
+					if (!raw_bytes[i])
+					{
+						warnf("Couldn't read JIT cache in variant %d\n", i);
+						break;
+					}
+				}
+
+				// Preprocess disassembly to identify vmcall patterns (they use data in code and screw up the objdump disassembly)
+				for (int i = 0; i < mvee::numvariants; ++i)
+				{
+					HDE_INS(ins);
+					int offset = 0;
+
+					while (offset < ARG2(i))
+					{
+						HDE_DISAS(len, &raw_bytes[i][offset], &ins);
+
+						if (len == 0)
+						{
+							warnf("disassembly failure while preprocessing JIT cache in variant %d\n", i);
+							break;
+						}
+
+						// look for jmp QWORD PTR [rip + 0x2] 
+						// This is a near jump (FF /4)
+						if (ins.opcode == 0xFF &&
+							ins.modrm == 0x25 &&
+							ins.modrm_mod == 0 &&  // 00B
+							ins.modrm_reg == 4 &&  // 100B - Selects jmp near
+							ins.modrm_rm == 5 &&   // 101B - Selects RIP-relative addressing
+							ins.disp.disp32 == 2)  // +2 - Selects RIP+2
+						{
+							indirect_jmp_targets[i].insert(std::make_pair(ARG1(i) + offset, *(unsigned long*)&raw_bytes[i][offset + len + 2]));
+
+							// NOP out original bytes
+							if (sizeof(unsigned long) == 8)
+								*(unsigned long*)&raw_bytes[i][offset + len + 2] = 0x9090909090909090;
+							else
+								*(unsigned long*)&raw_bytes[i][offset + len + 2] = 0x90909090;
+						}
+
+						offset += len;
+					}
+				}
+
+				// Disassemble raw JIT bytes
+				for (int i = 0; i < mvee::numvariants; ++i)
+				{
+					FILE* fp = tmpfile();
+
+					if (!fp)
+					{
+						warnf("Couldn't dump JIT cache for variant %d - tmpfile failed: %s\n", i, strerror(errno));
+						break;
+					}
+
+					// Don't dump trailing 0xed/0x00 bytes
+					size_t dump_offset = 0;
+/*					while (raw_bytes[i][dump_offset] == 0xed || 
+						   raw_bytes[i][dump_offset] == 0x00)
+						dump_offset++;
+*/
+
+					size_t dump_size = ARG2(i) - dump_offset;
+					if (dump_size > 0)
+					{
+/*						while (raw_bytes[i][dump_offset + dump_size - 1] == 0xed || 
+							   raw_bytes[i][dump_offset + dump_size - 1] == 0x00)
+							dump_size--;
+*/
+
+						if (fwrite(raw_bytes[i] + dump_offset, 1, dump_size, fp) != dump_size)
+						{
+							warnf("Couldn't dump JIT cache for variant %d - fwrite failed: %s\n", i, strerror(errno));
+							break;
+						}
+
+						std::stringstream cmd;
+						std::stringstream file;
+
+						file << " /proc/" << getpid() << "/fd/" << fileno(fp);
+						cmd << "objdump -z -D -Mintel," << OBJDUMP_SUBARCH << " -b binary -m " << OBJDUMP_ARCH << ":" << OBJDUMP_SUBARCH << " --adjust-vma=0x" << STDPTRSTR(ARG1(i) + dump_offset) << file.str();
+						debugf("Dumping: %s - size: %d\n", cmd.str().c_str(), dump_size);
+						disas[i] = mvee::log_read_from_proc_pipe(cmd.str().c_str(), NULL);
+					}
+
+					fclose(fp);
+				}
+
+				// Annotate and dump disassembly
+				for (int i = 0; i < mvee::numvariants; ++i)
+				{
+					debugf("JIT cache dump for variant %d - cache size is %d bytes (disassembled):\n", i, disas[i].length());
+
+					std::stringstream ss;
+					ss << disas[i];
+					std::string line;
+
+					while (std::getline(ss, line))
+					{
+						size_t call = line.find("call   0x");
+						size_t vmcall = line.find("jmp    QWORD PTR [rip+0x2]");
+						if (call != std::string::npos)
+						{
+							std::string addr = line.substr(call + strlen("call   0x"));
+							std::stringstream hexstr;
+							unsigned long real_addr;
+							hexstr << std::hex << addr;
+							hexstr >> real_addr;
+							std::string func = set_mmap_table->get_caller_info(i, variants[i].variantpid, real_addr);
+
+							debugf("%s (%s)\n", line.c_str(), func.c_str());
+						}
+						else if (vmcall != std::string::npos)
+						{
+							std::string addr = line.substr(0, line.find(":"));
+							std::stringstream hexstr;
+							unsigned long real_addr;
+							hexstr << std::hex << addr;
+							hexstr >> real_addr;
+
+							auto target = indirect_jmp_targets[i].find(real_addr);
+							if (target != indirect_jmp_targets[i].end())
+							{
+								std::string func = set_mmap_table->get_caller_info(i, variants[i].variantpid, target->second);
+								debugf("%s (%s)\n", line.substr(0, line.find("#")).c_str(), func.c_str());
+							}
+						}
+						else
+						{
+							debugf("%s\n", line.c_str());
+						}
+					}
+				}
+
+				// Dump disassembly
+				for (int i = 0; i < mvee::numvariants; ++i)
+
+				// Cleanup
+				for (int i = 0; i < mvee::numvariants; ++i)
+					SAFEDELETEARRAY(raw_bytes[i]);
+			}		
+		}
+#endif
 	}
 	else
 	{

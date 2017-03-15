@@ -96,6 +96,10 @@
 // MVEE_DWARF_DEBUG: adds debugging messages to the DWARF debugging support code
 // #define MVEE_DWARF_DEBUG
 
+// MVEE_DUMP_JIT_CACHES: disassembles, compares, and dumps the contents of JIT
+// caches every time they get marked PROT_EXEC
+// #define MVEE_DUMP_JIT_CACHES
+
 /*-----------------------------------------------------------------------------
   Constants
 -----------------------------------------------------------------------------*/
