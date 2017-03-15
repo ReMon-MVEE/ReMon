@@ -76,9 +76,13 @@
 #include <linux/perf_event.h>
 #include <linux/hw_breakpoint.h>
 #include <linux/net.h>
+#include <linux/seccomp.h>
+#include <linux/filter.h>
+#include <net/if.h>
 #include <asm/prctl.h>
 #include <sys/prctl.h>
 #include <sys/timerfd.h>
+#include <iomanip>
 #include "MVEE.h"
 #include "MVEE_monitor.h"
 #include "MVEE_macros.h"
@@ -92,10 +96,11 @@
 #include "MVEE_shm.h"
 #include "MVEE_signals.h"
 #include "MVEE_fake_syscall.h"
+#include "hde.h"
 
 /*-----------------------------------------------------------------------------
   old_kernel_stat
-  -----------------------------------------------------------------------------*/
+-----------------------------------------------------------------------------*/
 struct old_kernel_stat
 {
     unsigned short dev;
@@ -139,56 +144,6 @@ struct mmap_arg_struct
 };
 
 /*-----------------------------------------------------------------------------
-  Macros
------------------------------------------------------------------------------*/
-//
-// if true, the call we're looking at was not subject to lockstepping
-//
-#define IS_UNSYNCED_CALL						\
-	(variantnum != -1)
-
-//
-// similarly, if this is true, we're looking at a call that is subject to
-// lockstepping
-//
-#define IS_SYNCED_CALL							\
-	(variantnum == -1)
-
-
-//
-// Prologue for our syscall arguments logging functions
-//
-#define MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)			\
-    int start, lim;													\
-																	\
-    start = IS_SYNCED_CALL ? 0 : variantnum;						\
-    lim   = IS_SYNCED_CALL ? mvee::numvariants : variantnum + 1;	\
-																	\
-	/* manually update the register context */						\
-    if IS_UNSYNCED_CALL												\
-	    call_check_regs(variantnum);
-
-//
-// Prologue for postcall handlers
-//
-#define MVEE_HANDLER_POSTCALL(variantnum, start, lim)					\
-	int start, lim;														\
-																		\
-    start = IS_SYNCED_CALL ? 0 : variantnum;							\
-    lim   = IS_SYNCED_CALL ? (state == STATE_IN_MASTERCALL ? 1 : mvee::numvariants) : variantnum + 1;
-
-//
-// Prologue for our syscall return logging functions
-//
-#define MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, results)		\
-	MVEE_HANDLER_POSTCALL(variantnum, start, lim);						\
-    std::vector<unsigned long> results(mvee::numvariants);				\
-    if IS_SYNCED_CALL													\
-        results = call_postcall_get_result_vector();					\
-    else																\
-		results[variantnum] = call_postcall_get_variant_result(variantnum);
-
-/*-----------------------------------------------------------------------------
   pseudo handlers
 -----------------------------------------------------------------------------*/
 long monitor::handle_donthave(int variantnum)
@@ -199,6 +154,14 @@ long monitor::handle_donthave(int variantnum)
 long monitor::handle_dontneed(int variantnum)
 {
     return 0;
+}
+
+void monitor::log_donthave(int variantnum)
+{
+}
+
+void monitor::log_dontneed(int variantnum)
+{
 }
 
 /*-----------------------------------------------------------------------------
@@ -238,7 +201,7 @@ bool monitor::handle_is_known_false_positive(const char* program_name, long call
 
         for (int i = 0; i < mvee::numvariants; ++i)
         {
-            if ((data[i] = (char*)mvee_rw_read_data(variants[i].variantpid, ARG2(i), ARG3(i))) == NULL)
+            if ((data[i] = (char*)mvee_rw_read_data(variants[i].variantpid, (void*) ARG2(i), ARG3(i))) == NULL)
             {
                 warnf("couldn't get buffer for variant %d\n", i);
                 goto out;
@@ -291,7 +254,7 @@ bool monitor::handle_is_known_false_positive(const char* program_name, long call
 
 		for (int i = 0; i < mvee::numvariants; ++i)
 		{
-			char* str = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
+			char* str = mvee_rw_read_string(variants[i].variantpid, (void*) ARG1(i));
 			if (str)
 			{
 				files[i] = std::string(str);
@@ -369,7 +332,12 @@ long monitor::handle_check_open_call(const std::string& full_path, int* flags, i
         cache_mismatch_info("The program is trying to do direct rendering (open(%s)). This call has been denied.\n", full_path.c_str());
         return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
     }
-    else
+    else if (full_path.find("/dev/nvidia") == 0)
+	{
+		warnf("refusing nvidia diver request\n");
+		return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
+	}
+	else
     {
         //
         // open() with O_CREAT and O_EXCL will fail if the file already exists.
@@ -401,7 +369,7 @@ long monitor::handle_check_open_call(const std::string& full_path, int* flags, i
 /*-----------------------------------------------------------------------------
   sys_restart_syscall
 -----------------------------------------------------------------------------*/
-long monitor::handle_restart_syscall_get_call_type(int variantnum)
+GET_CALL_TYPE(restart_syscall)
 {
     return MVEE_CALL_TYPE_UNSYNCED;
 }
@@ -411,30 +379,26 @@ long monitor::handle_restart_syscall_get_call_type(int variantnum)
   sys_exit_group, waiting on a thread that gets shut down by sys_exit might not
   give you the right error code
 -----------------------------------------------------------------------------*/
-long monitor::handle_exit_precall(int variantnum)
+PRECALL(exit)
 {
     update_sync_primitives();
 #ifdef MVEE_CALCULATE_CLOCK_SPREAD
 	log_calculate_clock_spread();
 #endif
 	
-#ifndef MVEE_BENCHMARK
-//	if (set_mmap_table->mmap_startup_info[0].image.find("ferret") != std::string::npos)
-//		sleep(5);
-#endif
-	set_mmap_table->thread_group_shutting_down = 1;
+//	set_mmap_table->thread_group_shutting_down = 1;
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
 /*-----------------------------------------------------------------------------
   sys_fork
 -----------------------------------------------------------------------------*/
-long monitor::handle_fork_precall(int variantnum)
+PRECALL(fork)
 {
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_FORK;
 }
 
-long monitor::handle_fork_postcall(int variantnum)
+POSTCALL(fork)
 {
     // get PID returned in master variant
     long result = call_postcall_get_variant_result(0);
@@ -448,12 +412,12 @@ long monitor::handle_fork_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_vfork
 -----------------------------------------------------------------------------*/
-long monitor::handle_vfork_precall(int variantnum)
+PRECALL(vfork)
 {
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_FORK;
 }
 
-long monitor::handle_vfork_postcall(int variantnum)
+POSTCALL(vfork)
 {
     // get PID returned in master variant
     long result = call_postcall_get_variant_result(0);
@@ -467,22 +431,20 @@ long monitor::handle_vfork_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_read - (unsigned int fd, char __user *buf, size_t count)
 -----------------------------------------------------------------------------*/
-long monitor::handle_read_get_call_type(int variantnum)
+GET_CALL_TYPE(read)
 {
     return MVEE_CALL_TYPE_NORMAL;
 }
 
-long monitor::handle_read_log_args(int variantnum)
+LOG_ARGS(read)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_READ(%d, 0x" PTRSTR ", %d)\n", variants[i].variantpid, ARG1(i), ARG2(i), ARG3(i));
-
-    return 0;
 }
 
-long monitor::handle_read_precall(int variantnum)
+PRECALL(read)
 {
     CHECKARG(3);
     CHECKFD(1);
@@ -502,7 +464,7 @@ long monitor::handle_read_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_read_log_return(int variantnum)
+LOG_RETURN(read)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, result)
 
@@ -510,7 +472,7 @@ long monitor::handle_read_log_return(int variantnum)
     {
         if (call_succeeded)
         {
-            std::string result_str = call_serialize_io_buffer(i, ARG2(i), result[i]);
+            std::string result_str = call_serialize_io_buffer(i, (const unsigned char*) ARG2(i), result[i]);
             debugf("pid: %d - SYS_READ RETURN: %d => %s\n", variants[i].variantpid, result[i], result_str.c_str());
         }
         else
@@ -518,11 +480,9 @@ long monitor::handle_read_log_return(int variantnum)
             debugf("pid: %d - SYS_READ FAIL: %d (%s)\n", variants[i].variantpid, result[i], strerror(-result[i]));
         }
     }
-
-    return 0;
 }
 
-long monitor::handle_read_postcall(int variantnum)
+POSTCALL(read)
 {
 	if IS_SYNCED_CALL
 	{
@@ -545,26 +505,23 @@ long monitor::handle_read_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_write - (unsigned int fd, const char * buf, unsigned long count)
 -----------------------------------------------------------------------------*/
-long monitor::handle_write_log_args(int variantnum)
+LOG_ARGS(write)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
-        std::string buf_str = call_serialize_io_buffer(i, ARG2(i), ARG3(i));
+        std::string buf_str = call_serialize_io_buffer(i, (const unsigned char*) ARG2(i), ARG3(i));
         debugf("pid: %d - SYS_WRITE(%d, 0x" PTRSTR " (%s), %d)\n",
                    variants[i].variantpid, ARG1(i), ARG2(i), buf_str.c_str(), ARG3(i));
     }
-
-    return 0;
 }
 
-long monitor::handle_write_precall(int variantnum)
+PRECALL(write)
 {
     CHECKFD(1);
     CHECKPOINTER(2);
 
-#ifdef MVEE_ALLOW_PERF
     std::vector<unsigned long> argarray(mvee::numvariants);
     FILLARGARRAY(2, argarray);
 
@@ -572,7 +529,7 @@ long monitor::handle_write_precall(int variantnum)
     {
         for (int i = 0; i < mvee::numvariants; ++i)
         {
-            unsigned char* buf = mvee_rw_read_data(variants[i].variantpid, ARG2(i), ARG3(i), 1);
+            unsigned char* buf = mvee_rw_read_data(variants[i].variantpid, (void*)ARG2(i), ARG3(i), 1);
             if (buf)
                 variants[i].perf_out += std::string((char*)buf);
             SAFEDELETEARRAY(buf);
@@ -580,7 +537,6 @@ long monitor::handle_write_precall(int variantnum)
 
         return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
     }
-#endif
 
     CHECKARG(3);
     CHECKBUFFER(2, ARG3(0));
@@ -588,15 +544,10 @@ long monitor::handle_write_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_write_log_return(int variantnum)
-{
-    return 0;
-}
-
 /*-----------------------------------------------------------------------------
   sys_open - (const char* filename, int flags, int mode)
 -----------------------------------------------------------------------------*/
-long monitor::handle_open_log_args(int variantnum)
+LOG_ARGS(open)
 {
     char* str1;
     int   i;
@@ -605,18 +556,16 @@ long monitor::handle_open_log_args(int variantnum)
 
     for (i = start; i < lim; ++i)
     {
-        str1 = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
+        str1 = mvee_rw_read_string(variants[i].variantpid, (void*)ARG1(i));
         debugf("pid: %d - SYS_OPEN(%s, 0x%08X = %s, 0x%08X = %s)\n", variants[i].variantpid,
                    str1,
                    ARG2(i), getTextualFileFlags(ARG2(i)).c_str(),
                    ARG3(i), getTextualFileMode(ARG3(i) & S_FILEMODEMASK).c_str());
         SAFEDELETEARRAY(str1);
     }
-
-    return 0;
 }
 
-long monitor::handle_open_precall(int variantnum)
+PRECALL(open)
 {
     for (int i = 0; i < mvee::numvariants - 1; ++i)
 	{
@@ -653,7 +602,7 @@ long monitor::handle_open_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-long monitor::handle_open_call(int variantnum)
+CALL(open)
 {
 	if IS_UNSYNCED_CALL
 		return MVEE_CALL_ALLOW | MVEE_CALL_HANDLED_UNSYNCED_CALL;
@@ -668,20 +617,33 @@ long monitor::handle_open_call(int variantnum)
         for (i = 0; i < mvee::numvariants; ++i)
             SETARG2(i, flags);
 
+	// Apply aliasing
+	if (result & MVEE_CALL_ALLOW)
+	{
+		for (i = 0; i < mvee::numvariants; ++i)
+		{
+			auto alias = mvee::get_alias(i, str1);
+			if (alias != "")
+			{
+				debugf("Variant %d: File %s is aliased to %s\n",
+					  i, str1.c_str(), alias.c_str());
+				call_overwrite_arg_data(i, 1, str1.length() + 1, (void*) alias.c_str(), alias.length() + 1, true);
+			}
+		}
+	}
+
     return result;
 }
 
-long monitor::handle_open_log_return(int variantnum)
+LOG_RETURN(open)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, fds)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_OPEN return: %d\n", variants[i].variantpid, fds[i]);
-
-    return 0;
 }
 
-long monitor::handle_open_postcall(int variantnum)
+POSTCALL(open)
 {
 	if (!call_succeeded)
 		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
@@ -709,6 +671,13 @@ long monitor::handle_open_postcall(int variantnum)
 			unsynced = 1;
 		}
 
+		if (tmp_path.find("/proc/self") == 0)
+		{
+			std::stringstream pathbuilder;
+			pathbuilder << "/proc/" << variants[0].variantpid << tmp_path.substr(strlen("/proc/self/"));
+			tmp_path = pathbuilder.str();
+		}
+
 		resolved_path = realpath(tmp_path.c_str(), NULL);
 
 		if (!resolved_path)
@@ -721,8 +690,9 @@ long monitor::handle_open_postcall(int variantnum)
 
 		FileType type = (unsynced == 0) ? FT_REGULAR : FT_SPECIAL;
 		set_fd_table->create_fd_info(type, fds, resolved_path, ARG2(0), ARG2(0) & O_CLOEXEC, state == STATE_IN_MASTERCALL, unsynced);
+#ifdef MVEE_FD_DEBUG
 		set_fd_table->verify_fd_table(getpids());
-
+#endif
 		free(resolved_path);
 		REPLICATEFDRESULT();
 	}
@@ -743,17 +713,15 @@ long monitor::handle_open_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_close - (int filedescriptor)
 -----------------------------------------------------------------------------*/
-long monitor::handle_close_log_args(int variantnum)
+LOG_ARGS(close)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_CLOSE(%d)\n", variants[i].variantpid, ARG1(i));
-
-    return 0;
 }
 
-long monitor::handle_close_precall(int variantnum)
+PRECALL(close)
 {
     CHECKFD(1);
 
@@ -775,7 +743,7 @@ long monitor::handle_close_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-long monitor::handle_close_postcall(int variantnum)
+POSTCALL(close)
 {
 	if IS_SYNCED_CALL
 	{
@@ -784,7 +752,9 @@ long monitor::handle_close_postcall(int variantnum)
 
 		if (call_succeeded)
 			set_fd_table->free_fd_info(ARG1(0));
+#ifdef MVEE_FD_DEBUG
 		set_fd_table->verify_fd_table(getpids());
+#endif
 	}
 	else
 	{
@@ -798,17 +768,15 @@ long monitor::handle_close_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_waitpid - (pid_t pid, int __user *stat_addr, int options)
 -----------------------------------------------------------------------------*/
-long monitor::handle_waitpid_log_args(int variantnum)
+LOG_ARGS(waitpid)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_WAITPID(%d, 0x" PTRSTR ", %d)\n", variants[i].variantpid, ARG1(i), ARG2(i), ARG3(i));
-
-    return 0;
 }
 
-long monitor::handle_waitpid_precall(int variantnum)
+PRECALL(waitpid)
 {
     CHECKARG(1);
     CHECKPOINTER(2);
@@ -817,17 +785,15 @@ long monitor::handle_waitpid_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-long monitor::handle_waitpid_log_return(int variantnum)
+LOG_RETURN(waitpid)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, pids)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_WAITPID return: %d\n", variants[i].variantpid, pids[i]);
-
-    return 0;
 }
 
-long monitor::handle_waitpid_postcall(int variantnum)
+POSTCALL(waitpid)
 {
     long tmp    = ARG4(0);
     ARG4(0) = 0;
@@ -839,7 +805,7 @@ long monitor::handle_waitpid_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_link - (const char __user *oldname, const char __user *newname)
 -----------------------------------------------------------------------------*/
-long monitor::handle_link_precall(int variantnum)
+PRECALL(link)
 {
     CHECKPOINTER(1);
     CHECKPOINTER(2);
@@ -852,7 +818,7 @@ long monitor::handle_link_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_unlink - (const char __user *pathname)
 -----------------------------------------------------------------------------*/
-long monitor::handle_unlink_get_call_type(int variantnum)
+GET_CALL_TYPE(unlink)
 {
 #ifdef MVEE_ENABLE_VALGRIND_HACKS
     char* unlink_fd = mvee_rw_read_string(variants[variantnum].variantpid, ARG1(variantnum));
@@ -866,31 +832,28 @@ long monitor::handle_unlink_get_call_type(int variantnum)
     return MVEE_CALL_TYPE_NORMAL;
 }
 
-long monitor::handle_unlink_log_args(int variantnum)
+LOG_ARGS(unlink)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
-        char* unlink_fd = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
+        char* unlink_fd = mvee_rw_read_string(variants[i].variantpid, (void*) ARG1(i));
         debugf("pid: %d - SYS_UNLINK(%s)\n", variants[i].variantpid,
                    unlink_fd);
 
         SAFEDELETEARRAY(unlink_fd);
     }
-
-    return 0;
 }
 
-long monitor::handle_unlink_precall(int variantnum)
+PRECALL(unlink)
 {
     CHECKPOINTER(1);
     CHECKSTRING(1);
-
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_unlink_postcall(int variantnum)
+POSTCALL(unlink)
 {
 #ifdef MVEE_ENABLE_VALGRIND_HACKS
     if IS_UNSYNCED_CALL
@@ -903,6 +866,10 @@ long monitor::handle_unlink_postcall(int variantnum)
 		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
     }
 #endif
+#ifndef MVEE_FD_DEBUG
+	set_fd_table->verify_fd_table(getpids());
+#endif
+
     return 0;
 }
 
@@ -916,10 +883,13 @@ void monitor::handle_execve_get_args(int variantnum)
 {
     set_mmap_table->mmap_execve_id = monitorid;
     unsigned int      argc = 0;
+	unsigned int      envc = 0;
 
     std::stringstream args;
+	std::stringstream envs;
 
     set_mmap_table->mmap_startup_info[variantnum].argv.clear();
+	set_mmap_table->mmap_startup_info[variantnum].envp.clear();
 
     // determine number of arguments
     if (ARG2(variantnum))
@@ -934,19 +904,46 @@ void monitor::handle_execve_get_args(int variantnum)
             }
         }
 
+		if (ARG3(variantnum))
+		{
+			while (true)
+			{
+				long res = mvee_wrap_ptrace(PTRACE_PEEKDATA, variants[variantnum].variantpid, ARG3(variantnum) + sizeof(long)*envc++, NULL);
+				if (res == 0 || res == -1)
+				{
+					envc--;
+					break;
+				}
+			}
+		}
+
         if (argc > 0)
         {
             for (unsigned int i = 0; i < argc; ++i)
             {
                 unsigned long argvp = mvee_wrap_ptrace(PTRACE_PEEKDATA, variants[variantnum].variantpid,
                                                        ARG2(variantnum) + sizeof(long)*i, NULL);
-//				warnf("Reading argv[%d] data\n", i);
-                char*         tmp   = mvee_rw_read_string(variants[variantnum].variantpid, argvp);
-//				warnf("done\n");
+                char*         tmp   = mvee_rw_read_string(variants[variantnum].variantpid, (void*)argvp);
                 if (tmp)
                 {
                     set_mmap_table->mmap_startup_info[variantnum].argv.push_back(std::string(tmp));
                     args << tmp << " ";
+                }
+                SAFEDELETEARRAY(tmp);
+            }
+        }
+
+        if (envc > 0)
+        {
+            for (unsigned int i = 0; i < envc; ++i)
+            {
+                unsigned long envp  = mvee_wrap_ptrace(PTRACE_PEEKDATA, variants[variantnum].variantpid,
+                                                       ARG3(variantnum) + sizeof(long)*i, NULL);
+                char*         tmp   = mvee_rw_read_string(variants[variantnum].variantpid, (void*)envp);
+                if (tmp)
+                {
+                    set_mmap_table->mmap_startup_info[variantnum].envp.push_back(std::string(tmp));
+                    envs << tmp << " ";
                 }
                 SAFEDELETEARRAY(tmp);
             }
@@ -959,6 +956,7 @@ void monitor::handle_execve_get_args(int variantnum)
     set_mmap_table->mmap_startup_info[variantnum].image = 
 		mvee::os_normalize_path_name(set_fd_table->get_full_path(variantnum, variants[variantnum].variantpid, AT_FDCWD, (void*)ARG1(variantnum)));
     set_mmap_table->mmap_startup_info[variantnum].serialized_argv = args.str();
+	set_mmap_table->mmap_startup_info[variantnum].serialized_envp = envs.str();
 
 #if defined(MVEE_FILTER_LOGGING) && !defined(MVEE_BENCHMARK)
     if (set_mmap_table->mmap_startup_info[variantnum].image.find("parsec-2.1") != std::string::npos
@@ -971,7 +969,7 @@ void monitor::handle_execve_get_args(int variantnum)
 #endif
 }
 
-long monitor::handle_execve_log_args(int variantnum)
+LOG_ARGS(execve)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -979,20 +977,25 @@ long monitor::handle_execve_log_args(int variantnum)
     {
         handle_execve_get_args(i);
 
-        debugf("pid: %d - SYS_EXECVE(%s (0x" PTRSTR ") -- %s (0x" PTRSTR ")\n",
-                   variants[i].variantpid,
-                   set_mmap_table->mmap_startup_info[i].image.c_str(),
-                   ARG1(i),
-                   set_mmap_table->mmap_startup_info[i].serialized_argv.c_str(),
-                   ARG2(i));
+        debugf("pid: %d - SYS_EXECVE(%s (0x" PTRSTR ") -- %s (0x" PTRSTR ") -- %s (0x" PTRSTR ")\n",
+			   variants[i].variantpid,
+			   set_mmap_table->mmap_startup_info[i].image.c_str(),
+			   ARG1(i),
+			   set_mmap_table->mmap_startup_info[i].serialized_argv.c_str(),
+			   ARG2(i),
+			   set_mmap_table->mmap_startup_info[i].serialized_envp.c_str(),
+			   ARG3(i)
+			);
     }
-
-    return 0;
 }
 
-long monitor::handle_execve_precall(int variantnum)
+PRECALL(execve)
 {
 	handle_execve_get_args(0);
+
+	// This is the default, but we might set it to true if
+	// sys_execve mismatches on the first arg
+	set_mmap_table->have_diversified_variants = false;
 
     for (int i = 1; i < mvee::numvariants; ++i)
     {
@@ -1015,7 +1018,7 @@ long monitor::handle_execve_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-long monitor::handle_execve_call(int variantnum)
+CALL(execve)
 {
 	if IS_UNSYNCED_CALL
 	{
@@ -1023,7 +1026,25 @@ long monitor::handle_execve_call(int variantnum)
 		variants[variantnum].entry_point_bp_set = false;
 		return MVEE_CALL_ALLOW;
 	}
-	
+
+	// check if the file exists first
+	for (int i = 0; i < mvee::numvariants; ++i)
+	{
+		std::string alias = mvee::get_alias(i, set_mmap_table->mmap_startup_info[i].image);
+		if (alias == "" && access(set_mmap_table->mmap_startup_info[i].image.c_str(), F_OK) == -1)
+		{
+			debugf("variant %d is trying to launch a non-existing program: %s\n", 
+				   i, set_mmap_table->mmap_startup_info[i].image.c_str());
+			return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOENT);
+		}
+		else if (alias != "" && access(alias.c_str(), F_OK) == -1)
+		{
+			debugf("variant %d is trying to launch a non-existing program alias: %s\n", 
+				   i, alias.c_str());
+			return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOENT);
+		}					
+	}
+
 #ifndef MVEE_BENCHMARK
 	if (set_mmap_table->have_diversified_variants)
 	{
@@ -1044,15 +1065,24 @@ long monitor::handle_execve_call(int variantnum)
 	}
 #endif
 
-#ifdef MVEE_ALLOW_PERF
     if (set_mmap_table->mmap_startup_info[0].image.find("perf/perf") != std::string::npos)
         perf = 1;
-#endif
 
-	if (!mvee::config.mvee_hide_vdso && 
-		!mvee::config.mvee_use_dcl && 
-		mvee::custom_library_path.length() == 0)
+	// return immediately if we don't have to use the MVEE_LD_Loader
+	if (!(*mvee::config_variant_global)["hide_vdso"].asBool() && 
+		!(*mvee::config_variant_global)["non_overlapping_mmaps"].asInt() && 
+		(!(*mvee::config_variant_exec)["library_path"]
+		 || (*mvee::config_variant_exec)["library_path"].asString().length() == 0))
 		return MVEE_CALL_ALLOW;
+
+	// check if we can load indirectly
+	if (!mvee::os_can_load_indirect(set_mmap_table->mmap_startup_info[0].image))
+	{
+		warnf("File %s is statically linked and position dependent. We will not be able to use"
+			  " any of our GHUMVEE goodies (DCL, custom libraries, ...)\n", 
+			  set_mmap_table->mmap_startup_info[0].image.c_str());
+		return MVEE_CALL_ALLOW; 
+	}
 
 	for (int i = 0; i < mvee::numvariants; ++i)
 	{
@@ -1063,7 +1093,7 @@ long monitor::handle_execve_call(int variantnum)
     return MVEE_CALL_ALLOW;
 }
 
-long monitor::handle_execve_postcall(int variantnum)
+POSTCALL(execve)
 {
     if (call_succeeded)
     {
@@ -1103,7 +1133,7 @@ long monitor::handle_execve_postcall(int variantnum)
         for (i = 0; i < mvee::numvariants; ++i)
             set_mmap_table->verify_mman_table(i, variants[i].variantpid);
 
-        if (mvee::config.mvee_use_dcl)
+        if ((*mvee::config_variant_global)["non_overlapping_mmaps"].asInt())
         {
             // We need to check whether the initial VDSO pages overlap since we have
             // no control over where these are mapped...
@@ -1189,20 +1219,20 @@ long monitor::handle_execve_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_chdir - (const char __user *filename)
 -----------------------------------------------------------------------------*/
-long monitor::handle_chdir_precall(int variantnum)
+PRECALL(chdir)
 {
     CHECKPOINTER(1);
     CHECKSTRING(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-long monitor::handle_chdir_postcall(int variantnum)
+POSTCALL(chdir)
 {
     char* str;
 
     if (call_succeeded)
     {
-        str = mvee_rw_read_string(variants[0].variantpid, ARG1(0));
+        str = mvee_rw_read_string(variants[0].variantpid, (void*) ARG1(0));
         if (str)
             set_fd_table->chdir(str);
     }
@@ -1213,13 +1243,13 @@ long monitor::handle_chdir_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_time - (time_t __user *tloc)
 -----------------------------------------------------------------------------*/
-long monitor::handle_time_precall(int variantnum)
+PRECALL(time)
 {
     CHECKPOINTER(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_time_postcall(int variantnum)
+POSTCALL(time)
 {
     if (ARG1(0))
         REPLICATEBUFFERFIXEDLEN(1, sizeof(time_t));
@@ -1229,7 +1259,7 @@ long monitor::handle_time_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_chmod - (const char __user *filename, mode_t mode)
 -----------------------------------------------------------------------------*/
-long monitor::handle_chmod_precall(int variantnum)
+PRECALL(chmod)
 {
     CHECKPOINTER(1);
     CHECKARG(2);
@@ -1240,7 +1270,7 @@ long monitor::handle_chmod_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_fchmod - (unsigned int fd, mode_t mode)
 -----------------------------------------------------------------------------*/
-long monitor::handle_fchmod_precall(int variantnum)
+PRECALL(fchmod)
 {
     CHECKARG(2);
     CHECKFD(1);
@@ -1250,17 +1280,15 @@ long monitor::handle_fchmod_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_lseek - (unsigned int fd, off_t offset, unsigned int origin)
 -----------------------------------------------------------------------------*/
-long monitor::handle_lseek_log_args(int variantnum)
+LOG_ARGS(lseek)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_LSEEK(%d, 0x%08X, %d)\n", variants[i].variantpid, ARG1(i), ARG2(i), ARG3(i));
-
-    return 0;
 }
 
-long monitor::handle_lseek_precall(int variantnum)
+PRECALL(lseek)
 {
     CHECKARG(3);
     CHECKARG(2);
@@ -1271,7 +1299,7 @@ long monitor::handle_lseek_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_alarm - (unsigned int seconds)
 -----------------------------------------------------------------------------*/
-long monitor::handle_alarm_precall(int variantnum)
+PRECALL(alarm)
 {
     CHECKARG(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
@@ -1280,7 +1308,7 @@ long monitor::handle_alarm_precall(int variantnum)
 /*-----------------------------------------------------------------------------
     sys_setitimer - (int which, const struct itimerval* new_value, struct itimerval* old_value)
 -----------------------------------------------------------------------------*/
-long monitor::handle_setitimer_precall(int variantnum)
+PRECALL(setitimer)
 {
     CHECKARG(1);
     CHECKPOINTER(2);
@@ -1290,7 +1318,7 @@ long monitor::handle_setitimer_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_setitimer_postcall(int variantnum)
+POSTCALL(setitimer)
 {
     if (call_succeeded && ARG3(0))
         REPLICATEBUFFERFIXEDLEN(3, sizeof(struct itimerval));
@@ -1300,7 +1328,7 @@ long monitor::handle_setitimer_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
     sys_getpid
 -----------------------------------------------------------------------------*/
-long monitor::handle_getpid_postcall(int variantnum)
+POSTCALL(getpid)
 {
 	if IS_UNSYNCED_CALL
 		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
@@ -1314,18 +1342,16 @@ long monitor::handle_getpid_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_sendfile - (int out_fd, int in_fd, off_t __user * offset, size_t count)
 -----------------------------------------------------------------------------*/
-long monitor::handle_sendfile_log_args(int variantnum)
+LOG_ARGS(sendfile)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_SENDFILE(OUT: %d, IN: %d, CNT: %d)\n",
                    variants[i].variantpid, ARG1(i), ARG2(i), ARG4(i));
-
-    return 0;
 }
 
-long monitor::handle_sendfile_precall(int variantnum)
+PRECALL(sendfile)
 {
     CHECKFD(1);
     CHECKFD(2);
@@ -1337,7 +1363,7 @@ long monitor::handle_sendfile_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_ptrace
 -----------------------------------------------------------------------------*/
-long monitor::handle_ptrace_call(int variantnum)
+CALL(ptrace)
 {
     cache_mismatch_info("The program is trying to use ptrace. This call has been denied.\n");
     cache_mismatch_info("request: %s\n",        getTextualRequest(ARG1(0)));
@@ -1351,19 +1377,22 @@ long monitor::handle_ptrace_call(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_pause
 -----------------------------------------------------------------------------*/
-long monitor::handle_pause_get_call_type(int variantnum)
+GET_CALL_TYPE(pause)
 {
-    // There is a slight chance that we will see the return site of
+	// There is a slight chance that we will see the return site of
     // the initial pause call
+	//
+	// TODO: check if this is still true. I think this was a race that got fixed
+	// a while back...
     return MVEE_CALL_TYPE_UNSYNCED;
 }
 
-long monitor::handle_pause_call(int variantnum)
+CALL(pause)
 {
     return MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
 }
 
-long monitor::handle_pause_postcall(int variantnum)
+POSTCALL(pause)
 {
     return MVEE_POSTCALL_RESUME | MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
@@ -1371,26 +1400,23 @@ long monitor::handle_pause_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_rt_sigsuspend - (const sigset_t* sigset)
 -----------------------------------------------------------------------------*/
-long monitor::handle_rt_sigsuspend_log_args(int variantnum)
+LOG_ARGS(rt_sigsuspend)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_RT_SIGSUSPEND(%s)\n", variants[i].variantpid, 
-			   getTextualSigSet(call_get_sigset(i, ARG1(i), OLDCALLIFNOT(__NR_rt_sigsuspend))).c_str());
-
-    return 0;
-
+			   getTextualSigSet(call_get_sigset(i, (void*)ARG1(i), OLDCALLIFNOT(__NR_rt_sigsuspend))).c_str());
 }
 
-long monitor::handle_rt_sigsuspend_precall(int variantnum)
+PRECALL(rt_sigsuspend)
 {
     CHECKPOINTER(1);
     CHECKSIGSET(1, OLDCALLIFNOT(__NR_rt_sigsuspend));
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-long monitor::handle_rt_sigsuspend_call (int variantnum)
+CALL(rt_sigsuspend)
 {
 	if IS_SYNCED_CALL
 		variantnum = 0;
@@ -1400,7 +1426,7 @@ long monitor::handle_rt_sigsuspend_call (int variantnum)
 
     if (ARG1(variantnum))
     {
-        sigset_t _set = call_get_sigset(variantnum, ARG1(variantnum), OLDCALLIFNOT(__NR_rt_sigsuspend));
+        sigset_t _set = call_get_sigset(variantnum, (void*)ARG1(variantnum), OLDCALLIFNOT(__NR_rt_sigsuspend));
 
         for (int i = SIGINT; i < __SIGRTMAX; ++i)
             if (sigismember(&_set, i))
@@ -1413,7 +1439,7 @@ long monitor::handle_rt_sigsuspend_call (int variantnum)
 	return MVEE_CALL_ALLOW;
 }
 
-long monitor::handle_rt_sigsuspend_postcall(int variantnum)
+POSTCALL(rt_sigsuspend)
 {
 	if IS_SYNCED_CALL
 		variantnum = 0;
@@ -1431,7 +1457,7 @@ long monitor::handle_rt_sigsuspend_postcall(int variantnum)
   sys_utime - change access and/or modification times of an inode
   (char __user *, filename, struct utimbuf __user *, times)
 -----------------------------------------------------------------------------*/
-long monitor::handle_utime_precall(int variantnum)
+PRECALL(utime)
 {
     CHECKPOINTER(1);
     CHECKPOINTER(2);
@@ -1443,7 +1469,7 @@ long monitor::handle_utime_precall(int variantnum)
 /*-----------------------------------------------------------------------------
     sys_mknod - (const char *pathname, mode_t mode, dev_t dev)
 -----------------------------------------------------------------------------*/
-long monitor::handle_mknod_precall(int variantnum)
+PRECALL(mknod)
 {
 	CHECKPOINTER(1);
 	CHECKARG(2);
@@ -1455,22 +1481,20 @@ long monitor::handle_mknod_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_access - (const char * filename, int mode)
 -----------------------------------------------------------------------------*/
-long monitor::handle_access_log_args(int variantnum)
+LOG_ARGS(access)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
-        char* str1 = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
+        char* str1 = mvee_rw_read_string(variants[i].variantpid, (void*)ARG1(i));
         debugf("pid: %d - SYS_ACCESS(%s, 0x%08X = %s)\n", variants[i].variantpid,
                    str1, ARG2(i), getTextualAccessMode(ARG2(i)).c_str());
         SAFEDELETEARRAY(str1);
     }
-
-    return 0;
 }
 
-long monitor::handle_access_precall(int variantnum)
+PRECALL(access)
 {
     CHECKPOINTER(1);
     CHECKARG(2);
@@ -1481,17 +1505,15 @@ long monitor::handle_access_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_kill - (int pid, int sig)
 -----------------------------------------------------------------------------*/
-long monitor::handle_kill_log_args(int variantnum)
+LOG_ARGS(kill)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_KILL(%d, %s)\n", variants[i].variantpid, ARG1(i), getTextualSig(ARG2(i)));
-
-    return 0;
 }
 
-long monitor::handle_kill_precall(int variantnum)
+PRECALL(kill)
 {
     CHECKARG(1);
     CHECKARG(2);
@@ -1501,7 +1523,7 @@ long monitor::handle_kill_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_rename - (const char __user *oldname, const char __user *newname)
 -----------------------------------------------------------------------------*/
-long monitor::handle_rename_precall(int variantnum)
+PRECALL(rename)
 {
     CHECKPOINTER(1);
     CHECKPOINTER(2);
@@ -1513,21 +1535,19 @@ long monitor::handle_rename_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_mkdir - (const char __user *pathname, int mode)
 -----------------------------------------------------------------------------*/
-long monitor::handle_mkdir_log_args(int variantnum)
+LOG_ARGS(mkdir)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
-        char* str = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
+        char* str = mvee_rw_read_string(variants[i].variantpid, (void*)ARG1(i));
         debugf("pid: %d - SYS_MKDIR(%s, %d)\n", variants[i].variantpid, str, ARG2(i));
         SAFEDELETEARRAY(str);
     }
-
-    return 0;
 }
 
-long monitor::handle_mkdir_precall(int variantnum)
+PRECALL(mkdir)
 {
     CHECKPOINTER(1);
     CHECKARG(2);
@@ -1538,7 +1558,7 @@ long monitor::handle_mkdir_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_rmdir - (const char __user *pathname)
 -----------------------------------------------------------------------------*/
-long monitor::handle_rmdir_precall(int variantnum)
+PRECALL(rmdir)
 {
     CHECKPOINTER(1);
     CHECKSTRING(1);
@@ -1548,21 +1568,19 @@ long monitor::handle_rmdir_precall(int variantnum)
 /*-----------------------------------------------------------------------------
     sys_creat - (const char __user* pathname, umode_t mode)
 -----------------------------------------------------------------------------*/
-long monitor::handle_creat_log_args(int variantnum)
+LOG_ARGS(creat)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
-        char* str = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
+        char* str = mvee_rw_read_string(variants[i].variantpid, (void*)ARG1(i));
         debugf("pid: %d - SYS_CREAT(%s, %d)\n", variants[i].variantpid, str, ARG2(i));
         SAFEDELETEARRAY(str);
     }
-
-    return 0;
 }
 
-long monitor::handle_creat_precall(int variantnum)
+PRECALL(creat)
 {
     CHECKPOINTER(1);
     CHECKSTRING(1);
@@ -1570,15 +1588,17 @@ long monitor::handle_creat_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-long monitor::handle_creat_postcall(int variantnum)
+POSTCALL(creat)
 {
     if (call_succeeded)
     {
         std::vector<unsigned long> fds = call_postcall_get_result_vector();
-        char*                      str = mvee_rw_read_string(variants[0].variantpid, ARG1(0));
+        char*                      str = mvee_rw_read_string(variants[0].variantpid, (void*)ARG1(0));
 
         set_fd_table->create_fd_info(FT_REGULAR, fds, str, O_WRONLY, false, false, false, 0);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
+#endif
         SAFEDELETEARRAY(str);
     }
 
@@ -1588,17 +1608,15 @@ long monitor::handle_creat_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
     sys_dup - (unsigned int oldfd)
 -----------------------------------------------------------------------------*/
-long monitor::handle_dup_log_args(int variantnum)
+LOG_ARGS(dup)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_DUP(%d)\n", variants[i].variantpid, ARG1(i));
-
-    return 0;
 }
 
-long monitor::handle_dup_precall(int variantnum)
+PRECALL(dup)
 {
     CHECKFD(1);
 
@@ -1611,22 +1629,15 @@ long monitor::handle_dup_precall(int variantnum)
     }
 }
 
-long monitor::handle_dup_call(int variantnum)
-{
-    return MVEE_CALL_ALLOW;
-}
-
-long monitor::handle_dup_log_return(int variantnum)
+LOG_RETURN(dup)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, fds)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_DUP(%d) return: %d\n", variants[i].variantpid, ARG1(i), fds[i]);
-
-    return 0;
 }
 
-long monitor::handle_dup_postcall(int variantnum)
+POSTCALL(dup)
 {
     std::vector<unsigned long> fds;
     bool                       master_file = false;
@@ -1652,7 +1663,9 @@ long monitor::handle_dup_postcall(int variantnum)
             return 0;
 
         set_fd_table->create_fd_info(fd_info->file_type, fds, fd_info->path.c_str(), fd_info->access_flags, false, master_file, fd_info->unsynced_reads, fd_info->original_file_size);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
+#endif
     }
 
     return 0;
@@ -1661,18 +1674,13 @@ long monitor::handle_dup_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_pipe - (int __user * fildes)
 -----------------------------------------------------------------------------*/
-long monitor::handle_pipe_precall(int variantnum)
+PRECALL(pipe)
 {
     CHECKPOINTER(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_pipe_call(int variantnum)
-{
-    return MVEE_CALL_ALLOW;
-}
-
-long monitor::handle_pipe_postcall(int variantnum)
+POSTCALL(pipe)
 {
     if (call_succeeded)
     {
@@ -1680,7 +1688,7 @@ long monitor::handle_pipe_postcall(int variantnum)
         std::vector<unsigned long> read_fds(mvee::numvariants);
         std::vector<unsigned long> write_fds(mvee::numvariants);
 
-        if (!mvee_rw_read_struct(variants[0].variantpid, ARG1(0), 2 * sizeof(int), fildes))
+        if (!mvee_rw_read_struct(variants[0].variantpid, (void*)ARG1(0), 2 * sizeof(int), fildes))
         {
             warnf("couldn't read fds\n");
             return 0;
@@ -1694,7 +1702,9 @@ long monitor::handle_pipe_postcall(int variantnum)
         // add new file descriptor mappings for the created pipe
         set_fd_table->create_fd_info(FT_PIPE_BLOCKING, read_fds,  "pipe:read",  O_RDONLY, false, true);
         set_fd_table->create_fd_info(FT_PIPE_BLOCKING, write_fds, "pipe:write", O_WRONLY, false, true);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
+#endif
     }
 
     return 0;
@@ -1703,13 +1713,13 @@ long monitor::handle_pipe_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_times - (struct tms  *  tbuf)
 -----------------------------------------------------------------------------*/
-long monitor::handle_times_precall(int variantnum)
+PRECALL(times)
 {
     CHECKPOINTER(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_times_postcall(int variantnum)
+POSTCALL(times)
 {
     REPLICATEBUFFERFIXEDLEN(1, sizeof(struct tms));
     return 0;
@@ -1718,18 +1728,16 @@ long monitor::handle_times_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_brk
 -----------------------------------------------------------------------------*/
-long monitor::handle_brk_log_return(int variantnum)
+LOG_RETURN(brk)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, addrs);
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_BRK(0x" LONGPTRSTR ") return = 0x" LONGPTRSTR "\n",
                    variants[i].variantpid, ARG1(i), addrs[i]);
-
-    return 0;
 }
 
-long monitor::handle_brk_postcall(int variantnum)
+POSTCALL(brk)
 {	
 	if IS_SYNCED_CALL
 	{
@@ -1800,21 +1808,19 @@ long monitor::handle_brk_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_getgid
 -----------------------------------------------------------------------------*/
-long monitor::handle_getgid_log_return(int variantnum)
+LOG_RETURN(getgid)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, gids)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_GETGID return: %d (%s)\n", variants[i].variantpid,
                    gids[i], getTextualGroupId(gids[i]).c_str());
-
-    return 0;
 }
 
 /*-----------------------------------------------------------------------------
   sys_syslog - (int type, char __user * buf, int len)
 -----------------------------------------------------------------------------*/
-long monitor::handle_syslog_log_args(int variantnum)
+LOG_ARGS(syslog)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -1823,11 +1829,9 @@ long monitor::handle_syslog_log_args(int variantnum)
                    getTextualSyslogAction(ARG1(i)),
                    ARG2(i),
                    ARG3(i));
-
-    return 0;
 }
 
-long monitor::handle_syslog_precall(int variantnum)
+PRECALL(syslog)
 {
     CHECKARG(1);
     CHECKARG(3);
@@ -1835,7 +1839,7 @@ long monitor::handle_syslog_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_syslog_log_return(int variantnum)
+LOG_RETURN(syslog)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, rets)
 
@@ -1845,7 +1849,7 @@ long monitor::handle_syslog_log_return(int variantnum)
             ARG1(0) == SYSLOG_ACTION_READ_ALL ||
             ARG1(0) == SYSLOG_ACTION_READ_CLEAR)
         {
-            char* str = (rets[i] > 0) ? mvee_rw_read_string(variants[i].variantpid, ARG2(i), rets[i]) : NULL;
+            char* str = (rets[i] > 0) ? mvee_rw_read_string(variants[i].variantpid, (void*)ARG2(i), rets[i]) : NULL;
             debugf("pid: %d - SYS_SYSLOG return: %s\n", variants[i].variantpid, str);
             SAFEDELETEARRAY(str);
         }
@@ -1854,11 +1858,9 @@ long monitor::handle_syslog_log_return(int variantnum)
             debugf("pid: %d - SYS_SYSLOG return: %d\n", variants[i].variantpid, rets[i]);
         }
     }
-
-    return 0;
 }
 
-long monitor::handle_syslog_postcall(int variantnum)
+POSTCALL(syslog)
 {
     if (call_succeeded
         && (ARG1(0) == SYSLOG_ACTION_READ
@@ -1874,18 +1876,16 @@ long monitor::handle_syslog_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_setuid
 -----------------------------------------------------------------------------*/
-long monitor::handle_setuid_log_args(int variantnum)
+LOG_ARGS(setuid)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_SETUID(%d = %s)\n", variants[i].variantpid,
                    ARG1(i), getTextualGroupId(ARG1(i)).c_str());
-
-    return 0;
 }
 
-long monitor::handle_setuid_precall(int variantnum)
+PRECALL(setuid)
 {
     CHECKARG(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
@@ -1894,18 +1894,16 @@ long monitor::handle_setuid_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_setgid
 -----------------------------------------------------------------------------*/
-long monitor::handle_setgid_log_args(int variantnum)
+LOG_ARGS(setgid)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_SETGID(%d = %s)\n", variants[i].variantpid,
                    ARG1(i), getTextualGroupId(ARG1(i)).c_str());
-
-    return 0;
 }
 
-long monitor::handle_setgid_precall(int variantnum)
+PRECALL(setgid)
 {
     CHECKARG(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
@@ -1914,14 +1912,14 @@ long monitor::handle_setgid_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_signal - (int sig, __sighandler_t handler)
 -----------------------------------------------------------------------------*/
-long monitor::handle_signal_precall(int variantnum)
+PRECALL(signal)
 {
     CHECKARG(1);
     CHECKSIGHAND(2);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-long monitor::handle_signal_postcall(int variantnum)
+POSTCALL(signal)
 {
     if (call_succeeded)
     {
@@ -1938,19 +1936,17 @@ long monitor::handle_signal_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_ioctl - (unsigned int fd, unsigned int cmd, unsigned long arg)
 -----------------------------------------------------------------------------*/
-long monitor::handle_ioctl_log_args(int variantnum)
+LOG_ARGS(ioctl)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_IOCTL(%d, %d, 0x" PTRSTR ")\n", variants[i].variantpid, ARG1(i), ARG2(i), ARG3(i));
-
-    return 0;
 }
 
 // there are many many ioctls we don't know yet
 // http://man7.org/linux/man-pages/man2/ioctl_list.2.html
-long monitor::handle_ioctl_precall(int variantnum)
+PRECALL(ioctl)
 {
     CHECKARG(2);
     CHECKFD(1);
@@ -1958,11 +1954,10 @@ long monitor::handle_ioctl_precall(int variantnum)
 
     unsigned char is_master = 0;
     switch(ARG2(0))
-    {
+    {	
         case TCGETS:     // struct termios *
             is_master = set_fd_table->is_fd_master_file(ARG1(0));
             break;
-
         case FIONREAD:   // int*
         case TIOCGWINSZ: // struct winsize *
         case TIOCGPGRP:  // pid_t *
@@ -1987,10 +1982,67 @@ long monitor::handle_ioctl_precall(int variantnum)
         case FIOCLEX:
         case FIONCLEX:
             break;
+		// takes a struct ifconf *.  The ifc_buf field points to a buffer of
+		// length ifc_len bytes, into which the kernel writes a list of type
+		// struct ifreq [].
+		// 
+		// struct ifconf
+		// {
+		// 	int ifc_len;
+		// 	union
+		// 	{
+		// 		__caddr_t ifcu_buf;
+		// 		struct ifreq *ifcu_req;
+		// 	} ifc_ifcu;
+		// };
+		case SIOCGIFCONF: // struct ifconf*
+			CHECKBUFFER(3, sizeof(int)); // check if the length is equal
+			is_master = 1;
+			break;
+		// struct ifreq * (in+out)
+		//
+		// struct ifreq
+		// {
+		// # define IFHWADDRLEN    6
+		// # define IFNAMSIZ   IF_NAMESIZE
+		//   union
+		//	 {
+		//     char ifrn_name[IFNAMSIZ];   /* Interface name, e.g. "en0".  */
+		//   } ifr_ifrn;
+		//   union
+		//   {
+		//     struct sockaddr ifru_addr;
+		//     struct sockaddr ifru_dstaddr;
+		//     struct sockaddr ifru_broadaddr;
+		//     struct sockaddr ifru_netmask;
+		//     struct sockaddr ifru_hwaddr;
+		//     short int ifru_flags;
+		//     int ifru_ivalue;
+		//     int ifru_mtu;
+		//     struct ifmap ifru_map;
+		//     char ifru_slave[IFNAMSIZ];  /* Just fits the size */
+		//     char ifru_newname[IFNAMSIZ];
+		//     __caddr_t ifru_data;
+		//   } ifr_ifru;
+		// };			
+		// Not documented in the man pages but as far as I can tell:
+		// * The kernel loads the necessary network module based on the ifrn_name
+		// * The MAC address of the specified interface is returned in the ifr_ifru.ifru_hwaddr field		
+		case SIOCGIFHWADDR:
+			CHECKBUFFER(3, IFNAMSIZ);
+			is_master = 1;
+			break;
+
         default:
+		{
+			// TODO: Remove this. temporary whitelist of nvidia ioctls
+			// fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0));
+			// if (fd_info->path.find("nvidia") != std::string::npos)
+			//	break;
             warnf("unknown ioctl: %d (0x%08x)\n", ARG2(0), ARG2(0));
             shutdown(false);
             break;
+		}
     }
 
     if (!is_master)
@@ -2004,7 +2056,7 @@ long monitor::handle_ioctl_precall(int variantnum)
     }
 }
 
-long monitor::handle_ioctl_postcall(int variantnum)
+POSTCALL(ioctl)
 {
     switch(ARG2(0))
     {
@@ -2038,6 +2090,12 @@ long monitor::handle_ioctl_postcall(int variantnum)
                     fd_info->close_on_exec = false;
             }
             break;
+		case SIOCGIFCONF:
+			REPLICATEIFCONF(3);
+			break;
+		case SIOCGIFHWADDR:
+			REPLICATEBUFFERFIXEDLEN(3, sizeof(struct ifreq));
+			break;
     }
 
     if (state != STATE_IN_MASTERCALL)
@@ -2048,17 +2106,15 @@ long monitor::handle_ioctl_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_fcntl - (unsigned int fd, unsigned int cmd, unsigned long arg)
 -----------------------------------------------------------------------------*/
-long monitor::handle_fcntl_log_args(int variantnum)
+LOG_ARGS(fcntl)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_FCNTL(%d, %s, 0x" PTRSTR ")\n", variants[i].variantpid, ARG1(i), getTextualFcntlCmd(ARG2(i)), ARG3(i));
-
-    return 0;
 }
 
-long monitor::handle_fcntl_precall(int variantnum)
+PRECALL(fcntl)
 {
     CHECKARG(2);
 
@@ -2078,15 +2134,8 @@ long monitor::handle_fcntl_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_fcntl_call(int variantnum)
+POSTCALL(fcntl)
 {
-    return MVEE_CALL_ALLOW;
-}
-
-long monitor::handle_fcntl_postcall(int variantnum)
-{
-    //warnf("fcntl postcall. %s\n", getTextualFcntlCmd(ARG2(0)));
-
     if (call_succeeded)
     {
         if (ARG2(0) == F_GETLK || ARG2(0) == F_GETLK64) // locking operations
@@ -2129,7 +2178,9 @@ long monitor::handle_fcntl_postcall(int variantnum)
                     return 0;
 
                 set_fd_table->create_fd_info(fd_info->file_type, fds, fd_info->path.c_str(), fd_info->access_flags, (ARG2(0) == F_DUPFD_CLOEXEC) ? true : fd_info->close_on_exec, state == STATE_IN_MASTERCALL, fd_info->unsynced_reads, fd_info->original_file_size);
+#ifdef MVEE_FD_DEBUG
                 set_fd_table->verify_fd_table(getpids());
+#endif
             }
 			else if (ARG2(0) == F_SETFL)
 			{
@@ -2147,18 +2198,16 @@ long monitor::handle_fcntl_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_flock - (unsigned int fd, unsigned int operation)
 -----------------------------------------------------------------------------*/
-long monitor::handle_flock_log_args(int variantnum)
+LOG_ARGS(flock)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_FLOCK(%u, %u (%s))\n", variants[i].variantpid,
                    ARG1(i), ARG2(i), getTextualFlockType(ARG2(i)));
-
-    return 0;
 }
 
-long monitor::handle_flock_precall(int variantnum)
+PRECALL(flock)
 {
     CHECKFD(1);
     CHECKARG(2);
@@ -2168,24 +2217,22 @@ long monitor::handle_flock_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_umask - (int mask)
 -----------------------------------------------------------------------------*/
-long monitor::handle_umask_log_args(int variantnum)
+LOG_ARGS(umask)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_UMASK(%d = %s)\n", variants[i].variantpid,
                    ARG1(i), getTextualFileMode(ARG1(i)).c_str());
-
-    return 0;
 }
 
-long monitor::handle_umask_precall(int variantnum)
+PRECALL(umask)
 {
     CHECKARG(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-long monitor::handle_umask_postcall(int variantnum)
+POSTCALL(umask)
 {
     syscall(__NR_umask, ARG1(0));
     return 0;
@@ -2194,17 +2241,15 @@ long monitor::handle_umask_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_dup2 - (unsigned int oldfd, unsigned int newfd)
 -----------------------------------------------------------------------------*/
-long monitor::handle_dup2_log_args(int variantnum)
+LOG_ARGS(dup2)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_DUP2(%d, %d)\n", variants[i].variantpid, ARG1(i), ARG2(i));
-
-    return 0;
 }
 
-long monitor::handle_dup2_precall(int variantnum)
+PRECALL(dup2)
 {
     CHECKFD(1);
     CHECKFD(2);
@@ -2225,22 +2270,15 @@ long monitor::handle_dup2_precall(int variantnum)
     }
 }
 
-long monitor::handle_dup2_call(int variantnum)
-{
-    return MVEE_CALL_ALLOW;
-}
-
-long monitor::handle_dup2_log_return(int variantnum)
+LOG_RETURN(dup2)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, fds)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_DUP2(%d, %d) return: %d\n", variants[i].variantpid, ARG1(i), ARG2(i), fds[i]);
-
-    return 0;
 }
 
-long monitor::handle_dup2_postcall(int variantnum)
+POSTCALL(dup2)
 {
     std::vector<unsigned long> fds;
 
@@ -2276,7 +2314,9 @@ long monitor::handle_dup2_postcall(int variantnum)
                 return 0;
 
             set_fd_table->create_fd_info(fd_info->file_type, fds, fd_info->path.c_str(), fd_info->access_flags, false, fd_info->master_file, fd_info->unsynced_reads, fd_info->original_file_size);
+#ifdef MVEE_FD_DEBUG
             set_fd_table->verify_fd_table(getpids());
+#endif
         }
     }
 
@@ -2286,7 +2326,7 @@ long monitor::handle_dup2_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_setpgid
 -----------------------------------------------------------------------------*/
-long monitor::handle_setpgid_precall(int variantnum)
+PRECALL(setpgid)
 {
     CHECKARG(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
@@ -2295,25 +2335,23 @@ long monitor::handle_setpgid_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_getppid
 -----------------------------------------------------------------------------*/
-long monitor::handle_getppid_precall(int variantnum)
+PRECALL(getppid)
 {
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_getppid_log_return(int variantnum)
+LOG_RETURN(getppid)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, pids)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_GETPPID() return: %d\n", variants[i].variantpid, pids[i]);
-
-    return 0;
 }
 
 /*-----------------------------------------------------------------------------
   sys_getpgrp
 -----------------------------------------------------------------------------*/
-long monitor::handle_getpgrp_precall(int variantnum)
+PRECALL(getpgrp)
 {
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
@@ -2321,7 +2359,7 @@ long monitor::handle_getpgrp_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_setsid
 -----------------------------------------------------------------------------*/
-long monitor::handle_setsid_precall(int variantnum)
+PRECALL(setsid)
 {
     warnf("Process is creating a new session (i.e. it's becoming a daemon!)\n");
     for (int i = 0; i < mvee::numvariants; ++i)
@@ -2336,14 +2374,14 @@ long monitor::handle_setsid_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_getgroups - (int gidsetsize, gid_t __user* grouplist)
 -----------------------------------------------------------------------------*/
-long monitor::handle_getgroups_precall(int variantnum)
+PRECALL(getgroups)
 {
     CHECKARG(1);
     CHECKPOINTER(2);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-long monitor::handle_getgroups_log_return(int variantnum)
+LOG_RETURN(getgroups)
 {
     if (call_succeeded)
     {
@@ -2354,11 +2392,11 @@ long monitor::handle_getgroups_log_return(int variantnum)
             if (ARG2(i))
             {
                 gid_t* grouplist = (gid_t*)mvee_rw_safe_alloc(sizeof(gid_t) * rets[i]);
-                if (!mvee_rw_read_struct(variants[i].variantpid, ARG2(i), sizeof(gid_t) * rets[i], grouplist))
+                if (!mvee_rw_read_struct(variants[i].variantpid, (void*)ARG2(i), sizeof(gid_t) * rets[i], grouplist))
                 {
                     warnf("couldn't read grouplist\n");
                     SAFEDELETEARRAY(grouplist);
-                    return 0;
+					return;
                 }
 
                 debugf("pid: %d - SYS_GETGROUPS return: %s\n", variants[i].variantpid,
@@ -2372,14 +2410,12 @@ long monitor::handle_getgroups_log_return(int variantnum)
             }
         }
     }
-
-    return 0;
 }
 
 /*-----------------------------------------------------------------------------
   sys_setgroups - (int gidsetsize, gid_t __user* grouplist)
 -----------------------------------------------------------------------------*/
-long monitor::handle_setgroups_log_args(int variantnum)
+LOG_ARGS(setgroups)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -2389,23 +2425,21 @@ long monitor::handle_setgroups_log_args(int variantnum)
         {
             gid_t* grouplist = (gid_t*)mvee_rw_safe_alloc(sizeof(gid_t) * ARG1(i));
             memset(grouplist, 0, sizeof(gid_t) * ARG1(i));
-            if (!mvee_rw_read_struct(variants[i].variantpid, ARG2(i), sizeof(gid_t) * ARG1(i), grouplist))
+            if (!mvee_rw_read_struct(variants[i].variantpid, (void*) ARG2(i), sizeof(gid_t) * ARG1(i), grouplist))
             {
                 warnf("couldn't read grouplist\n");
                 SAFEDELETEARRAY(grouplist);
-                return 0;
-            }
+				return;
+			}
 
             debugf("pid: %d - SYS_SETGROUPS (%s)\n", variants[i].variantpid,
                        getTextualGroups(ARG1(i), grouplist).c_str());
             SAFEDELETEARRAY(grouplist);
         }
     }
-
-    return 0;
 }
 
-long monitor::handle_setgroups_precall(int variantnum)
+PRECALL(setgroups)
 {
     CHECKARG(1);
     CHECKPOINTER(2);
@@ -2416,7 +2450,7 @@ long monitor::handle_setgroups_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_setresuid
 -----------------------------------------------------------------------------*/
-long monitor::handle_setresuid_log_args(int variantnum)
+LOG_ARGS(setresuid)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -2428,11 +2462,9 @@ long monitor::handle_setresuid_log_args(int variantnum)
                    ARG2(i), getTextualUserId(ARG2(i)).c_str(),
                    ARG3(i), getTextualUserId(ARG3(i)).c_str());
     }
-
-    return 0;
 }
 
-long monitor::handle_setresuid_precall(int variantnum)
+PRECALL(setresuid)
 {
     CHECKARG(1);
     CHECKARG(2);
@@ -2443,7 +2475,7 @@ long monitor::handle_setresuid_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_setresgid
 -----------------------------------------------------------------------------*/
-long monitor::handle_setresgid_log_args(int variantnum)
+LOG_ARGS(setresgid)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -2455,11 +2487,9 @@ long monitor::handle_setresgid_log_args(int variantnum)
                    ARG2(i), getTextualGroupId(ARG2(i)).c_str(),
                    ARG3(i), getTextualGroupId(ARG3(i)).c_str());
     }
-
-    return 0;
 }
 
-long monitor::handle_setresgid_precall(int variantnum)
+PRECALL(setresgid)
 {
     CHECKARG(1);
     CHECKARG(2);
@@ -2471,13 +2501,13 @@ long monitor::handle_setresgid_precall(int variantnum)
     sys_rt_sigaction - (int sig, const struct sigaction __user *act,
     struct sigaction __user *oact, size_t sigsetsize)
 -----------------------------------------------------------------------------*/
-long monitor::handle_rt_sigaction_log_args(int variantnum)
+LOG_ARGS(rt_sigaction)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
-        struct sigaction action DEBUGVAR = call_get_sigaction(i, ARG2(i), OLDCALLIFNOT(__NR_rt_sigaction));
+        struct sigaction action DEBUGVAR = call_get_sigaction(i, (void*) ARG2(i), OLDCALLIFNOT(__NR_rt_sigaction));
 
         debugf("pid: %d - SYS_RT_SIGACTION(%d - %s - %s)\n", variants[i].variantpid, ARG1(i), getTextualSig(ARG1(i)),
                    (action.sa_handler == SIG_DFL) ? "SIG_DFL" :
@@ -2485,11 +2515,9 @@ long monitor::handle_rt_sigaction_log_args(int variantnum)
                    (action.sa_handler == (__sighandler_t)-2) ? "---" : "SIG_PTR"
                    );
     }
-
-    return 0;
 }
 
-long monitor::handle_rt_sigaction_precall(int variantnum)
+PRECALL(rt_sigaction)
 {
     CHECKARG(1);
     CHECKARG(4);
@@ -2499,7 +2527,7 @@ long monitor::handle_rt_sigaction_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-long monitor::handle_rt_sigaction_postcall(int variantnum)
+POSTCALL(rt_sigaction)
 {
 	// TODO/FIXME - stijn: We might see mismatches by not tracking sigactions
 	// while fast forwarding at some point
@@ -2508,7 +2536,7 @@ long monitor::handle_rt_sigaction_postcall(int variantnum)
 
     if (call_succeeded && ARG2(0))
     {
-        struct sigaction action = call_get_sigaction(0, ARG2(0), OLDCALLIFNOT(__NR_rt_sigaction));
+        struct sigaction action = call_get_sigaction(0, (void*) ARG2(0), OLDCALLIFNOT(__NR_rt_sigaction));
         set_sighand_table->set_sigaction(ARG1(0), &action);
     }
 
@@ -2520,7 +2548,7 @@ long monitor::handle_rt_sigaction_postcall(int variantnum)
 
 	This is used to get/set the FS/GS base on x86
 -----------------------------------------------------------------------------*/
-long monitor::handle_arch_prctl_precall(int variantnum)
+PRECALL(arch_prctl)
 {
     CHECKARG(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
@@ -2529,7 +2557,7 @@ long monitor::handle_arch_prctl_precall(int variantnum)
 /*-----------------------------------------------------------------------------
     sys_sync
 -----------------------------------------------------------------------------*/
-long monitor::handle_sync_precall(int variantnum)
+PRECALL(sync)
 {
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
@@ -2537,18 +2565,18 @@ long monitor::handle_sync_precall(int variantnum)
 /*-----------------------------------------------------------------------------
     sys_setrlimit - (int resource, const struct rlimit *rlim)
 -----------------------------------------------------------------------------*/
-long monitor::handle_setrlimit_log_args(int variantnum)
+LOG_ARGS(setrlimit)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
         struct rlimit  rlim;
-        unsigned char* tmp = mvee_rw_read_data(variants[i].variantpid, ARG2(i), sizeof(struct rlimit));
+        unsigned char* tmp = mvee_rw_read_data(variants[i].variantpid, (void*) ARG2(i), sizeof(struct rlimit));
         if (!tmp)
         {
             warnf("couldn't read rlimit\n");
-            return 0;
+			return;
         }
         memcpy(&rlim, tmp, sizeof(struct rlimit));
         SAFEDELETEARRAY(tmp);
@@ -2556,36 +2584,26 @@ long monitor::handle_setrlimit_log_args(int variantnum)
         debugf("pid: %d - SYS_SETRLIMIT(%s, CUR: %d, MAX: %d)\n", variants[i].variantpid,
                    getTextualRlimitType(ARG1(i)), rlim.rlim_cur, rlim.rlim_max);
     }
-
-    return 0;
 }
 
-long monitor::handle_setrlimit_precall(int variantnum)
+PRECALL(setrlimit)
 {
     CHECKARG(1);
     CHECKPOINTER(2);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-/*long monitor::hndle_setrlimit_call(int variantnum)
-{
-	if (ARG1(0) == RLIMIT_NOFILE)
-		return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
-	return MVEE_CALL_ALLOW;
-}*/
-
-
 /*-----------------------------------------------------------------------------
   sys_getrusage - (int who, struct rusage *usage)
 -----------------------------------------------------------------------------*/
-long monitor::handle_getrusage_precall(int variantnum)
+PRECALL(getrusage)
 {
     CHECKARG(1);
     CHECKPOINTER(2);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_getrusage_postcall(int variantnum)
+POSTCALL(getrusage)
 {
     if (ARG2(0))
         REPLICATEBUFFERFIXEDLEN(2, sizeof(struct rusage));
@@ -2595,13 +2613,13 @@ long monitor::handle_getrusage_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_sysinfo - (struct sysinfo *info)
 -----------------------------------------------------------------------------*/
-long monitor::handle_sysinfo_precall(int variantnum)
+PRECALL(sysinfo)
 {
     CHECKPOINTER(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_sysinfo_postcall(int variantnum)
+POSTCALL(sysinfo)
 {
     REPLICATEBUFFERFIXEDLEN(1, sizeof(struct sysinfo));
     return 0;
@@ -2610,14 +2628,14 @@ long monitor::handle_sysinfo_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_gettimeofday - (struct timeval *tv, struct timezone *tz)
 -----------------------------------------------------------------------------*/
-long monitor::handle_gettimeofday_precall(int variantnum)
+PRECALL(gettimeofday)
 {
     CHECKPOINTER(2);
     CHECKPOINTER(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_gettimeofday_postcall(int variantnum)
+POSTCALL(gettimeofday)
 {
     REPLICATEBUFFERFIXEDLEN(1, sizeof(struct timeval));
     REPLICATEBUFFERFIXEDLEN(2, sizeof(struct timezone));
@@ -2627,7 +2645,7 @@ long monitor::handle_gettimeofday_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_getrlimit (unsigned int resource, struct rlimit __user* limit)
 -----------------------------------------------------------------------------*/
-long monitor::handle_getrlimit_precall(int variantnum)
+PRECALL(getrlimit)
 {
     CHECKARG(1);
     CHECKPOINTER(2);
@@ -2637,7 +2655,7 @@ long monitor::handle_getrlimit_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_symlink - (const char  *  oldname, const char  *  newname)
 -----------------------------------------------------------------------------*/
-long monitor::handle_symlink_precall(int variantnum)
+PRECALL(symlink)
 {
     CHECKPOINTER(1);
     CHECKPOINTER(2);
@@ -2649,7 +2667,7 @@ long monitor::handle_symlink_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_readlink - (const char __user *path, char __user *buf, int bufsiz)
 -----------------------------------------------------------------------------*/
-long monitor::handle_readlink_precall(int variantnum)
+PRECALL(readlink)
 {
     CHECKPOINTER(1);
     CHECKPOINTER(2);
@@ -2658,9 +2676,9 @@ long monitor::handle_readlink_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_readlink_call(int variantnum)
+CALL(readlink)
 {
-	char* str = mvee_rw_read_string(variants[0].variantpid, ARG1(0));
+	char* str = mvee_rw_read_string(variants[0].variantpid, (void*) ARG1(0));
 
 	// ridiculous hack for java and other shit
 	if (str && !strcmp(str, "/proc/self/exe"))
@@ -2669,9 +2687,9 @@ long monitor::handle_readlink_call(int variantnum)
 		{
 			for (int i = 0; i < mvee::numvariants; ++i)
 			{
-				mvee_rw_write_data(variants[i].variantpid, ARG2(i), 
+				mvee_rw_write_data(variants[i].variantpid, (void*) ARG2(i), 
 								   set_mmap_table->mmap_startup_info[0].image.length(), 
-								   (unsigned char*)set_mmap_table->mmap_startup_info[0].image.c_str());
+								   (void*) set_mmap_table->mmap_startup_info[0].image.c_str());
 			}
 
 			return MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(set_mmap_table->mmap_startup_info[0].image.length());
@@ -2681,7 +2699,7 @@ long monitor::handle_readlink_call(int variantnum)
 	return MVEE_CALL_ALLOW;
 }
 
-long monitor::handle_readlink_postcall(int variantnum)
+POSTCALL(readlink)
 {
     REPLICATEBUFFER(2);
     return 0;
@@ -2690,7 +2708,7 @@ long monitor::handle_readlink_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_munmap
 -----------------------------------------------------------------------------*/
-long monitor::handle_munmap_get_call_type(int variantnum)
+GET_CALL_TYPE(munmap)
 {
     // We do NOT want to sync on the munmap of the lower region
     if (in_new_heap_allocation)
@@ -2703,14 +2721,12 @@ long monitor::handle_munmap_get_call_type(int variantnum)
     return MVEE_CALL_TYPE_NORMAL;
 }
 
-long monitor::handle_munmap_log_args(int variantnum)
+LOG_ARGS(munmap)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_MUNMAP(0x" PTRSTR ", %d)\n", variants[i].variantpid, ARG1(i), ARG2(i));
-
-    return 0;
 }
 
 bool monitor::handle_munmap_precall_callback(mmap_table* table, std::vector<mmap_region_info*>& infos, void* mon)
@@ -2741,15 +2757,15 @@ bool monitor::handle_munmap_precall_callback(mmap_table* table, std::vector<mmap
         info.writeback_buffer_size = writeback_size;
         info.writeback_buffer      = new unsigned char[writeback_size];
 
-        mvee_rw_copy_data(variants[0].variantpid, actual_base, mvee::os_getpid(), (unsigned long)info.writeback_buffer, writeback_size);
+        mvee_rw_copy_data(variants[0].variantpid, (void*) actual_base, mvee::os_getpid(), info.writeback_buffer, writeback_size);
 
         bool                    mismatch       = false;
 
         for (int i = 1; i < mvee::numvariants; ++i)
         {
             unsigned char* variant_region = new unsigned char[writeback_size];
-            mvee_rw_copy_data(variants[i].variantpid, MAX(infos[i]->region_base_address, (unsigned long)ARG1(i)),
-                              mvee::os_getpid(), (unsigned long)variant_region, writeback_size);
+            mvee_rw_copy_data(variants[i].variantpid, (void*) MAX(infos[i]->region_base_address, (unsigned long)ARG1(i)),
+                              mvee::os_getpid(), variant_region, writeback_size);
 
             if (memcmp(info.writeback_buffer, variant_region, writeback_size))
             {
@@ -2782,7 +2798,7 @@ bool monitor::handle_munmap_precall_callback(mmap_table* table, std::vector<mmap
     return true;
 }
 
-long monitor::handle_munmap_precall(int variantnum)
+PRECALL(munmap)
 {
     // We ONLY allow unsynced munmaps for the unmapping
     // of the region below the newly allocated heap.
@@ -2818,7 +2834,7 @@ long monitor::handle_munmap_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-long monitor::handle_munmap_postcall(int variantnum)
+POSTCALL(munmap)
 {
     int release_locks = 0;
 
@@ -2889,7 +2905,7 @@ long monitor::handle_munmap_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_truncate - (const char  *  path, long  length)
 -----------------------------------------------------------------------------*/
-long monitor::handle_truncate_precall(int variantnum)
+PRECALL(truncate)
 {
     CHECKPOINTER(1);
     CHECKARG(2);
@@ -2900,7 +2916,7 @@ long monitor::handle_truncate_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_ftruncate - (unsigned int  fd, unsigned long  length)
 -----------------------------------------------------------------------------*/
-long monitor::handle_ftruncate_precall(int variantnum)
+PRECALL(ftruncate)
 {
     CHECKARG(2);
     CHECKFD(1);
@@ -2910,7 +2926,7 @@ long monitor::handle_ftruncate_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_ioperm
 -----------------------------------------------------------------------------*/
-long monitor::handle_ioperm_call(int variantnum)
+CALL(ioperm)
 {
     cache_mismatch_info("The program is trying to access I/O ports. This call has been denied.\n");
     return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
@@ -2919,7 +2935,7 @@ long monitor::handle_ioperm_call(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_quotactl - (unsigned int cmd, const char* special, qid_t id, void* addr)
 -----------------------------------------------------------------------------*/
-long monitor::handle_quotactl_precall(int variantnum)
+PRECALL(quotactl)
 {
     CHECKARG(1);
     CHECKPOINTER(2);
@@ -2988,7 +3004,7 @@ long monitor::handle_quotactl_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_quotactl_postcall(int variantnum)
+POSTCALL(quotactl)
 {
     unsigned int subcmd = ((ARG1(0)) >> SUBCMDSHIFT);
 
@@ -3017,7 +3033,7 @@ long monitor::handle_quotactl_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_socket - (int family, int type, int protocol)
 -----------------------------------------------------------------------------*/
-long monitor::handle_socket_log_args(int variantnum)
+LOG_ARGS(socket)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -3029,11 +3045,9 @@ long monitor::handle_socket_log_args(int variantnum)
                    ARG2(i), getTextualSocketType(ARG2(i)).c_str(),
                    ARG3(i), getTextualSocketProtocol(ARG3(i)));
     }
-
-    return 0;
 }
 
-long monitor::handle_socket_precall(int variantnum)
+PRECALL(socket)
 {
     CHECKARG(1);
     CHECKARG(2);
@@ -3041,7 +3055,7 @@ long monitor::handle_socket_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_socket_postcall(int variantnum)
+POSTCALL(socket)
 {
     if (call_succeeded)
     {
@@ -3050,7 +3064,9 @@ long monitor::handle_socket_postcall(int variantnum)
 		
 		FileType type = (ARG2(0) & SOCK_NONBLOCK) ? FT_SOCKET_NON_BLOCKING : FT_SOCKET_BLOCKING;
         set_fd_table->create_fd_info(type, fds, "sock:unnamed", 0, (ARG2(0) & SOCK_CLOEXEC) ? true : false, true);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
+#endif
     }
     return 0;
 }
@@ -3058,7 +3074,7 @@ long monitor::handle_socket_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_bind - (int fd, struct sockaddr __user * umyaddr, int addrlen)
 -----------------------------------------------------------------------------*/
-long monitor::handle_bind_log_args(int variantnum)
+LOG_ARGS(bind)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -3069,11 +3085,9 @@ long monitor::handle_bind_log_args(int variantnum)
                    variants[i].variantpid,
                    ARG1(i), text_addr.c_str(), ARG3(i));
     }
-
-    return 0;
 }
 
-long monitor::handle_bind_precall(int variantnum)
+PRECALL(bind)
 {
     CHECKARG(3);
     CHECKPOINTER(2);
@@ -3082,7 +3096,7 @@ long monitor::handle_bind_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_bind_postcall(int variantnum)
+POSTCALL(bind)
 {
     if (call_succeeded)
     {
@@ -3097,7 +3111,7 @@ long monitor::handle_bind_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_connect - (int fd, struct sockaddr __user * uservaddr, int addrlen)
 -----------------------------------------------------------------------------*/
-long monitor::handle_connect_log_args(int variantnum)
+LOG_ARGS(connect)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -3108,10 +3122,9 @@ long monitor::handle_connect_log_args(int variantnum)
                    variants[i].variantpid,
                    ARG1(i), text_addr.c_str(), ARG3(i));
     }
-    return 0;
 }
 
-long monitor::handle_connect_precall(int variantnum)
+PRECALL(connect)
 {
     CHECKARG(3);
     CHECKPOINTER(2);
@@ -3120,7 +3133,7 @@ long monitor::handle_connect_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_connect_postcall(int variantnum)
+POSTCALL(connect)
 {
     if (call_succeeded)
     {
@@ -3135,7 +3148,7 @@ long monitor::handle_connect_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_listen - (int fd, int backlog)
 -----------------------------------------------------------------------------*/
-long monitor::handle_listen_log_args(int variantnum)
+LOG_ARGS(listen)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -3145,11 +3158,9 @@ long monitor::handle_listen_log_args(int variantnum)
                    variants[i].variantpid,
                    ARG1(i), ARG2(i));
     }
-
-    return 0;
 }
 
-long monitor::handle_listen_precall(int variantnum)
+PRECALL(listen)
 {
     CHECKARG(2);
     CHECKFD(1);
@@ -3160,7 +3171,7 @@ long monitor::handle_listen_precall(int variantnum)
   sys_getsockname - (int fd, struct sockaddr __user * usockaddr,
   int __user * usockaddr_len)
 -----------------------------------------------------------------------------*/
-long monitor::handle_getsockname_log_args(int variantnum)
+LOG_ARGS(getsockname)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -3170,11 +3181,9 @@ long monitor::handle_getsockname_log_args(int variantnum)
                    variants[i].variantpid,
                    ARG1(i), ARG2(i));
     }
-
-    return 0;
 }
 
-long monitor::handle_getsockname_precall(int variantnum)
+PRECALL(getsockname)
 {
     CHECKPOINTER(2);
     CHECKPOINTER(3);
@@ -3183,7 +3192,7 @@ long monitor::handle_getsockname_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_getsockname_postcall(int variantnum)
+POSTCALL(getsockname)
 {
     REPLICATEBUFFERANDLEN(2, 3, sizeof(int));
     return 0;
@@ -3193,7 +3202,7 @@ long monitor::handle_getsockname_postcall(int variantnum)
   sys_getpeername - (int fd, struct sockaddr __user * usockaddr,
   int __user * usockaddr_len)
 -----------------------------------------------------------------------------*/
-long monitor::handle_getpeername_log_args(int variantnum)
+LOG_ARGS(getpeername)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -3203,11 +3212,9 @@ long monitor::handle_getpeername_log_args(int variantnum)
                    variants[i].variantpid,
                    ARG1(i), ARG2(i));
     }
-
-    return 0;
 }
 
-long monitor::handle_getpeername_precall(int variantnum)
+PRECALL(getpeername)
 {
     CHECKPOINTER(2);
     CHECKPOINTER(3);
@@ -3216,7 +3223,7 @@ long monitor::handle_getpeername_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_getpeername_postcall(int variantnum)
+POSTCALL(getpeername)
 {
     REPLICATEBUFFERANDLEN(2, 3, sizeof(int));
     return 0;
@@ -3226,7 +3233,7 @@ long monitor::handle_getpeername_postcall(int variantnum)
   sys_socketpair - (int family, int type, int protocol,
   int __user * usockvec)
 -----------------------------------------------------------------------------*/
-long monitor::handle_socketpair_log_args(int variantnum)
+LOG_ARGS(socketpair)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -3238,11 +3245,9 @@ long monitor::handle_socketpair_log_args(int variantnum)
                    ARG2(i), getTextualSocketType(ARG2(i)).c_str(),
                    ARG3(i), getTextualSocketProtocol(ARG3(i)));
     }
-
-    return 0;
 }
 
-long monitor::handle_socketpair_precall(int variantnum)
+PRECALL(socketpair)
 {
     CHECKPOINTER(4);
     CHECKARG(3);
@@ -3251,7 +3256,7 @@ long monitor::handle_socketpair_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_socketpair_log_return(int variantnum)
+LOG_RETURN(socketpair)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, rets)
 
@@ -3263,11 +3268,9 @@ long monitor::handle_socketpair_log_return(int variantnum)
 
         debugf("pid: %d - SYS_SOCKETPAIR return: [%d, %d]\n", variants[i].variantpid, word1._int, word2._int);
     }
-
-    return 0;
 }
 
-long monitor::handle_socketpair_postcall(int variantnum)
+POSTCALL(socketpair)
 {
     if (call_succeeded)
     {
@@ -3283,7 +3286,9 @@ long monitor::handle_socketpair_postcall(int variantnum)
 		FileType type = (ARG2(0) & SOCK_NONBLOCK) ? FT_SOCKET_NON_BLOCKING : FT_SOCKET_BLOCKING;
         set_fd_table->create_fd_info(type, fds,  "sock:unnamed", 0, (ARG2(0) & SOCK_CLOEXEC) ? true : false, true);
         set_fd_table->create_fd_info(type, fds2, "sock:unnamed", 0, (ARG2(0) & SOCK_CLOEXEC) ? true : false, true);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
+#endif
 
         for (int i = 1; i < mvee::numvariants; ++i)
         {
@@ -3303,14 +3308,14 @@ long monitor::handle_socketpair_postcall(int variantnum)
   sys_sendto -  (int fd, void __user * buff, size_t len,
   unsigned int flags, struct sockaddr __user * addr, int addr_len)
 -----------------------------------------------------------------------------*/
-long monitor::handle_sendto_log_args(int variantnum)
+LOG_ARGS(sendto)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
         GETTEXTADDRDIRECT(i, text_addr, 5, ARG6(i));
-        std::string buf_str = call_serialize_io_buffer(i, ARG2(i), ARG3(i));
+        std::string buf_str = call_serialize_io_buffer(i, (const unsigned char*) ARG2(i), ARG3(i));
         debugf("pid: %d - SYS_SENDTO(%d, " PTRSTR " (%s), %d, %d = %s, 0x" PTRSTR " (%s), %d)\n",
                    variants[i].variantpid,
                    ARG1(i), ARG2(i), buf_str.c_str(),
@@ -3319,11 +3324,9 @@ long monitor::handle_sendto_log_args(int variantnum)
                    ARG5(i), text_addr.c_str(),
                    ARG6(i));
     }
-
-    return 0;
 }
 
-long monitor::handle_sendto_precall(int variantnum)
+PRECALL(sendto)
 {
     CHECKPOINTER(2);
     CHECKPOINTER(5);
@@ -3344,19 +3347,19 @@ long monitor::handle_sendto_precall(int variantnum)
 
   Is this deprecated now?!
 -----------------------------------------------------------------------------*/
-long monitor::handle_send_get_call_type(int variantnum)
+GET_CALL_TYPE(send)
 {
     ARG5(variantnum) = 0;
     ARG6(variantnum) = 0;
     return MVEE_CALL_TYPE_NORMAL;
 }
 
-long monitor::handle_send_log_args(int variantnum)
+LOG_ARGS(send)
 {
-    return handle_sendto_log_args(variantnum);
+    handle_sendto_log_args(variantnum);
 }
 
-long monitor::handle_send_precall(int variantnum)
+PRECALL(send)
 {
     return handle_sendto_precall(variantnum);
 }
@@ -3366,7 +3369,7 @@ long monitor::handle_send_precall(int variantnum)
   unsigned int flags, struct sockaddr __user * addr,
   int __user * addr_len)
 -----------------------------------------------------------------------------*/
-long monitor::handle_recvfrom_log_args(int variantnum)
+LOG_ARGS(recvfrom)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -3380,11 +3383,9 @@ long monitor::handle_recvfrom_log_args(int variantnum)
                    ARG5(i),
                    ARG6(i));
     }
-
-    return 0;
 }
 
-long monitor::handle_recvfrom_precall(int variantnum)
+PRECALL(recvfrom)
 {
     CHECKPOINTER(2);
     CHECKPOINTER(5);
@@ -3395,7 +3396,7 @@ long monitor::handle_recvfrom_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_recvfrom_postcall(int variantnum)
+POSTCALL(recvfrom)
 {
     REPLICATEBUFFER(2);
     REPLICATEBUFFERANDLEN(5, 6, sizeof(int));
@@ -3405,7 +3406,7 @@ long monitor::handle_recvfrom_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_shutdown - (int fd, int how)
 -----------------------------------------------------------------------------*/
-long monitor::handle_shutdown_log_args(int variantnum)
+LOG_ARGS(shutdown)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -3415,11 +3416,9 @@ long monitor::handle_shutdown_log_args(int variantnum)
                    variants[i].variantpid,
                    ARG1(i), ARG2(i), getTextualSocketShutdownHow(ARG2(i)));
     }
-
-    return 0;
 }
 
-long monitor::handle_shutdown_precall(int variantnum)
+PRECALL(shutdown)
 {
     CHECKARG(2);
     CHECKFD(1);
@@ -3430,22 +3429,20 @@ long monitor::handle_shutdown_precall(int variantnum)
   sys_setsockopt - (int fd, int level, int optname,
   char __user * optval, int optlen)
 -----------------------------------------------------------------------------*/
-long monitor::handle_setsockopt_log_args(int variantnum)
+LOG_ARGS(setsockopt)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
-        std::string str = call_serialize_io_buffer(i, ARG4(i), ARG5(i));
+        std::string str = call_serialize_io_buffer(i, (const unsigned char*) ARG4(i), ARG5(i));
         debugf("pid: %d - SYS_SETSOCKOPT(%d, %d, %d, %s, %d)\n",
                    variants[i].variantpid,
                    ARG1(i), ARG2(i), ARG3(i), str.c_str(), ARG5(i));
     }
-
-    return 0;
 }
 
-long monitor::handle_setsockopt_precall(int variantnum)
+PRECALL(setsockopt)
 {
     CHECKPOINTER(4);
     CHECKARG(5);
@@ -3460,7 +3457,7 @@ long monitor::handle_setsockopt_precall(int variantnum)
   sys_getsockopt - (int fd, int level, int optname,
   char __user * optval, int __user * optlen)
 -----------------------------------------------------------------------------*/
-long monitor::handle_getsockopt_log_args(int variantnum)
+LOG_ARGS(getsockopt)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -3470,11 +3467,9 @@ long monitor::handle_getsockopt_log_args(int variantnum)
                    variants[i].variantpid,
                    ARG1(i), ARG2(i), ARG3(i), ARG4(i), ARG5(i));
     }
-
-    return 0;
 }
 
-long monitor::handle_getsockopt_precall(int variantnum)
+PRECALL(getsockopt)
 {
     CHECKARG(3);
     CHECKARG(2);
@@ -3485,7 +3480,7 @@ long monitor::handle_getsockopt_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_getsockopt_postcall(int variantnum)
+POSTCALL(getsockopt)
 {
     REPLICATEBUFFERANDLEN(4, 5, sizeof(int));
     return 0;
@@ -3494,17 +3489,17 @@ long monitor::handle_getsockopt_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_sendmsg - (int fd, struct msghdr __user * msg, unsigned int flags)
 -----------------------------------------------------------------------------*/
-long monitor::handle_sendmsg_log_args(int variantnum)
+LOG_ARGS(sendmsg)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
         struct msghdr msg;
-        if (!mvee_rw_read_struct(variants[i].variantpid, ARG2(i), sizeof(struct msghdr), &msg))
+        if (!mvee_rw_read_struct(variants[i].variantpid, (void*) ARG2(i), sizeof(struct msghdr), &msg))
         {
             warnf("couldn't read msghdr\n");
-            return 0;
+            return;
         }
 
         std::string   msg_str = call_serialize_msgvector(i, &msg);
@@ -3513,11 +3508,9 @@ long monitor::handle_sendmsg_log_args(int variantnum)
                    ARG1(i), ARG2(i), msg_str.c_str(),
                    ARG3(i), getTextualSocketMsgFlags(ARG3(i)).c_str());
     }
-
-    return 0;
 }
 
-long monitor::handle_sendmsg_precall(int variantnum)
+PRECALL(sendmsg)
 {
     CHECKPOINTER(2);
     CHECKARG(3);
@@ -3530,7 +3523,7 @@ long monitor::handle_sendmsg_precall(int variantnum)
   sys_sendmmsg - (int fd, struct mmsghdr __user * mmsg,
   unsigned int vlen, unsigned int flags)
 -----------------------------------------------------------------------------*/
-long monitor::handle_sendmmsg_log_args(int variantnum)
+LOG_ARGS(sendmmsg)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -3540,11 +3533,9 @@ long monitor::handle_sendmmsg_log_args(int variantnum)
                    variants[i].variantpid,
                    ARG1(i), ARG2(i), ARG3(i), ARG4(i), getTextualSocketMsgFlags(ARG4(i)).c_str());
     }
-
-    return 0;
 }
 
-long monitor::handle_sendmmsg_precall(int variantnum)
+PRECALL(sendmmsg)
 {
     CHECKFD(1);
     CHECKPOINTER(2);
@@ -3554,7 +3545,7 @@ long monitor::handle_sendmmsg_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_sendmmsg_postcall(int variantnum)
+POSTCALL(sendmmsg)
 {
     // update msg_len fields
     REPLICATEMMSGVECTORLENS(2, ARG3(0));
@@ -3565,7 +3556,7 @@ long monitor::handle_sendmmsg_postcall(int variantnum)
   sys_recvmsg - (int fd, struct msghdr __user * msg,
   unsigned int flags)
 -----------------------------------------------------------------------------*/
-long monitor::handle_recvmsg_log_args(int variantnum)
+LOG_ARGS(recvmsg)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -3575,11 +3566,9 @@ long monitor::handle_recvmsg_log_args(int variantnum)
                    variants[i].variantpid,
                    ARG1(i), ARG2(i), ARG3(i), getTextualSocketMsgFlags(ARG3(i)).c_str());
     }
-
-    return 0;
 }
 
-long monitor::handle_recvmsg_precall(int variantnum)
+PRECALL(recvmsg)
 {
     CHECKPOINTER(2);
     CHECKARG(3);
@@ -3588,27 +3577,25 @@ long monitor::handle_recvmsg_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_recvmsg_log_return(int variantnum)
+LOG_RETURN(recvmsg)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, rets)
 
     for (int i = start; i < lim; ++i)
     {
         struct msghdr msg;
-        if (!mvee_rw_read_struct(variants[i].variantpid, ARG2(i), sizeof(struct msghdr), &msg))
+        if (!mvee_rw_read_struct(variants[i].variantpid, (void*) ARG2(i), sizeof(struct msghdr), &msg))
         {
             warnf("couldn't read msghdr\n");
-            return 0;
+            return;
         }
 
         std::string   _msg = call_serialize_msgvector(i, &msg);
         debugf("pid: %d - SYS_RECVMSG return: %d - %s\n", variants[i].variantpid, rets[i], _msg.c_str());
     }
-
-    return 0;
 }
 
-long monitor::handle_recvmsg_postcall(int variantnum)
+POSTCALL(recvmsg)
 {
     REPLICATEMSGVECTOR(2);
     return 0;
@@ -3619,7 +3606,7 @@ long monitor::handle_recvmsg_postcall(int variantnum)
   unsigned int vlen, unsigned int flags,
   struct timespec __user * timeout)
 -----------------------------------------------------------------------------*/
-long monitor::handle_recvmmsg_precall(int variantnum)
+PRECALL(recvmmsg)
 {
     CHECKFD(1);
     CHECKPOINTER(2);
@@ -3631,7 +3618,7 @@ long monitor::handle_recvmmsg_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_recvmmsg_postcall(int variantnum)
+POSTCALL(recvmmsg)
 {
     REPLICATEMMSGVECTOR(2);
     return 0;
@@ -3641,7 +3628,7 @@ long monitor::handle_recvmmsg_postcall(int variantnum)
   sys_accept4 - (int fd, struct sockaddr __user * upeer_sockaddr,
   int __user * upeer_addrlen, int flags)
 -----------------------------------------------------------------------------*/
-long monitor::handle_accept4_log_args(int variantnum)
+LOG_ARGS(accept4)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -3651,11 +3638,9 @@ long monitor::handle_accept4_log_args(int variantnum)
                    variants[i].variantpid,
                    ARG1(i), ARG2(i), ARG3(i), ARG4(i), getTextualSocketType(ARG4(i)).c_str());
     }
-
-    return 0;
 }
 
-long monitor::handle_accept4_precall(int variantnum)
+PRECALL(accept4)
 {
     CHECKARG(4);
     CHECKPOINTER(2);
@@ -3664,7 +3649,7 @@ long monitor::handle_accept4_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_accept4_postcall(int variantnum)
+POSTCALL(accept4)
 {
     REPLICATEBUFFERANDLEN(2, 3, sizeof(int));
 
@@ -3679,13 +3664,17 @@ long monitor::handle_accept4_postcall(int variantnum)
 
 			FileType type = (ARG4(0) & SOCK_NONBLOCK) ? FT_SOCKET_NON_BLOCKING : FT_SOCKET_BLOCKING;
             set_fd_table->create_fd_info(type, fds, text_addr, 0, (ARG4(0) & SOCK_CLOEXEC) ? true : false, true, 0);
+#ifdef MVEE_FD_DEBUG
             set_fd_table->verify_fd_table(getpids());
+#endif
         }
         else
         {
 			FileType type = (ARG4(0) & SOCK_NONBLOCK) ? FT_SOCKET_NON_BLOCKING : FT_SOCKET_BLOCKING;
             set_fd_table->create_fd_info(type, fds, "sock:unknown", 0, (ARG4(0) & SOCK_CLOEXEC) ? true : false, true);
+#ifdef MVEE_FD_DEBUG
             set_fd_table->verify_fd_table(getpids());
+#endif
         }
     }
     return 0;
@@ -3694,34 +3683,30 @@ long monitor::handle_accept4_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_eventfd2 - (unsigned int count, int flags)
 -----------------------------------------------------------------------------*/
-long monitor::handle_eventfd2_log_args(int variantnum)
+LOG_ARGS(eventfd2)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_EVENTFD2(%d, %d = %s)\n", variants[i].variantpid, ARG1(i), ARG2(i) & 0xffffffff, getTextualEventFdFlags(ARG2(i)  & 0xffffffff));
-
-    return 0;
 }
 
-long monitor::handle_eventfd2_precall(int variantnum)
+PRECALL(eventfd2)
 {
     CHECKARG(1);
     CHECKARG(2);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_eventfd2_log_return(int variantnum)
+LOG_RETURN(eventfd2)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, rets)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_EVENTFD2 return: %d\n", variants[i].variantpid, rets[i]);
-
-    return 0;
 }
 
-long monitor::handle_eventfd2_postcall(int variantnum)
+POSTCALL(eventfd2)
 {
     if (call_succeeded)
     {
@@ -3730,7 +3715,9 @@ long monitor::handle_eventfd2_postcall(int variantnum)
 
 		FileType type = (ARG2(0) & EFD_NONBLOCK) ? FT_POLL_NON_BLOCKING : FT_POLL_BLOCKING;
         set_fd_table->create_fd_info(type, fds, "eventfd", 0, (ARG2(0) & EFD_CLOEXEC) ? true : false, true);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
+#endif
     }
     return 0;
 }
@@ -3738,33 +3725,29 @@ long monitor::handle_eventfd2_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_epoll_create1 - (int flags)
 -----------------------------------------------------------------------------*/
-long monitor::handle_epoll_create1_log_args(int variantnum)
+LOG_ARGS(epoll_create1)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_EPOLL_CREATE1(%d = %s)\n", variants[i].variantpid, ARG1(i), getTextualEpollFlags(ARG1(i)));
-
-    return 0;
 }
 
-long monitor::handle_epoll_create1_precall(int variantnum)
+PRECALL(epoll_create1)
 {
     CHECKARG(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_epoll_create1_log_return(int variantnum)
+LOG_RETURN(epoll_create1)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, rets)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_EPOLL_CREATE1 return: %d\n", variants[i].variantpid, rets[i]);
-
-    return 0;
 }
 
-long monitor::handle_epoll_create1_postcall(int variantnum)
+POSTCALL(epoll_create1)
 {
     if (call_succeeded)
     {
@@ -3772,7 +3755,9 @@ long monitor::handle_epoll_create1_postcall(int variantnum)
         std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
 
         set_fd_table->create_fd_info(FT_POLL_BLOCKING, fds, "epoll_sock", 0, (ARG1(0) & EPOLL_CLOEXEC) ? true : false, true);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
+#endif
     }
     return 0;
 }
@@ -3784,23 +3769,23 @@ long monitor::handle_epoll_create1_postcall(int variantnum)
 
   WRAPPER AROUND sys_accept4!!!
 -----------------------------------------------------------------------------*/
-long monitor::handle_accept_get_call_type(int variantnum)
+GET_CALL_TYPE(accept)
 {
     ARG4(variantnum) = 0;
     return MVEE_CALL_TYPE_NORMAL;
 }
 
-long monitor::handle_accept_log_args(int variantnum)
+LOG_ARGS(accept)
 {
-    return handle_accept4_log_args(variantnum);
+   handle_accept4_log_args(variantnum);
 }
 
-long monitor::handle_accept_precall(int variantnum)
+PRECALL(accept)
 {
     return handle_accept4_precall(variantnum);
 }
 
-long monitor::handle_accept_postcall(int variantnum)
+POSTCALL(accept)
 {
     return handle_accept4_postcall(variantnum);
 }
@@ -3814,7 +3799,7 @@ long monitor::handle_accept_postcall(int variantnum)
 -----------------------------------------------------------------------------*/
 // WARNING: do NOT disable this handler!!!
 #ifdef __NR_socketcall
-long monitor::handle_socketcall_get_call_type(int variantnum)
+GET_CALL_TYPE(socketcall)
 {
     unsigned int  nargs = 0;
 
@@ -3868,34 +3853,32 @@ long monitor::handle_socketcall_get_call_type(int variantnum)
     return MVEE_CALL_TYPE_NORMAL;
 }
 
-long monitor::handle_socketcall_log_args(int variantnum)
+LOG_ARGS(socketcall)
 {
     switch(ORIGARG1(0))
     {
-        case SYS_SOCKET:    return handle_socket_log_args(variantnum);
-        case SYS_BIND:      return handle_bind_log_args(variantnum);
-        case SYS_CONNECT:   return handle_connect_log_args(variantnum);
-        case SYS_LISTEN:    return handle_listen_log_args(variantnum);
-        case SYS_ACCEPT:    return handle_accept4_log_args(variantnum);  // wrapper
-        case SYS_GETSOCKNAME: return handle_getsockname_log_args(variantnum);
-        case SYS_GETPEERNAME: return handle_getpeername_log_args(variantnum);
-        case SYS_SOCKETPAIR:  return handle_socketpair_log_args(variantnum);
-        case SYS_SEND:      return handle_sendto_log_args(variantnum);   // wrapper
-        case SYS_SENDTO:    return handle_sendto_log_args(variantnum);
-        case SYS_RECV:      return handle_recvfrom_log_args(variantnum); // wrapper
-        case SYS_RECVFROM:    return handle_recvfrom_log_args(variantnum);
-        case SYS_SHUTDOWN:    return handle_shutdown_log_args(variantnum);
-        case SYS_SETSOCKOPT:  return handle_setsockopt_log_args(variantnum);
-        case SYS_GETSOCKOPT:  return handle_getsockopt_log_args(variantnum);
-        case SYS_SENDMSG:   return handle_sendmsg_log_args(variantnum);
-        case SYS_RECVMSG:   return handle_recvmsg_log_args(variantnum);
-        case SYS_ACCEPT4:   return handle_accept4_log_args(variantnum);
+        case SYS_SOCKET:    handle_socket_log_args(variantnum); return;
+        case SYS_BIND:      handle_bind_log_args(variantnum); return;
+        case SYS_CONNECT:   handle_connect_log_args(variantnum); return;
+        case SYS_LISTEN:    handle_listen_log_args(variantnum); return;
+        case SYS_ACCEPT:    handle_accept4_log_args(variantnum); return;  // wrapper
+        case SYS_GETSOCKNAME: handle_getsockname_log_args(variantnum); return;
+        case SYS_GETPEERNAME: handle_getpeername_log_args(variantnum); return;
+        case SYS_SOCKETPAIR:  handle_socketpair_log_args(variantnum); return;
+        case SYS_SEND:      handle_sendto_log_args(variantnum); return;   // wrapper
+        case SYS_SENDTO:    handle_sendto_log_args(variantnum); return;
+        case SYS_RECV:      handle_recvfrom_log_args(variantnum); return; // wrapper
+        case SYS_RECVFROM:    handle_recvfrom_log_args(variantnum); return;
+        case SYS_SHUTDOWN:    handle_shutdown_log_args(variantnum); return;
+        case SYS_SETSOCKOPT:  handle_setsockopt_log_args(variantnum); return;
+        case SYS_GETSOCKOPT:  handle_getsockopt_log_args(variantnum); return;
+        case SYS_SENDMSG:   handle_sendmsg_log_args(variantnum); return;
+        case SYS_RECVMSG:   handle_recvmsg_log_args(variantnum); return;
+        case SYS_ACCEPT4:   handle_accept4_log_args(variantnum); return;
     }
-
-    return 0;
 }
 
-long monitor::handle_socketcall_precall(int variantnum)
+PRECALL(socketcall)
 {
     switch(ORIGARG1(0))
     {
@@ -3922,7 +3905,7 @@ long monitor::handle_socketcall_precall(int variantnum)
     return 0;
 }
 
-long monitor::handle_socketcall_postcall(int variantnum)
+POSTCALL(socketcall)
 {
     switch(ORIGARG1(0))
     {
@@ -3943,16 +3926,13 @@ long monitor::handle_socketcall_postcall(int variantnum)
     return 0;
 }
 
-long monitor::handle_socketcall_log_return(int variantnum)
+LOG_RETURN(socketcall)
 {
     switch(ORIGARG1(0))
     {
-        case SYS_SOCKETPAIR: return handle_socketpair_log_return(variantnum);
-        case SYS_RECVMSG: return handle_recvmsg_log_return(variantnum);
+        case SYS_SOCKETPAIR: handle_socketpair_log_return(variantnum); return;
+        case SYS_RECVMSG: handle_recvmsg_log_return(variantnum); return;
     }
-
-    return 0;
-
 }
 
 #endif
@@ -3961,17 +3941,15 @@ long monitor::handle_socketcall_log_return(int variantnum)
   sys_wait4 - (pid_t pid, int __user *stat_addr,
   int options, struct rusage __user *ru)
 -----------------------------------------------------------------------------*/
-long monitor::handle_wait4_log_args(int variantnum)
+LOG_ARGS(wait4)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_WAIT4(%d, 0x" PTRSTR ", %d, 0x" PTRSTR ")\n", variants[i].variantpid, ARG1(i), ARG2(i), ARG3(i), ARG4(i));
-
-    return 0;
 }
 
-long monitor::handle_wait4_precall(int variantnum)
+PRECALL(wait4)
 {
     CHECKARG(1);
     CHECKARG(3);
@@ -3981,17 +3959,15 @@ long monitor::handle_wait4_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-long monitor::handle_wait4_log_return(int variantnum)
+LOG_RETURN(wait4)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, pids)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_WAIT4 return: %d\n", variants[i].variantpid, pids[i]);
-
-    return 0;
 }
 
-long monitor::handle_wait4_postcall(int variantnum)
+POSTCALL(wait4)
 {
     UNMAPPIDS(1);
 
@@ -4026,17 +4002,15 @@ long monitor::handle_wait4_postcall(int variantnum)
 
   AMD64-only!!! this used to be sys_ipc(SHMAT, shmid, shmaddr, shmflg)
 -----------------------------------------------------------------------------*/
-long monitor::handle_shmat_log_args(int variantnum)
+LOG_ARGS(shmat)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_SHMAT(%d, 0x" PTRSTR ", %d (= %s))\n", variants[i].variantpid, ARG1(i), ARG2(i), ARG3(i), getTextualShmFlags(ARG3(i)).c_str());
-
-    return 0;
 }
 
-long monitor::handle_shmat_precall(int variantnum)
+PRECALL(shmat)
 {
 #ifndef MVEE_ALLOW_SHM
 	CHECKSHMID(1);
@@ -4044,7 +4018,7 @@ long monitor::handle_shmat_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-long monitor::handle_shmat_call(int variantnum)
+CALL(shmat)
 {
 	long result = MVEE_CALL_ALLOW;
 	bool disjoint_bases = true;
@@ -4129,7 +4103,7 @@ long monitor::handle_shmat_call(int variantnum)
 #endif
 }
 
-long monitor::handle_shmat_postcall(int variantnum)
+POSTCALL(shmat)
 {
 	std::vector<unsigned long> addresses = call_postcall_get_result_vector();
 	std::string region_name = "[anonymous-sys V shm]";
@@ -4221,20 +4195,18 @@ long monitor::handle_shmat_postcall(int variantnum)
 	return 0;
 }
 
-long monitor::handle_shmat_log_return(int variantnum)
+LOG_RETURN(shmat)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, results);
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_SHMAT return: 0x" PTRSTR "\n", variants[i].variantpid, results[i]);
-
-    return 0;
 }
 
 /*-----------------------------------------------------------------------------
   sys_ipc - i386 only!!!
 -----------------------------------------------------------------------------*/
-long monitor::handle_ipc_precall(int variantnum)
+PRECALL(ipc)
 {
     if (ARG1(0) == SHMAT)
     {
@@ -4249,7 +4221,7 @@ long monitor::handle_ipc_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
 }
 
-long monitor::handle_ipc_call(int variantnum)
+CALL(ipc)
 {
     if (ARG1(0) == SHMAT)
     {
@@ -4264,25 +4236,22 @@ long monitor::handle_ipc_call(int variantnum)
     return MVEE_CALL_ALLOW;
 }
 
-long monitor::handle_ipc_log_return(int variantnum)
+LOG_RETURN(ipc)
 {
     if (ARG1(0) == SHMAT)
     {
         for (int i = 0; i < mvee::numvariants; ++i)
             call_shift_args(i, 1);
-        long result = handle_shmat_log_return(variantnum);
+        handle_shmat_log_return(variantnum);
         for (int i = 0; i < mvee::numvariants; ++i)
             call_shift_args(i, -1);
-        return result;
     }
-
-    return 0;
 }
 
 /*-----------------------------------------------------------------------------
   sys_fsync - unsigned int fd
 -----------------------------------------------------------------------------*/
-long monitor::handle_fsync_precall(int variantnum)
+PRECALL(fsync)
 {
     CHECKFD(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
@@ -4291,7 +4260,7 @@ long monitor::handle_fsync_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_sigreturn -
 -----------------------------------------------------------------------------*/
-long monitor::handle_rt_sigreturn_call(int variantnum)
+CALL(rt_sigreturn)
 {
     if (variants[0].callnumbackup == __NR_rt_sigsuspend
 #ifdef __NR_sigsuspend
@@ -4308,7 +4277,7 @@ long monitor::handle_rt_sigreturn_call(int variantnum)
     return MVEE_CALL_ALLOW;
 }
 
-long monitor::handle_rt_sigreturn_postcall(int variantnum)
+POSTCALL(rt_sigreturn)
 {
     // if we did not deliver during sigsuspend, we will actually see sigreturn return -1
     // return_from_sighandler will restore the original context and resume
@@ -4320,17 +4289,15 @@ long monitor::handle_rt_sigreturn_postcall(int variantnum)
   sys_clone - (unsigned long clone_flags, unsigned long newsp,
   void __user *parent_tid, void __user *variant_tid, struct pt_regs *regs)
 -----------------------------------------------------------------------------*/
-long monitor::handle_clone_log_args(int variantnum)
+LOG_ARGS(clone)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim);
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_CLONE(%s)\n", variants[i].variantpid, getTextualCloneFlags(ARG1(i)).c_str());
-
-    return 0;
 }
 
-long monitor::handle_clone_precall(int variantnum)
+PRECALL(clone)
 {
 //	log_variant_backtrace(0);
     CHECKARG(1);
@@ -4342,7 +4309,7 @@ long monitor::handle_clone_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_FORK;
 }
 
-long monitor::handle_clone_postcall(int variantnum)
+POSTCALL(clone)
 {
     int i, result;
 
@@ -4353,7 +4320,7 @@ long monitor::handle_clone_postcall(int variantnum)
         {
             debugf("setting TID of the newly created thread in the address space of the parent\n");
             for (int i = 1; i < mvee::numvariants; ++i)
-				mvee_rw_write_pid(variants[i].variantpid, ARG3(i), 
+				mvee_rw_write_pid(variants[i].variantpid, (void*)ARG3(i), 
 								  (pid_t)call_postcall_get_variant_result(0));
         }
 
@@ -4395,18 +4362,16 @@ long monitor::handle_clone_postcall(int variantnum)
 
 TODO: Verify/Further documentation
 -----------------------------------------------------------------------------*/
-long monitor::handle_mprotect_log_args(int variantnum)
+LOG_ARGS(mprotect)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_MPROTECT(0x" PTRSTR ", 0x" PTRSTR ", 0x%08X = %s)\n",
                    variants[i].variantpid, ARG1(i), ARG2(i), ARG3(i), getTextualProtectionFlags(ARG3(i)).c_str());
-
-    return 0;
 }
 
-long monitor::handle_mprotect_precall(int variantnum)
+PRECALL(mprotect)
 {
     CHECKARG(2);
     CHECKARG(3);
@@ -4414,17 +4379,15 @@ long monitor::handle_mprotect_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-long monitor::handle_mprotect_log_return(int variantnum)
+LOG_RETURN(mprotect)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, ret)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_MPROTECT return: %d\n", variants[i].variantpid, ret[i]);
-
-    return 0;
 }
 
-long monitor::handle_mprotect_postcall(int variantnum)
+POSTCALL(mprotect)
 {
 	if IS_SYNCED_CALL
 	{
@@ -4434,6 +4397,167 @@ long monitor::handle_mprotect_postcall(int variantnum)
 
 		for (int i = 0; i < mvee::numvariants; ++i)
 			set_mmap_table->verify_mman_table(i, variants[i].variantpid);
+
+#ifdef MVEE_DUMP_JIT_CACHES
+		if (ARG3(0) & PROT_EXEC)
+		{
+			mmap_region_info* region = set_mmap_table->get_region_info(0, ARG1(0), 0);
+			
+			if (region && (region->region_map_flags & MAP_ANONYMOUS))
+			{
+				std::vector<unsigned char*> raw_bytes(mvee::numvariants);
+				std::vector<std::string> disas(mvee::numvariants);
+				std::vector<std::map<unsigned long, unsigned long>> indirect_jmp_targets(mvee::numvariants);
+
+				// Read raw JIT bytes
+				for (int i = 0; i < mvee::numvariants; ++i)
+				{
+					raw_bytes[i] = mvee_rw_read_data(variants[i].variantpid, (void*)ARG1(i), ARG2(i));
+
+					if (!raw_bytes[i])
+					{
+						warnf("Couldn't read JIT cache in variant %d\n", i);
+						break;
+					}
+				}
+
+				// Preprocess disassembly to identify vmcall patterns (they use data in code and screw up the objdump disassembly)
+				for (int i = 0; i < mvee::numvariants; ++i)
+				{
+					HDE_INS(ins);
+					int offset = 0;
+
+					while (offset < ARG2(i))
+					{
+						HDE_DISAS(len, &raw_bytes[i][offset], &ins);
+
+						if (len == 0)
+						{
+							warnf("disassembly failure while preprocessing JIT cache in variant %d\n", i);
+							break;
+						}
+
+						// look for jmp QWORD PTR [rip + 0x2] 
+						// This is a near jump (FF /4)
+						if (ins.opcode == 0xFF &&
+							ins.modrm == 0x25 &&
+							ins.modrm_mod == 0 &&  // 00B
+							ins.modrm_reg == 4 &&  // 100B - Selects jmp near
+							ins.modrm_rm == 5 &&   // 101B - Selects RIP-relative addressing
+							ins.disp.disp32 == 2)  // +2 - Selects RIP+2
+						{
+							indirect_jmp_targets[i].insert(std::make_pair(ARG1(i) + offset, *(unsigned long*)&raw_bytes[i][offset + len + 2]));
+
+							// NOP out original bytes
+							if (sizeof(unsigned long) == 8)
+								*(unsigned long*)&raw_bytes[i][offset + len + 2] = 0x9090909090909090;
+							else
+								*(unsigned long*)&raw_bytes[i][offset + len + 2] = 0x90909090;
+						}
+
+						offset += len;
+					}
+				}
+
+				// Disassemble raw JIT bytes
+				for (int i = 0; i < mvee::numvariants; ++i)
+				{
+					FILE* fp = tmpfile();
+
+					if (!fp)
+					{
+						warnf("Couldn't dump JIT cache for variant %d - tmpfile failed: %s\n", i, strerror(errno));
+						break;
+					}
+
+					// Don't dump trailing 0xed/0x00 bytes
+					size_t dump_offset = 0;
+/*					while (raw_bytes[i][dump_offset] == 0xed || 
+						   raw_bytes[i][dump_offset] == 0x00)
+						dump_offset++;
+*/
+
+					size_t dump_size = ARG2(i) - dump_offset;
+					if (dump_size > 0)
+					{
+/*						while (raw_bytes[i][dump_offset + dump_size - 1] == 0xed || 
+							   raw_bytes[i][dump_offset + dump_size - 1] == 0x00)
+							dump_size--;
+*/
+
+						if (fwrite(raw_bytes[i] + dump_offset, 1, dump_size, fp) != dump_size)
+						{
+							warnf("Couldn't dump JIT cache for variant %d - fwrite failed: %s\n", i, strerror(errno));
+							break;
+						}
+
+						std::stringstream cmd;
+						std::stringstream file;
+
+						file << " /proc/" << getpid() << "/fd/" << fileno(fp);
+						cmd << "objdump -z -D -Mintel," << OBJDUMP_SUBARCH << " -b binary -m " << OBJDUMP_ARCH << ":" << OBJDUMP_SUBARCH << " --adjust-vma=0x" << STDPTRSTR(ARG1(i) + dump_offset) << file.str();
+						debugf("Dumping: %s - size: %d\n", cmd.str().c_str(), dump_size);
+						disas[i] = mvee::log_read_from_proc_pipe(cmd.str().c_str(), NULL);
+					}
+
+					fclose(fp);
+				}
+
+				// Annotate and dump disassembly
+				for (int i = 0; i < mvee::numvariants; ++i)
+				{
+					debugf("JIT cache dump for variant %d - cache size is %d bytes (disassembled):\n", i, disas[i].length());
+
+					std::stringstream ss;
+					ss << disas[i];
+					std::string line;
+
+					while (std::getline(ss, line))
+					{
+						size_t call = line.find("call   0x");
+						size_t vmcall = line.find("jmp    QWORD PTR [rip+0x2]");
+						if (call != std::string::npos)
+						{
+							std::string addr = line.substr(call + strlen("call   0x"));
+							std::stringstream hexstr;
+							unsigned long real_addr;
+							hexstr << std::hex << addr;
+							hexstr >> real_addr;
+							std::string func = set_mmap_table->get_caller_info(i, variants[i].variantpid, real_addr);
+
+							debugf("%s (%s)\n", line.c_str(), func.c_str());
+						}
+						else if (vmcall != std::string::npos)
+						{
+							std::string addr = line.substr(0, line.find(":"));
+							std::stringstream hexstr;
+							unsigned long real_addr;
+							hexstr << std::hex << addr;
+							hexstr >> real_addr;
+
+							auto target = indirect_jmp_targets[i].find(real_addr);
+							if (target != indirect_jmp_targets[i].end())
+							{
+								std::string func = set_mmap_table->get_caller_info(i, variants[i].variantpid, target->second);
+								debugf("%s (%s)\n", line.substr(0, line.find("#")).c_str(), func.c_str());
+							}
+						}
+						else
+						{
+							debugf("%s\n", line.c_str());
+						}
+					}
+				}
+
+				// Dump disassembly
+				for (int i = 0; i < mvee::numvariants; ++i)
+
+				// Cleanup
+				for (int i = 0; i < mvee::numvariants; ++i)
+					SAFEDELETEARRAY(raw_bytes[i]);
+			}		
+		}
+#endif
 	}
 	else
 	{
@@ -4446,7 +4570,7 @@ long monitor::handle_mprotect_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_getpgid
 -----------------------------------------------------------------------------*/
-long monitor::handle_getpgid_precall(int variantnum)
+PRECALL(getpgid)
 {
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
@@ -4454,7 +4578,7 @@ long monitor::handle_getpgid_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_capget - (cap_user_header_t header, cap_user_data_t dataptr)
 -----------------------------------------------------------------------------*/
-long monitor::handle_capget_precall(int variantnum)
+PRECALL(capget)
 {
     CHECKPOINTER(1);
     if (ARG1(0))
@@ -4463,7 +4587,7 @@ long monitor::handle_capget_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_capget_postcall(int variantnum)
+POSTCALL(capget)
 {
     REPLICATEBUFFERFIXEDLEN(1, sizeof(__user_cap_header_struct));
     if (call_succeeded && ARG2(0))
@@ -4476,14 +4600,14 @@ long monitor::handle_capget_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_fchdir - (unsigned int fd)
 -----------------------------------------------------------------------------*/
-long monitor::handle_fchdir_precall(int variantnum)
+PRECALL(fchdir)
 {
     CHECKFD(1);
     MAPFDS(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-long monitor::handle_fchdir_postcall(int variantnum)
+POSTCALL(fchdir)
 {
     UNMAPFDS(1);
     if (call_succeeded)
@@ -4501,17 +4625,15 @@ long monitor::handle_fchdir_postcall(int variantnum)
   unsigned long offset_low, loff_t __user * result,
   unsigned int origin)
 -----------------------------------------------------------------------------*/
-long monitor::handle__llseek_log_args(int variantnum)
+LOG_ARGS(_llseek)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_LLSEEK(%d, %ld, %ld, 0x" PTRSTR ", %d)\n", variants[i].variantpid, ARG1(i), ARG2(i), ARG3(i), ARG4(i), ARG5(i));
-
-    return 0;
 }
 
-long monitor::handle__llseek_precall(int variantnum)
+PRECALL(_llseek)
 {
     CHECKPOINTER(4);
     CHECKARG(2);
@@ -4522,7 +4644,7 @@ long monitor::handle__llseek_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle__llseek_postcall(int variantnum)
+POSTCALL(_llseek)
 {
     REPLICATEBUFFERFIXEDLEN(4, sizeof(loff_t));
     return 0;
@@ -4532,7 +4654,7 @@ long monitor::handle__llseek_postcall(int variantnum)
   sys_getdents - (unsigned int fd,
   struct linux_dirent __user * dirent, unsigned int count)
 -----------------------------------------------------------------------------*/
-long monitor::handle_getdents_precall(int variantnum)
+PRECALL(getdents)
 {
     CHECKPOINTER(2);
     CHECKARG(3);
@@ -4540,7 +4662,7 @@ long monitor::handle_getdents_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_getdents_postcall(int variantnum)
+POSTCALL(getdents)
 {
     REPLICATEBUFFER(2);
     return 0;
@@ -4550,18 +4672,16 @@ long monitor::handle_getdents_postcall(int variantnum)
   sys__newselect - (int n, fd_set __user *inp, fd_set __user *outp,
   fd_set __user *exp, struct timeval __user *tvp)
 -----------------------------------------------------------------------------*/
-long monitor::handle_select_log_args(int variantnum)
+LOG_ARGS(select)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_SELECT(%d, 0x" PTRSTR ", 0x" PTRSTR ", 0x" PTRSTR ", 0x" PTRSTR ")\n", variants[i].variantpid,
                    ARG1(i), ARG2(i), ARG3(i), ARG4(i), ARG5(i));
-
-    return 0;
 }
 
-long monitor::handle_select_precall(int variantnum)
+PRECALL(select)
 {
     CHECKARG(1);
     CHECKPOINTER(5);
@@ -4573,7 +4693,7 @@ long monitor::handle_select_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_select_postcall(int variantnum)
+POSTCALL(select)
 {
     REPLICATEBUFFERFIXEDLEN(2, ROUND_UP(ARG1(0) + 1, sizeof(unsigned long)));
     REPLICATEBUFFERFIXEDLEN(3, ROUND_UP(ARG1(0) + 1, sizeof(unsigned long)));
@@ -4594,18 +4714,16 @@ long monitor::handle_select_postcall(int variantnum)
   compare the regions and perform an early writeback.
   The actual msync call should not go into the kernel!
 -----------------------------------------------------------------------------*/
-long monitor::handle_msync_log_args(int variantnum)
+LOG_ARGS(msync)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_MSYNC(0x" PTRSTR ", %d, %s)\n", variants[i].variantpid,
                    ARG1(i), ARG2(i), getTextualMSyncFlags(ARG3(i)).c_str());
-
-    return 0;
 }
 
-long monitor::handle_msync_precall(int variantnum)
+PRECALL(msync)
 {
     int               private_mapping = 1;
 
@@ -4652,7 +4770,7 @@ long monitor::handle_msync_precall(int variantnum)
   sys_readv - (unsigned long  fd, const struct iovec  *  vec,
   unsigned long  vlen)
 -----------------------------------------------------------------------------*/
-long monitor::handle_readv_precall(int variantnum)
+PRECALL(readv)
 {
     CHECKPOINTER(2);
     CHECKARG(3);
@@ -4661,7 +4779,7 @@ long monitor::handle_readv_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_readv_postcall(int variantnum)
+POSTCALL(readv)
 {
     REPLICATEVECTOR(2);
     return 0;
@@ -4671,29 +4789,27 @@ long monitor::handle_readv_postcall(int variantnum)
   sys_writev - (unsigned long  fd, const struct iovec  *  vec,
   unsigned long  vlen)
 -----------------------------------------------------------------------------*/
-long monitor::handle_writev_log_args(int variantnum)
+LOG_ARGS(writev)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
         debugf("pid: %d - SYS_WRITEV(%d, 0x" PTRSTR ", %d)\n", variants[i].variantpid, ARG1(i), ARG2(i), ARG3(i));
-        struct iovec* vec = (struct iovec*)mvee_rw_read_data(variants[i].variantpid, ARG2(i), sizeof(struct iovec) * ARG3(i));
+        struct iovec* vec = (struct iovec*)mvee_rw_read_data(variants[i].variantpid, (void*) ARG2(i), sizeof(struct iovec) * ARG3(i));
         if (!vec)
         {
             warnf("couldn't read iovec\n");
-            return 0;
+            return;
         }
 
         std::string   str = call_serialize_io_vector(i, vec, ARG3(i));
         debugf("    => \n%s\n", str.c_str());
         SAFEDELETEARRAY(vec);
     }
-
-    return 0;
 }
 
-long monitor::handle_writev_precall(int variantnum)
+PRECALL(writev)
 {
     CHECKPOINTER(2);
     CHECKARG(3);
@@ -4705,7 +4821,7 @@ long monitor::handle_writev_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_fdatasync - unsigned int fd
 -----------------------------------------------------------------------------*/
-long monitor::handle_fdatasync_precall(int variantnum)
+PRECALL(fdatasync)
 {
     CHECKFD(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
@@ -4714,7 +4830,7 @@ long monitor::handle_fdatasync_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_sched_yield
 -----------------------------------------------------------------------------*/
-long monitor::handle_sched_yield_get_call_type(int variantnum)
+GET_CALL_TYPE(sched_yield)
 {
     return MVEE_CALL_TYPE_UNSYNCED;
 }
@@ -4722,7 +4838,7 @@ long monitor::handle_sched_yield_get_call_type(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_nanosleep
 -----------------------------------------------------------------------------*/
-long monitor::handle_nanosleep_get_call_type(int variantnum)
+GET_CALL_TYPE(nanosleep)
 {
     return MVEE_CALL_TYPE_UNSYNCED;
 }
@@ -4732,7 +4848,7 @@ long monitor::handle_nanosleep_get_call_type(int variantnum)
   unsigned long, new_len, unsigned long, flags,
   unsigned long, new_addr
 -----------------------------------------------------------------------------*/
-long monitor::handle_mremap_log_args(int variantnum)
+LOG_ARGS(mremap)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -4741,11 +4857,9 @@ long monitor::handle_mremap_log_args(int variantnum)
         debugf("pid: %d - SYS_MREMAP(0x" PTRSTR ", %d, %d, 0x" PTRSTR ", 0x" PTRSTR ")\n",
                    variants[i].variantpid, ARG1(i), ARG2(i), ARG3(i), ARG4(i));
     }
-
-    return 0;
 }
 
-long monitor::handle_mremap_precall(int variantnum)
+PRECALL(mremap)
 {
     CHECKARG(2);
     CHECKARG(3);
@@ -4754,7 +4868,7 @@ long monitor::handle_mremap_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-long monitor::handle_mremap_postcall(int variantnum)
+POSTCALL(mremap)
 {
     if (call_succeeded)
     {
@@ -4793,7 +4907,7 @@ long monitor::handle_mremap_postcall(int variantnum)
     return 0;
 }
 
-long monitor::handle_mremap_log_return(int variantnum)
+LOG_RETURN(mremap)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, rets)
 
@@ -4803,24 +4917,20 @@ long monitor::handle_mremap_log_return(int variantnum)
 #ifdef MVEE_MMAN_DEBUG
     set_mmap_table->print_mmap_table();
 #endif
-
-    return 0;
 }
 
 /*-----------------------------------------------------------------------------
   sys_poll - (struct pollfd __user *ufds, unsigned int nfds, long timeout)
 -----------------------------------------------------------------------------*/
-long monitor::handle_poll_log_args(int variantnum)
+LOG_ARGS(poll)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_POLL(0x" PTRSTR ", %d, %d)\n", variants[i].variantpid, ARG1(i), ARG2(i), ARG3(i));
-
-    return 0;
 }
 
-long monitor::handle_poll_precall(int variantnum)
+PRECALL(poll)
 {
     CHECKPOINTER(1);
     CHECKARG(2);
@@ -4829,7 +4939,7 @@ long monitor::handle_poll_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_poll_log_return(int variantnum)
+LOG_RETURN(poll)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, rets)
 
@@ -4840,10 +4950,10 @@ long monitor::handle_poll_log_return(int variantnum)
         for (unsigned int j = 0; j < rets[i]; ++j)
         {
             struct pollfd fds;
-            if (!mvee_rw_read_struct(variants[i].variantpid, ARG1(i) + j * sizeof(struct pollfd), sizeof(struct pollfd), &fds))
+            if (!mvee_rw_read_struct(variants[i].variantpid, (struct pollfd*)ARG1(i) + j, sizeof(struct pollfd), &fds))
             {
                 warnf("couldn't read pollfd\n");
-                return 0;
+                return;
             }
 
             debugf("> fd: %d - events: %s - revents: %s\n",
@@ -4852,11 +4962,9 @@ long monitor::handle_poll_log_return(int variantnum)
                        getTextualPollRequest(fds.revents).c_str());
         }
     }
-
-    return 0;
 }
 
-long monitor::handle_poll_postcall(int variantnum)
+POSTCALL(poll)
 {
 //    long result = call_postcall_get_variant_result(0);
     REPLICATEBUFFERFIXEDLEN(1, sizeof(struct pollfd) * ARG2(0));
@@ -4867,7 +4975,7 @@ long monitor::handle_poll_postcall(int variantnum)
   sys_prctl - (int option, unsigned long arg2, unsigned long arg3,
   unsigned long arg4, unsigned long arg5)
 -----------------------------------------------------------------------------*/
-long monitor::handle_prctl_precall(int variantnum)
+PRECALL(prctl)
 {
     // TODO: not all arguments are always used here, comparing unused args may cause false positives
     /*
@@ -4908,7 +5016,7 @@ unsigned char ipmon_is_unchecked_syscall(unsigned char* mask, unsigned long sysc
 }
 
 
-long monitor::handle_prctl_call(int variantnum)
+CALL(prctl)
 {
     // check if the variants are trying to re-enable rdtsc
     if (ARG1(0) == PR_SET_TSC && ARG2(0) == PR_TSC_ENABLE)
@@ -4919,7 +5027,7 @@ long monitor::handle_prctl_call(int variantnum)
 	else if (ARG1(0) == PR_REGISTER_IPMON)
 	{
 		// inspect the list of syscalls
-		unsigned char* ipmon_mask = mvee_rw_read_data(variants[0].variantpid, ARG2(0), ARG3(0));
+		unsigned char* ipmon_mask = mvee_rw_read_data(variants[0].variantpid, (void*) ARG2(0), ARG3(0));
 
 		if (ipmon_mask)
 		{
@@ -4936,7 +5044,7 @@ long monitor::handle_prctl_call(int variantnum)
     return MVEE_CALL_ALLOW;
 }
 
-long monitor::handle_prctl_postcall(int variantnum)
+POSTCALL(prctl)
 {
 #ifdef MVEE_SUPPORTS_IPMON
     // PR_REGISTER_IPMON returns the IP-MON key
@@ -4981,7 +5089,7 @@ long monitor::handle_prctl_postcall(int variantnum)
   compat_sigset_t __user *oset,
   unsigned int sigsetsize)
 -----------------------------------------------------------------------------*/
-long monitor::handle_rt_sigprocmask_log_args(int variantnum)
+LOG_ARGS(rt_sigprocmask)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -4989,13 +5097,11 @@ long monitor::handle_rt_sigprocmask_log_args(int variantnum)
     {
         debugf("pid: %d - SYS_RT_SIGPROCMASK(%s, 0x" PTRSTR " - %s)\n", variants[i].variantpid,
 			   getTextualSigHow(ARG1(i)), ARG2(i), 
-			   getTextualSigSet(call_get_sigset(i, ARG2(i), OLDCALLIFNOT(__NR_rt_sigprocmask))).c_str());
+			   getTextualSigSet(call_get_sigset(i, (void*) ARG2(i), OLDCALLIFNOT(__NR_rt_sigprocmask))).c_str());
     }
-
-    return 0;
 }
 
-long monitor::handle_rt_sigprocmask_precall(int variantnum)
+PRECALL(rt_sigprocmask)
 {
     CHECKARG(1);
     CHECKPOINTER(2);
@@ -5004,16 +5110,16 @@ long monitor::handle_rt_sigprocmask_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-long monitor::handle_rt_sigprocmask_call(int variantnum)
+CALL(rt_sigprocmask)
 {
 	if IS_SYNCED_CALL
 		variantnum = 0;
 
-	variants[variantnum].last_sigset = call_get_sigset(variantnum, ARG2(variantnum), OLDCALLIFNOT(__NR_rt_sigprocmask));
+	variants[variantnum].last_sigset = call_get_sigset(variantnum, (void*) ARG2(variantnum), OLDCALLIFNOT(__NR_rt_sigprocmask));
 	return MVEE_CALL_ALLOW | MVEE_CALL_HANDLED_UNSYNCED_CALL;
 }
 
-long monitor::handle_rt_sigprocmask_postcall(int variantnum)
+POSTCALL(rt_sigprocmask)
 {
 	if IS_SYNCED_CALL
 		variantnum = 0;
@@ -5057,18 +5163,16 @@ long monitor::handle_rt_sigprocmask_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_pread64 - (unsigned int fd, char __user *buf, size_t count, loff_t pos)
 -----------------------------------------------------------------------------*/
-long monitor::handle_pread64_log_args(int variantnum)
+LOG_ARGS(pread64)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_PREAD64(%d, 0x" PTRSTR ", %d, %d)\n",
                    variants[i].variantpid, ARG1(i), ARG2(i), ARG3(i), ARG4(i));
-
-    return 0;
 }
 
-long monitor::handle_pread64_precall(int variantnum)
+PRECALL(pread64)
 {
     CHECKPOINTER(2);
     CHECKARG(3);
@@ -5077,7 +5181,7 @@ long monitor::handle_pread64_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_pread64_postcall(int variantnum)
+POSTCALL(pread64)
 {
     REPLICATEBUFFER(2);
     return 0;
@@ -5087,20 +5191,18 @@ long monitor::handle_pread64_postcall(int variantnum)
   sys_pwrite64 - (unsigned int fd, const char __user *buf,
   size_t count, loff_t pos)
 -----------------------------------------------------------------------------*/
-long monitor::handle_pwrite64_log_args(int variantnum)
+LOG_ARGS(pwrite64)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
-        std::string buf_str = call_serialize_io_buffer(i, ARG2(i), ARG3(i));
+        std::string buf_str = call_serialize_io_buffer(i, (const unsigned char*) ARG2(i), ARG3(i));
         debugf("pid: %d - SYS_PWRITE64(%d, %s, %d, %d)\n", variants[i].variantpid, ARG1(i), buf_str.c_str(), ARG3(i), ARG4(i));
     }
-
-    return 0;
 }
 
-long monitor::handle_pwrite64_precall(int variantnum)
+PRECALL(pwrite64)
 {
     CHECKPOINTER(2);
     CHECKARG(3);
@@ -5113,7 +5215,7 @@ long monitor::handle_pwrite64_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_chown - (const char  *  filename, uid_t  user, gid_t  group)
 -----------------------------------------------------------------------------*/
-long monitor::handle_chown_precall(int variantnum)
+PRECALL(chown)
 {
     CHECKPOINTER(1);
     CHECKARG(3);
@@ -5125,7 +5227,7 @@ long monitor::handle_chown_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_fcown - (int fd, uid_t user, gid_t group)
 -----------------------------------------------------------------------------*/
-long monitor::handle_fchown_precall(int variantnum)
+PRECALL(fchown)
 {
     CHECKFD(1);
     CHECKARG(2);
@@ -5136,7 +5238,7 @@ long monitor::handle_fchown_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_getcwd - (char* buf, int buflen)
 -----------------------------------------------------------------------------*/
-long monitor::handle_getcwd_precall(int variantnum)
+PRECALL(getcwd)
 {
     CHECKPOINTER(1);
     CHECKARG(2);
@@ -5146,7 +5248,7 @@ long monitor::handle_getcwd_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_getrlimit - (unsigned int  resource, struct rlimit  *  rlim)
 -----------------------------------------------------------------------------*/
-long monitor::handle_ugetrlimit_precall(int variantnum)
+PRECALL(ugetrlimit)
 {
     CHECKPOINTER(2);
     CHECKARG(1);
@@ -5159,7 +5261,7 @@ long monitor::handle_ugetrlimit_precall(int variantnum)
 
   !!!!! fd is implicitly cast from unsigned long to int on AMD64 !!!
 -----------------------------------------------------------------------------*/
-long monitor::handle_mmap_log_args(int variantnum)
+LOG_ARGS(mmap)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -5170,15 +5272,13 @@ long monitor::handle_mmap_log_args(int variantnum)
                    getTextualProtectionFlags(ARG3(i)).c_str(),
                    getTextualMapType(ARG4(i)).c_str(), (int)ARG5(i), ARG6(i));
     }
-
-    return 0;
 }
 
 #ifdef MVEE_ENABLE_VALGRIND_HACKS
 static int first_mmap2_call = 1;
 #endif
 
-long monitor::handle_mmap_precall(int variantnum)
+PRECALL(mmap)
 {
 #ifdef MVEE_ENABLE_VALGRIND_HACKS
     if (first_mmap2_call)
@@ -5202,7 +5302,7 @@ long monitor::handle_mmap_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-long monitor::handle_mmap_call(int variantnum)
+CALL(mmap)
 {
 	if IS_UNSYNCED_CALL
 		return MVEE_CALL_ALLOW | MVEE_CALL_HANDLED_UNSYNCED_CALL;
@@ -5221,13 +5321,42 @@ long monitor::handle_mmap_call(int variantnum)
     {
         fd_info* info = set_fd_table->get_fd_info(ARG5(0));
 
+		// Handle firefox shm corner case here.  FF has threads that create
+		// temporary shm backing files.  These files are created, unlinked,
+		// dupped, mmaped, and then closed (both the original and the dupped
+		// version).  At some point, a copy of the file pops up in the fd table.
+		// I don't know precisely why, but I'm assuming it happens when the file
+		// is written to for the first time.  Unfortunately, we currently have
+		// no way to see when/where this fd gets created.  As a temporary
+		// workaround, we can resynchronize the MVEE fd table with the fd table
+		// in /proc/pid/fd here.
+		//
+		// A better workaround would probably be to install an inotify_watch
+		// on the /proc/pid/fd folders for all of our variants.
+		if (!info && !ipmon_fd_handling)
+		{
+			if (!set_fd_table->add_missing_fds(getpids()))
+				shutdown(false);
+			info = set_fd_table->get_fd_info(ARG5(0));
+		}
+
         if (!info)
         {		
 			if (ipmon_fd_handling)
 				return MVEE_CALL_ALLOW;
 
             warnf("mmap2 request with an unknown backing file!!!\n");
+
+#ifndef MVEE_BENCHMARK
+			set_fd_table->print_fd_table_proc(variants[0].variantpid);
+			log_variant_backtrace(0);
+#endif
+
+#ifndef MVEE_ALLOW_SHM
             return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
+#else
+			return MVEE_CALL_ALLOW;
+#endif
         }
 
         if ((info->access_flags & O_RDWR) && (ARG4(0) & MAP_SHARED))
@@ -5238,6 +5367,7 @@ long monitor::handle_mmap_call(int variantnum)
             warnf("> map prot flags = %s\n", getTextualProtectionFlags(ARG3(0)).c_str());
 //#endif
 
+#ifndef MVEE_ALLOW_SHM
             if (ARG3(0) & PROT_WRITE)
             {
                 if (info->path != "")
@@ -5276,11 +5406,11 @@ long monitor::handle_mmap_call(int variantnum)
         }
         else if ((ARG3(0) & PROT_EXEC))
         {
-            if (mvee::config.mvee_use_dcl)
+            if ((*mvee::config_variant_global)["non_overlapping_mmaps"].asInt())
             {
                 if (ARG4(0) & MAP_FIXED)
                 {
-                    warnf("GHUMVEE is running with use_dcl enabled but the following binary is not position independent: %s\n", info->path.c_str());
+                    warnf("GHUMVEE is running with non_overlapping_mmaps enabled but the following binary is not position independent: %s\n", info->path.c_str());
                     warnf("> We cannot enforce disjunct code within this address space!!!\n");
                 }
                 else
@@ -5301,13 +5431,14 @@ long monitor::handle_mmap_call(int variantnum)
                     }
                 }
             }
+#endif
         }
     }
 
     return MVEE_CALL_ALLOW;
 }
 
-long monitor::handle_mmap_postcall(int variantnum)
+POSTCALL(mmap)
 {
 	if (!call_succeeded)
 	{
@@ -5315,6 +5446,10 @@ long monitor::handle_mmap_postcall(int variantnum)
 			UNMAPFDS(5);
 		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 	}	
+
+#ifdef MVEE_FD_DEBUG
+	set_fd_table->verify_fd_table(getpids());
+#endif
 
 	if IS_SYNCED_CALL
 	{
@@ -5331,6 +5466,9 @@ long monitor::handle_mmap_postcall(int variantnum)
 			if (!info)
 			{
 				warnf("mmap2 request with backing file but backing file info not found!\n");
+#ifdef MVEE_ALLOW_SHM
+				return 0;
+#endif
 				shutdown(false);
 				return 0;
 			}
@@ -5474,7 +5612,7 @@ long monitor::handle_mmap_postcall(int variantnum)
     return 0;
 }
 
-long monitor::handle_mmap_log_return(int variantnum)
+LOG_RETURN(mmap)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, rets)
 
@@ -5486,14 +5624,12 @@ long monitor::handle_mmap_log_return(int variantnum)
 #ifdef MVEE_MMAN_DEBUG
     set_mmap_table->print_mmap_table();
 #endif
-
-    return 0;
 }
 
 /*-----------------------------------------------------------------------------
   sys_truncate64 - (const char __user * path, loff_t length)
 -----------------------------------------------------------------------------*/
-long monitor::handle_truncate64_precall(int variantnum)
+PRECALL(truncate64)
 {
     CHECKPOINTER(1);
     CHECKARG(2);
@@ -5504,7 +5640,7 @@ long monitor::handle_truncate64_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_ftruncate64 - (unsigned int fd, loff_t length)
 -----------------------------------------------------------------------------*/
-long monitor::handle_ftruncate64_precall(int variantnum)
+PRECALL(ftruncate64)
 {
     CHECKARG(2);
     CHECKFD(1);
@@ -5514,21 +5650,19 @@ long monitor::handle_ftruncate64_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_stat64 - (char __user *filename, struct stat64 __user *statbuf);
 -----------------------------------------------------------------------------*/
-long monitor::handle_stat_log_args(int variantnum)
+LOG_ARGS(stat)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
-        char* str1 = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
+        char* str1 = mvee_rw_read_string(variants[i].variantpid, (void*) ARG1(i));
         debugf("pid: %d - SYS_STAT(%s)\n", variants[i].variantpid, str1);
         SAFEDELETEARRAY(str1);
     }
-
-    return 0;
 }
 
-long monitor::handle_stat_precall(int variantnum)
+PRECALL(stat)
 {
     CHECKPOINTER(1);
     CHECKSTRING(1);
@@ -5536,34 +5670,32 @@ long monitor::handle_stat_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_stat_postcall(int variantnum)
+POSTCALL(stat)
 {
 	if IS_SYNCED_CALL
 		REPLICATEBUFFERFIXEDLEN(2, sizeof(struct stat));
     return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
 
-long monitor::handle_stat64_log_args(int variantnum)
+LOG_ARGS(stat64)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
-        char* str1 = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
+        char* str1 = mvee_rw_read_string(variants[i].variantpid, (void*) ARG1(i));
         debugf("pid: %d - SYS_STAT64(%s)\n", variants[i].variantpid, str1);
         SAFEDELETEARRAY(str1);
     }
-
-    return 0;
 }
 
-long monitor::handle_stat64_precall(int variantnum)
+PRECALL(stat64)
 {
     CHECKSTRING(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_stat64_postcall(int variantnum)
+POSTCALL(stat64)
 {
     REPLICATEBUFFERFIXEDLEN(2, sizeof(struct stat64));
     return 0;
@@ -5572,21 +5704,19 @@ long monitor::handle_stat64_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_lstat64 - (char __user *filename, struct stat64 __user *statbuf);
 -----------------------------------------------------------------------------*/
-long monitor::handle_lstat_log_args(int variantnum)
+LOG_ARGS(lstat)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
-        char* str1 = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
+        char* str1 = mvee_rw_read_string(variants[i].variantpid, (void*) ARG1(i));
         debugf("pid: %d - SYS_LSTAT(%s)\n", variants[i].variantpid, str1);
         SAFEDELETEARRAY(str1);
     }
-
-    return 0;
 }
 
-long monitor::handle_lstat_precall(int variantnum)
+PRECALL(lstat)
 {
     CHECKPOINTER(1);
     CHECKSTRING(1);
@@ -5594,7 +5724,7 @@ long monitor::handle_lstat_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_lstat_postcall(int variantnum)
+POSTCALL(lstat)
 {
     if (sizeof(unsigned long) == 4)
     {
@@ -5607,21 +5737,19 @@ long monitor::handle_lstat_postcall(int variantnum)
     return 0;
 }
 
-long monitor::handle_lstat64_log_args(int variantnum)
+LOG_ARGS(lstat64)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
-        char* str1 = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
+        char* str1 = mvee_rw_read_string(variants[i].variantpid, (void*) ARG1(i));
         debugf("pid: %d - SYS_LSTAT64(%s)\n", variants[i].variantpid, str1);
         SAFEDELETEARRAY(str1);
     }
-
-    return 0;
 }
 
-long monitor::handle_lstat64_precall(int variantnum)
+PRECALL(lstat64)
 {
     CHECKPOINTER(1);
     CHECKSTRING(1);
@@ -5629,7 +5757,7 @@ long monitor::handle_lstat64_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_lstat64_postcall(int variantnum)
+POSTCALL(lstat64)
 {
     REPLICATEBUFFERFIXEDLEN(2, sizeof(struct stat64));
     return 0;
@@ -5638,18 +5766,16 @@ long monitor::handle_lstat64_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_fstat - (unsigned long fd, struct stat64 * statbuf)
 -----------------------------------------------------------------------------*/
-long monitor::handle_fstat_log_args(int variantnum)
+LOG_ARGS(fstat)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_FSTAT(%d, 0x" PTRSTR ")\n",
                    variants[i].variantpid, ARG1(i), ARG2(i));
-
-    return 0;
 }
 
-long monitor::handle_fstat_precall(int variantnum)
+PRECALL(fstat)
 {
     CHECKPOINTER(2);
     CHECKFD(1);
@@ -5662,7 +5788,7 @@ long monitor::handle_fstat_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_fstat_log_return(int variantnum)
+LOG_RETURN(fstat)
 {
     std::vector<unsigned long> argarray(mvee::numvariants);
     if (state == STATE_IN_SYSCALL)
@@ -5670,7 +5796,7 @@ long monitor::handle_fstat_log_return(int variantnum)
         FILLARGARRAY(2, argarray);
         for (int i = 0; i < mvee::numvariants; ++i)
         {
-            struct stat* sb = (struct stat*)mvee_rw_read_data(variants[i].variantpid, argarray[i], sizeof(struct stat));
+            struct stat* sb = (struct stat*)mvee_rw_read_data(variants[i].variantpid, (void*) argarray[i], sizeof(struct stat));
             if (sb)
             {
                 /*
@@ -5727,11 +5853,9 @@ long monitor::handle_fstat_log_return(int variantnum)
             SAFEDELETEARRAY(sb);
         }
     }
-
-    return 0;
 }
 
-long monitor::handle_fstat_postcall(int variantnum)
+POSTCALL(fstat)
 {
 	if IS_SYNCED_CALL
 	{
@@ -5749,17 +5873,15 @@ long monitor::handle_fstat_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_fstat64 - (unsigned long fd, struct stat64 * statbuf)
 -----------------------------------------------------------------------------*/
-long monitor::handle_fstat64_log_args(int variantnum)
+LOG_ARGS(fstat64)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_FSTAT64(%d, 0x" PTRSTR ")\n", variants[i].variantpid, ARG1(i), ARG2(i));
-
-    return 0;
 }
 
-long monitor::handle_fstat64_precall(int variantnum)
+PRECALL(fstat64)
 {
     CHECKPOINTER(2);
     CHECKFD(1);
@@ -5772,7 +5894,7 @@ long monitor::handle_fstat64_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_fstat64_log_return(int variantnum)
+LOG_RETURN(fstat64)
 {
     std::vector<unsigned long> argarray(mvee::numvariants);
     if (state == STATE_IN_SYSCALL)
@@ -5780,7 +5902,7 @@ long monitor::handle_fstat64_log_return(int variantnum)
         FILLARGARRAY(2, argarray);
         for (int i = 0; i < mvee::numvariants; ++i)
         {
-            struct stat64* sb = (struct stat64*)mvee_rw_read_data(variants[i].variantpid, argarray[i], sizeof(struct stat64));
+            struct stat64* sb = (struct stat64*)mvee_rw_read_data(variants[i].variantpid, (void*) argarray[i], sizeof(struct stat64));
             if (sb)
             {
                 /*
@@ -5837,11 +5959,9 @@ long monitor::handle_fstat64_log_return(int variantnum)
             SAFEDELETEARRAY(sb);
         }
     }
-
-    return 0;
 }
 
-long monitor::handle_fstat64_postcall(int variantnum)
+POSTCALL(fstat64)
 {
     REPLICATEBUFFERFIXEDLEN(2, sizeof(struct stat64));
     if (state != STATE_IN_MASTERCALL)
@@ -5852,7 +5972,7 @@ long monitor::handle_fstat64_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_madvise
 -----------------------------------------------------------------------------*/
-long monitor::handle_madvise_get_call_type(int variantnum)
+GET_CALL_TYPE(madvise)
 {
     return MVEE_CALL_TYPE_UNSYNCED;
 }
@@ -5860,7 +5980,7 @@ long monitor::handle_madvise_get_call_type(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_shmget
 -----------------------------------------------------------------------------*/
-long monitor::handle_shmget_call(int variantnum)
+CALL(shmget)
 {
 #ifndef MVEE_ALLOW_SHM
     warnf("The program is trying to allocate shared memory. This call has been denied.\n");
@@ -5874,7 +5994,7 @@ long monitor::handle_shmget_call(int variantnum)
   sys_getdents64 - (unsigned int  fd, struct linux_dirent64  *  dirent,
   unsigned int  count)
 -----------------------------------------------------------------------------*/
-long monitor::handle_getdents64_precall(int variantnum)
+PRECALL(getdents64)
 {
     CHECKPOINTER(2);
     CHECKARG(3);
@@ -5882,27 +6002,39 @@ long monitor::handle_getdents64_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_getdents64_postcall(int variantnum)
+POSTCALL(getdents64)
 {
     REPLICATEBUFFER(2);
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_gettid
+  sys_gettid - We use this as a secret MVEE debugging interface :)
 -----------------------------------------------------------------------------*/
-long monitor::handle_gettid_get_call_type(int variantnum)
+GET_CALL_TYPE(gettid)
 {
 #if !defined(MVEE_BENCHMARK) || defined(MVEE_FORCE_ENABLE_BACKTRACING)
-    if (ARG1(variantnum) == 1337 && ARG2(variantnum) == 10000001
-        && (ARG3(variantnum) == 91 || ARG3(variantnum) == 92 || ARG3(variantnum) == 94 || ARG3(variantnum) == 95 || ARG3(variantnum) == 97))
-        return MVEE_CALL_TYPE_NORMAL;
+	// Check if the variant passed the magic values
+	if (!(ARG1(variantnum) == 1337 && ARG2(variantnum) == 10000001))
+		return MVEE_CALL_TYPE_NORMAL;
+
+	// The variant is trying to log something into the MVEE log.
+	// Depending on the message type (ARG3), this might or might
+	// not happen in lockstep.
+    if (ARG3(variantnum) == 91 ||
+		ARG3(variantnum) == 92 ||
+		ARG3(variantnum) == 94 ||
+		ARG3(variantnum) == 95 ||
+		ARG3(variantnum) == 97)
+        return MVEE_CALL_TYPE_NORMAL; // need lockstep
+
+	// No lockstep needed
     return MVEE_CALL_TYPE_UNSYNCED;
 #endif
     return MVEE_CALL_TYPE_NORMAL;
 }
 
-long monitor::handle_gettid_log_args(int variantnum)
+LOG_ARGS(gettid)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -5913,7 +6045,7 @@ long monitor::handle_gettid_log_args(int variantnum)
             if (ARG3(i) == 74)
             {
                 struct mvee_malloc_error err;
-                mvee_rw_read_struct(variants[i].variantpid, ARG4(i), sizeof(mvee_malloc_error), &err);
+                mvee_rw_read_struct(variants[i].variantpid, (void*) ARG4(i), sizeof(mvee_malloc_error), &err);
                 warnf("[PID:%05d] - [MALLOC_MISMATCH - MASTER INFO] - [FUNC: %s] - [MSG: %d (%s)] - [CHUNKSIZE: %ld] - [ARENA PTR: 0x" PTRSTR "] - [CHUNK PTR: 0x" PTRSTR "]\n",
                             variants[i].variantpid,
                             getTextualAllocType(err.alloc_type),
@@ -5927,7 +6059,7 @@ long monitor::handle_gettid_log_args(int variantnum)
             else if (ARG3(i) == 75)
             {
                 struct mvee_malloc_error err;
-                mvee_rw_read_struct(variants[i].variantpid, ARG4(i), sizeof(mvee_malloc_error), &err);
+                mvee_rw_read_struct(variants[i].variantpid, (void*) ARG4(i), sizeof(mvee_malloc_error), &err);
                 warnf("[PID:%05d] - [MALLOC_MISMATCH - SLAVE INFO] - [FUNC: %s] - [MSG: %d (%s)] - [CHUNKSIZE: %ld] - [ARENA PTR: 0x" PTRSTR "] - [CHUNK PTR: 0x" PTRSTR "]\n",
                             variants[i].variantpid,
                             getTextualAllocType(err.alloc_type),
@@ -5947,54 +6079,57 @@ long monitor::handle_gettid_log_args(int variantnum)
             }
         }
     }
-
-    return 0;
 }
 
-long monitor::handle_gettid_precall(int variantnum)
+PRECALL(gettid)
 {
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_gettid_call(int variantnum)
+CALL(gettid)
 {
 #if !defined(MVEE_BENCHMARK) || defined(MVEE_FORCE_ENABLE_BACKTRACING)
-    if (IS_UNSYNCED_CALL && ARG1(variantnum) == 1337 && ARG2(variantnum) == 10000001 && ARG3(variantnum) == 71)
-        log_variant_backtrace(variantnum);
-    if IS_UNSYNCED_CALL
+    if (IS_UNSYNCED_CALL && ARG1(variantnum) == 1337 && ARG2(variantnum) == 10000001)
     {
+		if (ARG3(variantnum) == 71)
+			log_variant_backtrace(variantnum);
+		
         int i = variantnum;
-        if (ARG1(i) == 1337 && ARG2(i) == 10000001)
-        {
-            if (ARG3(i) == 10)
-            {
-                warnf("[PID:%05d] - [LIBC_LOCK_BUFFER_ATTACHED:0x" PTRSTR "]\n",
-                            variants[i].variantpid, ARG4(i));
-            }
-            if (ARG3(i) == 59)
-            {
-                warnf("[PID:%05d] - [INVALID_LOCK_TYPE=>READ:%d (%s) - EXPECTED:%d (%s)]\n",
-                            variants[i].variantpid, ARG4(i), getTextualAtomicType(ARG4(i)),
-                            ARG5(i), getTextualAtomicType(ARG5(i)));
-                shutdown(false);
-            }
-            else if (ARG3(i) == 60)
-            {
-                warnf("[PID:%05d] - [INVALID_LOCK_TYPE] - [SLOT_SIZE:%d] - TMPPOS:%d\n",
-                            variants[i].variantpid, ARG4(i), ARG5(i));
-            }
-            else if (ARG3(i) == 90)
-            {
-                std::string master_callee = set_mmap_table->get_caller_info(0, variants[0].variantpid, ARG5(i));
-                std::string actual_callee = set_mmap_table->get_caller_info(i, variants[i].variantpid, ARG6(i));
+		if (ARG3(i) == 10)
+		{
+			warnf("[PID:%05d] - [LIBC_LOCK_BUFFER_ATTACHED:0x" PTRSTR "]\n",
+				  variants[i].variantpid, ARG4(i));
+		}
+		if (ARG3(i) == 59)
+		{
+			warnf("[PID:%05d] - [INVALID_LOCK_TYPE=>READ:%d (%s) - EXPECTED:%d (%s)]\n",
+				  variants[i].variantpid, ARG4(i), getTextualAtomicType(ARG4(i)),
+				  ARG5(i), getTextualAtomicType(ARG5(i)));
+			shutdown(false);
+		}
+		else if (ARG3(i) == 60)
+		{
+			warnf("[PID:%05d] - [INVALID_LOCK_TYPE] - [SLOT_SIZE:%d] - TMPPOS:%d\n",
+				  variants[i].variantpid, ARG4(i), ARG5(i));
+		}
+		else if (ARG3(i) == 61)
+		{
+			warnf("[PID:%05d] - [INVALID_LOCK_PTR] - [SLAVE_PTR:0x" PTRSTR "] - TMPPOS:%d\n",
+				  variants[i].variantpid, ARG4(i), ARG5(i));
+			shutdown(false);
+			
+		}
+		else if (ARG3(i) == 90)
+		{
+			std::string master_callee = set_mmap_table->get_caller_info(0, variants[0].variantpid, ARG5(i));
+			std::string actual_callee = set_mmap_table->get_caller_info(i, variants[i].variantpid, ARG6(i));
 
-                warnf("[PID:%05d] - [INVALID_LOCK_CALLEE] - [LOCK_TYPE:%d (%s)] - [MASTER CALLEE:%s] - [ACTUAL CALLEE:%s]\n",
-                            variants[i].variantpid, ARG4(i), getTextualAtomicType(ARG4(i)),
-                            master_callee.c_str(), actual_callee.c_str());
+			warnf("[PID:%05d] - [INVALID_LOCK_CALLEE] - [LOCK_TYPE:%d (%s)] - [MASTER CALLEE:%s] - [ACTUAL CALLEE:%s]\n",
+				  variants[i].variantpid, ARG4(i), getTextualAtomicType(ARG4(i)),
+				  master_callee.c_str(), actual_callee.c_str());
 
-                shutdown(false);
-            }
-        }
+			shutdown(false);
+		}
 
 		return MVEE_CALL_HANDLED_UNSYNCED_CALL | MVEE_CALL_ALLOW;
     }
@@ -6004,13 +6139,13 @@ long monitor::handle_gettid_call(int variantnum)
 	return MVEE_CALL_ALLOW;
 #endif
 
-    return MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(variants[0].variantpid);
+    return MVEE_CALL_HANDLED_UNSYNCED_CALL | MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(variants[0].variantpid);
 }
 
 /*-----------------------------------------------------------------------------
   sys_readahead - (int fd, loff_t offset, size_t sz)
 -----------------------------------------------------------------------------*/
-long monitor::handle_readahead_precall(int variantnum)
+PRECALL(readahead)
 {
     CHECKFD(1);
     CHECKARG(2);
@@ -6019,7 +6154,7 @@ long monitor::handle_readahead_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-long monitor::handle_readahead_postcall(int variantnum)
+POSTCALL(readahead)
 {
     long result = call_postcall_get_variant_result(0);
     for (int i = 1; i < mvee::numvariants; ++i)
@@ -6032,24 +6167,22 @@ long monitor::handle_readahead_postcall(int variantnum)
   sys_setxattr - (const char __user *, pathname,
   const char __user *, name, void __user *, value, size_t, size, int, flags)
 -----------------------------------------------------------------------------*/
-long monitor::handle_setxattr_log_args(int variantnum)
+LOG_ARGS(setxattr)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
-        char*       path  = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
-        char*       name  = mvee_rw_read_string(variants[i].variantpid, ARG2(i));
+        char*       path  = mvee_rw_read_string(variants[i].variantpid, (void*) ARG1(i));
+        char*       name  = mvee_rw_read_string(variants[i].variantpid, (void*) ARG2(i));
         debugf("pid: %d - SYS_SETXATTR(%s, %s, %d, 0x" PTRSTR ", %d, %s)\n",
                    variants[i].variantpid, path, name, ARG3(i), ARG4(i), getTextualXattrFlags(ARG5(i)));
         SAFEDELETEARRAY(path);
         SAFEDELETEARRAY(name);
     }
-
-    return 0;
 }
 
-long monitor::handle_setxattr_precall(int variantnum)
+PRECALL(setxattr)
 {
     CHECKPOINTER(1);
     CHECKPOINTER(2);
@@ -6066,22 +6199,20 @@ long monitor::handle_setxattr_precall(int variantnum)
   sys_setxattr - (int, fd,
   const char __user *, name, void __user *, value, size_t, size, int, flags)
 -----------------------------------------------------------------------------*/
-long monitor::handle_fsetxattr_log_args(int variantnum)
+LOG_ARGS(fsetxattr)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
-        char*       name  = mvee_rw_read_string(variants[i].variantpid, ARG2(i));
+        char*       name  = mvee_rw_read_string(variants[i].variantpid, (void*) ARG2(i));
         debugf("pid: %d - SYS_FSETXATTR(%d, %s, %d, 0x" PTRSTR ", %d, %s)\n",
                    variants[i].variantpid, ARG1(i), name, ARG3(i), ARG4(i), getTextualXattrFlags(ARG5(i)));
         SAFEDELETEARRAY(name);
     }
-
-    return 0;
 }
 
-long monitor::handle_fsetxattr_precall(int variantnum)
+PRECALL(fsetxattr)
 {
     CHECKFD(1);
     CHECKPOINTER(2);
@@ -6097,24 +6228,22 @@ long monitor::handle_fsetxattr_precall(int variantnum)
   sys_getxattr - (const char __user *, pathname,
   const char __user *, name, void __user *, value, size_t, size)
 -----------------------------------------------------------------------------*/
-long monitor::handle_getxattr_log_args(int variantnum)
+LOG_ARGS(getxattr)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
-        char* path = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
-        char* name = mvee_rw_read_string(variants[i].variantpid, ARG2(i));
+        char* path = mvee_rw_read_string(variants[i].variantpid, (void*) ARG1(i));
+        char* name = mvee_rw_read_string(variants[i].variantpid, (void*) ARG2(i));
         debugf("pid: %d - SYS_GETXATTR(%s, %s, %d, 0x" PTRSTR ", %d)\n",
                    variants[i].variantpid, path, name, ARG3(i), ARG4(i));
         SAFEDELETEARRAY(path);
         SAFEDELETEARRAY(name);
     }
-
-    return 0;
 }
 
-long monitor::handle_getxattr_precall(int variantnum)
+PRECALL(getxattr)
 {
     CHECKPOINTER(1);
     CHECKSTRING(1);
@@ -6125,7 +6254,7 @@ long monitor::handle_getxattr_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_getxattr_postcall(int variantnum)
+POSTCALL(getxattr)
 {
     REPLICATEBUFFERFIXEDLEN(3, call_postcall_get_variant_result(0));
     return 0;
@@ -6135,22 +6264,20 @@ long monitor::handle_getxattr_postcall(int variantnum)
   sys_fgetxattr - (int, fd,
   const char __user *, name, void __user *, value, size_t, size)
 -----------------------------------------------------------------------------*/
-long monitor::handle_fgetxattr_log_args(int variantnum)
+LOG_ARGS(fgetxattr)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
-        char* name = mvee_rw_read_string(variants[i].variantpid, ARG2(i));
+        char* name = mvee_rw_read_string(variants[i].variantpid, (void*) ARG2(i));
         debugf("pid: %d - SYS_FGETXATTR(%d, %s, %d, 0x" PTRSTR ", %d)\n",
                    variants[i].variantpid, ARG1(i), name, ARG3(i), ARG4(i));
         SAFEDELETEARRAY(name);
     }
-
-    return 0;
 }
 
-long monitor::handle_fgetxattr_precall(int variantnum)
+PRECALL(fgetxattr)
 {
     CHECKFD(1);
     CHECKPOINTER(2);
@@ -6160,7 +6287,7 @@ long monitor::handle_fgetxattr_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_fgetxattr_postcall(int variantnum)
+POSTCALL(fgetxattr)
 {
     REPLICATEBUFFERFIXEDLEN(3, call_postcall_get_variant_result(0));
     return 0;
@@ -6170,7 +6297,7 @@ long monitor::handle_fgetxattr_postcall(int variantnum)
   sys_futex - (u32* uaddr, int op, u32 val, struct timespec* utime,
   u32* uaddr2, u32 val3)
 -----------------------------------------------------------------------------*/
-long monitor::handle_futex_log_args(int variantnum)
+LOG_ARGS(futex)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -6181,11 +6308,9 @@ long monitor::handle_futex_log_args(int variantnum)
                    getTextualFutexOp(ARG2(i)), ARG3(i),
                    ARG4(i), ARG5(i), ARG6(i));
     }
-
-    return 0;
 }
 
-long monitor::handle_futex_precall(int variantnum)
+PRECALL(futex)
 {
 #ifndef MVEE_DISABLE_SYNCHRONIZATION_REPLICATION
     CHECKARG(2);
@@ -6206,7 +6331,7 @@ long monitor::handle_futex_precall(int variantnum)
 #endif
 }
 
-long monitor::handle_futex_call(int variantnum)
+CALL(futex)
 {
 	if IS_UNSYNCED_CALL
 		return MVEE_CALL_ALLOW | MVEE_CALL_HANDLED_UNSYNCED_CALL;
@@ -6217,14 +6342,14 @@ long monitor::handle_futex_call(int variantnum)
     {
         // clear it for the slaves too and deny the call
         for (int i = 1; i < mvee::numvariants; ++i)
-			mvee_rw_write_uint(variants[i].variantpid, ARG1(i), 0);
+			mvee_rw_write_uint(variants[i].variantpid, (void*) ARG1(i), 0);
         return MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
     }
 #endif
     return MVEE_CALL_ALLOW;
 }
 
-long monitor::handle_futex_log_return(int variantnum)
+LOG_RETURN(futex)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, rets)
 
@@ -6235,11 +6360,9 @@ long monitor::handle_futex_log_return(int variantnum)
                    ((long)rets[i] < 0) ? strerror(-(long)rets[i]) : "",
                    ((long)rets[i] < 0) ? ")" : "");
     }
-
-    return 0;
 }
 
-long monitor::handle_futex_postcall(int variantnum)
+POSTCALL(futex)
 {
 #ifndef MVEE_DISABLE_SYNCHRONIZATION_REPLICATION
 	if IS_SYNCED_CALL
@@ -6265,83 +6388,82 @@ long monitor::handle_futex_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   int sched_setaffinity(pid_t pid, size_t cpusetsize, cpu_set_t *mask);
 -----------------------------------------------------------------------------*/
-long monitor::handle_sched_setaffinity_log_args(int variantnum)
+LOG_ARGS(sched_setaffinity)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
         cpu_set_t mask;
-        if (!mvee_rw_read_struct(variants[i].variantpid, ARG3(i), sizeof(cpu_set_t), &mask))
+        if (!mvee_rw_read_struct(variants[i].variantpid, (void*) ARG3(i), sizeof(cpu_set_t), &mask))
         {
             warnf("couldn't read cpu_set_t\n");
-            return 0;
+            return;
         }
         debugf("pid: %d - SYS_SCHED_SETAFFINITY(%d, %d, %s)\n",
                    variants[i].variantpid, ARG1(i),
                    ARG2(i), getTextualCPUSet(&mask).c_str());
     }
-    return 0;
 }
 
-long monitor::handle_sched_setaffinity_precall(int variantnum)
+PRECALL(sched_setaffinity)
 {
-#ifdef MVEE_ALLOW_SETAFFINITY
-    // manipulate the mask so that each variant runs on its own "virtual" cpu
-    CHECKPOINTER(3);
+	if ((*mvee::config_variant_global)["allow_setaffinity"].asBool())
+	{
+		// manipulate the mask so that each variant runs on its own "virtual" cpu
+		CHECKPOINTER(3);
 
-    if (ARG3(0))
-    {
-        for (int i = 0; i < mvee::numvariants; ++i)
-        {
-            cpu_set_t available_cores;
-            int       num_cores_total      = mvee_env_get_num_cores();
-            int       num_cores_variant      = num_cores_total / mvee::numvariants;
-            int       first_core_available = num_cores_variant * i;
-            int       modified_mask        = 0;
+		if (ARG3(0))
+		{
+			for (int i = 0; i < mvee::numvariants; ++i)
+			{
+				cpu_set_t available_cores;
+				int       num_cores_total      = mvee::os_get_num_cores();
+				int       num_cores_variant      = num_cores_total / mvee::numvariants;
+				int       first_core_available = num_cores_variant * i;
+				int       modified_mask        = 0;
 
-            if (!mvee_rw_read_struct(variants[i].variantpid, ARG3(i), sizeof(cpu_set_t), &available_cores))
-            {
-                warnf("couldn't read cpu_set_t\n");
-                return 0;
-            }
+				if (!mvee_rw_read_struct(variants[i].variantpid, (void*) ARG3(i), sizeof(cpu_set_t), &available_cores))
+				{
+					warnf("couldn't read cpu_set_t\n");
+					return 0;
+				}
 
-            for (int j = 0; j < sizeof(cpu_set_t) * 8; ++j)
-            {
-                if (CPU_ISSET(j, &available_cores) &&
-                    (j < first_core_available || j >= first_core_available + num_cores_variant))
-                {
-                    CPU_CLR(j, &available_cores);
-                    if (j < num_cores_variant)
-                        CPU_SET(j + first_core_available, &available_cores);
-                    modified_mask = 1;
-                }
-            }
+				for (int j = 0; j < (int)(sizeof(cpu_set_t) * 8); ++j)
+				{
+					if (CPU_ISSET(j, &available_cores) &&
+						(j < first_core_available || j >= first_core_available + num_cores_variant))
+					{
+						CPU_CLR(j, &available_cores);
+						if (j < num_cores_variant)
+							CPU_SET(j + first_core_available, &available_cores);
+						modified_mask = 1;
+					}
+				}
 
-            if (modified_mask)
-            {
+				if (modified_mask)
+				{
 #ifndef MVEE_BENCHMARK
-                debugf("manipulated virtual CPU mask for the variant: %d - %s\n", i,
+					debugf("manipulated virtual CPU mask for the variant: %d - %s\n", i,
                            getTextualCPUSet(&available_cores).c_str());
 #endif
-                mvee_rw_write_data(variants[i].variantpid, ARG3(i), sizeof(cpu_set_t), (unsigned char*)&available_cores);
-            }
-        }
-    }
-#endif
+					mvee_rw_write_data(variants[i].variantpid, (void*) ARG3(i), sizeof(cpu_set_t), (unsigned char*)&available_cores);
+				}
+			}
+		}
+	}
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-long monitor::handle_sched_setaffinity_call(int variantnum)
+CALL(sched_setaffinity)
 {
-#ifndef MVEE_ALLOW_SETAFFINITY
-    return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
-#else
+	if (!(*mvee::config_variant_global)["allow_setaffinity"].asBool())
+		return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
     return MVEE_CALL_ALLOW;
-#endif
 }
 
-long monitor::handle_sched_setaffinity_log_return(int variantnum)
+LOG_RETURN(sched_setaffinity)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, rets)
 
@@ -6350,7 +6472,6 @@ long monitor::handle_sched_setaffinity_log_return(int variantnum)
                    ((long)rets[i] < 0) ? "(" : "",
                    ((long)rets[i] < 0) ? strerror(-(long)rets[i]) : "",
                    ((long)rets[i] < 0) ? ")" : "");
-    return 0;
 }
 
 /*-----------------------------------------------------------------------------
@@ -6358,13 +6479,13 @@ long monitor::handle_sched_setaffinity_log_return(int variantnum)
   sched_getaffinity, pid_t, pid, unsigned int, len,
   unsigned long __user *, user_mask_ptr)
 -----------------------------------------------------------------------------*/
-long monitor::handle_sched_getaffinity_get_call_type(int variantnum)
+GET_CALL_TYPE(sched_getaffinity)
 {
     // this is unsynced to work around a "harmless data race" in glibc
     return MVEE_CALL_TYPE_UNSYNCED;
 }
 
-long monitor::handle_sched_getaffinity_postcall(int variantnum)
+POSTCALL(sched_getaffinity)
 {
     // mask the return with the CPU cores we wish to make available to this variant
 
@@ -6385,7 +6506,7 @@ long monitor::handle_sched_getaffinity_postcall(int variantnum)
 
         CPU_ZERO(&available_cores);
 
-        if (!mvee_rw_read_struct(variants[variantnum].variantpid, ARG3(variantnum), ROUND_UP(num_cores_total, 8) / 8, &available_cores))
+        if (!mvee_rw_read_struct(variants[variantnum].variantpid, (void*) ARG3(variantnum), ROUND_UP(num_cores_total, 8) / 8, &available_cores))
         {
             warnf("couldn't read cpu_set_t\n");
             return 0;
@@ -6403,7 +6524,7 @@ long monitor::handle_sched_getaffinity_postcall(int variantnum)
         }
 
         if (modified_mask)
-            mvee_rw_write_data(variants[variantnum].variantpid, ARG3(variantnum), ROUND_UP(num_cores_total, 8) / 8, (unsigned char*)&available_cores);
+            mvee_rw_write_data(variants[variantnum].variantpid, (void*) ARG3(variantnum), ROUND_UP(num_cores_total, 8) / 8, (unsigned char*)&available_cores);
     }
 
 
@@ -6413,40 +6534,38 @@ long monitor::handle_sched_getaffinity_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_epoll_create - (int size)
 -----------------------------------------------------------------------------*/
-long monitor::handle_epoll_create_log_args(int variantnum)
+LOG_ARGS(epoll_create)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_EPOLL_CREATE(%d)\n", variants[i].variantpid, ARG1(i));
-
-    return 0;
 }
 
-long monitor::handle_epoll_create_precall(int variantnum)
+PRECALL(epoll_create)
 {
     CHECKARG(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_epoll_create_log_return(int variantnum)
+LOG_RETURN(epoll_create)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, rets)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_EPOLL_CREATE return: %d\n", variants[i].variantpid, rets[i]);
-
-    return 0;
 }
 
-long monitor::handle_epoll_create_postcall(int variantnum)
+POSTCALL(epoll_create)
 {
     if (call_succeeded)
     {
         std::vector<unsigned long> fds(mvee::numvariants);
         std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
         set_fd_table->create_fd_info(FT_POLL_BLOCKING, fds, "epoll_sock", 0, false, true);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
+#endif
     }
     return 0;
 }
@@ -6488,7 +6607,7 @@ static void handle_get_mem_size(int pid, unsigned long* phys_sz, unsigned long* 
 }
 #endif
 
-long monitor::handle_exit_group_call(int variantnum)
+CALL(exit_group)
 {
 #ifdef MVEE_DUMP_MEM_STATS
     unsigned long mvee_phys, variant_virt, variant_phys;
@@ -6529,7 +6648,7 @@ long monitor::handle_exit_group_call(int variantnum)
 /*-----------------------------------------------------------------------------
     sys_set_tid_address - Always returns the caller's thread ID
 -----------------------------------------------------------------------------*/
-long monitor::handle_set_tid_address_postcall(int variantnum)
+POSTCALL(set_tid_address)
 {
     MVEE_HANDLER_POSTCALL(variantnum, start, lim)
 
@@ -6542,14 +6661,14 @@ long monitor::handle_set_tid_address_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   clock_gettime - (clockid_t which_clock, struct timespec __user* tp)
 -----------------------------------------------------------------------------*/
-long monitor::handle_clock_gettime_precall(int variantnum)
+PRECALL(clock_gettime)
 {
     CHECKPOINTER(2);
     CHECKARG(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_clock_gettime_postcall(int variantnum)
+POSTCALL(clock_gettime)
 {
     REPLICATEBUFFERFIXEDLEN(2, sizeof(struct timespec));
     return 0;
@@ -6558,7 +6677,7 @@ long monitor::handle_clock_gettime_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_statfs - (const char  *  pathname, struct statfs64  *  buf)
 -----------------------------------------------------------------------------*/
-long monitor::handle_statfs_precall(int variantnum)
+PRECALL(statfs)
 {
     CHECKPOINTER(1);
     CHECKSTRING(1);
@@ -6566,7 +6685,7 @@ long monitor::handle_statfs_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_statfs_postcall(int variantnum)
+POSTCALL(statfs)
 {
     REPLICATEBUFFERFIXEDLEN(2, sizeof(struct statfs64));
     return 0;
@@ -6575,7 +6694,7 @@ long monitor::handle_statfs_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_statfs64 - (const char  *  pathname, size_t  sz, struct statfs64  *  buf)
 -----------------------------------------------------------------------------*/
-long monitor::handle_statfs64_precall(int variantnum)
+PRECALL(statfs64)
 {
     CHECKPOINTER(1);
     CHECKSTRING(1);
@@ -6584,7 +6703,7 @@ long monitor::handle_statfs64_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_statfs64_postcall(int variantnum)
+POSTCALL(statfs64)
 {
     REPLICATEBUFFERFIXEDLEN(3, sizeof(struct statfs64));
     return 0;
@@ -6594,20 +6713,20 @@ long monitor::handle_statfs64_postcall(int variantnum)
   sys_fstatfs - (int fd, struct statfs* buf)
   sys_fstatfs64 - (int fd, size_t  sz, struct statfs64  *  buf)
 -----------------------------------------------------------------------------*/
-long monitor::handle_fstatfs_precall(int variantnum)
+PRECALL(fstatfs)
 {
     CHECKFD(1);
     CHECKPOINTER(2);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_fstatfs_postcall(int variantnum)
+POSTCALL(fstatfs)
 {
     REPLICATEBUFFERFIXEDLEN(2, sizeof(struct statfs));
     return 0;
 }
 
-long monitor::handle_fstatfs64_precall(int variantnum)
+PRECALL(fstatfs64)
 {
     CHECKARG(2);
     CHECKFD(1);
@@ -6615,7 +6734,7 @@ long monitor::handle_fstatfs64_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_fstatfs64_postcall(int variantnum)
+POSTCALL(fstatfs64)
 {
     REPLICATEBUFFERFIXEDLEN(3, sizeof(struct statfs64));
     return 0;
@@ -6624,7 +6743,7 @@ long monitor::handle_fstatfs64_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_getpriority - (int which, int who)
 -----------------------------------------------------------------------------*/
-long monitor::handle_getpriority_precall (int variantnum)
+PRECALL(getpriority)
 {
     CHECKARG(1);
     CHECKARG(2);
@@ -6634,7 +6753,7 @@ long monitor::handle_getpriority_precall (int variantnum)
 /*-----------------------------------------------------------------------------
   sys_setpriority - (int which, int who, int niceval)
 -----------------------------------------------------------------------------*/
-long monitor::handle_setpriority_precall(int variantnum)
+PRECALL(setpriority)
 {
     CHECKARG(1);
     CHECKARG(2);
@@ -6647,7 +6766,7 @@ long monitor::handle_setpriority_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_setpriority_postcall(int variantnum)
+POSTCALL(setpriority)
 {
     if (ARG1(0) != PRIO_USER)
     {
@@ -6659,7 +6778,7 @@ long monitor::handle_setpriority_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_epoll_wait - (int epfd, struct epoll_event __user* events, int maxevents, int timeout)
 -----------------------------------------------------------------------------*/
-long monitor::handle_epoll_wait_log_args(int variantnum)
+LOG_ARGS(epoll_wait)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -6670,11 +6789,9 @@ long monitor::handle_epoll_wait_log_args(int variantnum)
                    ARG2(i),
                    ARG3(i),
                    ARG4(i));
-
-    return 0;
 }
 
-long monitor::handle_epoll_wait_precall(int variantnum)
+PRECALL(epoll_wait)
 {
     CHECKFD(1);
     CHECKPOINTER(2);
@@ -6683,7 +6800,7 @@ long monitor::handle_epoll_wait_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_epoll_wait_log_return(int variantnum)
+LOG_RETURN(epoll_wait)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, rets)
 
@@ -6693,10 +6810,10 @@ long monitor::handle_epoll_wait_log_return(int variantnum)
         if ((int)rets[i] > 0)
         {
             struct epoll_event* events = (struct epoll_event*)mvee_rw_safe_alloc(sizeof(struct epoll_event) * rets[i]);
-            if (!mvee_rw_read_struct(variants[i].variantpid, ARG2(i), sizeof(struct epoll_event) * rets[i], events))
+            if (!mvee_rw_read_struct(variants[i].variantpid, (void*) ARG2(i), sizeof(struct epoll_event) * rets[i], events))
             {
                 warnf("couldn't read epoll_event\n");
-                return 0;
+                return;
             }
 
             for (unsigned int j = 0; j < rets[i]; ++j)
@@ -6706,11 +6823,9 @@ long monitor::handle_epoll_wait_log_return(int variantnum)
             SAFEDELETEARRAY(events);
         }
     }
-
-    return 0;
 }
 
-long monitor::handle_epoll_wait_postcall(int variantnum)
+POSTCALL(epoll_wait)
 {
     if (call_succeeded)
     {
@@ -6718,7 +6833,7 @@ long monitor::handle_epoll_wait_postcall(int variantnum)
         if (master_result > 0)
         {
             struct epoll_event* master_events = (struct epoll_event*)mvee_rw_safe_alloc(sizeof(struct epoll_event) * master_result);
-            if (!mvee_rw_read_struct(variants[0].variantpid, ARG2(0), sizeof(struct epoll_event) * master_result, master_events))
+            if (!mvee_rw_read_struct(variants[0].variantpid, (void*) ARG2(0), sizeof(struct epoll_event) * master_result, master_events))
             {
                 warnf("couldn't replicate epoll_events\n");
                 return 0;
@@ -6744,7 +6859,7 @@ long monitor::handle_epoll_wait_postcall(int variantnum)
 					}
                 }
 
-                if (!mvee_rw_write_data(variants[j].variantpid, ARG2(j), sizeof(epoll_event) * master_result, (unsigned char*)slave_events))
+                if (!mvee_rw_write_data(variants[j].variantpid, (void*) ARG2(j), sizeof(epoll_event) * master_result, (unsigned char*)slave_events))
                     warnf("failed to replicate epoll_events to slave variant %d\n", j);
                 SAFEDELETEARRAY(slave_events);
             }
@@ -6759,7 +6874,7 @@ long monitor::handle_epoll_wait_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_epoll_ctl - (int epfd, int op, int fd, struct epoll_event __user* event)
 -----------------------------------------------------------------------------*/
-long monitor::handle_epoll_ctl_log_args(int variantnum)
+LOG_ARGS(epoll_ctl)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -6770,10 +6885,10 @@ long monitor::handle_epoll_ctl_log_args(int variantnum)
         memset(&event, 0, sizeof(struct epoll_event));
         if (ARG4(i))
         {
-            if (!mvee_rw_read_struct(variants[i].variantpid, ARG4(i), sizeof(struct epoll_event), &event))
+            if (!mvee_rw_read_struct(variants[i].variantpid, (void*) ARG4(i), sizeof(struct epoll_event), &event))
             {
                 warnf("couldn't read epoll_event\n");
-                return 0;
+                return;
             }
             events = getTextualEpollEvents(event.events);
         }
@@ -6786,11 +6901,9 @@ long monitor::handle_epoll_ctl_log_args(int variantnum)
                    events.c_str(),
                    (unsigned long)event.data.ptr);
     }
-
-    return 0;
 }
 
-long monitor::handle_epoll_ctl_precall(int variantnum)
+PRECALL(epoll_ctl)
 {
     CHECKFD(1);
     CHECKARG(2);
@@ -6800,7 +6913,7 @@ long monitor::handle_epoll_ctl_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_epoll_ctl_postcall(int variantnum)
+POSTCALL(epoll_ctl)
 {
     if (call_succeeded && mvee::numvariants > 1)
     {
@@ -6812,7 +6925,7 @@ long monitor::handle_epoll_ctl_postcall(int variantnum)
             {
                 struct epoll_event event;
                 memset(&event, 0, sizeof(struct epoll_event));
-                if (!mvee_rw_read_struct(variants[i].variantpid, ARG4(i), sizeof(struct epoll_event), &event))
+                if (!mvee_rw_read_struct(variants[i].variantpid, (void*) ARG4(i), sizeof(struct epoll_event), &event))
                 {
                     warnf("couldn't read epoll_event\n");
                     return 0;
@@ -6834,17 +6947,15 @@ long monitor::handle_epoll_ctl_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_tgkill - (int tgid, int pid, int sig)
 -----------------------------------------------------------------------------*/
-long monitor::handle_tgkill_log_args(int variantnum)
+LOG_ARGS(tgkill)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_TGKILL(%d, %d, %d = %s)\n", variants[i].variantpid, ARG1(i), ARG2(i), ARG3(i), getTextualSig(ARG3(i)));
-
-    return 0;
 }
 
-long monitor::handle_tgkill_precall(int variantnum)
+PRECALL(tgkill)
 {
     CHECKARG(1);
     CHECKARG(2);
@@ -6863,7 +6974,7 @@ long monitor::handle_tgkill_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_tgkill_postcall(int variantnum)
+POSTCALL(tgkill)
 {
 	UNMAPPIDS(1);
 	UNMAPPIDS(2);
@@ -6873,21 +6984,21 @@ long monitor::handle_tgkill_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_utimes - (char* filename, struct timeval utimes[2])
 -----------------------------------------------------------------------------*/
-long monitor::handle_utimes_log_args(int variantnum)
+LOG_ARGS(utimes)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
         struct timeval utimes[2];
-        char*          str1 = mvee_rw_read_string(variants[i].variantpid, ARG1(i));
+        char*          str1 = mvee_rw_read_string(variants[i].variantpid, (void*) ARG1(i));
 
         if (ARG2(i))
         {
-            if (!mvee_rw_read_struct(variants[i].variantpid, ARG2(i), 2 * sizeof(struct timeval), utimes))
+            if (!mvee_rw_read_struct(variants[i].variantpid, (void*) ARG2(i), 2 * sizeof(struct timeval), utimes))
             {
                 warnf("couldn't read utimes\n");
-                return 0;
+                return;
             }
         }
         else
@@ -6902,11 +7013,9 @@ long monitor::handle_utimes_log_args(int variantnum)
 
         SAFEDELETEARRAY(str1);
     }
-
-    return 0;
 }
 
-long monitor::handle_utimes_precall(int variantnum)
+PRECALL(utimes)
 {
     CHECKPOINTER(1);
     CHECKSTRING(1);
@@ -6918,17 +7027,15 @@ long monitor::handle_utimes_precall(int variantnum)
   sys_waitid - (int which, pid_t pid, struct siginfo __user *infop,
   int options, struct rusage __user *ru);
 -----------------------------------------------------------------------------*/
-long monitor::handle_waitid_log_args(int variantnum)
+LOG_ARGS(waitid)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_WAITID(%d, %d, 0x" PTRSTR ", 0x" PTRSTR ", 0x" PTRSTR ")\n", variants[i].variantpid, ARG1(i), ARG2(i), ARG3(i), ARG4(i), ARG5(i));
-
-    return 0;
 }
 
-long monitor::handle_waitid_precall(int variantnum)
+PRECALL(waitid)
 {
     CHECKARG(1);
     CHECKPOINTER(3);
@@ -6939,17 +7046,15 @@ long monitor::handle_waitid_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-long monitor::handle_waitid_log_return(int variantnum)
+LOG_RETURN(waitid)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, pids)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_WAITID return: %d\n", variants[i].variantpid, pids[i]);
-
-    return 0;
 }
 
-long monitor::handle_waitid_postcall(int variantnum)
+POSTCALL(waitid)
 {
     UNMAPPIDS(1);
 
@@ -6982,24 +7087,21 @@ long monitor::handle_waitid_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_inotify_init
 -----------------------------------------------------------------------------*/
-long monitor::handle_inotify_init_precall(int variantnum)
+PRECALL(inotify_init)
 {
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_inotify_init_call(int variantnum)
-{
-    return MVEE_CALL_ALLOW;
-}
-
-long monitor::handle_inotify_init_postcall(int variantnum)
+POSTCALL(inotify_init)
 {
     if (call_succeeded)
     {
         std::vector<unsigned long> fds(mvee::numvariants);
         std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
         set_fd_table->create_fd_info(FT_POLL_BLOCKING, fds, "inotify_init", 0, false, true);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
+#endif
     }
 
     return 0;
@@ -7008,59 +7110,37 @@ long monitor::handle_inotify_init_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_inotify_add_watch
 -----------------------------------------------------------------------------*/
-long monitor::handle_inotify_add_watch_precall(int variantnum)
+PRECALL(inotify_add_watch)
 {
     // TODO: Check arguments?
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
-
-long monitor::handle_inotify_add_watch_call(int variantnum)
-{
-    return MVEE_CALL_ALLOW;
-}
-
-long monitor::handle_inotify_add_watch_postcall(int variantnum)
-{
-    return 0;
 }
 
 /*-----------------------------------------------------------------------------
   sys_inotify_rm_watch
 -----------------------------------------------------------------------------*/
-long monitor::handle_inotify_rm_watch_precall(int variantnum)
+PRECALL(inotify_rm_watch)
 {
     // TODO: Check arguments?
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_inotify_rm_watch_call(int variantnum)
-{
-    return MVEE_CALL_ALLOW;
-}
-
-long monitor::handle_inotify_rm_watch_postcall(int variantnum)
-{
-    return 0;
-}
-
 /*-----------------------------------------------------------------------------
   sys_openat - (int dfd, const char __user *filename, int flags, int mode)
 -----------------------------------------------------------------------------*/
-long monitor::handle_openat_log_args(int variantnum)
+LOG_ARGS(openat)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
-        char* filename = mvee_rw_read_string(variants[i].variantpid, ARG2(i));
+        char* filename = mvee_rw_read_string(variants[i].variantpid, (void*)ARG2(i));
         debugf("pid: %d - SYS_OPENAT(%d, %s, 0x%08X, 0x%08X)\n", variants[i].variantpid, ARG1(i), filename, ARG3(i), ARG4(i));
         SAFEDELETEARRAY(filename);
     }
-
-    return 0;
 }
 
-long monitor::handle_openat_precall(int variantnum)
+PRECALL(openat)
 {
     for (int i = 0; i < mvee::numvariants - 1; ++i)
 	{
@@ -7091,7 +7171,7 @@ long monitor::handle_openat_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-long monitor::handle_openat_call(int variantnum)
+CALL(openat)
 {
     int         i, result, old_flags, flags;
     std::string str1 = set_fd_table->get_full_path(0, variants[0].variantpid, (unsigned long)(int)ARG1(0), (void*)ARG2(0));
@@ -7113,20 +7193,34 @@ long monitor::handle_openat_call(int variantnum)
         for (i = 0; i < mvee::numvariants; ++i)
             SETARG3(i, flags);
 
+	// apply aliasing - we don't have to worry about the dirfd. If the filename
+	// is absolute, the dirfd will be ignored
+	if (result & MVEE_CALL_ALLOW)
+	{
+		for (i = 0; i < mvee::numvariants; ++i)
+		{
+			auto alias = mvee::get_alias(i, str1);
+			if (alias != "")
+			{
+				debugf("Variant %d: File %s is aliased to %s\n",
+					  i, str1.c_str(), alias.c_str());
+				call_overwrite_arg_data(i, 2, str1.length() + 1, (void*) alias.c_str(), alias.length() + 1, true);
+			}
+		}
+	}
+
     return result;
 }
 
-long monitor::handle_openat_log_return(int variantnum)
+LOG_RETURN(openat)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, fds)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_OPENAT return: %d\n", variants[i].variantpid, fds[i]);
-
-    return 0;
 }
 
-long monitor::handle_openat_postcall(int variantnum)
+POSTCALL(openat)
 {
     if ((int)ARG1(0) > 0)
         UNMAPFDS(1);
@@ -7141,8 +7235,9 @@ long monitor::handle_openat_postcall(int variantnum)
         std::vector<unsigned long> fds           = call_postcall_get_result_vector();
         REPLICATEFDRESULT();
         set_fd_table->create_fd_info(FT_REGULAR, fds, resolved_path, ARG3(0), ARG3(0) & O_CLOEXEC, state == STATE_IN_MASTERCALL, false);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
-
+#endif
         free(resolved_path);
     }
 
@@ -7152,7 +7247,7 @@ long monitor::handle_openat_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_mkdirat - (int dirfd, const char *pathname, mode_t mode)
 -----------------------------------------------------------------------------*/
-long monitor::handle_mkdirat_precall(int variantnum)
+PRECALL(mkdirat)
 {
     CHECKARG(3);
     CHECKPOINTER(2);
@@ -7167,21 +7262,19 @@ long monitor::handle_mkdirat_precall(int variantnum)
   sys_newfstatat - (int dfd, const char __user * filename,
   struct stat __user * statbuf, int flag)
 -----------------------------------------------------------------------------*/
-long monitor::handle_newfstatat_log_args(int variantnum)
+LOG_ARGS(newfstatat)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
-        char* path = mvee_rw_read_string(variants[i].variantpid, ARG2(i));
+        char* path = mvee_rw_read_string(variants[i].variantpid, (void*)ARG2(i));
         debugf("pid: %d - SYS_NEWFSTATAT(%d, %s, 0x" PTRSTR ", 0x%08X)\n", variants[i].variantpid, ARG1(i), path, ARG3(i), ARG4(i));
         SAFEDELETEARRAY(path);
     }
-
-    return 0;
 }
 
-long monitor::handle_newfstatat_precall(int variantnum)
+PRECALL(newfstatat)
 {
     CHECKPOINTER(2);
     CHECKPOINTER(3);
@@ -7191,27 +7284,25 @@ long monitor::handle_newfstatat_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_newfstatat_postcall(int variantnum)
+POSTCALL(newfstatat)
 {
     REPLICATEBUFFERFIXEDLEN(3, sizeof(struct stat64));
     return 0;
 }
 
-long monitor::handle_fstatat64_log_args(int variantnum)
+LOG_ARGS(fstatat64)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
-        char* path = mvee_rw_read_string(variants[i].variantpid, ARG2(i));
+        char* path = mvee_rw_read_string(variants[i].variantpid, (void*) ARG2(i));
         debugf("pid: %d - SYS_FSTATAT64(%d, %s, 0x" PTRSTR ", 0x%08X)\n", variants[i].variantpid, ARG1(i), path, ARG3(i), ARG4(i));
         SAFEDELETEARRAY(path);
     }
-
-    return 0;
 }
 
-long monitor::handle_fstatat64_precall(int variantnum)
+PRECALL(fstatat64)
 {
     CHECKPOINTER(2);
     CHECKPOINTER(3);
@@ -7221,7 +7312,7 @@ long monitor::handle_fstatat64_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_fstatat64_log_return(int variantnum)
+LOG_RETURN(fstatat64)
 {
     std::vector<unsigned long> argarray(mvee::numvariants);
     if (state == STATE_IN_SYSCALL)
@@ -7229,7 +7320,7 @@ long monitor::handle_fstatat64_log_return(int variantnum)
         FILLARGARRAY(3, argarray);
         for (int i = 0; i < mvee::numvariants; ++i)
         {
-            struct stat64* sb = (struct stat64*)mvee_rw_read_data(variants[i].variantpid, argarray[i], sizeof(struct stat64));
+            struct stat64* sb = (struct stat64*)mvee_rw_read_data(variants[i].variantpid, (void*)argarray[i], sizeof(struct stat64));
             if (sb)
             {
                 debugf("pid: %d - SYS_FSTATAT64 return\n", variants[i].variantpid);
@@ -7268,11 +7359,9 @@ long monitor::handle_fstatat64_log_return(int variantnum)
             SAFEDELETEARRAY(sb);
         }
     }
-
-    return 0;
 }
 
-long monitor::handle_fstatat64_postcall(int variantnum)
+POSTCALL(fstatat64)
 {
     REPLICATEBUFFERFIXEDLEN(3, sizeof(struct stat64));
     return 0;
@@ -7281,7 +7370,7 @@ long monitor::handle_fstatat64_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_unlinkat - (int dirfd, const char *pathname, int flags)
 -----------------------------------------------------------------------------*/
-long monitor::handle_unlinkat_precall(int variantnum)
+PRECALL(unlinkat)
 {
     CHECKPOINTER(2);
     CHECKARG(3);
@@ -7294,7 +7383,7 @@ long monitor::handle_unlinkat_precall(int variantnum)
   sys_renameat - (int olddirfd, const char *oldpath,
   int newdirfd, const char *newpath)
 -----------------------------------------------------------------------------*/
-long monitor::handle_renameat_precall(int variantnum)
+PRECALL(renameat)
 {
     CHECKFD(3);
     CHECKFD(1);
@@ -7309,7 +7398,7 @@ long monitor::handle_renameat_precall(int variantnum)
   sys_linkat - (int olddirfd, const char *oldpath,
   int newdirfd, const char *newpath, int flags)
 -----------------------------------------------------------------------------*/
-long monitor::handle_linkat_precall(int variantnum)
+PRECALL(linkat)
 {
     CHECKPOINTER(2);
     CHECKPOINTER(4);
@@ -7324,7 +7413,7 @@ long monitor::handle_linkat_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_symlinkat - (const char *oldpath, int newdirfd, const char *newpath)
 -----------------------------------------------------------------------------*/
-long monitor::handle_symlinkat_precall(int variantnum)
+PRECALL(symlinkat)
 {
     CHECKPOINTER(1);
     CHECKPOINTER(3);
@@ -7338,7 +7427,7 @@ long monitor::handle_symlinkat_precall(int variantnum)
   sys_readlinkat - (int dirfd, const char *pathname,
   char *buf, size_t bufsiz)
 -----------------------------------------------------------------------------*/
-long monitor::handle_readlinkat_precall(int variantnum)
+PRECALL(readlinkat)
 {
     CHECKPOINTER(2);
     CHECKPOINTER(3);
@@ -7348,7 +7437,7 @@ long monitor::handle_readlinkat_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_readlinkat_postcall(int variantnum)
+POSTCALL(readlinkat)
 {
     REPLICATEBUFFER(3);
     return 0;
@@ -7357,7 +7446,7 @@ long monitor::handle_readlinkat_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_fchmodat - (int, dfd, const char __user *, filename, umode_t, mode)
 -----------------------------------------------------------------------------*/
-long monitor::handle_fchmodat_precall (int variantnum)
+PRECALL(fchmodat)
 {
     CHECKPOINTER(2);
     CHECKFD(1);
@@ -7369,23 +7458,21 @@ long monitor::handle_fchmodat_precall (int variantnum)
 /*-----------------------------------------------------------------------------
   sys_faccessat - (int dirfd, const char *pathname, int mode)
 -----------------------------------------------------------------------------*/
-long monitor::handle_faccessat_log_args(int variantnum)
+LOG_ARGS(faccessat)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
     {
-        char* str1 = mvee_rw_read_string(variants[i].variantpid, ARG2(i));
+        char* str1 = mvee_rw_read_string(variants[i].variantpid, (void*)ARG2(i));
         debugf("pid: %d - SYS_FACCESSAT(%d, %s, 0x%08X = %s, 0x%08x)\n",
                    variants[i].variantpid, ARG1(i), str1, ARG3(i),
                    getTextualAccessMode(ARG3(i)).c_str(), ARG4(i));
         SAFEDELETEARRAY(str1);
     }
-
-    return 0;
 }
 
-long monitor::handle_faccessat_precall(int variantnum)
+PRECALL(faccessat)
 {
     CHECKPOINTER(2);
     CHECKARG(3);
@@ -7395,12 +7482,66 @@ long monitor::handle_faccessat_precall(int variantnum)
 }
 
 /*-----------------------------------------------------------------------------
+  sys_unshare - reverses the effect of sharing certain kernel data structures
+  through sys_clone
+-----------------------------------------------------------------------------*/
+LOG_ARGS(unshare)
+{
+    MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
+
+    for (int i = start; i < lim; ++i)
+    {
+        debugf("pid: %d - SYS_UNSHARE(%d)\n",
+			   variants[i].variantpid, ARG1(i));
+	}
+}
+
+PRECALL(unshare)
+{
+	CHECKARG(1);
+	return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+}
+
+CALL(unshare)
+{
+	// 
+	// This may be downright impossible to do in the general case as we do not
+	// have a stop-the-world primitive in the MVEE.  There are two cases that we
+	// COULD handle right now:
+	// 
+	// 1) Unshare is called with arg 0. This is a no-op 
+	// 2) Unshare is called by a single-threaded process. In this case, we leave
+	// the tables of the parent process intact, and we create new copies of
+	// whatever tables are being unshared by this process
+	//
+
+	if (ARG1(0) == 0)
+	{
+		// this is a no-op... fine
+		return MVEE_CALL_ALLOW;
+	}
+	else if (!is_program_multithreaded())
+	{
+		// We can handle this...
+		warnf("Unshare called by singlethreaded process. This is not implemented yet!\n");
+		return MVEE_CALL_ALLOW;
+	}
+	else
+	{
+		// Program is multithreaded and tables are being unshared.
+		// No way to handle this right now
+		warnf("Unshare called by multithreaded process. This is not implemented yet!\n");
+		return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
+	}
+}
+
+/*-----------------------------------------------------------------------------
   sys_utimensat - (int dirfd, const char *pathname,
   const struct timespec times[2], int flags)
 -----------------------------------------------------------------------------*/
-long monitor::handle_utimensat_precall(int variantnum)
+PRECALL(utimensat)
 {
-    std::vector<unsigned long> argarray(mvee::numvariants);
+    std::vector<const char*> argarray(mvee::numvariants);
 
     CHECKPOINTER(2);
     CHECKPOINTER(3);
@@ -7417,7 +7558,7 @@ long monitor::handle_utimensat_precall(int variantnum)
 
     if (ARG3(0))
     {
-        unsigned char* master_times = mvee_rw_read_data(variants[0].variantpid, ARG3(0), sizeof(struct timespec)*2);
+        unsigned char* master_times = mvee_rw_read_data(variants[0].variantpid, (void*)ARG3(0), sizeof(struct timespec)*2);
         if (!master_times)
         {
             cache_mismatch_info("couldn't read master times\n");
@@ -7426,7 +7567,7 @@ long monitor::handle_utimensat_precall(int variantnum)
         bool           mismatch     = false;
         for (int i = 1; i < mvee::numvariants; ++i)
         {
-            unsigned char* slave_times = mvee_rw_read_data(variants[i].variantpid, ARG3(i), sizeof(struct timespec)*2);
+            unsigned char* slave_times = mvee_rw_read_data(variants[i].variantpid, (void*)ARG3(i), sizeof(struct timespec)*2);
             if (!slave_times)
             {
                 cache_mismatch_info("couldn't read slave times\n");
@@ -7449,7 +7590,7 @@ long monitor::handle_utimensat_precall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_timerfd_create - (int clockid, int flags)
 -----------------------------------------------------------------------------*/
-long monitor::handle_timerfd_create_log_args(int variantnum)
+LOG_ARGS(timerfd_create)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -7458,28 +7599,24 @@ long monitor::handle_timerfd_create_log_args(int variantnum)
                    variants[i].variantpid,
                    ARG1(i), getTextualTimerType(ARG1(i)),
                    ARG2(i), getTextualTimerFlags(ARG2(i)).c_str());
-
-    return 0;
 }
 
-long monitor::handle_timerfd_create_precall(int variantnum)
+PRECALL(timerfd_create)
 {
     CHECKARG(1);
     CHECKARG(2);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_timerfd_create_log_return(int variantnum)
+LOG_RETURN(timerfd_create)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, fds)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_TIMERFD_CREATE return: %d\n", variants[i].variantpid, fds[i]);
-
-    return 0;
 }
 
-long monitor::handle_timerfd_create_postcall(int variantnum)
+POSTCALL(timerfd_create)
 {
     std::vector<unsigned long> fds;
     fds.resize(mvee::numvariants);
@@ -7489,7 +7626,9 @@ long monitor::handle_timerfd_create_postcall(int variantnum)
     {
 		FileType type = (ARG2(0) & TFD_NONBLOCK) ? FT_POLL_NON_BLOCKING : FT_POLL_BLOCKING;
         set_fd_table->create_fd_info(type, fds, "timer", O_RDWR, (ARG2(0) & TFD_CLOEXEC) ? true : false, true);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
+#endif
     }
 
     return 0;
@@ -7498,7 +7637,7 @@ long monitor::handle_timerfd_create_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_fallocate - (int fd, int mode, off_t offset, off_t len)
 -----------------------------------------------------------------------------*/
-long monitor::handle_fallocate_precall(int variantnum)
+PRECALL(fallocate)
 {
     CHECKFD(1);
     CHECKARG(2);
@@ -7511,7 +7650,7 @@ long monitor::handle_fallocate_precall(int variantnum)
   sys_timerfd_settime - (int ufd, int flags,
   const struct itimerspec* utmr, struct itimerspec* otmr)
 -----------------------------------------------------------------------------*/
-long monitor::handle_timerfd_settime_precall(int variantnum)
+PRECALL(timerfd_settime)
 {
     CHECKFD(1);
     CHECKARG(2);
@@ -7521,7 +7660,7 @@ long monitor::handle_timerfd_settime_precall(int variantnum)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_timerfd_settime_postcall(int variantnum)
+POSTCALL(timerfd_settime)
 {
     if (ARG4(0))
         REPLICATEBUFFERFIXEDLEN(4, sizeof(struct itimerspec));
@@ -7531,14 +7670,14 @@ long monitor::handle_timerfd_settime_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_timerfd_gettime - (int ufd, struct itimerspec* otmr)
 -----------------------------------------------------------------------------*/
-long monitor::handle_timerfd_gettime_precall(int variantnum)
+PRECALL(timerfd_gettime)
 {
     CHECKFD(1);
     CHECKPOINTER(2);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_timerfd_gettime_postcall(int variantnum)
+POSTCALL(timerfd_gettime)
 {
     if (ARG2(0))
         REPLICATEBUFFERFIXEDLEN(2, sizeof(struct itimerspec));
@@ -7549,18 +7688,16 @@ long monitor::handle_timerfd_gettime_postcall(int variantnum)
   sys_dup3 - (unsigned int oldfd, unsigned int newfd, int flags)
   the only valid flag that can be passed to dup3 through the flags field is O_CLOEXEC!!!
 -----------------------------------------------------------------------------*/
-long monitor::handle_dup3_log_args(int variantnum)
+LOG_ARGS(dup3)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_DUP3(%d, %d, %s)\n", variants[i].variantpid,
                    ARG1(i), ARG2(i), getTextualFileFlags(ARG3(i)).c_str());
-
-    return 0;
 }
 
-long monitor::handle_dup3_precall(int variantnum)
+PRECALL(dup3)
 {
     CHECKARG(3);
     CHECKFD(2);
@@ -7576,22 +7713,15 @@ long monitor::handle_dup3_precall(int variantnum)
     }
 }
 
-long monitor::handle_dup3_call(int variantnum)
-{
-    return MVEE_CALL_ALLOW;
-}
-
-long monitor::handle_dup3_log_return(int variantnum)
+LOG_RETURN(dup3)
 {
     MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, fds)
 
     for (int i = start; i < lim; ++i)
         debugf("pid: %d - SYS_DUP3(%d, %d) return: %d\n", variants[i].variantpid, ARG1(i), ARG2(i), fds[i]);
-
-    return 0;
 }
 
-long monitor::handle_dup3_postcall(int variantnum)
+POSTCALL(dup3)
 {
 	std::vector<unsigned long> fds;
 
@@ -7626,7 +7756,9 @@ long monitor::handle_dup3_postcall(int variantnum)
                 return 0;
 
             set_fd_table->create_fd_info(fd_info->file_type, fds, fd_info->path.c_str(), fd_info->access_flags, (ARG3(0) != 0) ? true : false, fd_info->master_file, fd_info->unsynced_reads, fd_info->original_file_size);
+#ifdef MVEE_FD_DEBUG
             set_fd_table->verify_fd_table(getpids());
+#endif
         }
     }
     return 0;
@@ -7635,19 +7767,14 @@ long monitor::handle_dup3_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_pipe2
   -----------------------------------------------------------------------------*/
-long monitor::handle_pipe2_precall(int variantnum)
+PRECALL(pipe2)
 {
     CHECKPOINTER(1);
     CHECKARG(2);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_pipe2_call(int variantnum)
-{
-    return MVEE_CALL_ALLOW;
-}
-
-long monitor::handle_pipe2_postcall(int variantnum)
+POSTCALL(pipe2)
 {
     if (call_succeeded)
     {
@@ -7655,7 +7782,7 @@ long monitor::handle_pipe2_postcall(int variantnum)
 		std::vector<unsigned long> read_fds(mvee::numvariants);
 		std::vector<unsigned long> write_fds(mvee::numvariants);
 
-        if (!mvee_rw_read_struct(variants[0].variantpid, ARG1(0), 2 * sizeof(int), fildes))
+        if (!mvee_rw_read_struct(variants[0].variantpid, (void*)ARG1(0), 2 * sizeof(int), fildes))
         {
             warnf("couldn't read master fds\n");
             return 0;
@@ -7670,7 +7797,9 @@ long monitor::handle_pipe2_postcall(int variantnum)
 		FileType type = (ARG2(0) & O_NONBLOCK) ? FT_PIPE_NON_BLOCKING : FT_PIPE_BLOCKING;
         set_fd_table->create_fd_info(type, read_fds,  "pipe2:read",  O_RDONLY, ARG2(0) & O_CLOEXEC, true);
         set_fd_table->create_fd_info(type, write_fds, "pipe2:write", O_WRONLY, ARG2(0) & O_CLOEXEC, true);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
+#endif
     }
 
     return 0;
@@ -7679,18 +7808,13 @@ long monitor::handle_pipe2_postcall(int variantnum)
 /*-----------------------------------------------------------------------------
   sys_inotify_init1
   -----------------------------------------------------------------------------*/
-long monitor::handle_inotify_init1_precall(int variantnum)
+PRECALL(inotify_init1)
 {
     CHECKARG(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-long monitor::handle_inotify_init1_call(int variantnum)
-{
-    return MVEE_CALL_ALLOW;
-}
-
-long monitor::handle_inotify_init1_postcall(int variantnum)
+POSTCALL(inotify_init1)
 {
     if (call_succeeded)
     {
@@ -7699,16 +7823,32 @@ long monitor::handle_inotify_init1_postcall(int variantnum)
 
 		FileType type = (ARG1(0) & IN_NONBLOCK) ? FT_POLL_NON_BLOCKING : FT_POLL_BLOCKING;
         set_fd_table->create_fd_info(type, fds, "inotify_init1", 0, (ARG1(0) & IN_CLOEXEC) ? true : false, false);
+#ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
+#endif
     }
 
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
+  sys_rt_tgsigqueueinfo - (pid_t tgid, pid_t pid, int sig, siginfo_t* uinfo)
+-----------------------------------------------------------------------------*/
+PRECALL(rt_tgsigqueueinfo)
+{
+	CHECKARG(1);
+	CHECKARG(2);
+	CHECKARG(3);
+	// there might be uninitialized data in the siginfo_t struct so we probably
+	// can't do a plain memcmp
+	CHECKBUFFER(4, 3 * sizeof(int)); // compare signo, errno, code
+	return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+}
+
+/*-----------------------------------------------------------------------------
   sys_perf_event_open
 -----------------------------------------------------------------------------*/
-long monitor::handle_perf_event_open_log_args(int variantnum)
+LOG_ARGS(perf_event_open)
 {
     MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)
 
@@ -7716,11 +7856,9 @@ long monitor::handle_perf_event_open_log_args(int variantnum)
         debugf("pid: %d - SYS_PERF_EVENT_OPEN(0x" PTRSTR ", %d, %d, %d, %s)\n",
                    variants[i].variantpid,
                    ARG1(i), ARG2(i), ARG3(i), ARG4(i), getTextualPerfFlags(ARG5(i)).c_str());
-
-    return 0;
 }
 
-long monitor::handle_perf_event_open_precall(int variantnum)
+PRECALL(perf_event_open)
 {
     CHECKPOINTER(1);
     CHECKBUFFER(1, sizeof(struct perf_event_attr));
@@ -7729,17 +7867,13 @@ long monitor::handle_perf_event_open_precall(int variantnum)
     CHECKARG(4);
     CHECKARG(5);
 
-#ifdef MVEE_ALLOW_PERF
     if (ARG2(0))
         MAPPIDS(2);
 
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
-#else
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-#endif
 }
 
-long monitor::handle_perf_event_open_postcall(int variantnum)
+POSTCALL(perf_event_open)
 {
     if (call_succeeded)
     {
@@ -7748,24 +7882,43 @@ long monitor::handle_perf_event_open_postcall(int variantnum)
         if (ARG5(0) & PERF_FLAG_FD_CLOEXEC)
             cloexec = true;
 #endif
-        if (state != STATE_IN_MASTERCALL)
-        {
-            UNMAPFDS(2);
-            std::vector<unsigned long> fds = call_postcall_get_result_vector();
-            REPLICATEFDRESULT();
-            set_fd_table->create_fd_info(FT_SPECIAL, fds, "perf_event", 0, cloexec, false, true);
-            set_fd_table->verify_fd_table(getpids());
-        }
-        else
-        {
-            std::vector<unsigned long> fds(mvee::numvariants);
-            std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
-            set_fd_table->create_fd_info(FT_SPECIAL, fds, "perf_event", 0, cloexec, true, false);
-            set_fd_table->verify_fd_table(getpids());
-        }
+		UNMAPFDS(2);
+		std::vector<unsigned long> fds = call_postcall_get_result_vector();
+		REPLICATEFDRESULT();
+		set_fd_table->create_fd_info(FT_SPECIAL, fds, "perf_event", 0, cloexec, false, true);
+#ifdef MVEE_FD_DEBUG
+		set_fd_table->verify_fd_table(getpids());
+#endif
     }
 
     return 0;
+}
+
+/*-----------------------------------------------------------------------------
+  sys_seccomp
+-----------------------------------------------------------------------------*/
+LOG_ARGS(seccomp)
+{
+
+}
+
+PRECALL(seccomp)
+{
+	CHECKARG(1);
+	switch(ARG1(0))
+	{
+		// only allow read/write/exit
+		case SECCOMP_SET_MODE_STRICT:
+			break;
+		// allow a specific set of syscalls
+		case SECCOMP_SET_MODE_FILTER:
+			break;
+		default:
+			warnf("unknown seccomp option used: %d\n", ARG1(0));
+			return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
+
+	}
+	return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -7784,42 +7937,42 @@ static void mvee_handlers_setalias(int callnum, int alias)
 void mvee::init_syslocks()
 {
     /*
-    These annotations get picked up by the generate_syscall_table.sh script
-	DONTNEED monitor::handle_shmctl_precall
-    DONTNEED monitor::handle_brk_precall
-    DONTNEED monitor::handle_shmget_precall
-    DONTNEED monitor::handle_uname_precall
-    DONTNEED monitor::handle_sched_getparam_precall
-    DONTNEED monitor::handle_sched_getscheduler_precall
-    DONTNEED monitor::handle_sched_get_priority_max_precall
-    DONTNEED monitor::handle_sched_get_priority_min_precall
-    DONTNEED monitor::handle_getuid32_precall
-    DONTNEED monitor::handle_getuid_precall
-    DONTNEED monitor::handle_getgid32_precall
-    DONTNEED monitor::handle_getgid_precall
-    DONTNEED monitor::handle_geteuid32_precall
-    DONTNEED monitor::handle_geteuid_precall
-    DONTNEED monitor::handle_getegid32_precall
-    DONTNEED monitor::handle_getegid_precall
-    DONTNEED monitor::handle_getresuid32_precall
-    DONTNEED monitor::handle_getresuid_precall
-    DONTNEED monitor::handle_getresgid32_precall
-    DONTNEED monitor::handle_getresgid_precall
-    DONTNEED monitor::handle_madvise_precall
-    DONTNEED monitor::handle_set_thread_area_precall
-    DONTNEED monitor::handle_exit_group_precall
-    DONTNEED monitor::handle_set_tid_address_precall
-    DONTNEED monitor::handle_clock_getres_precall
-    DONTNEED monitor::handle_set_robust_list_precall
-    DONTNEED monitor::handle_fadvise64_64_precall
-    DONTNEED monitor::handle_fadvise64_precall
-    DONTNEED monitor::handle_sched_getaffinity_precall
-    DONTNEED monitor::handle_rt_sigreturn_precall
-    DONTNEED monitor::handle_getpid_precall
-    DONTNEED monitor::handle_prlimit64_precall
-    DONTNEED monitor::handle_sigaltstack_precall
-    DONTNEED monitor::handle_shmdt_precall
-	DONTNEED monitor::handle_rt_sigtimedwait_precall
+    These annotations get picked up by the generate_syscall_table.rb script
+	DONTNEED PRECALL(shmctl)
+    DONTNEED PRECALL(brk)
+    DONTNEED PRECALL(shmget)
+    DONTNEED PRECALL(uname)
+    DONTNEED PRECALL(sched_getparam)
+    DONTNEED PRECALL(sched_getscheduler)
+    DONTNEED PRECALL(sched_get_priority_max)
+    DONTNEED PRECALL(sched_get_priority_min)
+    DONTNEED PRECALL(getuid32)
+    DONTNEED PRECALL(getuid)
+    DONTNEED PRECALL(getgid32)
+    DONTNEED PRECALL(getgid)
+    DONTNEED PRECALL(geteuid32)
+    DONTNEED PRECALL(geteuid)
+    DONTNEED PRECALL(getegid32)
+    DONTNEED PRECALL(getegid)
+    DONTNEED PRECALL(getresuid32)
+    DONTNEED PRECALL(getresuid)
+    DONTNEED PRECALL(getresgid32)
+    DONTNEED PRECALL(getresgid)
+    DONTNEED PRECALL(madvise)
+    DONTNEED PRECALL(set_thread_area)
+    DONTNEED PRECALL(exit_group)
+    DONTNEED PRECALL(set_tid_address)
+    DONTNEED PRECALL(clock_getres)
+    DONTNEED PRECALL(set_robust_list)
+    DONTNEED PRECALL(fadvise64_64)
+    DONTNEED PRECALL(fadvise64)
+    DONTNEED PRECALL(sched_getaffinity)
+    DONTNEED PRECALL(rt_sigreturn)
+    DONTNEED PRECALL(getpid)
+    DONTNEED PRECALL(prlimit64)
+    DONTNEED PRECALL(sigaltstack)
+    DONTNEED PRECALL(shmdt)
+	DONTNEED PRECALL(rt_sigtimedwait)
     ALIAS mmap mmap2
     ALIAS fcntl fcntl64
     ALIAS rt_sigaction sigaction
@@ -7865,8 +8018,11 @@ void mvee::init_syslocks()
     REG_LOCKS(__NR_execve,              MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN | MVEE_SYSLOCK_SHM | MVEE_SYSLOCK_FULL);
     REG_LOCKS(__NR_clone,               MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN | MVEE_SYSLOCK_SHM | MVEE_SYSLOCK_FULL);
 
+	// Special case that affects all tables
+    REG_LOCKS(__NR_unshare,             MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN | MVEE_SYSLOCK_SHM | MVEE_SYSLOCK_FULL);
+
     // normal syscalls that create/destroy/modify file descriptors
-    REG_LOCKS(__NR_open,                MVEE_SYSLOCK_FD | MVEE_SYSLOCK_FULL);
+    REG_LOCKS(__NR_open,                MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL | MVEE_SYSLOCK_POSTCALL);
     REG_LOCKS(__NR_openat,              MVEE_SYSLOCK_FD | MVEE_SYSLOCK_FULL);
     REG_LOCKS(__NR_dup,                 MVEE_SYSLOCK_FD | MVEE_SYSLOCK_FULL);
     REG_LOCKS(__NR_dup2,                MVEE_SYSLOCK_FD | MVEE_SYSLOCK_FULL);

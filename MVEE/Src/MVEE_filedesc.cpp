@@ -117,33 +117,27 @@ fd_table::~fd_table()
 }
 
 /*-----------------------------------------------------------------------------
-    refresh_fd_table - Try to wipe and repopulate the fd table. We do this if
-	we see an execve in an IP-MON process because GHUMVEE might lose track
-	of which fds are opened in which variants...
------------------------------------------------------------------------------*/
-void fd_table::refresh_fd_table(std::vector<pid_t> variant_pids)
-{
-	table.clear();
-	epoll_map.clear();
-	temporary_files.clear();
-	fd_cwd = "";
+    add_missing_fds - Firefox 51 does something weird that I can't quite figure
+    out right now. At some point, there is a thread B that opens a shared memory
+    backing file, unlinks it from the file system, maps it into the address
+    space as a shared mapping, and closes the fd.
 
-// I'm not sure if it's really a good idea to repopulate the table
-// as we generally can't figure out the mapping between master and slave
-// fds if we haven't seen the original sys_open(at)
-# if 0
+	At a later point, there is a thread A that maps that same file using a file
+	descriptor whose creation we never see... Since GHUMVEE doesn't know the fd,
+	it denies thread A's attempt to create the shared mapping. A and B are in
+	different processes, which makes this even more mysterious.
+
+	Until we find out where this missing fd is created, we use this function
+	which reads missing fd info from /proc/pid/fd
+-----------------------------------------------------------------------------*/
+bool fd_table::add_missing_fds(std::vector<pid_t> variant_pids)
+{
+	std::map<std::string, std::vector<unsigned long>> missing_fds;
+
 	int i = 0;
 	for (auto pid : variant_pids)
 	{
-		debugf("refreshing fd table for variant %d (pid %d)\n", i, pid);
-
-/*
-lrwx------ 1 stijn stijn 64 Sep  5 12:18 0 -> /dev/pts/5
-lrwx------ 1 stijn stijn 64 Sep  5 12:18 1 -> /dev/pts/5
-lrwx------ 1 stijn stijn 64 Sep  5 12:18 2 -> /dev/pts/5
-lrwx------ 1 stijn stijn 64 Sep  5 12:18 3 -> /dev/tty
-*/
-
+		debugf("adding missing fds for variant %d (pid %d)\n", i, pid);
 		char cmd   [500];
 		char perms [15];
 		char file  [1024];
@@ -178,14 +172,102 @@ lrwx------ 1 stijn stijn 64 Sep  5 12:18 3 -> /dev/tty
 				prot = 0;
 			}
 
-			// TODO: implement?
-
-			debugf("variant %d (pid %d) has file: %d -> %s (perms: %s)\n",
+			fd_info* info = get_fd_info(fd, i);
+			if (!info)
+			{
+				debugf("variant %d (pid %d) has missing file: %d -> %s (perms: %s)\n",
 				  i, pid, fd, file, perms);
+
+				auto missing = missing_fds.find(std::string(file));
+				if (missing == missing_fds.end())
+				{
+					std::vector<unsigned long> fds(mvee::numvariants);
+					std::fill(fds.begin(), fds.end(), ~0);
+					fds[i] = (unsigned long)fd | ((unsigned long)prot << 32);
+					missing_fds.insert(std::make_pair(std::string(file), fds));
+				}
+				else
+				{					
+					if (missing->second[i] != ~0)
+					{
+						warnf("Found missing file using multiple fds. We can't handle this case :(\n");
+						return false;
+					}
+					else
+					{
+						missing->second[i] = (unsigned long)fd | ((unsigned long)prot << 32);
+					}
+				}
+			}
 		}
 
 		i++;
 	}
+
+	for (auto missing : missing_fds)
+	{
+		bool master_has_file = false;
+		int num_fds = 0;
+		int prot = 0;
+		i = 0;
+		
+		for (auto fd : missing.second)
+		{
+			if (fd != ~0)
+			{
+			    if (i == 0)
+					master_has_file = true;
+				num_fds++;
+			}
+
+			if (!master_has_file)
+			{
+				warnf("Found missing file that is not mapped by the master: %s - this shouldn't happen!\n", 
+					  missing.first.c_str());
+				return false;
+			}
+
+			if (num_fds != 1 && num_fds != mvee::numvariants)
+			{
+				warnf("Found missing file that is mapped by some, but not all slaves: %s - this shouldn't happen!\n",
+					  missing.first.c_str());
+				return false;
+			}
+
+			prot = fd >> 32;
+			missing.second[i++] = fd & 0xFFFFFFFF;
+		}
+
+		create_fd_info(FT_UNKNOWN, // TODO: use sys_stat to get extra info?
+					   missing.second,
+					   missing.first,
+					   false,
+					   num_fds == 1,
+					   false,
+					   0 // TODO: use sys_stat to get extra info?
+			);
+	}
+
+	return true;
+}
+
+/*-----------------------------------------------------------------------------
+    refresh_fd_table - Try to wipe and repopulate the fd table. We do this if
+	we see an execve in an IP-MON process because GHUMVEE might lose track
+	of which fds are opened in which variants...
+-----------------------------------------------------------------------------*/
+void fd_table::refresh_fd_table(std::vector<pid_t> variant_pids)
+{
+	table.clear();
+	epoll_map.clear();
+	temporary_files.clear();
+	fd_cwd = "";
+
+    // I'm not sure if it's really a good idea to repopulate the table
+    // as we generally can't figure out the mapping between master and slave
+    // fds if we haven't seen the original sys_open(at)
+#if 0
+	add_missing_fds(variant_pids);
 #endif
 }
 
@@ -273,7 +355,7 @@ void fd_table::create_fd_info
     auto it = table.find(fds[0]);
     if (it != table.end())
     {
-		if (!mvee::config.mvee_use_ipmon)
+		if (!(*mvee::config_variant_global)["use_ipmon"].asBool())
 			warnf("fd override!!! FIXME (unless IP-MON is managing fds, in which case you can safely ignore this warning)\n");
         it->second.print_fd_info();
         free_fd_info(it->second.fds[0]);
@@ -328,7 +410,7 @@ std::map<unsigned long, fd_info>::iterator fd_table::free_fd_info (unsigned long
 -----------------------------------------------------------------------------*/
 void fd_table::free_cloexec_fds ()
 {
-    for (auto it = table.begin(); it != table.end(); it++)
+    for (auto it = table.begin(); it != table.end(); )
     {
         /*
          * POSIX.1-2001 says that if file
@@ -348,6 +430,10 @@ void fd_table::free_cloexec_fds ()
             debugf("removing cloexec fd: %d (%s)\n", it->second.fds[0], it->second.path.c_str());
             it = free_fd_info(it->second.fds[0]);
         }
+		else
+		{
+			it++;
+		}
     }
 }
 
@@ -455,12 +541,27 @@ bool fd_table::verify_path(std::string& mvee_path, const char* proc_path)
         return true;
 
     if (strstr(proc_path, "socket:") == proc_path
-        && mvee_path.find("sock:") == 0)
+        && (mvee_path.find("sock:") == 0 || mvee_path.find("clientsock:") == 0 || mvee_path.find("srvsock:") == 0))
         return true;
 
     if (strcmp(proc_path, "anon_inode:[eventfd]") == 0
         && mvee_path == "eventfd")
         return true;
+
+    if (strcmp(proc_path, "anon_inode:[eventpoll]") == 0
+        && mvee_path == "epoll_sock")
+        return true;
+
+    if (strcmp(proc_path, "anon_inode:inotify") == 0
+        && mvee_path.find("inotify_init") == 0)
+        return true;
+
+	if (strstr(proc_path, "/proc/") == proc_path && 
+		mvee_path.find("/proc/") == 0)
+		return true;
+
+	if (strstr(proc_path, ".mozilla/firefox/Crash"))
+		return true;
 
     return false;
 }
@@ -494,6 +595,16 @@ void fd_table::verify_fd_table(std::vector<pid_t> pids)
             strcpy(path, it->second.c_str());
 
             fd_info* info = get_fd_info(fd, i);
+
+			if (!info && strstr(path, "socket:") != path)
+			{
+				warnf("FD TABLE VERIFICATION FAILED - A wild FD appeared! - variant: %d (PID: %d)\n",
+					  i, pids[i]);
+				warnf("> fd seen in /proc: %d - %s\n", fd, path);
+				print_fd_table();
+				print_fd_table_proc(pids[i]);
+				return;
+			}
 
             if (info && !verify_path(info->path, path))
             {
@@ -570,7 +681,7 @@ std::string fd_table::get_full_path (int variantnum, pid_t variantpid, unsigned 
     std::stringstream ss;
 
     // fetch the path and check if it's absolute...
-    char* tmp_path = mvee_rw_read_string(variantpid, (unsigned long)path_ptr, 0);
+    char* tmp_path = mvee_rw_read_string(variantpid, path_ptr, 0);
     if (!tmp_path)
     {
         warnf("couldn't get full path\n");
@@ -645,6 +756,16 @@ void fd_table::full_release_lock()
 {
     while (lock.__data.__owner == syscall(__NR_gettid))
         release_lock();
+}
+
+/*-----------------------------------------------------------------------------
+    have_unlocked
+-----------------------------------------------------------------------------*/
+bool fd_table::have_unlocked()
+{
+	if (lock.__data.__owner == syscall(__NR_gettid))
+		return false;
+	return true;
 }
 
 /*-----------------------------------------------------------------------------

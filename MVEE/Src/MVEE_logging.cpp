@@ -34,6 +34,17 @@
 #include "MVEE_memory.h"
 
 /*-----------------------------------------------------------------------------
+    Static Variable Initialization
+-----------------------------------------------------------------------------*/
+FILE*             mvee::logfile              = NULL;
+FILE*             mvee::ptrace_logfile       = NULL;
+FILE*             mvee::datatransfer_logfile = NULL;
+FILE*             mvee::lockstats_logfile    = NULL;
+double            mvee::startup_time         = 0.0;
+pthread_mutex_t   mvee::loglock              = PTHREAD_MUTEX_INITIALIZER;
+
+
+/*-----------------------------------------------------------------------------
     cache_mismatch_info
 -----------------------------------------------------------------------------*/
 void monitor::cache_mismatch_info(const char* format, ...)
@@ -205,9 +216,10 @@ bool monitor::log_ipmon_entry
 void monitor::log_ipmon_state()
 {
 #ifndef MVEE_BENCHMARK
-	debugf("Dumping IPMON buffer " PTRSTR " ...\n", ipmon_buffer);
 	if (! ipmon_buffer)
 		return;
+
+	debugf("Dumping IPMON buffer " PTRSTR " ...\n", ipmon_buffer);
 
 	std::vector<unsigned int> offsets(mvee::numvariants);
 	unsigned int highest = 0;
@@ -446,12 +458,14 @@ void monitor::log_variant_backtrace(int variantnum, int max_depth, int calculate
 
 	set_mmap_table->grab_lock();
 
+/*
 	if (set_mmap_table->thread_group_shutting_down)
 	{
 		logfunc("This thread group is shutting down - not backtracing\n");
 		set_mmap_table->release_lock();
 		return;
 	}
+*/
 
 #if defined(MVEE_BENCHMARK) && defined(MVEE_FORCE_ENABLE_BACKTRACING)
     logfunc = mvee::warnf;
@@ -561,12 +575,11 @@ was_interrupted:
         logfunc("pid: %d - > variant is currently suspended\n", variants[variantnum].variantpid);
         //sync();
 
-        mvee_syscall_handler handler;
+        mvee_syscall_logger logger;
         if (variants[variantnum].callnum > 0 && variants[variantnum].callnum <= MAX_CALLS)
         {
-            handler = monitor::syscall_logger_table[variants[variantnum].callnum][MVEE_LOG_ARGS];
-            if (handler != MVEE_HANDLER_DONTHAVE && handler != MVEE_HANDLER_DONTNEED)
-                (this->*handler)(variantnum);
+            logger = monitor::syscall_logger_table[variants[variantnum].callnum][MVEE_LOG_ARGS];
+			(this->*logger)(variantnum);
         }
     }
 
@@ -624,7 +637,7 @@ void monitor::log_dump_queues(shm_table* shm_table)
         if (!logfile)
             return;
 
-        warnf("dumping queue: %s\n", getTextualBufferType(MVEE_LIBC_ATOMIC_BUFFER));
+        debugf("dumping queue: %s\n", getTextualBufferType(MVEE_LIBC_ATOMIC_BUFFER));
 
 //        warnf("dumping queue: %s - FILE: %s (%d - %s)\n",
 //                    getTextualBufferType(MVEE_LIBC_ATOMIC_BUFFER), logname, logfile, strerror(errno));
@@ -659,7 +672,7 @@ void monitor::log_dump_queues(shm_table* shm_table)
                     i, variants[i].variantpid);
 
             struct mvee_counter* counters = (struct mvee_counter*)mvee_rw_read_data(variants[i].variantpid,
-                                                                                    (unsigned long)atomic_counters[i], MVEE_COUNTERS * sizeof(struct mvee_counter), 0);
+                                                                                    atomic_counters[i], MVEE_COUNTERS * sizeof(struct mvee_counter), 0);
 
             if (counters)
                 for (int j = 0; j < MVEE_COUNTERS; ++j)
@@ -864,6 +877,12 @@ void monitor::log_dump_queues(shm_table* shm_table)
                 }
             }
         }
+		
+		warnf("Queue dump finished\n");
+		
+		if (logfile)
+			fclose(logfile);
+
 #ifndef MVEE_ALWAYS_DUMP_QUEUES
     }
     else
@@ -893,7 +912,7 @@ void monitor::log_calculate_clock_spread()
 	std::vector<double> cntrs(MVEE_COUNTERS);
 
 	struct mvee_counter* counters = (struct mvee_counter*)mvee_rw_read_data(variants[0].variantpid,
-		(unsigned long)atomic_counters[0], MVEE_COUNTERS * sizeof(struct mvee_counter), 0);
+		atomic_counters[0], MVEE_COUNTERS * sizeof(struct mvee_counter), 0);
 
 	for (int j = 0; j < MVEE_COUNTERS; ++j)
 	{
@@ -965,18 +984,16 @@ void monitor::log_call_mismatch(int index1, int index2)
     warnf("call2    : %ld (%s)\n", variants[index2].callnum, getTextualSyscall(variants[index2].callnum));
     warnf("type2    : %d\n",       variants[index2].call_type);
     warnf("==================================\n");
-    mvee_syscall_handler handler;
+    mvee_syscall_logger logger;
     if (variants[index1].callnum > 0 && variants[index1].callnum <= MAX_CALLS)
     {
-        handler = monitor::syscall_logger_table[variants[index1].callnum][MVEE_LOG_ARGS];
-        if (handler != MVEE_HANDLER_DONTHAVE && handler != MVEE_HANDLER_DONTNEED)
-            (this->*handler)(index1);
+        logger = monitor::syscall_logger_table[variants[index1].callnum][MVEE_LOG_ARGS];
+		(this->*logger)(index1);
     }
     if (variants[index2].callnum > 0 && variants[index2].callnum <= MAX_CALLS)
     {
-        handler = monitor::syscall_logger_table[variants[index2].callnum][MVEE_LOG_ARGS];
-        if (handler != MVEE_HANDLER_DONTHAVE && handler != MVEE_HANDLER_DONTNEED)
-            (this->*handler)(index2);
+        logger = monitor::syscall_logger_table[variants[index2].callnum][MVEE_LOG_ARGS];
+		(this->*logger)(index2);
     }
     log_monitor_state_short(0);
     warnf("==================================\n");
@@ -1107,7 +1124,7 @@ void monitor::log_segfault(int variantnum)
 					{
 						// try to read the slave block from mem
 						unsigned char* slave_arg = mvee_rw_read_data(variants[variantnum].variantpid,
-																	 slave_arg_val,
+																	 (void*)slave_arg_val,
 																	 arg->len - sizeof(unsigned long),
 																	 0);
 																 
@@ -1225,7 +1242,7 @@ void mvee::log_init()
 
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    mvee::initialtime          = tv.tv_sec + tv.tv_usec / 1000000.0;
+    mvee::startup_time          = tv.tv_sec + tv.tv_usec / 1000000.0;
 
 #ifdef MVEE_GENERATE_EXTRA_STATS
     printf("Opening PTRACE Log @ %s\n", PTRACE_LOGNAME);
@@ -1259,9 +1276,9 @@ void mvee::log_fini(bool terminated)
         double currenttime = tv.tv_sec + tv.tv_usec / 1000000.0;
 
 #ifndef MVEE_BENCHMARK
-        printf("Program terminated after: %lf seconds\n", currenttime - mvee::initialtime);
+        printf("Program terminated after: %lf seconds\n", currenttime - mvee::startup_time);
 #else
-        fprintf(stderr, "%lf\n", currenttime - mvee::initialtime);
+        fprintf(stderr, "%lf\n", currenttime - mvee::startup_time);
 #endif
     }
 
@@ -1306,7 +1323,7 @@ void mvee::warnf(const char* format, ...)
     struct timeval tv;
     double curtime;
     gettimeofday(&tv, NULL);
-    curtime = tv.tv_sec + tv.tv_usec / 1000000.0 - mvee::initialtime;
+    curtime = tv.tv_sec + tv.tv_usec / 1000000.0 - mvee::startup_time;
     if (mvee::active_monitor && mvee::active_monitor->monitor_log)
     {
         va_list va;
@@ -1375,7 +1392,7 @@ void mvee::logf(const char* format, ...)
 #endif
 
     gettimeofday(&tv, NULL);
-    curtime = tv.tv_sec + tv.tv_usec / 1000000.0 - mvee::initialtime;
+    curtime = tv.tv_sec + tv.tv_usec / 1000000.0 - mvee::startup_time;
 
     if (mvee::active_monitor && mvee::active_monitor->monitor_log)
     {
@@ -1387,7 +1404,7 @@ void mvee::logf(const char* format, ...)
     }
 
     MutexLock lock(&mvee::loglock);
-    if (mvee::print_to_stdout)
+    if ((*mvee::config_monitor)["log_to_stdout"].asBool())
     {
         va_list va;
         va_start(va, format);
@@ -1405,7 +1422,7 @@ void mvee::logf(const char* format, ...)
     }
 #endif
 #if defined(MVEE_BENCHMARK) && defined(MVEE_FORCE_ENABLE_BACKTRACING)
-    if (mvee::print_to_stdout)
+    if ((*mvee::config_monitor)["log_to_stdout"].asBool())
     {
         va_list va;
         va_start(va, format);
@@ -1668,7 +1685,8 @@ void mvee_log_local_backtrace()
 /*-----------------------------------------------------------------------------
   mvee_wrap_ptrace - wrapper around ptrace that logs when something went wrong
 -----------------------------------------------------------------------------*/
-long mvee_wrap_ptrace(unsigned short request, pid_t pid, unsigned long addr, void *data, int allow_even_if_shutting_down)
+static __thread bool saw_ptrace_fail = false;
+long mvee_wrap_ptrace(unsigned short request, pid_t pid, unsigned long addr, void *data)
 {
 //	debugf("PTRACE(%s, %d, 0x" PTRSTR ", 0x" PTRSTR ")\n",
 //			   getTextualRequest(request), pid, addr, data);
@@ -1683,9 +1701,11 @@ long mvee_wrap_ptrace(unsigned short request, pid_t pid, unsigned long addr, voi
     if (unlikely(result == -1)
         && errno != 0
         && mvee::active_monitor
-        && !mvee::active_monitor->is_group_shutting_down())
+        && !mvee::active_monitor->is_group_shutting_down()
+		&& !saw_ptrace_fail)
     {
         int err = errno;
+		saw_ptrace_fail = true;
         warnf("==================================\n");
         warnf("ERROR: ptrace request failed\n");
         warnf("request  : %d (%s)\n",      request, getTextualRequest(request));

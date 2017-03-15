@@ -31,6 +31,25 @@
 #include "hde.h"
 
 /*-----------------------------------------------------------------------------
+    overwritten_syscall_arg
+-----------------------------------------------------------------------------*/
+overwritten_syscall_arg::overwritten_syscall_arg()
+	: syscall_arg_num (0)
+	, arg_old_value (0)
+	, restore_data (false)
+	, data_loc (NULL)
+	, data_content (NULL)
+	, data_len (0)
+{
+}
+
+overwritten_syscall_arg::~overwritten_syscall_arg()
+{
+	if (data_content)
+		delete[] (unsigned char*)data_content;
+}
+
+/*-----------------------------------------------------------------------------
     variantstate class
 -----------------------------------------------------------------------------*/
 variantstate::variantstate()
@@ -53,6 +72,7 @@ variantstate::variantstate()
     current_signal_ready(false),
 	fast_forward_to_entry_point(false),
 	entry_point_bp_set(false),
+    have_overwritten_args(false),  
     last_lower_region_start(0),
     last_lower_region_size(0),
     last_upper_region_start(0),
@@ -68,7 +88,8 @@ variantstate::variantstate()
     infinite_loop_ptr(0),
     should_sync_ptr(0),
     callnumbackup(0),
-    orig_controllen(0)
+    orig_controllen(0),
+    config(NULL)
 #ifdef __NR_socketcall
     , orig_arg1(0)
 #endif
@@ -141,9 +162,7 @@ void monitor::init()
     current_signal                 = 0;
     current_signal_sent            = 0;
     current_signal_info            = NULL;
-#ifdef MVEE_ALLOW_PERF
     perf                           = false;
-#endif
     monitor_tid                    = 0;
 	master_core                    = -1;
 
@@ -266,9 +285,13 @@ int monitor::init_ptrace_options(int variantnum)
 -----------------------------------------------------------------------------*/
 void monitor::init_variant(int variantnum, pid_t variantpid, pid_t varianttgid)
 {
-    variants[variantnum].callnum   = NO_CALL;
+    variants[variantnum].callnum     = NO_CALL;
     variants[variantnum].variantpid  = variantpid;
     variants[variantnum].varianttgid = varianttgid ? varianttgid : variantpid;
+	if (!mvee::config["variant"]["specs"] ||
+		!mvee::config["variant"]["specs"]["test"])
+		return;
+	variants[variantnum].config      = &mvee::config["variant"]["specs"][mvee::variant_ids[variantnum]];
 }
 
 /*-----------------------------------------------------------------------------
@@ -354,6 +377,17 @@ void monitor::rewrite_execve_args(int variantnum, bool write_to_stack, bool rewr
     std::deque<char*> argv   = get_original_argv(variantnum);
 	std::deque<char*> envp;
 	pid_t pid = variants[variantnum].variantpid;
+	std::string lib_path_from_env;
+
+	// See if we have any LD_LIBRARY_PATH in the envp vars
+	for (auto envp : set_mmap_table->mmap_startup_info[variantnum].envp)
+	{
+		if (envp.find("LD_LIBRARY_PATH=") == 0)
+		{
+			lib_path_from_env = envp.substr(strlen("LD_LIBRARY_PATH="));
+			break;
+		}
+	}
 
 	// We might want to do this if we want to restart a variant altogether
 	if (rewrite_envp)
@@ -395,24 +429,21 @@ void monitor::rewrite_execve_args(int variantnum, bool write_to_stack, bool rewr
 	}
 
 	// insert custom library path
-    if (mvee::custom_library_path.length() > 0)
+	std::stringstream lib_path;
+    if (!(*mvee::config_variant_exec)["library_path"].isNull())
     {
-		std::stringstream ss;
-        if (mvee::custom_library_path.size() > 0)
-        {
-            if (ss.gcount() > 0)
-                ss << ":";
-            ss << mvee::custom_library_path;
-        }
-
-		argv.push_front(mvee::strdup(ss.str().c_str()));
+		lib_path << (*mvee::config_variant_exec)["library_path"].asString();
+		if (lib_path_from_env.length() > 0)
+			lib_path << ":" << lib_path_from_env;
+		argv.push_front(mvee::strdup(lib_path.str().c_str()));
 		argv.push_front(mvee::strdup("--library-path"));
     }
 
 	// insert ELF interpreter if necessary
-	if (mvee::custom_library_path.length() > 0)
+	if (lib_path.str().length() > 0)
 	{
-		if (mvee::config.mvee_hide_vdso || mvee::config.mvee_use_dcl)
+		if ((*mvee::config_variant_global)["hide_vdso"].asBool() ||
+			(*mvee::config_variant_global)["non_overlapping_mmaps"].asInt())
 		{
 			argv.push_front(mvee::strdup(MVEE_LD_LOADER_NAME));
 			image = mvee::os_get_mvee_ld_loader();
@@ -492,11 +523,11 @@ void monitor::rewrite_execve_args(int variantnum, bool write_to_stack, bool rewr
 		serialize_and_relocate_arr(envp, serialized_envp, relocated_envp, envp_target_address);
 
     debugf("Writing new execve arguments...\n");
-    if (mvee_rw_copy_data(mvee::os_gettid(), (unsigned long)image.c_str(), pid, image_target_address, image.length() + 1) == -1
-        || mvee_rw_copy_data(mvee::os_gettid(), (unsigned long)relocated_argv, pid, relocated_argv_target_address, sizeof(char*) * argv.size()) == -1
-        || (rewrite_envp && mvee_rw_copy_data(mvee::os_gettid(), (unsigned long)relocated_envp, pid, relocated_envp_target_address, sizeof(char*) * envp.size()) == -1)
-        || mvee_rw_copy_data(mvee::os_gettid(), (unsigned long)serialized_argv, pid, argv_target_address, argv_len) == -1
-        || (rewrite_envp && mvee_rw_copy_data(mvee::os_gettid(), (unsigned long)serialized_envp, pid, envp_target_address, envp_len) == -1))
+    if (mvee_rw_copy_data(mvee::os_gettid(), (void*)image.c_str(), pid, (void*)image_target_address, image.length() + 1) == -1
+        || mvee_rw_copy_data(mvee::os_gettid(), (void*)relocated_argv, pid, (void*)relocated_argv_target_address, sizeof(char*) * argv.size()) == -1
+        || (rewrite_envp && mvee_rw_copy_data(mvee::os_gettid(), (void*)relocated_envp, pid, (void*)relocated_envp_target_address, sizeof(char*) * envp.size()) == -1)
+        || mvee_rw_copy_data(mvee::os_gettid(), (void*)serialized_argv, pid, (void*)argv_target_address, argv_len) == -1
+        || (rewrite_envp && mvee_rw_copy_data(mvee::os_gettid(), (void*)serialized_envp, pid, (void*)envp_target_address, envp_len) == -1))
     {
         warnf("Couldn't copy execve arguments to address space of variant: %d (PID: %d) => execve arguments writing\n", variantnum, pid);
         shutdown(false);
@@ -832,7 +863,6 @@ nobacktrace:
 		}
 	}
 
-#ifdef MVEE_ALLOW_PERF
     for (int i = 0; i < mvee::numvariants; ++i)
     {
         if (variants[i].perf_out.length() > 0)
@@ -842,7 +872,6 @@ nobacktrace:
         }
         variants[i].perf_out.erase();
     }
-#endif
 
     // Successful return. Unregister the monitor from all mappings
     log_fini();
@@ -1298,7 +1327,7 @@ void monitor::handle_resume_event(int index)
                         debugf("setting master tid for variant: %d\n", variants[i].variantpid);
 						
 						mvee_rw_write_pid(variants[i].variantpid, 
-										  (unsigned long)variants[i].tid_address[j], 
+										  variants[i].tid_address[j], 
 										  variants[0].variantpid);
                     }
                 }
@@ -1718,6 +1747,9 @@ void monitor::handle_syscall_exit_event(int index)
     variants[index].callnum           = NO_CALL;
     variants[index].restarted_syscall = false;
 
+	if (variants[index].have_overwritten_args)
+		call_restore_args(index);
+
     // if the last syscall we've entered was an unsynced call
     // then dispatch the return right away...
     if (variants[index].call_type == MVEE_CALL_TYPE_UNSYNCED)
@@ -1878,6 +1910,7 @@ void monitor::handle_syscall_exit_event(int index)
     {
         sig_restart_partially_interrupted_syscall();
     }
+
 }
 
 /*-----------------------------------------------------------------------------
@@ -2136,6 +2169,7 @@ void monitor::handle_sig_delivery_stop(int variantnum, int status)
 {
     siginfo_t siginfo = {0};
 	unsigned long ip = 0;
+	bool skip_segv = false;
 
     // Terminated by unhandled signal
     if (WIFSIGNALED(status))
@@ -2180,6 +2214,8 @@ void monitor::handle_sig_delivery_stop(int variantnum, int status)
 			if (!ip) FETCH_IP_DIRECT(variantnum, ip);
 			std::string caller_info = set_mmap_table->get_caller_info(variantnum, variants[variantnum].variantpid, ip, 0);
 			debugf("variant %d crashed - trapping ins: %s\n", variantnum, caller_info.c_str());
+			if (caller_info.find("mvee_log_stack at") != std::string::npos)
+				skip_segv = true;
 #endif
         }
 
@@ -2189,11 +2225,37 @@ dont_resolve_segv_origin:
         debugf("Signal %s (%d) received by variant %d.\n", getTextualSig(signal), signal, variants[variantnum].variantpid);
 
 #ifndef MVEE_BENCHMARK
-		if (!ip) FETCH_IP_DIRECT(variantnum, ip);		
-		std::string caller_info = set_mmap_table->get_caller_info(variantnum, variants[variantnum].variantpid, ip, 0);
-		debugf("signal arrived while variant was executing ins: %s\n", caller_info.c_str());
-		FETCH_SYSCALL_RETURN(variantnum, ret);
-		debugf("ret is currently: %ld\n", ret);
+		if (skip_segv)
+		{
+			unsigned long instr[2];
+			instr[0] = (unsigned long)mvee_wrap_ptrace(PTRACE_PEEKTEXT, variants[variantnum].variantpid, ip, NULL);
+			instr[1] = (unsigned long)mvee_wrap_ptrace(PTRACE_PEEKTEXT, variants[variantnum].variantpid, ip + sizeof(unsigned long), NULL);
+
+			if (instr[0] == (unsigned long)-1 || instr[1] == (unsigned long)-1)
+			{
+				warnf("couldn't skip SEGV\n");
+				shutdown(false);
+				return;
+			}		
+
+			HDE_INS(disas_ins);
+			HDE_DISAS(disas_ins_len, &instr, &disas_ins);
+			if (disas_ins_len > 0)
+			{
+				WRITE_IP(variantnum, ip + disas_ins_len);
+				mvee_wrap_ptrace(PTRACE_SYSCALL, variants[variantnum].variantpid, 0, NULL);
+				debugf("skipped SIGSEGV in variant %d\n", variantnum);
+				return;
+			}
+		}
+		else
+		{
+			if (!ip) FETCH_IP_DIRECT(variantnum, ip);		
+			std::string caller_info = set_mmap_table->get_caller_info(variantnum, variants[variantnum].variantpid, ip, 0);
+			debugf("signal arrived while variant was executing ins: %s\n", caller_info.c_str());
+			FETCH_SYSCALL_RETURN(variantnum, ret);
+			debugf("ret is currently: %ld\n", ret);
+		}
 #endif
 
         if (signal == SIGSEGV || signal == SIGBUS)
@@ -2323,7 +2385,7 @@ dont_resolve_segv_origin:
                 debugf("signal queued\n");
             }
 
-			if (mvee::config.mvee_use_ipmon && variantnum == 0)
+			if (variantnum == 0 && (*mvee::config_variant_global)["use_ipmon"].asBool())
 			{
 				if (!ip) 
 					FETCH_IP_DIRECT(variantnum, ip);		
@@ -2496,7 +2558,7 @@ bool monitor::sig_prepare_delivery ()
                 )
             {
                 // sigsuspend might be about to unblock the signal we're checking
-                sigset_t _set = call_get_sigset(0, ARG1(0), OLDCALLIFNOT(__NR_rt_sigsuspend));
+                sigset_t _set = call_get_sigset(0, (void*)ARG1(0), OLDCALLIFNOT(__NR_rt_sigsuspend));
 
                 if (!sigismember(&_set, it->sig_no))
                     dont_block = true;

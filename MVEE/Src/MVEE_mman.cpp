@@ -117,11 +117,7 @@ dwarf_info* mmap_region_info::get_dwarf_info(int variantnum, pid_t variantpid)
     if (!region_dwarf_info)
     {
         region_dwarf_info = std::shared_ptr<dwarf_info>(new dwarf_info(region_backing_file_path, variantnum, variantpid, this));
-
-        if (!region_dwarf_info->info_valid)
-            region_dwarf_info.reset();  // this will also dealloc it
-        else
-            mvee::dwarf_cache.insert(std::pair<std::string, std::weak_ptr<dwarf_info> >(region_backing_file_path, region_dwarf_info));
+		mvee::dwarf_cache.insert(std::pair<std::string, std::weak_ptr<dwarf_info> >(region_backing_file_path, region_dwarf_info));
     }
 
     return region_dwarf_info.get();
@@ -1289,7 +1285,13 @@ int mmap_table::check_vdso_overlap(int variantnum)
     find_writable_region - find a PROT_WRITE region of at least len bytes
     long in the address space of variant variantnum
 -----------------------------------------------------------------------------*/
-mmap_region_info* mmap_table::find_writable_region(int variantnum, unsigned long len, pid_t look_for_thread, bool is_main_thread)
+mmap_region_info* mmap_table::find_writable_region
+(
+	int variantnum,
+	unsigned long len,
+	pid_t look_for_thread,
+	bool is_main_thread
+)
 {
     std::set<mmap_region_info*, region_sort>::iterator region_iterator;
     std::set<mmap_region_info*, region_sort> *         region_table

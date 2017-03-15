@@ -15,7 +15,7 @@
 #include <string>
 #include <map>
 #include <pthread.h>
-#include "MVEE_config.h"
+#include "MVEE_build_config.h"
 #include "MVEE_shm.h"
 
 /*-----------------------------------------------------------------------------
@@ -92,6 +92,7 @@ public:
     void          grab_lock           ();
     void          release_lock        ();
     void          full_release_lock   ();
+    bool          have_unlocked       ();
 
 	//
     // Creating/Deleting file descriptors. These are the functions we use for
@@ -105,6 +106,7 @@ public:
 	//
 	// Wipe the fd table and repopulate it using /proc/<pid>/fd
     //
+    bool          add_missing_fds     (std::vector<pid_t> variant_pids);
 	void          refresh_fd_table    (std::vector<pid_t> variant_pids);
 
 	// Temporary files management. These functions are used for unsynchronized

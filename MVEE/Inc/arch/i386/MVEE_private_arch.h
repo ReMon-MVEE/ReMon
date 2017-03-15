@@ -44,11 +44,13 @@
 /*-----------------------------------------------------------------------------
   String Constants
 -----------------------------------------------------------------------------*/
-#define STDHEXSTR(w, x) std::setw(w) << std::hex << std::setfill('0') << (unsigned long)(x) << std::setfill(' ') << std::setw(0)
+#define STDHEXSTR(w, x) std::setw(w) << std::hex << std::setfill('0') << (unsigned long)(x) << std::setfill(' ') << std::setw(0) << std::dec
 #define STDPTRSTR(x)    STDHEXSTR(8, x)
 #define LONGPTRSTR                 "%08lx"
 #define PTRSTR                     "%08x"
 #define LONGRESULTSTR              "%08d"
+#define OBJDUMP_ARCH               "i386"
+#define OBJDUMP_SUBARCH            "i386"
 
 /*-----------------------------------------------------------------------------
   DWARF Constants
