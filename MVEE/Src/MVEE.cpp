@@ -1536,6 +1536,8 @@ void mvee::add_argv(const char* arg)
 	else
 		(*mvee::config_variant_exec)["argv"].append(std::string(arg));
 
+	warnf("Added argv: %s\n", arg);
+
 	// TODO: consider adding this to variant.specs too
 }
 
@@ -1675,14 +1677,28 @@ int main(int argc, char *argv[])
 				usage();
 				return -1;
 			}
+
+			// discard any conflicting args we may have read from the config
+			mvee::config["variant"]["sets"].clear();
+			mvee::config["variant"]["specs"].clear();
+			if (!(*mvee::config_variant_exec)["path"].isNull() &&
+				(*mvee::config_variant_exec)["path"].isArray()) // it shouldn't be, but who knows...
+				(*mvee::config_variant_exec)["path"];
+			if (!(*mvee::config_variant_exec)["argv"].isNull() &&
+				(*mvee::config_variant_exec)["argv"].isArray())
+				(*mvee::config_variant_exec)["argv"].clear();
+			if (!(*mvee::config_variant_exec)["env"].isNull() &&
+				(*mvee::config_variant_exec)["env"].isArray())
+				(*mvee::config_variant_exec)["env"].clear();
 			
 			builtin = atoi(argv[1]);
             mvee::numvariants = atoi(argv[2]);
-			mvee::set_builtin_config(builtin);
 
 			// Pretend that argv[2] is the new argv[0]
 			if (!mvee::process_opts(argc - 2, &argv[2], true))
 				return -1;
+
+			mvee::set_builtin_config(builtin);
         }
     }
 
