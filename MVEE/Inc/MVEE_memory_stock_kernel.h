@@ -24,7 +24,7 @@
     mvee_rw_copy_data - copy data from one process to another. Without the
     MVEE ptrace extension, we have to redirect all copies through the monitor
 -----------------------------------------------------------------------------*/
-long mvee_rw_copy_data (pid_t source_pid, unsigned long source_addr, pid_t dest_pid, unsigned long dest_addr, ssize_t len)
+long mvee_rw_copy_data (pid_t source_pid, void* source_addr, pid_t dest_pid, void* dest_addr, ssize_t len)
 {
     bool mvee_is_source = false;
     bool mvee_is_dest   = false;
@@ -127,7 +127,7 @@ long mvee_rw_copy_data (pid_t source_pid, unsigned long source_addr, pid_t dest_
 /*-----------------------------------------------------------------------------
     mvee_rw_copy_string -
 -----------------------------------------------------------------------------*/
-bool mvee_rw_copy_string (pid_t source_pid, unsigned long source_addr, pid_t dest_pid, unsigned long dest_addr)
+bool mvee_rw_copy_string (pid_t source_pid, void* source_addr, pid_t dest_pid, void* dest_addr)
 {
     // We REALLY shouldn't use this one without the PTRACE_EXT_COPYSTRING extension
     bool mvee_is_source = false;
@@ -159,7 +159,7 @@ bool mvee_rw_copy_string (pid_t source_pid, unsigned long source_addr, pid_t des
             }
             else
             {
-                bool result = mvee_rw_write_data(dest_pid, dest_addr, strlen(str) + 1, (unsigned char*)str);
+                bool result = mvee_rw_write_data(dest_pid, dest_addr, strlen(str) + 1, str);
                 SAFEDELETEARRAY(str);
                 return result;
             }
@@ -173,7 +173,7 @@ bool mvee_rw_copy_string (pid_t source_pid, unsigned long source_addr, pid_t des
     mvee_rw_write_data - write databuf to target variant's address space - we
     probably don't need PTRACE_EXT_COPYMEM for good performance here
 -----------------------------------------------------------------------------*/
-bool mvee_rw_write_data (pid_t variantpid, unsigned long addr, ssize_t datalength, unsigned char* databuf)
+bool mvee_rw_write_data (pid_t variantpid, void* addr, ssize_t datalength, void* databuf)
 {
     struct iovec local[1];
     struct iovec remote[1];
@@ -203,7 +203,7 @@ bool mvee_rw_write_data (pid_t variantpid, unsigned long addr, ssize_t datalengt
     mvee_rw_read_data - same as above. This should be pretty fast with the
     stock 3.2+ kernel
 -----------------------------------------------------------------------------*/
-unsigned char* mvee_rw_read_data (pid_t variantpid, unsigned long addr, ssize_t datalength, int append_zero_byte)
+unsigned char* mvee_rw_read_data (pid_t variantpid, void* addr, ssize_t datalength, int append_zero_byte)
 {
     if (datalength <= 0)
         return NULL;
@@ -245,7 +245,7 @@ unsigned char* mvee_rw_read_data (pid_t variantpid, unsigned long addr, ssize_t 
     If we don't know the size of the string, we have to copy it word
     by word...
 -----------------------------------------------------------------------------*/
-char* mvee_rw_read_string (pid_t variantpid, unsigned long addr, ssize_t maxlength)
+char* mvee_rw_read_string (pid_t variantpid, void* addr, ssize_t maxlength)
 {
     char* result = NULL;
 
@@ -263,7 +263,7 @@ char* mvee_rw_read_string (pid_t variantpid, unsigned long addr, ssize_t maxleng
         while(true)
         {
             long tmp = mvee_wrap_ptrace(PTRACE_PEEKDATA,
-                                        variantpid, addr + (pos++) * sizeof(long), NULL);
+                                        variantpid, (unsigned long)addr + (pos++) * sizeof(long), NULL);
 
 #ifdef MVEE_GENERATE_EXTRA_STATS
             if (!mvee::in_logging_handler)
@@ -295,7 +295,7 @@ char* mvee_rw_read_string (pid_t variantpid, unsigned long addr, ssize_t maxleng
 /*-----------------------------------------------------------------------------
     mvee_rw_read_struct - read directly into buf
 -----------------------------------------------------------------------------*/
-bool mvee_rw_read_struct (pid_t variantpid, unsigned long addr, ssize_t datalength, void* buf)
+bool mvee_rw_read_struct (pid_t variantpid, void* addr, ssize_t datalength, void* buf)
 {
     struct iovec local[1];
     struct iovec remote[1];

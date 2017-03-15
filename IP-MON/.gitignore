@@ -1,0 +1,10 @@
+MVEE_ipmon_is_unsynced.h
+MVEE_ipmon_precall.h
+MVEE_ipmon_postcall.h
+MVEE_ipmon_maybe_checked.h
+MVEE_ipmon_calcsize.h
+*.o
+*.s
+*_preprocessed.S
+*.p
+*.so

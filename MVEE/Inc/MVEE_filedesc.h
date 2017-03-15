@@ -15,7 +15,7 @@
 #include <string>
 #include <map>
 #include <pthread.h>
-#include "MVEE_config.h"
+#include "MVEE_build_config.h"
 #include "MVEE_shm.h"
 
 /*-----------------------------------------------------------------------------
@@ -92,14 +92,22 @@ public:
     void          grab_lock           ();
     void          release_lock        ();
     void          full_release_lock   ();
+    bool          have_unlocked       ();
 
 	//
     // Creating/Deleting file descriptors. These are the functions we use for
     // synchronized file operations.
 	//
     void          create_fd_info      (FileType type, std::vector<unsigned long>& fds, std::string path, unsigned long access_flags, bool close_on_exec, bool master_file, bool unsynced_reads=false, ssize_t original_file_size=0);
-    void          free_fd_info        (unsigned long fd);
+	std::map<unsigned long, fd_info>::iterator
+                  free_fd_info        (unsigned long fd);
     void          free_cloexec_fds    ();
+
+	//
+	// Wipe the fd table and repopulate it using /proc/<pid>/fd
+    //
+    bool          add_missing_fds     (std::vector<pid_t> variant_pids);
+	void          refresh_fd_table    (std::vector<pid_t> variant_pids);
 
 	// Temporary files management. These functions are used for unsynchronized
 	// file operations that happen during fast forwarding

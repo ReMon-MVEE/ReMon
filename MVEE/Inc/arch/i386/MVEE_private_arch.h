@@ -27,8 +27,6 @@
 /*-----------------------------------------------------------------------------
   MVEE LD Loader
 -----------------------------------------------------------------------------*/
-#define HOST_ARCH                  ARCH_I386
-#define HOST_ARCH_STR              " Intel 80386"
 #define MVEE_ARCH_SUFFIX           "/i386/"
 #define MVEE_ARCH_INTERP_PATH      "/lib/"
 #define MVEE_ARCH_INTERP_NAME      "ld-linux.so.2"
@@ -46,11 +44,13 @@
 /*-----------------------------------------------------------------------------
   String Constants
 -----------------------------------------------------------------------------*/
-#define STDHEXSTR(w, x) std::setw(w) << std::hex << std::setfill('0') << (unsigned long)(x) << std::setfill(' ') << std::setw(0)
+#define STDHEXSTR(w, x) std::setw(w) << std::hex << std::setfill('0') << (unsigned long)(x) << std::setfill(' ') << std::setw(0) << std::dec
 #define STDPTRSTR(x)    STDHEXSTR(8, x)
 #define LONGPTRSTR                 "%08lx"
 #define PTRSTR                     "%08x"
 #define LONGRESULTSTR              "%08d"
+#define OBJDUMP_ARCH               "i386"
+#define OBJDUMP_SUBARCH            "i386"
 
 /*-----------------------------------------------------------------------------
   DWARF Constants

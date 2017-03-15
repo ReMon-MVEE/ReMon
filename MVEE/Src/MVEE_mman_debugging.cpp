@@ -43,13 +43,15 @@ mmap_addr2line_proc::mmap_addr2line_proc(std::string& file, int variantnum, pid_
     addr2line_fds[0] = addr2line_fds[1] = 0;
     pthread_mutex_init(&addr2line_lock, NULL);
 
-    if (file == "[vdso]")
+    if (file == "[vdso]" || file == "[vsyscall]")
     {
+		std::string dump_name = "/tmp/" + file.substr(1, file.length() - 2) + "-dump.so";
+
         // possibly dump the vdso
         struct stat _stat;
-        if (stat("/tmp/vdso-dump.so", &_stat))
+        if (stat(dump_name.c_str(), &_stat))
         {
-            FILE*          vdso      = fopen("/tmp/vdso-dump.so", "wb+");
+            FILE*          vdso      = fopen(dump_name.c_str(), "wb+");
             if (!vdso)
             {
                 warnf("couldn't open vdso dump file - err: %s\n", strerror(errno));
@@ -57,7 +59,7 @@ mmap_addr2line_proc::mmap_addr2line_proc(std::string& file, int variantnum, pid_
                 addr2line_status = ADDR2LINE_FILE_NO_DEBUG_SYMS;
                 return;
             }
-            unsigned char* vdso_data = mvee_rw_read_data(variantpid, region_address,
+            unsigned char* vdso_data = mvee_rw_read_data(variantpid, (void*)region_address,
                                                          region_size, 0);
             if (!vdso_data)
             {
@@ -78,11 +80,15 @@ mmap_addr2line_proc::mmap_addr2line_proc(std::string& file, int variantnum, pid_
             fclose(vdso);
         }
 
-        pipe_create("/tmp/vdso-dump.so");
+        pipe_create(dump_name.c_str());
     }
-    else
+	else
     {
-        pipe_create(file.c_str());
+		// test if file exists
+		if (access(file.c_str(), R_OK) != 0)
+			addr2line_status = ADDR2LINE_FILE_NO_DEBUG_SYMS;
+		else
+			pipe_create(file.c_str());
     }
 }
 
@@ -109,7 +115,8 @@ void mmap_addr2line_proc::close_proc()
 -----------------------------------------------------------------------------*/
 std::string mmap_addr2line_proc::read_internal(const std::string& cmd)
 {
-    std::string tmp        = "";
+	std::stringstream ss;
+	std::string tmp;
     int         read_bytes = -1;
     char        tmp_buf[4096];
 
@@ -121,24 +128,38 @@ std::string mmap_addr2line_proc::read_internal(const std::string& cmd)
     if (write(addr2line_fds[1], tmp.c_str(), tmp.length()) == -1)
     {
         warnf("can't write cmd to addr2line pipe: %s (err: %s)\n", cmd.c_str(), strerror(errno));
-        return tmp;
+        return "";
     }
 
-    read_bytes = read(addr2line_fds[0], tmp_buf, 4096);
+    while (true)
+	{
+		read_bytes = read(addr2line_fds[0], tmp_buf, 4096);
 
-    if (read_bytes > 1)
-    {
-        tmp_buf[read_bytes-1] = '\0';
-        tmp                   = tmp_buf;
-    }
-    else
-    {
-        tmp              = "";
-        warnf("couldn't read from proc pipe! - command was: %s\n", cmd.c_str());
-        addr2line_status = ADDR2LINE_PROC_TERMINATED;
-    }
+		if (read_bytes > 1)
+		{
+			tmp_buf[read_bytes-1] = '\0';
+			ss << tmp_buf;
 
-    return tmp;
+			if (read_bytes < 4096)
+				break;
+		}
+		else if (read_bytes == -1)
+		{
+			debugf("couldn't read from proc pipe! - command was: %s\n", cmd.c_str());
+			addr2line_status = ADDR2LINE_PROC_TERMINATED;
+			return "";
+		}
+		else
+		{
+			break;
+		}
+	}
+
+	size_t inlined = ss.str().rfind("(inlined by) ");
+	if (inlined != std::string::npos)
+		return ss.str().substr(inlined + strlen("(inlined by) "));
+
+	return ss.str();
 }
 
 /*-----------------------------------------------------------------------------
@@ -242,7 +263,7 @@ void mmap_addr2line_proc::pipe_func (unsigned int rfd, unsigned int wfd, const s
     dup2(rfd, STDIN_FILENO);
     dup2(wfd, STDOUT_FILENO);
     close(STDERR_FILENO);        // equivalent to 2>/dev/null
-    execl("/usr/bin/addr2line", "addr2line", "-e", lib_name.c_str(), "-f", "-p", "-C", NULL);
+    execl("/usr/bin/addr2line", "addr2line", "-e", lib_name.c_str(), "-f", "-p", "-C", "-i", NULL);
 }
 
 /*-----------------------------------------------------------------------------
@@ -343,7 +364,7 @@ dwarf_info::dwarf_info(std::string& file, int variantnum, pid_t variantpid, mmap
     if (dwarf_in_memory)
     {
         dwarf_data.dwarf_buffer =
-            mvee_rw_read_data(variantpid, region_info->region_base_address, region_info->region_size, true);
+            mvee_rw_read_data(variantpid, (void*)region_info->region_base_address, region_info->region_size, true);
 
         if (dwarf_data.dwarf_buffer)
             dwarf_elf = elf_memory((char*)dwarf_data.dwarf_buffer, region_info->region_size);
@@ -367,9 +388,13 @@ dwarf_info::dwarf_info(std::string& file, int variantnum, pid_t variantpid, mmap
     {
         elf_version(EV_CURRENT);
 
-        dwarf_data.dwarf_fd = open(region_info->region_backing_file_path.c_str(), O_RDONLY, 0);
-        if (dwarf_data.dwarf_fd > 0)
+		int fd = open(region_info->region_backing_file_path.c_str(), O_RDONLY, 0);
+
+        if (fd >= 0)
+		{
+			dwarf_data.dwarf_fd = (unsigned int)fd;
             dwarf_elf = elf_begin(dwarf_data.dwarf_fd, ELF_C_READ, NULL);
+		}
 
         if ((int)dwarf_data.dwarf_fd < 0 || !dwarf_elf)
         {
@@ -441,7 +466,7 @@ dwarf_info::~dwarf_info()
 unsigned long mmap_region_info::map_memory_pc_to_file_pc (int variantnum, pid_t variantpid, unsigned long rva)
 {
     dwarf_info*   dwarf_info        = get_dwarf_info(variantnum, variantpid);
-    if (!dwarf_info)
+    if (!dwarf_info || !dwarf_info->info_valid)
         return 0;
 
     unsigned char elf_class         = ELFCLASSNONE;
@@ -575,11 +600,13 @@ int mmap_table::dwarf_step (int variantnum, pid_t variantpid, mvee_dwarf_context
     Dwarf_Fde         fde;
     Dwarf_Addr        row_pc, pc, low_pc, high_pc;
     Dwarf_Error       de;
-    regtable.rt3_rules = NULL;
 
 #ifdef MVEE_DWARF_DEBUG
+	unsigned long old_cfa;
     debugf("DWARF: stepping to the previous frame - variantnum: %d\n", variantnum);
 #endif
+
+    regtable.rt3_rules = NULL;
 
     // map EIP to a region
     found_region       = get_region_info(variantnum, IP(context->regs));
@@ -656,8 +683,17 @@ int mmap_table::dwarf_step (int variantnum, pid_t variantpid, mvee_dwarf_context
         goto out;
     }
 
+#ifdef MVEE_DWARF_DEBUG
+	old_cfa = context->cfa;
+#endif
+
     context->cfa = *regptr
                    + (long)regtable.rt3_cfa_rule.dw_offset_or_block_len;
+
+#ifdef MVEE_DWARF_DEBUG
+	debugf("DWARF: updated canonical frame address: " PTRSTR " => " PTRSTR "\n", old_cfa, context->cfa);
+#endif
+
     for (int i = 0; i <= DWARF_RAR; ++i)
     {
         if (regtable.rt3_rules[i].dw_value_type == DW_EXPR_OFFSET)
@@ -934,12 +970,23 @@ std::string mmap_table::get_caller_info
         ss.str(std::string());
         ss.clear();
 
-        if (caller_info.find("couldn't get") == 0
-            && found_region->region_backing_file_path == "[vdso]")
+        if (caller_info.find("couldn't get") == 0)
         {
-            FETCH_SYSCALL_NO_PID(variantpid, eax);
-            update_instr_cache = 0;
-            ss << "vdso - syscall: " << eax << " (" << getTextualSyscall(eax) << ") - addr: " << STDPTRSTR(address - lib_start_address);
+			if (found_region->region_backing_file_path == "[vdso]")
+			{
+				FETCH_SYSCALL_NO_PID(variantpid, eax);
+				update_instr_cache = 0;
+				ss << "vdso - syscall: " << eax << " (" << getTextualSyscall(eax) << ") - addr: " << STDPTRSTR(address - lib_start_address);
+				caller_info = "";
+			}
+			else if (found_region->region_backing_file_path == "[anonymous]" &&
+					 (found_region->region_prot_flags & PROT_EXEC))
+			{
+				ss << STDPTRSTR(address) << ": JIT cache @ " << STDPTRSTR(found_region->region_base_address) << "-" << STDPTRSTR(found_region->region_base_address + found_region->region_size);
+				update_instr_cache = 0;
+				calculate_file_offsets = 0;
+				caller_info = "";
+			}
         }
 
         // lookup complete... update the resolved instruction info

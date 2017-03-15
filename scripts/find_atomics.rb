@@ -55,7 +55,7 @@ arr=lock_insns.split("\n")
 print("=> found #{arr.size} instructions with lock prefixes\n")
 dump_lines(arr)
 
-implicit_lock_insns=`objdump --disassemble #{ARGV[0]} | grep "xchg" | grep -v "xchg   %ax,%ax" | grep -v "lock " | cut -d':' -f1 |  sed 's/ *//' | uniq`
+implicit_lock_insns=`objdump --disassemble #{ARGV[0]} | grep "xchg" | grep -v "xchg *%ax,%ax" | grep -v "lock " | cut -d':' -f1 |  sed 's/ *//' | uniq`
 arr=implicit_lock_insns.split("\n")
 print("=> found #{arr.size} instructions with implicit lock prefixes\n")
 dump_lines(arr)

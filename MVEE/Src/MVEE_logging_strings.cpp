@@ -1379,31 +1379,6 @@ const char* getTextualFileType(int type)
 }
 
 /*-----------------------------------------------------------------------------
-    getTextualISA
------------------------------------------------------------------------------*/
-const char* getTextualISA(VariantArch arch)
-{
-	switch(arch)
-	{
-		case ARCH_I386:
-			return "x86 32-bit (i386)";
-		case ARCH_AMD64:
-			return "x86 64-bit (amd64)";
-		case ARCH_ARM:
-			return "ARM 32-bit";
-		case ARCH_AARCH64:
-			return "ARM 64-bit (aarch64)";
-		case ARCH_HOST:
-			return "Native";
-		case ARCH_UNKNOWN:
-			return "Architecture Unidentified";
-		default:
-			return "(unknown)";
-	}
-}
-
-
-/*-----------------------------------------------------------------------------
     getTextualTimerFlags
 -----------------------------------------------------------------------------*/
 std::string getTextualTimerFlags(int flags)

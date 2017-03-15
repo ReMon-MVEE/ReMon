@@ -27,8 +27,6 @@
 /*-----------------------------------------------------------------------------
   MVEE LD Loader
 -----------------------------------------------------------------------------*/
-#define HOST_ARCH                  ARCH_AMD64
-#define HOST_ARCH_STR              " x86-64"
 #define MVEE_ARCH_SUFFIX           "/amd64/"
 #define MVEE_ARCH_INTERP_PATH      "/lib64/"
 #define MVEE_ARCH_INTERP_NAME      "ld-linux-x86-64.so.2"
@@ -49,11 +47,13 @@
 /*-----------------------------------------------------------------------------
   String Constants
 -----------------------------------------------------------------------------*/
-#define STDHEXSTR(w, x) std::setw(w) << std::hex << std::setfill('0') << (unsigned long)(x) << std::setfill(' ') << std::setw(0)
+#define STDHEXSTR(w, x) std::setw(w) << std::hex << std::setfill('0') << (unsigned long)(x) << std::setfill(' ') << std::setw(0) << std::dec
 #define STDPTRSTR(x)    STDHEXSTR(16, x)
 #define LONGPTRSTR                 "%016lx"
 #define PTRSTR                     "%016lx"
 #define LONGRESULTSTR              "%016ld"
+#define OBJDUMP_ARCH               "i386"
+#define OBJDUMP_SUBARCH            "x86-64"
 
 /*-----------------------------------------------------------------------------
   DWARF Constants
@@ -163,6 +163,9 @@
 #define PRINT_REG(variantnum, logfunc, reg) \
     mvee::log_register(#reg, (unsigned long*)&variants[variantnum].regs.reg, logfunc);
 
+#define PRINT_REG_DIRECT(regs, logfunc, reg) \
+    mvee::log_register(#reg, (unsigned long*)&regs.reg, logfunc);
+
 #define log_registers(variantnum, logfunc)			\
     {												\
         variants[variantnum].regs_valid = false;	\
@@ -186,6 +189,29 @@
         PRINT_REG(variantnum, logfunc, r14);		\
         PRINT_REG(variantnum, logfunc, r15);		\
     }												\
+
+#define log_registers_direct(regs, logfunc)			\
+    {												\
+        PRINT_REG_DIRECT(regs, logfunc, rax);		\
+        PRINT_REG_DIRECT(regs, logfunc, rbx);		\
+        PRINT_REG_DIRECT(regs, logfunc, rcx);		\
+        PRINT_REG_DIRECT(regs, logfunc, rdx);		\
+        PRINT_REG_DIRECT(regs, logfunc, rdi);		\
+        PRINT_REG_DIRECT(regs, logfunc, rsi);		\
+        PRINT_REG_DIRECT(regs, logfunc, rip);		\
+        PRINT_REG_DIRECT(regs, logfunc, eflags);	\
+        PRINT_REG_DIRECT(regs, logfunc, rsp);		\
+        PRINT_REG_DIRECT(regs, logfunc, rbp);		\
+        PRINT_REG_DIRECT(regs, logfunc, r8);		\
+        PRINT_REG_DIRECT(regs, logfunc, r9);		\
+        PRINT_REG_DIRECT(regs, logfunc, r10);		\
+        PRINT_REG_DIRECT(regs, logfunc, r11);		\
+        PRINT_REG_DIRECT(regs, logfunc, r12);		\
+        PRINT_REG_DIRECT(regs, logfunc, r13);		\
+        PRINT_REG_DIRECT(regs, logfunc, r14);		\
+        PRINT_REG_DIRECT(regs, logfunc, r15);		\
+    }												\
+
 
 
 #endif /* MVEE_PRIVATE_ARCH_H_ */

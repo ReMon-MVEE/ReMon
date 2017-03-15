@@ -1,0 +1,128 @@
+diff --git a/include/clang/Basic/DiagnosticSemaKinds.td b/include/clang/Basic/DiagnosticSemaKinds.td
+index 5429b12..b13d69b 100644
+--- a/include/clang/Basic/DiagnosticSemaKinds.td
++++ b/include/clang/Basic/DiagnosticSemaKinds.td
+@@ -5996,6 +5996,8 @@ def err_bad_static_cast_overload : Error<
+ def err_bad_cstyle_cast_overload : Error<
+   "address of overloaded function %0 cannot be cast to type %1">;
+ 
++def err_illegal_atomic_pointer_cast : Error<
++  "Atomic->Non-Atomic pointer cast from %0 to %1 is not allowed">;
+ 
+ def err_bad_cxx_cast_generic : Error<
+   "%select{const_cast|static_cast|reinterpret_cast|dynamic_cast|C-style cast|"
+@@ -6778,7 +6780,10 @@ def err_typecheck_call_too_many_args_at_most_suggest : Error<
+ def err_arc_typecheck_convert_incompatible_pointer : Error<
+   "incompatible pointer types passing retainable parameter of type %0"
+   "to a CF function expecting %1 type">;
+-  
++def err_atomic_to_non_atomic_pointer_assignment : Error<
++  "assignment operation discards Atomic qualifier of source type %0"
++  "target type is %1">;
++
+ def err_builtin_fn_use : Error<"builtin functions must be directly called">;
+ 
+ def warn_call_wrong_number_of_arguments : Warning<
+@@ -7069,6 +7074,8 @@ let CategoryName = "Inline Assembly Issue" in {
+     "invalid output constraint '%0' in asm">;
+   def err_asm_invalid_lvalue_in_input : Error<
+     "invalid lvalue in asm input for constraint '%0'">;
++  def err_asm_atomic_operand : Error<
++      "asm statement has an operand with an atomic type qualifier: '%0' - use stdatomic instead!">;
+   def err_asm_invalid_input_constraint : Error<
+     "invalid input constraint '%0' in asm">;
+   def err_asm_immediate_expected : Error<"constraint '%0' expects "
+diff --git a/lib/Sema/SemaCast.cpp b/lib/Sema/SemaCast.cpp
+index 6222e4c..3704be2 100644
+--- a/lib/Sema/SemaCast.cpp
++++ b/lib/Sema/SemaCast.cpp
+@@ -2343,11 +2343,13 @@ static void DiagnoseBadFunctionCast(Sema &Self, const ExprResult &SrcExpr,
+ }
+ 
+ /// Check the semantics of a C-style cast operation, in C.
+-void CastOperation::CheckCStyleCast() {
++void CastOperation::CheckCStyleCast()
++{
+   assert(!Self.getLangOpts().CPlusPlus);
+ 
+   // C-style casts can resolve __unknown_any types.
+-  if (claimPlaceholder(BuiltinType::UnknownAny)) {
++  if (claimPlaceholder(BuiltinType::UnknownAny))
++  {
+     SrcExpr = Self.checkUnknownAnyCast(DestRange, DestType,
+                                        SrcExpr.get(), Kind,
+                                        ValueKind, BasePath);
+@@ -2382,6 +2384,12 @@ void CastOperation::CheckCStyleCast() {
+     return;
+   QualType SrcType = SrcExpr.get()->getType();
+ 
++  // MVEE patch: forbid casting between atomic and non-atomic types
++  if (DestType->isPointerType() && SrcType->isPointerType())
++  {
++
++  }
++
+   assert(!SrcType->isPlaceholderType());
+ 
+   // OpenCL v1 s6.5: Casting a pointer to address space A to a pointer to
+@@ -2612,6 +2620,22 @@ ExprResult Sema::BuildCStyleCastExpr(SourceLocation LPLoc,
+   Op.DestRange = CastTypeInfo->getTypeLoc().getSourceRange();
+   Op.OpRange = SourceRange(LPLoc, CastExpr->getLocEnd());
+ 
++  // GHUMVEE patch - forbid pointer to pointer casts if exactly
++  // one of the pointers points to an atomic type
++  QualType DestType = Op.DestType;
++  QualType SrcType  = Op.SrcExpr.get()->getType();
++
++  if (DestType->isPointerType() && SrcType->isPointerType())
++  {
++    if (SrcType->getPointeeType()->isAtomicType() && !DestType->getPointeeType()->isAtomicType())
++    {
++      Op.Self.Diag(Op.OpRange.getBegin(), diag::err_illegal_atomic_pointer_cast)
++        << Op.SrcExpr.get()->getType() << DestType << Op.OpRange;
++      Op.SrcExpr = ExprError();
++      return ExprError();
++    }
++  }
++
+   if (getLangOpts().CPlusPlus) {
+     Op.CheckCXXCStyleCast(/*FunctionalStyle=*/ false,
+                           isa<InitListExpr>(CastExpr));
+diff --git a/lib/Sema/SemaExpr.cpp b/lib/Sema/SemaExpr.cpp
+index 4324239..8ea02ee 100644
+--- a/lib/Sema/SemaExpr.cpp
++++ b/lib/Sema/SemaExpr.cpp
+@@ -12690,7 +12690,11 @@ bool Sema::DiagnoseAssignmentResult(AssignConvertType ConvTy,
+     MayHaveConvFixit = true;
+     break;
+   case IncompatiblePointer:
+-    if (Action == AA_Passing_CFAudited)
++    // GHUMVEE patch - be very strict about Atomic->Non-Atomic assignments
++    if (SrcType->getPointeeType()->isAtomicType() &&
++        !DstType->getPointeeType()->isAtomicType())
++      DiagKind = diag::err_atomic_to_non_atomic_pointer_assignment;
++    else if (Action == AA_Passing_CFAudited)
+       DiagKind = diag::err_arc_typecheck_convert_incompatible_pointer;
+     else if (SrcType->isFunctionPointerType() &&
+              DstType->isFunctionPointerType())
+diff --git a/lib/Sema/SemaStmtAsm.cpp b/lib/Sema/SemaStmtAsm.cpp
+index 76de9e2..9a0ec72 100644
+--- a/lib/Sema/SemaStmtAsm.cpp
++++ b/lib/Sema/SemaStmtAsm.cpp
+@@ -316,6 +316,16 @@ StmtResult Sema::ActOnGCCAsmStmt(SourceLocation AsmLoc, bool IsSimple,
+ 
+     Expr *InputExpr = Exprs[i];
+ 
++    if ((InputExpr->getType()->isPointerType() &&
++        InputExpr->getType()->getPointeeType()->isAtomicType()) ||
++        InputExpr->getType()->isAtomicType())
++    {
++      return StmtError(Diag(InputExpr->getLocStart(),
++                            diag::err_asm_atomic_operand)
++                         << InputExpr
++                         << InputExpr->getSourceRange());
++    }
++
+     // Referring to parameters is not allowed in naked functions.
+     if (CheckNakedParmReference(InputExpr, *this))
+       return StmtError();

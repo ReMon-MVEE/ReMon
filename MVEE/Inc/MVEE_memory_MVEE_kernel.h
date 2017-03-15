@@ -16,7 +16,7 @@
 /*-----------------------------------------------------------------------------
     mvee_rw_check_args
 -----------------------------------------------------------------------------*/
-void mvee_rw_check_args(pid_t source_pid, unsigned long source_addr, pid_t dest_pid, unsigned long dest_addr)
+void mvee_rw_check_args(pid_t source_pid, void* source_addr, pid_t dest_pid, void* dest_addr)
 {
     if (!source_addr || !source_pid || !dest_addr || !dest_pid)
     {
@@ -28,7 +28,7 @@ void mvee_rw_check_args(pid_t source_pid, unsigned long source_addr, pid_t dest_
 /*-----------------------------------------------------------------------------
     mvee_rw_copy_data
 -----------------------------------------------------------------------------*/
-long mvee_rw_copy_data (pid_t source_pid, unsigned long source_addr, pid_t dest_pid, unsigned long dest_addr, ssize_t len)
+long mvee_rw_copy_data (pid_t source_pid, void* source_addr, pid_t dest_pid, void* dest_addr, ssize_t len)
 {
     struct pt_copymem mem;
 
@@ -53,14 +53,14 @@ long mvee_rw_copy_data (pid_t source_pid, unsigned long source_addr, pid_t dest_
 /*-----------------------------------------------------------------------------
     mvee_rw_write_data - Write data into the VA of the variant process
 -----------------------------------------------------------------------------*/
-bool mvee_rw_write_data (pid_t variantpid, unsigned long addr, ssize_t datalength, unsigned char* databuf)
+bool mvee_rw_write_data (pid_t variantpid, void* addr, ssize_t datalength, void* databuf)
 {
     struct pt_copymem mem;
 
     mem.source_pid = mvee::os_getpid();
-    mem.source_va  = (unsigned long)databuf;
+    mem.source_va  = databuf;
     mem.dest_pid   = variantpid;
-    mem.dest_va    = (unsigned long)addr;
+    mem.dest_va    = addr;
     mem.copy_size  = datalength;
 
     mvee_rw_check_args(mem.source_pid, mem.source_va, mem.dest_pid, mem.dest_va);
@@ -78,7 +78,7 @@ bool mvee_rw_write_data (pid_t variantpid, unsigned long addr, ssize_t datalengt
 /*-----------------------------------------------------------------------------
     mvee_rw_read_data - Read data from the VA of the variant process
 -----------------------------------------------------------------------------*/
-unsigned char* mvee_rw_read_data(pid_t variantpid, unsigned long addr, ssize_t datalength, int append_zero_byte)
+unsigned char* mvee_rw_read_data(pid_t variantpid, void* addr, ssize_t datalength, int append_zero_byte)
 {
     ssize_t           alloc_length = append_zero_byte ? datalength+1 : datalength;
     unsigned char*    result       = new unsigned char[alloc_length];
@@ -97,7 +97,7 @@ unsigned char* mvee_rw_read_data(pid_t variantpid, unsigned long addr, ssize_t d
     mem.source_pid         = variantpid;
     mem.source_va          = addr;
     mem.dest_pid           = mvee::os_getpid();
-    mem.dest_va            = (unsigned long)result;
+    mem.dest_va            = (void*)result;
     mem.copy_size          = datalength;
 
     mvee_rw_check_args(mem.source_pid, mem.source_va, mem.dest_pid, mem.dest_va);
@@ -121,7 +121,7 @@ unsigned char* mvee_rw_read_data(pid_t variantpid, unsigned long addr, ssize_t d
 
     @return Pointer to the string that was read, or NULL if reading was unsuccessful
 -----------------------------------------------------------------------------*/
-char* mvee_rw_read_string(pid_t variantpid, unsigned long addr, ssize_t maxlength)
+char* mvee_rw_read_string(pid_t variantpid, void* addr, ssize_t maxlength)
 {
     char* result = NULL;
     long  ret    = 0;
@@ -138,7 +138,7 @@ char* mvee_rw_read_string(pid_t variantpid, unsigned long addr, ssize_t maxlengt
     else
     {
         struct pt_copystring mem;
-        mem.dest_buffer_va   = (unsigned long)buffer;
+        mem.dest_buffer_va   = (void*)buffer;
         mem.dest_buffer_size = PAGE_SIZE;
         mem.source_va        = addr;
         mem.out_string_size  = 0;
@@ -188,7 +188,7 @@ char* mvee_rw_read_string(pid_t variantpid, unsigned long addr, ssize_t maxlengt
     @param addr Address of the struct (in the variant's address space)
     @param datalength   Length of the struct to read, in bytes
 -----------------------------------------------------------------------------*/
-bool mvee_rw_read_struct(pid_t variantpid, unsigned long addr, ssize_t datalength, void* buf)
+bool mvee_rw_read_struct(pid_t variantpid, void* addr, ssize_t datalength, void* buf)
 {
     unsigned char* result = mvee_rw_read_data(variantpid, addr, datalength);
     if (!result)

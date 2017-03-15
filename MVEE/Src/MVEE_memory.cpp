@@ -36,36 +36,48 @@ unsigned char* mvee_rw_safe_alloc(long alloc_size)
     sometimes we need to write a smaller value and we must avoid overwriting the
     rest of the word when doing so
 -----------------------------------------------------------------------------*/
-void mvee_rw_write_uchar(pid_t pid, unsigned long addr, unsigned char val)
+void mvee_rw_write_uchar(pid_t pid, void* addr, unsigned char val)
 {
 	mvee_word word;
-	word._long  = mvee_wrap_ptrace(PTRACE_PEEKDATA, pid, addr, NULL);
+	word._long  = mvee_wrap_ptrace(PTRACE_PEEKDATA, pid, (unsigned long)addr, NULL);
 	word._uchar = val;
-	mvee_wrap_ptrace(PTRACE_POKEDATA, pid, addr, (void*)word._long);
+	mvee_wrap_ptrace(PTRACE_POKEDATA, pid, (unsigned long)addr, (void*)word._long);
 }
 
-void mvee_rw_write_ushort(pid_t pid, unsigned long addr, unsigned short val)
+void mvee_rw_write_ushort(pid_t pid, void* addr, unsigned short val)
 {
 	mvee_word word;
-	word._long  = mvee_wrap_ptrace(PTRACE_PEEKDATA, pid, addr, NULL);
+	word._long  = mvee_wrap_ptrace(PTRACE_PEEKDATA, pid, (unsigned long)addr, NULL);
 	word._ushort = val;
-	mvee_wrap_ptrace(PTRACE_POKEDATA, pid, addr, (void*)word._long);
+	mvee_wrap_ptrace(PTRACE_POKEDATA, pid, (unsigned long)addr, (void*)word._long);
 }
 
-void mvee_rw_write_uint(pid_t pid, unsigned long addr, unsigned int val)
+void mvee_rw_write_uint(pid_t pid, void* addr, unsigned int val)
 {
 	mvee_word word;
-	word._long  = mvee_wrap_ptrace(PTRACE_PEEKDATA, pid, addr, NULL);
+	word._long  = mvee_wrap_ptrace(PTRACE_PEEKDATA, pid, (unsigned long)addr, NULL);
 	word._uint   = val;
-	mvee_wrap_ptrace(PTRACE_POKEDATA, pid, addr, (void*)word._long);
+	mvee_wrap_ptrace(PTRACE_POKEDATA, pid, (unsigned long)addr, (void*)word._long);
 }
 
-void mvee_rw_write_pid(pid_t pid, unsigned long addr, pid_t val)
+bool mvee_rw_read_int(pid_t pid, void* addr, int* val)
 {
 	mvee_word word;
-	word._long  = mvee_wrap_ptrace(PTRACE_PEEKDATA, pid, addr, NULL);
+	word._long = mvee_wrap_ptrace(PTRACE_PEEKDATA, pid, (unsigned long)addr, NULL);
+	if (word._long != -1)
+	{
+		*val = word._int;
+		return true;
+	}
+	return false;		
+}
+
+void mvee_rw_write_pid(pid_t pid, void* addr, pid_t val)
+{
+	mvee_word word;
+	word._long  = mvee_wrap_ptrace(PTRACE_PEEKDATA, pid, (unsigned long)addr, NULL);
 	word._pid   = val;
-	mvee_wrap_ptrace(PTRACE_POKEDATA, pid, addr, (void*)word._long);
+	mvee_wrap_ptrace(PTRACE_POKEDATA, pid, (unsigned long)addr, (void*)word._long);
 }
 
 #ifdef MVEE_HAVE_MVEE_KERNEL

@@ -25,15 +25,15 @@ The following command installs all of the required packages:
 
 ### Building GHUMVEE
 
-Building GHUMVEE is really easy. Just navigate to ReMon's root folder and type `make`. 
+Building GHUMVEE is really easy. Just navigate to ReMon's root folder and type `make -f makefile.release`.
+This will build an optimized and statically linked version of the GHUMVEE binary.
 
-GHUMVEE's **makefile** currently supports four types of builds. You can select the build you want by manually editing the **BUILD** variable in the **makefile** (I'm too lazy to write a proper makefile, sorry!). 
+Alternatively, you can also use these build configurations:
+- `Release-syms`: link-time optimized version of GHUMVEE (with symbol tables intact). Suitable for people who want to debug the Release build for some obscure reason. Build using `make -f makefile.release-with-syms`.
+- `Debug`: unoptimized version of GHUMVEE. This builds really fast and is suitable for people who want to debug GHUMVEE. Build using `make -f makefile.debug`.
+- `Debug-sanitize`: unoptimized version of GHUMVEE with address-sanitizer enabled. Might be useful to debug memory corruption bugs. Build using `make -f make.debug-sanitize`
 
-The supported build types are:
-- `Release`: link-time optimized version of GHUMVEE (with stripped symbol tables). Suitable to run benchmarks
-- `Release-syms`: link-time optimized version of GHUMVEE (with symbol tables intact). Suitable for people who want to debug the Release build for some obscure reason.
-- `Debug`: unoptimized version of GHUMVEE. This builds really fast and is suitable for people who want to debug GHUMVEE.
-- `Debug-sanitize`: unoptimized version of GHUMVEE with address-sanitizer enabled. Might be useful to debug memory corruption bugs.
+You will find the compiled GHUMVEE binary in the MVEE/bin/<your configuration>/ folder.
  
 ### Configuring GHUMVEE
 
@@ -60,9 +60,17 @@ sudo reboot
 
 Depending on which build type you selected, you'll find GHUMVEE in either /path/to/ReMon/MVEE/bin/Release/ or /path/to/ReMon/MVEE/bin/Debug/. Navigate to this folder and you'll find the MVEE executable.
 
-You can launch the MVEE in two ways:
-- The **EASY** way: Use `./MVEE <number of variants> -- <some command>`. Example: `./MVEE 2 -- ls -al`.
-- The **HARD** way: Use `./MVEE <demo number> <number of variants>`. You'll find a list of demos in /path/to/ReMon/MVEE/Src/MVEE_demos.cpp.
+You can launch the MVEE in two modes:
+- Legacy Mode: Use `./MVEE [Builtin Configuration Number (see MVEE_config.cpp)] [Number of Variants] [MVEE Options]`.
+- RAVEN Mode: Use `./MVEE -s [Variant Set (default: default)] -f [Config File (default: MVEE.ini)] [MVEE Options] -- [Additional Program Args]`
+
+To see a full list of supported option, just launch the MVEE using `./MVEE`.
+The config file format is (mostly) compatible with RAVEN. 
+A full overview of RAVEN's options is available in `RAVEN-config.pdf`.
+
+**NOTES:** 
+- The `--` is mandatory in RAVEN mode, even if no program args are passed.
+- The default config file is set up to launch two variants of `/bin/bash -c` by default. Thus, if you were to launch ReMon like this: `./MVEE -- "echo test"`, this would end up executing `/bin/bash -c echo lol`.
  
 ### Shutting GHUMVEE down
 
@@ -82,13 +90,13 @@ To build IP-MON itself, navigate to /path/to/ReMon/IP-MON and type `./comp.sh`.
 
 ### Building the IP-MON kernel
 
-**IP-MON** requires some kernel modifications to run. **ReMon** ships with the necessary kernel patch for Linux 3.13. To build and install the custom kernel, use the following commands:
+**IP-MON** requires some kernel modifications to run. **ReMon** ships with the necessary kernel patch for Linux 4.40. To build and install the custom kernel, use the following commands:
 
 ```
 cd /wherever/you/want/to/download/the/kernel
 apt-get source linux
 cd linux-<insert version number here>
-patch -p1 < /path/to/ReMon/patches/linux-3.13-ipmon.patch
+patch -p1 < /path/to/ReMon/patches/linux-4.4.0-full-ipmon.patch
 make menuconfig 
 # while you're in the config menu, you might want to bump the kernel tick rate up to 1000Hz
 # you can do so by navigating to "Processor type and features" > "Timer Frequency"
@@ -96,10 +104,6 @@ make -j 8
 sudo make modules_install
 sudo make install
 ``` 
-
-### Building the IP-MON glibc
-
-**IP-MON** requires some minor modifications to glibc to work properly. The glibc binaries **GHUMVEE** ships with do not have the necessary modifications so you'll have to build glibc yourself. Please refer to the "Further Tinkering" > "Building GHUMVEE-ready glibc and libpthreads libraries" for instructions on how to build a GHUMVEE and IP-MON-ready glibc and libpthreads.
 
 ### Configuring the IP-MON policy
 
@@ -111,7 +115,11 @@ To enable **IP-MON**, simply edit the MVEE.ini file in the output folder of your
 
 ### Running IP-MON
 
-You cannot run **IP-MON** directly. GHUMVEE will automatically load and run **IP-MON** when you enable it using the `use_ipmon` option described above. 
+You cannot run **IP-MON** directly. GHUMVEE will automatically load and run **IP-MON** when you enable it using the `use_ipmon` option described above.
+
+### Older IP-MON version
+
+Although we no longer support the version of IP-MON we presented at USENIX ATC, you can still find its source code in this repository in the IP-MON-atc folder.
 
 ## Further Tinkering
 
@@ -212,14 +220,22 @@ cp <arch>-pc-linux-gnu/libstdc++-v3/src/.libs/libstdc++.so.6.0.<ver> /path/to/Re
 
 Here are some of the publications that build on or use ReMon:
 
+Taming Parallelism in a Multi-Variant Execution Environment
+Stijn Volckaert, Bart Coppens, Bjorn De Sutter, Koen De Bosschere, Per Larsen, and Michael Franz.
+In 12th European Conference on Computer Systems (EuroSys'17). ACM, 2017.
+To appear.
+
+[Secure and Efficient Application Monitoring and Replication](http://ics.uci.edu/~stijnv/Papers/atc16-remon.pdf)
+Stijn Volckaert, Bart Coppens, Alexios Voulimeneas, Andrei Homescu, Per Larsen, Bjorn De Sutter, and Michael Franz.
+In 2016 USENIX Annual Technical Conference (ATC'16), pages 167-179. USENIX, 2016.
+
 [Advanced Techniques for Multi-Variant Execution](http://ics.uci.edu/~stijnv/Papers/thesis.pdf)
 Stijn Volckaert.
 PhD dissertation, Ghent University, 2015.
 
 [Cloning your Gadgets: Complete ROP Attack Immunity with Multi-Variant Execution](http://ics.uci.edu/~stijnv/Papers/cloning.pdf)
 Stijn Volckaert, Bart Coppens, and Bjorn De Sutter.
-To appear in IEEE Transactions on Dependable and Secure Computing (TDSC).
-DOI:10.1109/TDSC.2015.2411254.
+In IEEE Transactions on Dependable and Secure Computing (TDSC) (Volume 13, Issue 4, July-Aug 2016).
 
 [GHUMVEE: Efficient, effective, and flexible replication](http://ics.uci.edu/~stijnv/Papers/ghumvee.pdf)
 Stijn Volckaert, Bjorn De Sutter, Tim De Baets, and Koen De Bosschere.
@@ -229,7 +245,6 @@ In 5th International Symposium on Foundations and Practice of Security (FPS'12),
 
 The **IP-MON** component is available under the licensing terms in `IPMONLICENSE.txt`.
 This license applies to the following files:
-- `patches/glibc-2.19-ipmon.patch`
 - `patches/linux-3.13-ipmon.patch`
 - The entire `IP-MON` folder
 

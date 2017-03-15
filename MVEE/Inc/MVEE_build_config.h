@@ -5,8 +5,8 @@
  * found in GHUMVEELICENSE.txt.
  */
 
-#ifndef MVEE_CONFIG_H_
-#define MVEE_CONFIG_H_
+#ifndef MVEE_BUILD_CONFIG_H_
+#define MVEE_BUILD_CONFIG_H_
 
 /*-----------------------------------------------------------------------------
   Monitor Definitions
@@ -14,27 +14,13 @@
 //
 // MVEE_BENCHMARK: When this is defined, no messages are logged to the logfile
 // and the monitor won't keep track of the number of syscalls made.
-#define MVEE_BENCHMARK
+// #define MVEE_BENCHMARK
 
 //
 // MVEE_FORCE_ENABLE_BACKTRACING: if this is defined, you can also request a monitor
 // backtrace in benchmark mode. In benchmark mode, the backtrace will be logged to
 // stdout.
 // #define MVEE_FORCE_ENABLE_BACKTRACING
-
-//
-// MVEE_MINIMAL_MONITORING: dispatches all calls as unsynced, without any logging
-// Useful for benchmarking syscall overhead in different monitor modes
-//
-// >>> DO NOT ENABLE THIS UNLESS YOU KNOW WHAT YOU'RE DOING !!!! <<<
-//
-// >>> DO NOT ENABLE THIS UNLESS YOU KNOW WHAT YOU'RE DOING !!!! <<<
-//
-// >>> DO NOT ENABLE THIS UNLESS YOU KNOW WHAT YOU'RE DOING !!!! <<<
-//
-// >>> DO NOT ENABLE THIS UNLESS YOU KNOW WHAT YOU'RE DOING !!!! <<<
-//
-// #define MVEE_MINIMAL_MONITORING
 
 //
 // MVEE_DISABLE_SYNCHRONIZATION_REPLICATION: if defined, no user-space sync will
@@ -67,7 +53,7 @@
 
 // MVEE_ALLOW_MONITOR_SCHEDULING: if defined, the monitor might pin variant threads
 // and their respective thread monitors onto the same physical cpu
-// We have predefined scheduling rules in Src/MVEE_demos.cpp
+// We have predefined scheduling rules in Src/MVEE_variant_launch.cpp
 // #define MVEE_ALLOW_MONITOR_SCHEDULING
 
 // MVEE_DUMP_MEM_STATS: When defined, the MVEE will calculate an estimate of the
@@ -85,7 +71,7 @@
 
 // MVEE_ALLOW_SHM: When defined, the variants are permitted to attach to sysv shared
 // memory segments even though it is clearly a bad idea to allow them to do so!!!!
-// #define MVEE_ALLOW_SHM
+#define MVEE_ALLOW_SHM
 
 // MVEE_DUMP_IPMON_BUFFER_ON_FLUSH: If defined, GHUMVEE will log the contents of
 // the IP-MON/UTCB buffer whenever it is being flushed 
@@ -110,9 +96,9 @@
 // MVEE_DWARF_DEBUG: adds debugging messages to the DWARF debugging support code
 // #define MVEE_DWARF_DEBUG
 
-// MVEE_ALLOW_PERF: allow the use of the -p commandline parameter, which enables
-// performance counting for the variants
-// #define MVEE_ALLOW_PERF
+// MVEE_DUMP_JIT_CACHES: disassembles, compares, and dumps the contents of JIT
+// caches every time they get marked PROT_EXEC
+// #define MVEE_DUMP_JIT_CACHES
 
 /*-----------------------------------------------------------------------------
   Constants
@@ -128,4 +114,4 @@
 // This must match the MVEE_TOTAL_CLOCK_COUNT value in glibc/csu/libc-start.c
 #define MVEE_COUNTERS         2048
 
-#endif /* MVEE_CONFIG_H_ */
+#endif /* MVEE_BUILD_CONFIG_H_ */

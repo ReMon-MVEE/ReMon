@@ -1,0 +1,252 @@
+diff -r --unified nginx-1.8.0.orig/src/core/ngx_connection.c nginx-1.8.0-new/src/core/ngx_connection.c
+--- nginx-1.8.0.orig/src/core/ngx_connection.c	2015-04-21 07:11:59.000000000 -0700
++++ nginx-1.8.0-new/src/core/ngx_connection.c	2017-03-02 16:27:17.264257822 -0800
+@@ -1005,7 +1005,7 @@
+         /* need cast as ngx_cycle is volatile */
+ 
+         ngx_queue_insert_head(
+-            (ngx_queue_t *) &ngx_cycle->reusable_connections_queue, &c->queue);
++            (ngx_queue_t __attribute__((nonsync)) *) &ngx_cycle->reusable_connections_queue, &c->queue);
+ 
+ #if (NGX_STAT_STUB)
+         (void) ngx_atomic_fetch_add(ngx_stat_waiting, 1);
+diff -r --unified nginx-1.8.0.orig/src/core/ngx_cycle.c nginx-1.8.0-new/src/core/ngx_cycle.c
+--- nginx-1.8.0.orig/src/core/ngx_cycle.c	2015-04-21 07:11:59.000000000 -0700
++++ nginx-1.8.0-new/src/core/ngx_cycle.c	2017-03-02 16:33:09.220251520 -0800
+@@ -17,7 +17,7 @@
+ static void ngx_clean_old_cycles(ngx_event_t *ev);
+ 
+ 
+-volatile ngx_cycle_t  *ngx_cycle;
++volatile __attribute__((nonsync)) ngx_cycle_t  *ngx_cycle;
+ ngx_array_t            ngx_old_cycles;
+ 
+ static ngx_pool_t     *ngx_temp_pool;
+@@ -43,7 +43,7 @@
+     char               **senv, **env;
+     ngx_uint_t           i, n;
+     ngx_log_t           *log;
+-    ngx_time_t          *tp;
++    volatile ngx_time_t          *tp;
+     ngx_conf_t           conf;
+     ngx_pool_t          *pool;
+     ngx_cycle_t         *cycle, **old;
+diff -r --unified nginx-1.8.0.orig/src/core/ngx_cycle.h nginx-1.8.0-new/src/core/ngx_cycle.h
+--- nginx-1.8.0.orig/src/core/ngx_cycle.h	2015-04-21 07:11:59.000000000 -0700
++++ nginx-1.8.0-new/src/core/ngx_cycle.h	2017-03-02 16:32:54.293251787 -0800
+@@ -135,7 +135,7 @@
+     size_t size, void *tag);
+ 
+ 
+-extern volatile ngx_cycle_t  *ngx_cycle;
++extern volatile __attribute__((nonsync)) ngx_cycle_t  *ngx_cycle;
+ extern ngx_array_t            ngx_old_cycles;
+ extern ngx_module_t           ngx_core_module;
+ extern ngx_uint_t             ngx_test_config;
+diff -r --unified nginx-1.8.0.orig/src/core/ngx_times.h nginx-1.8.0-new/src/core/ngx_times.h
+--- nginx-1.8.0.orig/src/core/ngx_times.h	2015-04-21 07:12:00.000000000 -0700
++++ nginx-1.8.0-new/src/core/ngx_times.h	2017-03-02 16:28:09.703256883 -0800
+@@ -34,7 +34,7 @@
+ extern volatile ngx_time_t  *ngx_cached_time;
+ 
+ #define ngx_time()           ngx_cached_time->sec
+-#define ngx_timeofday()      (ngx_time_t *) ngx_cached_time
++#define ngx_timeofday()      (volatile ngx_time_t *) ngx_cached_time
+ 
+ extern volatile ngx_str_t    ngx_cached_err_log_time;
+ extern volatile ngx_str_t    ngx_cached_http_time;
+diff -r --unified nginx-1.8.0.orig/src/event/ngx_event_accept.c nginx-1.8.0-new/src/event/ngx_event_accept.c
+--- nginx-1.8.0.orig/src/event/ngx_event_accept.c	2015-04-21 07:12:00.000000000 -0700
++++ nginx-1.8.0-new/src/event/ngx_event_accept.c	2017-03-02 16:29:46.355255152 -0800
+@@ -33,7 +33,7 @@
+ #endif
+ 
+     if (ev->timedout) {
+-        if (ngx_enable_accept_events((ngx_cycle_t *) ngx_cycle) != NGX_OK) {
++        if (ngx_enable_accept_events((ngx_cycle_t __attribute__((nonsync)) *) ngx_cycle) != NGX_OK) {
+             return;
+         }
+ 
+@@ -112,7 +112,7 @@
+             }
+ 
+             if (err == NGX_EMFILE || err == NGX_ENFILE) {
+-                if (ngx_disable_accept_events((ngx_cycle_t *) ngx_cycle)
++                if (ngx_disable_accept_events((ngx_cycle_t __attribute__((nonsync)) *) ngx_cycle)
+                     != NGX_OK)
+                 {
+                     return;
+diff -r --unified nginx-1.8.0.orig/src/event/ngx_event.c nginx-1.8.0-new/src/event/ngx_event.c
+--- nginx-1.8.0.orig/src/event/ngx_event.c	2015-04-21 07:12:00.000000000 -0700
++++ nginx-1.8.0-new/src/event/ngx_event.c	2017-03-02 16:28:58.431256011 -0800
+@@ -433,7 +433,7 @@
+     u_char              *shared;
+     size_t               size, cl;
+     ngx_shm_t            shm;
+-    ngx_time_t          *tp;
++    volatile ngx_time_t          *tp;
+     ngx_core_conf_t     *ccf;
+     ngx_event_conf_t    *ecf;
+ 
+diff -r --unified nginx-1.8.0.orig/src/http/modules/ngx_http_autoindex_module.c nginx-1.8.0-new/src/http/modules/ngx_http_autoindex_module.c
+--- nginx-1.8.0.orig/src/http/modules/ngx_http_autoindex_module.c	2015-04-21 07:12:00.000000000 -0700
++++ nginx-1.8.0-new/src/http/modules/ngx_http_autoindex_module.c	2017-03-02 16:37:04.221247311 -0800
+@@ -435,7 +435,7 @@
+     ngx_buf_t                      *b;
+     ngx_int_t                       size;
+     ngx_uint_t                      i, utf8;
+-    ngx_time_t                     *tp;
++    volatile ngx_time_t                     *tp;
+     ngx_http_autoindex_entry_t     *entry;
+     ngx_http_autoindex_loc_conf_t  *alcf;
+ 
+diff -r --unified nginx-1.8.0.orig/src/http/modules/ngx_http_limit_req_module.c nginx-1.8.0-new/src/http/modules/ngx_http_limit_req_module.c
+--- nginx-1.8.0.orig/src/http/modules/ngx_http_limit_req_module.c	2015-04-21 07:12:00.000000000 -0700
++++ nginx-1.8.0-new/src/http/modules/ngx_http_limit_req_module.c	2017-03-02 16:37:29.601246857 -0800
+@@ -362,7 +362,7 @@
+ {
+     size_t                      size;
+     ngx_int_t                   rc, excess;
+-    ngx_time_t                 *tp;
++    volatile ngx_time_t                 *tp;
+     ngx_msec_t                  now;
+     ngx_msec_int_t              ms;
+     ngx_rbtree_node_t          *node, *sentinel;
+@@ -483,7 +483,7 @@
+     ngx_uint_t *ep, ngx_http_limit_req_limit_t **limit)
+ {
+     ngx_int_t                   excess;
+-    ngx_time_t                 *tp;
++    volatile ngx_time_t                 *tp;
+     ngx_msec_t                  now, delay, max_delay;
+     ngx_msec_int_t              ms;
+     ngx_http_limit_req_ctx_t   *ctx;
+@@ -549,7 +549,7 @@
+ ngx_http_limit_req_expire(ngx_http_limit_req_ctx_t *ctx, ngx_uint_t n)
+ {
+     ngx_int_t                   excess;
+-    ngx_time_t                 *tp;
++    volatile ngx_time_t                 *tp;
+     ngx_msec_t                  now;
+     ngx_queue_t                *q;
+     ngx_msec_int_t              ms;
+diff -r --unified nginx-1.8.0.orig/src/http/modules/ngx_http_log_module.c nginx-1.8.0-new/src/http/modules/ngx_http_log_module.c
+--- nginx-1.8.0.orig/src/http/modules/ngx_http_log_module.c	2015-04-21 07:12:00.000000000 -0700
++++ nginx-1.8.0-new/src/http/modules/ngx_http_log_module.c	2017-03-02 16:34:46.108249784 -0800
+@@ -821,7 +821,7 @@
+ static u_char *
+ ngx_http_log_msec(ngx_http_request_t *r, u_char *buf, ngx_http_log_op_t *op)
+ {
+-    ngx_time_t  *tp;
++    volatile ngx_time_t  *tp;
+ 
+     tp = ngx_timeofday();
+ 
+@@ -833,7 +833,7 @@
+ ngx_http_log_request_time(ngx_http_request_t *r, u_char *buf,
+     ngx_http_log_op_t *op)
+ {
+-    ngx_time_t      *tp;
++    volatile ngx_time_t      *tp;
+     ngx_msec_int_t   ms;
+ 
+     tp = ngx_timeofday();
+diff -r --unified nginx-1.8.0.orig/src/http/modules/ngx_http_ssi_filter_module.c nginx-1.8.0-new/src/http/modules/ngx_http_ssi_filter_module.c
+--- nginx-1.8.0.orig/src/http/modules/ngx_http_ssi_filter_module.c	2015-04-21 07:12:00.000000000 -0700
++++ nginx-1.8.0-new/src/http/modules/ngx_http_ssi_filter_module.c	2017-03-02 16:36:24.180248028 -0800
+@@ -2723,7 +2723,7 @@
+     ngx_http_variable_value_t *v, uintptr_t gmt)
+ {
+     ngx_http_ssi_ctx_t  *ctx;
+-    ngx_time_t          *tp;
++    volatile ngx_time_t          *tp;
+     ngx_str_t           *timefmt;
+     struct tm            tm;
+     char                 buf[NGX_HTTP_SSI_DATE_LEN];
+diff -r --unified nginx-1.8.0.orig/src/http/ngx_http_core_module.c nginx-1.8.0-new/src/http/ngx_http_core_module.c
+--- nginx-1.8.0.orig/src/http/ngx_http_core_module.c	2015-04-21 07:12:00.000000000 -0700
++++ nginx-1.8.0-new/src/http/ngx_http_core_module.c	2017-03-02 16:33:47.257250838 -0800
+@@ -2450,7 +2450,7 @@
+     ngx_str_t *uri, ngx_str_t *args, ngx_http_request_t **psr,
+     ngx_http_post_subrequest_t *ps, ngx_uint_t flags)
+ {
+-    ngx_time_t                    *tp;
++    volatile ngx_time_t                    *tp;
+     ngx_connection_t              *c;
+     ngx_http_request_t            *sr;
+     ngx_http_core_srv_conf_t      *cscf;
+diff -r --unified nginx-1.8.0.orig/src/http/ngx_http_request.c nginx-1.8.0-new/src/http/ngx_http_request.c
+--- nginx-1.8.0.orig/src/http/ngx_http_request.c	2015-04-21 07:12:01.000000000 -0700
++++ nginx-1.8.0-new/src/http/ngx_http_request.c	2017-03-02 16:34:06.389250496 -0800
+@@ -504,7 +504,7 @@
+ ngx_http_create_request(ngx_connection_t *c)
+ {
+     ngx_pool_t                 *pool;
+-    ngx_time_t                 *tp;
++    volatile ngx_time_t                 *tp;
+     ngx_http_request_t         *r;
+     ngx_http_log_ctx_t         *ctx;
+     ngx_http_connection_t      *hc;
+diff -r --unified nginx-1.8.0.orig/src/http/ngx_http_upstream.c nginx-1.8.0-new/src/http/ngx_http_upstream.c
+--- nginx-1.8.0.orig/src/http/ngx_http_upstream.c	2015-04-21 07:12:01.000000000 -0700
++++ nginx-1.8.0-new/src/http/ngx_http_upstream.c	2017-03-02 16:35:55.131248548 -0800
+@@ -1300,7 +1300,7 @@
+ ngx_http_upstream_connect(ngx_http_request_t *r, ngx_http_upstream_t *u)
+ {
+     ngx_int_t          rc;
+-    ngx_time_t        *tp;
++    volatile ngx_time_t        *tp;
+     ngx_connection_t  *c;
+ 
+     r->connection->log->action = "connecting to upstream";
+@@ -2017,7 +2017,7 @@
+ {
+     ssize_t            n;
+     ngx_int_t          rc;
+-    ngx_time_t        *tp;
++    volatile ngx_time_t        *tp;
+     ngx_connection_t  *c;
+ 
+     c = u->peer.connection;
+@@ -3924,7 +3924,7 @@
+     ngx_http_upstream_t *u, ngx_int_t rc)
+ {
+     ngx_uint_t   flush;
+-    ngx_time_t  *tp;
++    volatile ngx_time_t  *tp;
+ 
+     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                    "finalize http upstream request: %i", rc);
+diff -r --unified nginx-1.8.0.orig/src/http/ngx_http_variables.c nginx-1.8.0-new/src/http/ngx_http_variables.c
+--- nginx-1.8.0.orig/src/http/ngx_http_variables.c	2015-04-21 07:12:01.000000000 -0700
++++ nginx-1.8.0-new/src/http/ngx_http_variables.c	2017-03-02 16:35:17.034249231 -0800
+@@ -2041,7 +2041,7 @@
+     ngx_http_variable_value_t *v, uintptr_t data)
+ {
+     u_char          *p;
+-    ngx_time_t      *tp;
++    volatile ngx_time_t      *tp;
+     ngx_msec_int_t   ms;
+ 
+     p = ngx_pnalloc(r->pool, NGX_TIME_T_LEN + 4);
+@@ -2161,7 +2161,7 @@
+     ngx_http_variable_value_t *v, uintptr_t data)
+ {
+     u_char      *p;
+-    ngx_time_t  *tp;
++    volatile ngx_time_t  *tp;
+ 
+     p = ngx_pnalloc(r->pool, NGX_TIME_T_LEN + 4);
+     if (p == NULL) {
+diff -r --unified nginx-1.8.0.orig/src/os/unix/ngx_process.c nginx-1.8.0-new/src/os/unix/ngx_process.c
+--- nginx-1.8.0.orig/src/os/unix/ngx_process.c	2015-04-21 07:12:01.000000000 -0700
++++ nginx-1.8.0-new/src/os/unix/ngx_process.c	2017-03-02 16:30:53.804253945 -0800
+@@ -565,7 +565,7 @@
+      * process
+      */
+ 
+-    part = (ngx_list_part_t *) &ngx_cycle->shared_memory.part;
++    part = (ngx_list_part_t __attribute__((nonsync)) *) &ngx_cycle->shared_memory.part;
+     shm_zone = part->elts;
+ 
+     for (i = 0; /* void */ ; i++) {
