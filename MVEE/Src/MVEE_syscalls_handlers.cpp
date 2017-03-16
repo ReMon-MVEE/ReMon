@@ -5552,11 +5552,13 @@ POSTCALL(mmap)
 				variants[i].last_upper_region_start = start_of_aligned_heap + requested_size;
 				variants[i].last_upper_region_size  = results[i] + ARG2(i) - (start_of_aligned_heap + requested_size);
 
-				debugf("Variant %d expected sys_munmaps:", i);
+				std::stringstream ss;
+
 				if (variants[i].last_lower_region_size)
 				{
-					debugf("LOWER REGION [0x" PTRSTR "-0x" PTRSTR "] - ", variants[i].last_lower_region_start, 
-						   variants[i].last_lower_region_start + variants[i].last_lower_region_size);
+					ss << "LOWER REGION [0x" << STDPTRSTR(variants[i].last_lower_region_start)
+					   << "-0x" << STDPTRSTR(variants[i].last_lower_region_start + variants[i].last_lower_region_size)
+					   << "]";
 				}
 				else
 				{
@@ -5564,14 +5566,18 @@ POSTCALL(mmap)
 				}
 				if (variants[i].last_upper_region_size)
 				{
-					debugf("UPPER REGION [0x" PTRSTR "-0x" PTRSTR "]", variants[i].last_upper_region_start, 
-						   variants[i].last_upper_region_start + variants[i].last_upper_region_size);
+					if (ss.str().length() > 0)
+						ss << " - ";
+					
+					ss << "UPPER REGION [0x" << STDPTRSTR(variants[i].last_upper_region_start)
+					   << "-0x" << STDPTRSTR(variants[i].last_upper_region_start + variants[i].last_upper_region_size)
+					   << "]";
 				}
 				else
 				{
 					variants[i].last_upper_region_start = 0;
 				}
-				debugf("\n");
+				debugf("Variant %d expected sys_munmaps: %s\n", i, ss.str().c_str());
 			}
 		}
 
