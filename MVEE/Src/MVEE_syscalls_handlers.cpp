@@ -2715,7 +2715,11 @@ GET_CALL_TYPE(munmap)
     {
         if ((unsigned long)ARG1(variantnum) == variants[variantnum].last_lower_region_start
             && (unsigned long)ARG2(variantnum) == variants[variantnum].last_lower_region_size)
+		{
+			variants[variantnum].last_lower_region_start = 
+				variants[variantnum].last_lower_region_size = 0;			
             return MVEE_CALL_TYPE_UNSYNCED;
+		}
     }
 
     return MVEE_CALL_TYPE_NORMAL;
@@ -2853,6 +2857,23 @@ POSTCALL(munmap)
     {
 		if IS_UNSYNCED_CALL
 		{
+			if (in_new_heap_allocation)
+			{
+				int i = 0;
+				for (; i < mvee::numvariants; ++i)
+				{
+					if (variants[i].last_lower_region_start)
+						break;
+				}
+
+				if (i >= mvee::numvariants)
+				{
+					in_new_heap_allocation = false;
+					release_locks          = 1;
+					call_release_locks(MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN);
+				}
+			}
+
 			set_mmap_table->munmap_range(variantnum, ARG1(variantnum), ARG2(variantnum));
 			set_mmap_table->verify_mman_table(variantnum, variants[variantnum].variantpid);
 		}
@@ -5568,8 +5589,20 @@ POSTCALL(mmap)
 					debugf("LOWER REGION [0x" PTRSTR "-0x" PTRSTR "] - ", variants[i].last_lower_region_start, 
 						   variants[i].last_lower_region_start + variants[i].last_lower_region_size);
 				}
-				debugf("UPPER REGION [0x" PTRSTR "-0x" PTRSTR "]\n", variants[i].last_upper_region_start, 
-					   variants[i].last_upper_region_start + variants[i].last_upper_region_size);
+				else
+				{
+					variants[i].last_lower_region_start = 0;
+				}
+				if (variants[i].last_upper_region_size)
+				{
+					debugf("UPPER REGION [0x" PTRSTR "-0x" PTRSTR "]", variants[i].last_upper_region_start, 
+						   variants[i].last_upper_region_start + variants[i].last_upper_region_size);
+				}
+				else
+				{
+					variants[i].last_upper_region_start = 0;
+				}
+				debugf("\n");
 			}
 		}
 
