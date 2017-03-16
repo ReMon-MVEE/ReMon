@@ -25,7 +25,7 @@ diff -N -r --unified glibc-2.19/crypt/crypt_util.c glibc-2.19-woc/crypt/crypt_ut
      __libc_lock_unlock(_ufc_tables_lock);
 diff -N -r --unified glibc-2.19/csu/libc-start.c glibc-2.19-woc/csu/libc-start.c
 --- glibc-2.19/csu/libc-start.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/csu/libc-start.c	2017-03-15 14:27:40.486773914 -0700
++++ glibc-2.19-woc/csu/libc-start.c	2017-03-15 16:47:09.628338771 -0700
 @@ -104,6 +104,298 @@
  # define MAIN_AUXVEC_PARAM
  #endif
@@ -75,7 +75,7 @@ diff -N -r --unified glibc-2.19/csu/libc-start.c glibc-2.19-woc/csu/libc-start.c
 +#define ALIGNMENT 0x4000000
 +
 +int
-+mvee_all_heaps_aligned(char* heap)
++mvee_all_heaps_aligned(char* heap, unsigned long alloc_size)
 +{
 +  // if we're not running under MVEE control,
 +  // just check the alignment of the current heap
@@ -89,7 +89,7 @@ diff -N -r --unified glibc-2.19/csu/libc-start.c glibc-2.19-woc/csu/libc-start.c
 +  // We ARE running under MVEE control
 +  // => ask the MVEE to check the alignments
 +  // of ALL heaps
-+  return syscall(MVEE_ALL_HEAPS_ALIGNED, heap, ALIGNMENT);
++  return syscall(MVEE_ALL_HEAPS_ALIGNED, heap, ALIGNMENT, alloc_size);
 +}
 +
 +/* 
@@ -4282,7 +4282,7 @@ diff -N -r --unified glibc-2.19/intl/plural.y glibc-2.19-woc/intl/plural.y
  }
 diff -N -r --unified glibc-2.19/malloc/arena.c glibc-2.19-woc/malloc/arena.c
 --- glibc-2.19/malloc/arena.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/malloc/arena.c	2017-03-15 14:09:48.970701595 -0700
++++ glibc-2.19-woc/malloc/arena.c	2017-03-15 16:47:38.767340738 -0700
 @@ -526,7 +526,7 @@
  new_heap (size_t size, size_t top_pad)
  {
@@ -4327,7 +4327,7 @@ diff -N -r --unified glibc-2.19/malloc/arena.c glibc-2.19-woc/malloc/arena.c
 +	 heaps are aligned. If not, we unmap all of them, even if some
 +	 WERE aligned!!!
 +       */
-+      if (p2 != MAP_FAILED && !mvee_all_heaps_aligned(p2))
++      if (p2 != MAP_FAILED && !mvee_all_heaps_aligned(p2, HEAP_MAX_SIZE))
          {
            __munmap (p2, HEAP_MAX_SIZE);
            p2 = MAP_FAILED;
@@ -4345,7 +4345,7 @@ diff -N -r --unified glibc-2.19/malloc/arena.c glibc-2.19-woc/malloc/arena.c
 +	 sequence is atomic and cannot block (=> we should _NOT_ grab
 +	 ANY locks until after the last munmap)	
 +       */
-+	  (void)mvee_all_heaps_aligned(0);
++	  (void)mvee_all_heaps_aligned(0, HEAP_MAX_SIZE);
        p1 = (char *) MMAP (0, HEAP_MAX_SIZE << 1, PROT_NONE, MAP_NORESERVE);
        if (p1 != MAP_FAILED)
          {
@@ -4368,7 +4368,7 @@ diff -N -r --unified glibc-2.19/malloc/arena.c glibc-2.19-woc/malloc/arena.c
  
 -          if ((unsigned long) p2 & (HEAP_MAX_SIZE - 1))
 +	  /* MVEE patch: see comment above */
-+          if (!mvee_all_heaps_aligned(p2))
++          if (!mvee_all_heaps_aligned(p2, HEAP_MAX_SIZE))
              {
                __munmap (p2, HEAP_MAX_SIZE);
                return 0;
@@ -12802,7 +12802,7 @@ diff -N -r --unified glibc-2.19/sysdeps/unix/sysv/linux/malloc-sysdep.h glibc-2.
  #define HAVE_MREMAP 1
 diff -N -r --unified glibc-2.19/sysdeps/x86_64/bits/atomic.h glibc-2.19-woc/sysdeps/x86_64/bits/atomic.h
 --- glibc-2.19/sysdeps/x86_64/bits/atomic.h	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/sysdeps/x86_64/bits/atomic.h	2017-03-15 14:17:16.949731830 -0700
++++ glibc-2.19-woc/sysdeps/x86_64/bits/atomic.h	2017-03-15 16:47:10.004338797 -0700
 @@ -55,10 +55,71 @@
  # endif
  #endif
@@ -13158,7 +13158,7 @@ diff -N -r --unified glibc-2.19/sysdeps/x86_64/bits/atomic.h glibc-2.19-woc/sysd
 +extern void          mvee_atomic_postop_internal (unsigned char preop_result);
 +extern unsigned char mvee_atomic_preop_internal  (void* word_ptr);
 +extern int           mvee_should_sync_tid        (void);
-+extern int           mvee_all_heaps_aligned      (char* heap); 
++extern int           mvee_all_heaps_aligned      (char* heap, unsigned long alloc_size); 
 +extern void          mvee_invalidate_buffer      (void);
 +
 +#define MVEE_POSTOP()					\

@@ -162,7 +162,6 @@ public:
     unsigned long last_upper_region_start;
     unsigned long last_upper_region_size;
     unsigned long last_mmap_result;
-	unsigned long last_mmap_desired_alignment;
 
 	// Fast forwarding support
 	unsigned long entry_point_address;                              // relative to the base address of the first PT_LOAD segment of the main program binary
@@ -1006,6 +1005,9 @@ private:
     // previous set of signals which were blocked. this is used for calls
     // that temporarily replace the signal mask (e.g. sigsuspend)
 	std::vector<sigset_t>             old_blocked_signals;
+
+	unsigned long                     last_mmap_requested_size;
+	unsigned long                     last_mmap_requested_alignment;
 
 	int master_core;
 

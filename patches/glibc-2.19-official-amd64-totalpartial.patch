@@ -25,7 +25,7 @@ diff -N -r --unified glibc-2.19/crypt/crypt_util.c glibc-2.19-totalpartial/crypt
      __libc_lock_unlock(_ufc_tables_lock);
 diff -N -r --unified glibc-2.19/csu/libc-start.c glibc-2.19-totalpartial/csu/libc-start.c
 --- glibc-2.19/csu/libc-start.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-totalpartial/csu/libc-start.c	2017-03-15 14:37:47.385814876 -0700
++++ glibc-2.19-totalpartial/csu/libc-start.c	2017-03-15 17:00:18.714392029 -0700
 @@ -104,6 +104,889 @@
  # define MAIN_AUXVEC_PARAM
  #endif
@@ -69,7 +69,7 @@ diff -N -r --unified glibc-2.19/csu/libc-start.c glibc-2.19-totalpartial/csu/lib
 +#define ALIGNMENT 0x4000000
 +
 +int
-+mvee_all_heaps_aligned(char* heap)
++mvee_all_heaps_aligned(char* heap, unsigned long alloc_size)
 +{
 +  // if we're not running under MVEE control,
 +  // just check the alignment of the current heap
@@ -83,7 +83,7 @@ diff -N -r --unified glibc-2.19/csu/libc-start.c glibc-2.19-totalpartial/csu/lib
 +  // We ARE running under MVEE control
 +  // => ask the MVEE to check the alignments
 +  // of ALL heaps
-+  return syscall(MVEE_ALL_HEAPS_ALIGNED, heap, ALIGNMENT);
++  return syscall(MVEE_ALL_HEAPS_ALIGNED, heap, ALIGNMENT, alloc_size);
 +}
 +
 +/* 
@@ -4872,7 +4872,7 @@ diff -N -r --unified glibc-2.19/intl/plural.y glibc-2.19-totalpartial/intl/plura
  }
 diff -N -r --unified glibc-2.19/malloc/arena.c glibc-2.19-totalpartial/malloc/arena.c
 --- glibc-2.19/malloc/arena.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-totalpartial/malloc/arena.c	2017-03-15 14:38:09.875816394 -0700
++++ glibc-2.19-totalpartial/malloc/arena.c	2017-03-15 16:59:21.370388159 -0700
 @@ -526,7 +526,7 @@
  new_heap (size_t size, size_t top_pad)
  {
@@ -4917,7 +4917,7 @@ diff -N -r --unified glibc-2.19/malloc/arena.c glibc-2.19-totalpartial/malloc/ar
 +	 heaps are aligned. If not, we unmap all of them, even if some
 +	 WERE aligned!!!
 +       */
-+      if (p2 != MAP_FAILED && !mvee_all_heaps_aligned(p2))
++      if (p2 != MAP_FAILED && !mvee_all_heaps_aligned(p2, HEAP_MAX_SIZE))
          {
            __munmap (p2, HEAP_MAX_SIZE);
            p2 = MAP_FAILED;
@@ -4935,7 +4935,7 @@ diff -N -r --unified glibc-2.19/malloc/arena.c glibc-2.19-totalpartial/malloc/ar
 +	 sequence is atomic and cannot block (=> we should _NOT_ grab
 +	 ANY locks until after the last munmap)	
 +       */
-+	  (void)mvee_all_heaps_aligned(0);
++	  (void)mvee_all_heaps_aligned(0, HEAP_MAX_SIZE);
        p1 = (char *) MMAP (0, HEAP_MAX_SIZE << 1, PROT_NONE, MAP_NORESERVE);
        if (p1 != MAP_FAILED)
          {
@@ -4958,7 +4958,7 @@ diff -N -r --unified glibc-2.19/malloc/arena.c glibc-2.19-totalpartial/malloc/ar
  
 -          if ((unsigned long) p2 & (HEAP_MAX_SIZE - 1))
 +	  /* MVEE patch: see comment above */
-+          if (!mvee_all_heaps_aligned(p2))
++          if (!mvee_all_heaps_aligned(p2, HEAP_MAX_SIZE))
              {
                __munmap (p2, HEAP_MAX_SIZE);
                return 0;
@@ -13409,7 +13409,7 @@ diff -N -r --unified glibc-2.19/sysdeps/unix/sysv/linux/malloc-sysdep.h glibc-2.
  #define HAVE_MREMAP 1
 diff -N -r --unified glibc-2.19/sysdeps/x86_64/bits/atomic.h glibc-2.19-totalpartial/sysdeps/x86_64/bits/atomic.h
 --- glibc-2.19/sysdeps/x86_64/bits/atomic.h	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-totalpartial/sysdeps/x86_64/bits/atomic.h	2017-03-14 17:19:18.637637584 -0700
++++ glibc-2.19-totalpartial/sysdeps/x86_64/bits/atomic.h	2017-03-15 16:59:41.835389540 -0700
 @@ -55,10 +55,71 @@
  # endif
  #endif
@@ -13875,7 +13875,7 @@ diff -N -r --unified glibc-2.19/sysdeps/x86_64/bits/atomic.h glibc-2.19-totalpar
 +extern void mvee_invalidate_buffer      (void);
 +extern void mvee_atomic_postop_internal (unsigned char preop_result);
 +extern int  mvee_should_sync_tid        (void);
-+extern int  mvee_all_heaps_aligned      (char* heap); 
++extern int  mvee_all_heaps_aligned      (char* heap, unsigned long alloc_size); 
 +extern void mvee_malloc_hook(int alloc_type, int msg, long chunksize, void* ar_ptr, void* chunk_ptr);
 +extern void mvee_write_malloc_info(int alloc_type, int msg, long chunksize, void* ar_ptr, void* chunk_ptr);
 +extern void mvee_verify_malloc_info(int alloc_type, int msg, long chunksize, void* ar_ptr, void* chunk_ptr);

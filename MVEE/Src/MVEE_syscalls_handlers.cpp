@@ -2812,9 +2812,20 @@ PRECALL(munmap)
         for (int i = 0; i < mvee::numvariants; ++i)
         {
             if ((unsigned long)ARG1(i) != variants[i].last_upper_region_start)
-				return MVEE_PRECALL_CALL_DENY | MVEE_PRECALL_ARGS_MISMATCH(1);
+			{
+				// jemalloc (used in FF) allocates 1 page less than requested
+				// alloc size + requested alignment. This used to cause a mismatch
+				// here.
+				if ((unsigned long)ARG1(i) != variants[i].last_upper_region_start + 4096)
+					return MVEE_PRECALL_CALL_DENY | MVEE_PRECALL_ARGS_MISMATCH(1);
+			}
+
 			if ((unsigned long)ARG2(i) != variants[i].last_upper_region_size)
-				return MVEE_PRECALL_CALL_DENY | MVEE_PRECALL_ARGS_MISMATCH(2);
+			{
+				
+				if (variants[i].last_upper_region_size != (unsigned long)ARG2(i) + 4096)
+					return MVEE_PRECALL_CALL_DENY | MVEE_PRECALL_ARGS_MISMATCH(2);
+			}
         }
     }
     else
@@ -5523,7 +5534,7 @@ POSTCALL(mmap)
 		// lower region.
 		//
 		if (ARG1(0) == 0                                                // no base address
-			&& variants[0].last_mmap_desired_alignment                  // syscall(MVEE_ALL_HEAPS_ALIGNED) must have been called prior to this mmap
+			&& last_mmap_requested_alignment                            // syscall(MVEE_ALL_HEAPS_ALIGNED) must have been called prior to this mmap
 			&& (ARG4(0) & (MAP_PRIVATE | MAP_ANONYMOUS))                // must be a private anonymous mapping
 			&& (int)ARG5(0) == -1                                       // backed by /dev/zero
 			&& !ipmon_mmap_handling)
@@ -5533,23 +5544,32 @@ POSTCALL(mmap)
 			// bump the lock counter for the fd/mman locks - we'll unlock when we see the munmap of the upper region
 			call_grab_locks(MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN);
 
-			unsigned long desired_alignment = variants[0].last_mmap_desired_alignment;
+			unsigned long requested_alignment = last_mmap_requested_alignment;
+			unsigned long requested_size      = last_mmap_requested_size;
 
-			debugf("this seems to be an aligned heap allocation - desired alignment: 0x" PTRSTR " - alloc size: 0x" PTRSTR "\n", desired_alignment, ARG2(0));
+			last_mmap_requested_alignment =
+				last_mmap_requested_size = 0;			
+
+			// ptmalloc allocates <requested alloc size> + <requested alignment> bytes
+			// jemalloc allocates <requested alloc size> + <requested alignment> - <page size> bytes
 
 			// We can now calculate the lower and upper region bounds
 			for (int i = 0; i < mvee::numvariants; ++i)
 			{
-				variants[i].last_mmap_desired_alignment = 0;
-				unsigned long start_of_aligned_heap = (results[i] + (desired_alignment - 1)) & ~(desired_alignment - 1);
+				unsigned long start_of_aligned_heap = (results[i] + (requested_alignment - 1)) & ~(requested_alignment - 1);
 				variants[i].last_lower_region_start = results[i];
 				variants[i].last_lower_region_size  = start_of_aligned_heap - results[i];
-				variants[i].last_upper_region_start = start_of_aligned_heap + ARG2(i) - desired_alignment;
-				variants[i].last_upper_region_size  = results[i] + ARG2(i) - (start_of_aligned_heap + ARG2(i) - desired_alignment);
+				variants[i].last_upper_region_start = start_of_aligned_heap + requested_size;
+				variants[i].last_upper_region_size  = results[i] + ARG2(i) - (start_of_aligned_heap + requested_size);
 
-				debugf("Variant %d: LOWER REGION [0x" PTRSTR "-0x" PTRSTR "] - UPPER REGION [0x" PTRSTR "-0x" PTRSTR "]\n",
-					   i, variants[i].last_lower_region_start, variants[i].last_lower_region_start + variants[i].last_lower_region_size,
-					   variants[i].last_upper_region_start, variants[i].last_upper_region_start + variants[i].last_upper_region_size);
+				debugf("Variant %d expected sys_munmaps:", i);
+				if (variants[i].last_lower_region_size)
+				{
+					debugf("LOWER REGION [0x" PTRSTR "-0x" PTRSTR "] - ", variants[i].last_lower_region_start, 
+						   variants[i].last_lower_region_start + variants[i].last_lower_region_size);
+				}
+				debugf("UPPER REGION [0x" PTRSTR "-0x" PTRSTR "]\n", variants[i].last_upper_region_start, 
+					   variants[i].last_upper_region_start + variants[i].last_upper_region_size);
 			}
 		}
 

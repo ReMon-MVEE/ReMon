@@ -174,6 +174,24 @@ long monitor::call_precall ()
             shutdown(false);
         }
     }
+	else
+	{
+		if (callnum == MVEE_ALL_HEAPS_ALIGNED)
+		{
+			for (int i = 0; i < mvee::numvariants; ++i)
+			{
+				debugf("pid: %d - SYS_MVEE_ALL_HEAPS_ALIGNED(heap: 0x" PTRSTR ", requested alignment: 0x" PTRSTR ", requested size: 0x" PTRSTR")\n", 
+					   variants[i].variantpid, ARG1(i), ARG2(i), ARG3(i));
+
+				if (i >= 1 &&
+					(ARG2(i) != ARG2(0) ||
+					 ARG3(i) != ARG3(0)))
+				{
+					result = MVEE_PRECALL_CALL_DENY | MVEE_PRECALL_ARGS_MISMATCH(2);
+				}
+			}
+		}
+	}
 
     if (result & MVEE_PRECALL_CALL_DENY)
         call_release_syslocks(-1, callnum, MVEE_SYSLOCK_PRECALL | MVEE_SYSLOCK_FULL);
@@ -665,11 +683,11 @@ long monitor::call_call_dispatch ()
             }
 
 			// 
-			// Called by the variants to check if the heaps have the desired
+			// Called by the variants to check if the heaps have the requested
 			// alignment 
 			//
-            // syntax: syscall(MVEE_ALL_HEAPS_ALIGNED, heap pointer, desired
-			// alignment);
+            // syntax: syscall(MVEE_ALL_HEAPS_ALIGNED, heap pointer, requested
+			// alignment, requested size);
 			//
 			// If the heaps are not aligned in any of the variants, then this
 			// call should return false, even for variants that DO have an
@@ -680,12 +698,10 @@ long monitor::call_call_dispatch ()
             {
 				for (int i = 0; i < mvee::numvariants; ++i)
 				{
-					debugf("pid: %d - SYS_MVEE_ALL_HEAPS_ALIGNED(0x" PTRSTR ", 0x" PTRSTR ")\n", 
-						   variants[i].variantpid, ARG1(i), ARG2(i));
-
 					if (!ARG1(i) || (ARG1(i) & (ARG2(i) - 1)))
 					{
-						variants[i].last_mmap_desired_alignment = ARG2(i);
+						last_mmap_requested_alignment = ARG2(i);
+						last_mmap_requested_size      = ARG3(i);
 						result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
 						break;
 					}

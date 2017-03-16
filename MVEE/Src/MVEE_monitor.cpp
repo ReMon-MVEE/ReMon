@@ -78,7 +78,6 @@ variantstate::variantstate()
     last_upper_region_start(0),
     last_upper_region_size(0),
     last_mmap_result(0),
-	last_mmap_desired_alignment(0),
 	entry_point_address(0),
 	ipmon_region(NULL),
 	hidden_buffer_array_id(0),
@@ -166,6 +165,8 @@ void monitor::init()
     perf                           = false;
     monitor_tid                    = 0;
 	master_core                    = -1;
+	last_mmap_requested_size       = 0;
+	last_mmap_requested_alignment  = 0;
 
 	blocked_signals.resize(mvee::numvariants);
 	old_blocked_signals.resize(mvee::numvariants);

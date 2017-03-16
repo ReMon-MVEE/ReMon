@@ -1536,8 +1536,6 @@ void mvee::add_argv(const char* arg)
 	else
 		(*mvee::config_variant_exec)["argv"].append(std::string(arg));
 
-	warnf("Added argv: %s\n", arg);
-
 	// TODO: consider adding this to variant.specs too
 }
 
