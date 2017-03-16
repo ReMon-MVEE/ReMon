@@ -1513,12 +1513,13 @@ static void usage()
 	printf("                 aka \"GHUMVEE\"                      \n");
 	printf("======================================================\n\n");
 	printf("Legacy Mode Syntax:\n");
-	printf("./MVEE [Builtin Configuration Number (see MVEE_config.cpp)] [Number of Variants] [MVEE Options]\n\n");
+	printf("./MVEE [Builtin Configuration Number (see MVEE_config.cpp)] [MVEE Options]\n\n");
 	printf("RAVEN Mode Syntax:\n");
 	printf("./MVEE -s <variant set> -f <config file> [MVEE Options] -- [Program Args]\n\n");
 	printf("MVEE Options:\n");
 	printf("> -s <variant set> : run the specified variant set. If this option is omitted, GHUMVEE will launch variant set \"default\". NOTE: This option is ignored in legacy mode.\n");
 	printf("> -f <file name>   : use the monitor config in the specified file. If this option is omitted, the config will be read from MVEE.ini. NOTE: If the MVEE is run in legacy mode, then any options in the builtin config take precedence over the settings in the config file.\n");
+	printf("> -N <number of variants> : sets the number of variants. In RAVEN mode, this option can override the number of variants specified in the config file.\n");
 	printf("> -n : no monitoring. Variant processes are executed without supervision. Useful for benchmarking.\n");
 	printf("> -p : use performance counters to track cache and synchronization behavior of the variants.\n");
 	printf("> -o : log everything to stdout, as well as the log files. This flag is ignored if the MVEE is compiled with MVEE_BENCHMARK defined in MVEE_build_config.h\n");
@@ -1546,7 +1547,7 @@ bool mvee::process_opts(int argc, char** argv, bool add_args)
 {
 	int opt;
 	bool stop = false;
-	while ((opt = getopt(argc, argv, ":s:f:npoc")) != -1 && !stop)
+	while ((opt = getopt(argc, argv, ":s:f:N:npoc")) != -1 && !stop)
 	{
 		switch(opt)
 		{
@@ -1566,6 +1567,9 @@ bool mvee::process_opts(int argc, char** argv, bool add_args)
 				break;
 			case 'o':
 				(*mvee::config_monitor)["log_to_stdout"] = true;
+				break;
+			case 'N':
+				mvee::numvariants = strtoll(optarg, NULL, 10);
 				break;
 			case 'n':
 				(*mvee::config_variant_global)["disable_syscall_checks"] = true;
@@ -1670,7 +1674,7 @@ int main(int argc, char *argv[])
         }
         else
         {
-			if (!isnumeric(argv[1]) || !isnumeric(argv[2]))
+			if (!isnumeric(argv[1]))
 			{
 				usage();
 				return -1;
@@ -1690,10 +1694,10 @@ int main(int argc, char *argv[])
 				(*mvee::config_variant_exec)["env"].clear();
 			
 			builtin = atoi(argv[1]);
-            mvee::numvariants = atoi(argv[2]);
+//            mvee::numvariants = atoi(argv[2]);
 
-			// Pretend that argv[2] is the new argv[0]
-			if (!mvee::process_opts(argc - 2, &argv[2], true))
+			// Pretend that argv[1] is the new argv[0]
+			if (!mvee::process_opts(argc - 1, &argv[1], true))
 				return -1;
 
 			mvee::set_builtin_config(builtin);
@@ -1709,8 +1713,18 @@ int main(int argc, char *argv[])
 			return -1;
 		}
 
-		for (auto variant : mvee::config["variant"]["sets"][mvee::config_variant_set])
+		int limit = mvee::numvariants ? mvee::numvariants : mvee::config["variant"]["sets"][mvee::config_variant_set].size(), i = 0;
+		auto it = mvee::config["variant"]["sets"][mvee::config_variant_set].begin();
+		for (; i < limit; ++i)
 		{
+			if (it == mvee::config["variant"]["sets"][mvee::config_variant_set].end())
+				it = mvee::config["variant"]["sets"][mvee::config_variant_set].begin();
+
+			if (it == mvee::config["variant"]["sets"][mvee::config_variant_set].end())
+				break;
+
+			auto variant = *it;
+
 			// check if a variant.specs config exists for the specified variant
 			if (!mvee::config["variant"]["specs"][variant.asString()])
 			{
@@ -1719,6 +1733,8 @@ int main(int argc, char *argv[])
 				return -1;
 			}
 			mvee::variant_ids.push_back(variant.asString());
+
+			it++;
 		}
 
 		mvee::numvariants = mvee::variant_ids.size();
