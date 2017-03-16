@@ -2720,6 +2720,15 @@ GET_CALL_TYPE(munmap)
 				variants[variantnum].last_lower_region_size = 0;			
             return MVEE_CALL_TYPE_UNSYNCED;
 		}
+
+        if ((unsigned long)ARG1(variantnum) == variants[variantnum].last_upper_region_start
+            && (unsigned long)ARG2(variantnum) == variants[variantnum].last_upper_region_size)
+		{
+			variants[variantnum].last_upper_region_start = 
+				variants[variantnum].last_upper_region_size = 0;			
+            return MVEE_CALL_TYPE_UNSYNCED;
+		}
+
     }
 
     return MVEE_CALL_TYPE_NORMAL;
@@ -2811,48 +2820,22 @@ PRECALL(munmap)
     if IS_UNSYNCED_CALL
         return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 
-    if (in_new_heap_allocation)
-    {
-        for (int i = 0; i < mvee::numvariants; ++i)
-        {
-            if ((unsigned long)ARG1(i) != variants[i].last_upper_region_start)
-			{
-				// jemalloc (used in FF) allocates 1 page less than requested
-				// alloc size + requested alignment. This used to cause a mismatch
-				// here.
-				if ((unsigned long)ARG1(i) != variants[i].last_upper_region_start + 4096)
-					return MVEE_PRECALL_CALL_DENY | MVEE_PRECALL_ARGS_MISMATCH(1);
-			}
+	CHECKARG(2);
 
-			if ((unsigned long)ARG2(i) != variants[i].last_upper_region_size)
-			{
-				
-				if (variants[i].last_upper_region_size != (unsigned long)ARG2(i) + 4096)
-					return MVEE_PRECALL_CALL_DENY | MVEE_PRECALL_ARGS_MISMATCH(2);
-			}
-        }
-    }
-    else
-    {
-        CHECKARG(2);
+	// compare regions
+	CHECKREGION(1, ARG2(0));
 
-        // compare regions
-        CHECKREGION(1, ARG2(0));
-
-        // finally, check whether these are writeback regions
-        std::vector<unsigned long> addresses(mvee::numvariants);
-        FILLARGARRAY(1, addresses);
-        if (set_mmap_table->foreach_region(addresses, ARG2(0), this, handle_munmap_precall_callback) != 0)
-            return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
-    }
+	// finally, check whether these are writeback regions
+	std::vector<unsigned long> addresses(mvee::numvariants);
+	FILLARGARRAY(1, addresses);
+	if (set_mmap_table->foreach_region(addresses, ARG2(0), this, handle_munmap_precall_callback) != 0)
+		return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
 
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
 POSTCALL(munmap)
 {
-    int release_locks = 0;
-
     if (call_succeeded)
     {
 		if IS_UNSYNCED_CALL
@@ -2862,14 +2845,14 @@ POSTCALL(munmap)
 				int i = 0;
 				for (; i < mvee::numvariants; ++i)
 				{
-					if (variants[i].last_lower_region_start)
+					if (variants[i].last_lower_region_start || 
+						variants[i].last_upper_region_start)
 						break;
 				}
 
 				if (i >= mvee::numvariants)
 				{
 					in_new_heap_allocation = false;
-					release_locks          = 1;
 					call_release_locks(MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN);
 				}
 			}
@@ -2908,26 +2891,12 @@ POSTCALL(munmap)
 				writeback_infos.pop_back();
 			}
 
-			//
-			// this is the unmap of the upper region!!! we need to release those
-			// extra locks we took in mmap here. See MVEE_monitor.h for further
-			// comments on ptmalloc2 handling
-			// 
-			if (in_new_heap_allocation)
-			{
-				in_new_heap_allocation = false;
-				release_locks          = 1;
-			}
-
 			for (int i = 0; i < mvee::numvariants; ++i)
 				set_mmap_table->verify_mman_table(i, variants[i].variantpid);
 
 #ifdef MVEE_MMAN_DEBUG
 			set_mmap_table->print_mmap_table();
 #endif
-			if (release_locks)
-				call_release_locks(MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN);
-
 		}
     }
 
