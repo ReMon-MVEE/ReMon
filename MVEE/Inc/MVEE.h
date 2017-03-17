@@ -273,6 +273,12 @@ public:
 	//
     static bool map_master_to_slave_pids    (pid_t master_pid, std::vector<pid_t>& slave_pids);
 
+	// 
+	// Returns true if the process with the specified pid is one of the variants
+	// we're monitoring
+	//
+	static bool is_monitored_variant                 (pid_t variant_pid);
+
 	//
 	// Check if the specified variant has an alias for the specified path.
 	// If so, return that alias. If not, return ""

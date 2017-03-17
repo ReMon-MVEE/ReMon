@@ -850,6 +850,12 @@ PRECALL(unlink)
 {
     CHECKPOINTER(1);
     CHECKSTRING(1);
+	
+	// we do this at the precall site so we can still resolve the file name
+	char* unlink_file = mvee_rw_read_string(variants[0].variantpid, (void*)ARG1(0));
+	set_fd_table->set_file_unlinked(unlink_file);
+	SAFEDELETEARRAY(unlink_file);
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -1123,6 +1129,9 @@ POSTCALL(execve)
             set_mmap_table   = new_table;
             call_grab_syslocks(variantnum, __NR_execve, MVEE_SYSLOCK_FULL);
         }
+
+		for (i = 0; i < mvee::numvariants; ++i)
+			variants[i].should_sync_ptr = 0;
 
 		set_mmap_table->truncate_table();
 		for (i = 0; i < mvee::numvariants; ++i)
@@ -1595,7 +1604,7 @@ POSTCALL(creat)
         std::vector<unsigned long> fds = call_postcall_get_result_vector();
         char*                      str = mvee_rw_read_string(variants[0].variantpid, (void*)ARG1(0));
 
-        set_fd_table->create_fd_info(FT_REGULAR, fds, str, O_WRONLY, false, false, false, 0);
+        set_fd_table->create_fd_info(FT_REGULAR, fds, str, O_WRONLY, false, false);
 #ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
 #endif
@@ -1662,7 +1671,15 @@ POSTCALL(dup)
         if (!fd_info)
             return 0;
 
-        set_fd_table->create_fd_info(fd_info->file_type, fds, fd_info->path.c_str(), fd_info->access_flags, false, master_file, fd_info->unsynced_reads, fd_info->original_file_size);
+        set_fd_table->create_fd_info(fd_info->file_type, 
+									 fds, 
+									 fd_info->path.c_str(), 
+									 fd_info->access_flags, 
+									 false, 
+									 master_file,
+									 fd_info->unsynced_reads, 
+									 fd_info->unlinked, 
+									 fd_info->original_file_size);
 #ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
 #endif
@@ -2177,7 +2194,15 @@ POSTCALL(fcntl)
                 if (!fd_info)
                     return 0;
 
-                set_fd_table->create_fd_info(fd_info->file_type, fds, fd_info->path.c_str(), fd_info->access_flags, (ARG2(0) == F_DUPFD_CLOEXEC) ? true : fd_info->close_on_exec, state == STATE_IN_MASTERCALL, fd_info->unsynced_reads, fd_info->original_file_size);
+                set_fd_table->create_fd_info(fd_info->file_type, 
+											 fds, 
+											 fd_info->path.c_str(),
+											 fd_info->access_flags, 
+											 (ARG2(0) == F_DUPFD_CLOEXEC) ? true : fd_info->close_on_exec, 
+											 state == STATE_IN_MASTERCALL, 
+											 fd_info->unsynced_reads, 
+											 fd_info->unlinked,
+											 fd_info->original_file_size);
 #ifdef MVEE_FD_DEBUG
                 set_fd_table->verify_fd_table(getpids());
 #endif
@@ -2313,7 +2338,15 @@ POSTCALL(dup2)
             if (!fd_info)
                 return 0;
 
-            set_fd_table->create_fd_info(fd_info->file_type, fds, fd_info->path.c_str(), fd_info->access_flags, false, fd_info->master_file, fd_info->unsynced_reads, fd_info->original_file_size);
+            set_fd_table->create_fd_info(fd_info->file_type, 
+										 fds, 
+										 fd_info->path.c_str(), 
+										 fd_info->access_flags, 
+										 false, 
+										 fd_info->master_file, 
+										 fd_info->unsynced_reads, 
+										 fd_info->unlinked,
+										 fd_info->original_file_size);
 #ifdef MVEE_FD_DEBUG
             set_fd_table->verify_fd_table(getpids());
 #endif
@@ -4550,9 +4583,6 @@ POSTCALL(mprotect)
 					}
 				}
 
-				// Dump disassembly
-				for (int i = 0; i < mvee::numvariants; ++i)
-
 				// Cleanup
 				for (int i = 0; i < mvee::numvariants; ++i)
 					SAFEDELETEARRAY(raw_bytes[i]);
@@ -5362,20 +5392,18 @@ CALL(mmap)
 
         if ((info->access_flags & O_RDWR) && (ARG4(0) & MAP_SHARED))
         {
-//#ifndef MVEE_BENCHMARK
-            warnf("variants are opening a shared memory mapping backed by an O_RDWR file!!!\n");
-            warnf("> file = %s\n",           info->path.c_str());
-            warnf("> map prot flags = %s\n", getTextualProtectionFlags(ARG3(0)).c_str());
-//#endif
+			if (!info->unlinked)
+			{
+				warnf("variants are opening a shared memory mapping backed by an O_RDWR file!!!\n");
+				warnf("> file = %s\n",           info->path.c_str());
+				warnf("> map prot flags = %s\n", getTextualProtectionFlags(ARG3(0)).c_str());
+			}
 
 #ifndef MVEE_ALLOW_SHM
-            if (ARG3(0) & PROT_WRITE)
+            if ((ARG3(0) & PROT_WRITE) || (ARG3(0) & PROT_EXEC))
             {
-                if (info->path != "")
+                if (!info->unlinked)
                 {
-                    // if the path exists, assume that it's a regular file. Don't
-                    // check if it's a regular file here because the file might've
-                    // been unlinked (LibreOffice)
 #ifndef MVEE_BENCHMARK
                     warnf("> this is a regular file! changing to private mapping\n");
 #endif
@@ -5386,22 +5414,37 @@ CALL(mmap)
                     }
                     return MVEE_CALL_ALLOW;
                 }
+				else
+				{
+					// check if any process outside the MVEE has this region mapped into their address space
+					std::stringstream ultimate_grep_command_of_doom;
+					ultimate_grep_command_of_doom << "grep \"" << info->path << " (deleted)$\" $(find /proc/ 2>&1 | grep \"/maps\" | grep -v \"/task/\") 2>&1 | grep \"^/proc\" | cut -d'/' -f3";
+					std::string output = mvee::log_read_from_proc_pipe(ultimate_grep_command_of_doom.str().c_str(), NULL);
+
+					std::stringstream lines;
+					lines << output;
+
+					while (std::getline(lines, output, '\n'))
+					{
+						pid_t pid;
+						std::stringstream tmp;
+						tmp << output;
+						tmp >> pid;
+
+						if (!mvee::is_monitored_variant(pid))
+						{
+							warnf("MAP_SHARED mapping request of unlinked file denied.");
+							warnf("> file: %s\n", info->path.c_str()); 
+							warnf("> reason: also mapped into the address space of non-monitored process %d\n", pid);
+							return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
+						}
+					}
+
+					return MVEE_CALL_ALLOW;
+				}
 
                 warnf("MAP_SHARED mapping request with PROT_WRITE detected!\n");
                 warnf("This call has been denied.\n");
-                return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
-            }
-            // Temporary hack for LibreOffice.
-            //
-            // LibreOffice has some startup code that maps certain files in twice!
-            // Once as a shared READ/WRITE mapping, which we change to a private READ/WRITE mapping
-            // and once as a shared EXEC mapping ==> we should return the address of the private mapping here
-            //
-            // TODO: Check if the specified file region has already been mapped
-            // as a private mapping.
-            else if (ARG3(0) & PROT_EXEC)
-            {
-                warnf("> Temporary LibreOffice hack. Call denied!!! FIXME!!!\n");
                 return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
             }
         }
@@ -7224,16 +7267,6 @@ CALL(openat)
     flags  = old_flags = ARG3(0);
     result = handle_check_open_call(str1, &flags, ARG4(0));
 
-    /* MORE LIBREOFFICE HACKS. See comment in handle_open_call
-
-       if (flags != old_flags)
-       for (i = 0; i < mvee::numvariants; ++i)
-       SETARG3(i, flags);
-
-       =>
-       mvee_wrap_ptrace(PTRACE_POKEUSER, variants[i].variantpid, 4*EDX, (void*)flags);
-     */
-
     if (flags != old_flags)
         for (i = 0; i < mvee::numvariants; ++i)
             SETARG3(i, flags);
@@ -7421,6 +7454,10 @@ PRECALL(unlinkat)
     CHECKARG(3);
     CHECKFD(1);
     CHECKSTRING(2);
+	
+	std::string full_path = set_fd_table->get_full_path(0, variants[0].variantpid, (unsigned long)(int)ARG1(0), (void*)ARG2(0));
+	set_fd_table->set_file_unlinked(full_path.c_str());
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -7800,7 +7837,15 @@ POSTCALL(dup3)
             if (!fd_info)
                 return 0;
 
-            set_fd_table->create_fd_info(fd_info->file_type, fds, fd_info->path.c_str(), fd_info->access_flags, (ARG3(0) != 0) ? true : false, fd_info->master_file, fd_info->unsynced_reads, fd_info->original_file_size);
+            set_fd_table->create_fd_info(fd_info->file_type, 
+										 fds, 
+										 fd_info->path.c_str(), 
+										 fd_info->access_flags, 
+										 (ARG3(0) != 0) ? true : false, 
+										 fd_info->master_file, 
+										 fd_info->unsynced_reads, 
+										 fd_info->unlinked,
+										 fd_info->original_file_size);
 #ifdef MVEE_FD_DEBUG
             set_fd_table->verify_fd_table(getpids());
 #endif

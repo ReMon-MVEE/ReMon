@@ -25,11 +25,12 @@
     fd_info class
 -----------------------------------------------------------------------------*/
 fd_info::fd_info()
-    : access_flags(0),
-    master_file(0),
-    close_on_exec(0),
-    unsynced_reads(0),
-    original_file_size(0)
+    : access_flags(0)
+    , master_file(false)
+	, close_on_exec(false)
+	, unsynced_reads(false)
+	, unlinked(false)
+	, original_file_size(0)
 {
     fds.resize(mvee::numvariants);
 }
@@ -43,16 +44,18 @@ fd_info::fd_info
     bool                      close_on_exec,
     bool                      master_file,
     bool                      unsynced_reads,
+	bool                      unlinked,
     ssize_t                   original_file_size
 )
-    : fds(fds),
-	  path(path),
-	  access_flags(access_flags),
-	  master_file(master_file),
-	  close_on_exec(close_on_exec),
-	  unsynced_reads(unsynced_reads),
-	  original_file_size(original_file_size),
-	file_type(type)	
+    : fds(fds)
+	, path(path)
+	, access_flags(access_flags)
+	, master_file(master_file)
+	, close_on_exec(close_on_exec)
+	, unsynced_reads(unsynced_reads)
+	, unlinked(unlinked)
+	, original_file_size(original_file_size)
+	, file_type(type)	
 {
 }
 
@@ -68,6 +71,7 @@ void fd_info::print_fd_info ()
     debugf("> cloexec      = %d\n",         close_on_exec);
     debugf("> master file  = %d\n",         master_file);
     debugf("> unsynced     = %d\n",         unsynced_reads);
+	debugf("> unlinked     = %d\n",         unlinked);
 	debugf("> file type    = %s\n",         getTextualFileType(file_type));
 }
 
@@ -91,11 +95,11 @@ fd_table::fd_table()
     // clean table. Just add default fds
     std::vector<unsigned long> fds(mvee::numvariants);
     std::fill(fds.begin(), fds.end(), 0);
-    create_fd_info(FT_SPECIAL, fds, "stdin", O_RDONLY, false, false, false, 0);
+    create_fd_info(FT_SPECIAL, fds, "stdin", O_RDONLY, false, false, false, true, 0);
     std::fill(fds.begin(), fds.end(), 1);
-    create_fd_info(FT_SPECIAL, fds, "stdout", O_WRONLY, false, false, false, 0);
+    create_fd_info(FT_SPECIAL, fds, "stdout", O_WRONLY, false, false, false, true, 0);
     std::fill(fds.begin(), fds.end(), 2);
-    create_fd_info(FT_SPECIAL, fds, "stderr", O_WRONLY, false, false, false, 0);
+    create_fd_info(FT_SPECIAL, fds, "stderr", O_WRONLY, false, false, false, true, 0);
 
     char*                      cwd = getcwd(NULL, 0);
     fd_cwd = std::string(cwd);
@@ -244,6 +248,7 @@ bool fd_table::add_missing_fds(std::vector<pid_t> variant_pids)
 					   false,
 					   num_fds == 1,
 					   false,
+					   false, // TODO: Check using stat?
 					   0 // TODO: use sys_stat to get extra info?
 			);
 	}
@@ -347,10 +352,11 @@ void fd_table::create_fd_info
     bool                      close_on_exec,
     bool                      master_file,
     bool                      unsynced_reads,
+	bool                      unlinked,
     ssize_t                   original_file_size
 )
 {
-    fd_info info(type, fds, path, access_flags, close_on_exec, master_file, unsynced_reads, original_file_size);
+    fd_info info(type, fds, path, access_flags, close_on_exec, master_file, unsynced_reads, unlinked, original_file_size);
 
     auto it = table.find(fds[0]);
     if (it != table.end())
@@ -927,3 +933,46 @@ void fd_table::chdir(const char* path)
 //		return ::chdir(path);
     }
 }
+
+/*-----------------------------------------------------------------------------
+    set_fd_unlinked
+-----------------------------------------------------------------------------*/
+void fd_table::set_fd_unlinked(unsigned long fd, int variantnum)
+{
+    fd_info* fd_info = get_fd_info(fd, variantnum);
+
+    if (fd_info)
+		set_file_unlinked(fd_info->path.c_str());
+}
+
+/*-----------------------------------------------------------------------------
+    set_file_unlinked
+-----------------------------------------------------------------------------*/
+void fd_table::set_file_unlinked(const char* path)
+{
+	char* resolved_path = realpath(path, NULL);
+
+	if (!resolved_path)
+		resolved_path = strdup(path);
+
+	for (auto it = table.begin(); it != table.end(); ++it)
+	{
+		if (!strcmp(it->second.path.c_str(), resolved_path))
+			it->second.unlinked = true;
+	}
+
+	free(resolved_path);
+}
+
+/*-----------------------------------------------------------------------------
+    is_fd_unlinked
+-----------------------------------------------------------------------------*/
+bool fd_table::is_fd_unlinked(unsigned long fd, int variantnum)
+{
+    fd_info* fd_info = get_fd_info(fd, variantnum);
+
+    if (fd_info && (fd_info->unlinked || (fd_info->file_type != FT_REGULAR && fd_info->file_type != FT_UNKNOWN && fd_info->file_type != FT_SPECIAL)))
+		return true;
+	return false;
+}
+

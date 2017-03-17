@@ -257,6 +257,16 @@ bool mvee::map_master_to_slave_pids(pid_t master_pid, std::vector<pid_t>& slave_
 }
 
 /*-----------------------------------------------------------------------------
+    is_monitored_variant
+-----------------------------------------------------------------------------*/
+bool mvee::is_monitored_variant(pid_t variant_pid)
+{
+	MutexLock lock(&mvee::global_lock);
+	return mvee::variant_pid_mapping.find(variant_pid) !=
+		mvee::variant_pid_mapping.end();
+}
+
+/*-----------------------------------------------------------------------------
     get_addr2line_proc - global lock must be locked when calling this function
 -----------------------------------------------------------------------------*/
 std::shared_ptr<mmap_addr2line_proc> mvee::get_addr2line_proc(const std::string& input_file_name)
