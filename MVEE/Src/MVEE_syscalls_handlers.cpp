@@ -5072,6 +5072,10 @@ CALL(prctl)
 			delete[] ipmon_mask;
 		}
 	}
+	else if (ARG1(0) == PR_SET_SECCOMP && ARG2(0) == SECCOMP_MODE_FILTER)
+	{
+		return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EINVAL);
+	}
     return MVEE_CALL_ALLOW;
 }
 
@@ -7985,13 +7989,14 @@ POSTCALL(perf_event_open)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_seccomp
+  sys_seccomp - seccomp can be used to filter syscalls based on the syscall
+  numbers or arguments. We currently disable this syscall as our sync agents
+  might trigger seccomp violations.
+
+  In the future, we could either emulate seccomp (which is easy to do but will
+  involve a lot of engineering), or we could manipulate the filters passed
+  to seccomp so they become sync agent-aware.
 -----------------------------------------------------------------------------*/
-LOG_ARGS(seccomp)
-{
-
-}
-
 PRECALL(seccomp)
 {
 	CHECKARG(1);
@@ -8000,7 +8005,7 @@ PRECALL(seccomp)
 		// only allow read/write/exit
 		case SECCOMP_SET_MODE_STRICT:
 			break;
-		// allow a specific set of syscalls
+		// installs filters for a set of syscalls
 		case SECCOMP_SET_MODE_FILTER:
 			break;
 		default:
@@ -8009,6 +8014,15 @@ PRECALL(seccomp)
 
 	}
 	return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+}
+
+CALL(seccomp)
+{
+	// Unless the program is GHUMVEE-aware, these filters will not work
+	// well. We'll just pretend like the kernel doesn't support seccomp-filtering
+	if (ARG1(0) == SECCOMP_SET_MODE_FILTER)
+		return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EINVAL);
+	return MVEE_CALL_ALLOW;	
 }
 
 /*-----------------------------------------------------------------------------
@@ -8112,7 +8126,7 @@ void mvee::init_syslocks()
     REG_LOCKS(__NR_unshare,             MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN | MVEE_SYSLOCK_SHM | MVEE_SYSLOCK_FULL);
 
     // normal syscalls that create/destroy/modify file descriptors
-    REG_LOCKS(__NR_open,                MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL | MVEE_SYSLOCK_POSTCALL);
+    REG_LOCKS(__NR_open,                MVEE_SYSLOCK_FD | MVEE_SYSLOCK_FULL); // There seem to be blocking open calls in FF
     REG_LOCKS(__NR_openat,              MVEE_SYSLOCK_FD | MVEE_SYSLOCK_FULL);
     REG_LOCKS(__NR_dup,                 MVEE_SYSLOCK_FD | MVEE_SYSLOCK_FULL);
     REG_LOCKS(__NR_dup2,                MVEE_SYSLOCK_FD | MVEE_SYSLOCK_FULL);
