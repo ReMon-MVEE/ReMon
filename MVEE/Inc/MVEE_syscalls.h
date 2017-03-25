@@ -69,8 +69,9 @@
 //
 // Called for                : all syscalls
 // Called in BENCHMARK mode  : YES
-// variants[x].callnum valid : NO
-// variants[x].regs valid    : NO
+// variantnum argument       : number of the variant
+// variants[x].callnum valid : YES
+// variants[x].regs valid    : YES
 //
 // GHUMVEE calls this handler to determine the synchronization mode for the
 // corresponding syscall. If the function returns MVEE_CALL_TYPE_UNSYNCED, then
@@ -83,8 +84,9 @@
 //
 // Called for                : all syscalls
 // Called in BENCHMARK mode  : NO
-// variants[x].callnum valid : NO
-// variants[x].regs valid    : NO
+// variantnum argument       : number of the variant
+// variants[x].callnum valid : YES
+// variants[x].regs valid    : YES
 //
 // GHUMVEE calls this handler at the entrance of a syscall. The handler logs
 // the system call arguments for the syscall being executed. The return value
@@ -95,6 +97,7 @@
 //
 // Called for                : synced syscalls only
 // Called in BENCHMARK mode  : YES
+// variantnum argument       : -1
 // variants[x].callnum valid : YES
 // variants[x].regs valid    : YES
 //
@@ -108,6 +111,7 @@
 //
 // Called for                : all syscalls
 // Called in BENCHMARK mode  : YES
+// variantnum argument       : -1 for synced calls, number of the variant for unsynced calls
 // variants[x].callnum valid : YES
 // variants[x].regs valid    : YES
 //
@@ -122,17 +126,20 @@
 //
 // Called for                : all syscalls
 // Called in BENCHMARK mode  : NO
+// variantnum argument       : number of the variant
 // variants[x].callnum valid : YES
 // variants[x].regs valid    : YES
 //
 // Similar to the log_args handlers, these handler functions log the syscall
-// results for the corresponding system call.
+// results for the corresponding system call. This handler ONLY gets called for
+// syscalls that did NOT return an error.
 // 
 // 6) postcall handler (Optional):
 // -------------------------------
 //
 // Called for                : all syscalls
 // Called in BENCHMARK mode  : YES
+// variantnum argument       : -1 for synced calls, number of the variant for unsynced calls
 // variants[x].callnum valid : NO
 // variants[x].regs valid    : YES
 //
@@ -181,7 +188,6 @@
 // Possible return values of the CALL system call handler
 #define MVEE_CALL_ALLOW                   0x0001                    // Allow the variant(s) to be resumed from the syscall entry site, without modifying their syscall number or arguments
 #define MVEE_CALL_DENY                    0x0002                    // Allow the variant(s) to be resumed from the syscall entry site, but replace their syscall number by __NR_getpid
-#define MVEE_CALL_HANDLED_UNSYNCED_CALL   0x0004                    // Debugging aid
 #define MVEE_CALL_ERROR                   0x0004                    
 #define MVEE_CALL_VALUE                   0x0008
 #define MVEE_CALL_RETURN_ERROR(a) (0x0004 | (a << 6))               // Used in conjunction with MVEE_CALL_DENY. Return error <a> from the denied syscall (this is equivalent to MVEE_CALL_RETURN_VALUE(-a))
@@ -245,40 +251,5 @@
 //
 #define IS_SYNCED_CALL							\
 	(variantnum == -1)
-
-
-//
-// Prologue for our syscall arguments logging functions
-//
-#define MVEE_HANDLER_ARGS_LOGGER(variantnum, start, lim)			\
-    int start, lim;													\
-																	\
-    start = IS_SYNCED_CALL ? 0 : variantnum;						\
-    lim   = IS_SYNCED_CALL ? mvee::numvariants : variantnum + 1;	\
-																	\
-	/* manually update the register context */						\
-    if IS_UNSYNCED_CALL												\
-	    call_check_regs(variantnum);
-
-//
-// Prologue for postcall handlers
-//
-#define MVEE_HANDLER_POSTCALL(variantnum, start, lim)					\
-	int start, lim;														\
-																		\
-    start = IS_SYNCED_CALL ? 0 : variantnum;							\
-    lim   = IS_SYNCED_CALL ? (state == STATE_IN_MASTERCALL ? 1 : mvee::numvariants) : variantnum + 1;
-
-//
-// Prologue for our syscall return logging functions
-//
-#define MVEE_HANDLER_RETURN_LOGGER(variantnum, start, lim, results)		\
-	MVEE_HANDLER_POSTCALL(variantnum, start, lim);						\
-    std::vector<unsigned long> results(mvee::numvariants);				\
-    if IS_SYNCED_CALL													\
-        results = call_postcall_get_result_vector();					\
-    else																\
-		results[variantnum] = call_postcall_get_variant_result(variantnum);
-
 
 #endif // MVEE_SYSCALLS_H_INCLUDED

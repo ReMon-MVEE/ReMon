@@ -186,13 +186,13 @@ bool fd_table::add_missing_fds(std::vector<pid_t> variant_pids)
 				if (missing == missing_fds.end())
 				{
 					std::vector<unsigned long> fds(mvee::numvariants);
-					std::fill(fds.begin(), fds.end(), ~0);
+					std::fill(fds.begin(), fds.end(), (unsigned long)-1);
 					fds[i] = (unsigned long)fd | ((unsigned long)prot << 32);
 					missing_fds.insert(std::make_pair(std::string(file), fds));
 				}
 				else
 				{					
-					if (missing->second[i] != ~0)
+					if (missing->second[i] != (unsigned long)-1)
 					{
 						warnf("Found missing file using multiple fds. We can't handle this case :(\n");
 						return false;
@@ -217,7 +217,7 @@ bool fd_table::add_missing_fds(std::vector<pid_t> variant_pids)
 		
 		for (auto fd : missing.second)
 		{
-			if (fd != ~0)
+			if (fd != (unsigned long)-1)
 			{
 			    if (i == 0)
 					master_has_file = true;
@@ -687,16 +687,16 @@ std::string fd_table::get_full_path (int variantnum, pid_t variantpid, unsigned 
     std::stringstream ss;
 
     // fetch the path and check if it's absolute...
-    char* tmp_path = mvee_rw_read_string(variantpid, path_ptr, 0);
-    if (!tmp_path)
+	std::string tmp_path = rw::read_string(variantpid, path_ptr, 0);
+    if (tmp_path.length() == 0)
     {
         warnf("couldn't get full path\n");
-        return std::string("");
+        return tmp_path;
     }
 
-    if (strstr(tmp_path, "/proc/self/") == tmp_path)
+    if (tmp_path.find("/proc/self/") == 0)
     {
-        ss << "/proc/" << variantpid << "/" << (tmp_path + strlen("/proc/self/"));
+        ss << "/proc/" << variantpid << "/" << tmp_path.substr(strlen("/proc/self/"));
     }
     else if (tmp_path[0] == '/')
     {
@@ -735,7 +735,6 @@ std::string fd_table::get_full_path (int variantnum, pid_t variantpid, unsigned 
         ss << tmp_path;
     }
 
-    SAFEDELETEARRAY(tmp_path);
 	return mvee::os_normalize_path_name(ss.str());
 }
 

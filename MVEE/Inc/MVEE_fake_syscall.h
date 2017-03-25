@@ -146,13 +146,11 @@ enum mvee_shared_buffer_types
 #define MVEE_SET_SYNC_PRIMITIVES_PTR   MVEE_FAKE_SYSCALL_BASE + 12
 
 //
-// MVEE_ALL_HEAPS_ALIGNED: Checks wether or not all variants got
-// HEAP_MAX_SIZE aligned heaps from the previous mmap request.
-// If some of them have not, ALL variants have to bail out of the
-// current new_heap (see eglibc/malloc/arena.c) code path and
-// fall back to another heap allocation method. This ensures
-// that the variants stay in sync with respect to future mm
-// requests.
+// MVEE_ALL_HEAPS_ALIGNED: Checks if the variants' newly allocated heaps are
+// aligned to the desired boundary. If any variant has a non-aligned heap, this
+// syscall will return 0.  If all variants have aligned heaps, the call returns
+// 1. If the call returns 0, the variants are expected to unmap the newly mapped
+// heap and fall back to a slower aligned allocation method.
 //
 #define MVEE_ALL_HEAPS_ALIGNED         MVEE_FAKE_SYSCALL_BASE + 13
 

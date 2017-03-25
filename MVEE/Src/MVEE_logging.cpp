@@ -8,13 +8,11 @@
 /*-----------------------------------------------------------------------------
     Global Variables
 -----------------------------------------------------------------------------*/
-#include <sys/wait.h>
 #include <stdarg.h>
 #include <errno.h>
 #include <sstream>
 #include <dwarf.h>
 #include <libdwarf.h>
-#include <sys/ptrace.h>
 #include <sys/time.h>
 #include <string.h>
 #include <iomanip>
@@ -32,6 +30,7 @@
 #include "MVEE_private_arch.h"
 #include "MVEE_mman.h"
 #include "MVEE_memory.h"
+#include "MVEE_interaction.h"
 
 /*-----------------------------------------------------------------------------
     Static Variable Initialization
@@ -42,7 +41,6 @@ FILE*             mvee::datatransfer_logfile = NULL;
 FILE*             mvee::lockstats_logfile    = NULL;
 double            mvee::startup_time         = 0.0;
 pthread_mutex_t   mvee::loglock              = PTHREAD_MUTEX_INITIALIZER;
-
 
 /*-----------------------------------------------------------------------------
     cache_mismatch_info
@@ -439,13 +437,14 @@ void monitor::log_caller_info
 -----------------------------------------------------------------------------*/
 void monitor::log_variant_backtrace(int variantnum, int max_depth, int calculate_file_offsets, int is_segfault)
 {
-    int  i, status;
+	interaction::mvee_wait_status status;
+    int  i;
     void (*logfunc)(const char*, ...) = mvee::logf;
-    bool should_send_sigstop = state != STATE_WAITING_RESUME;
-    bool at_call_entry       = variants[variantnum].callnum != NO_CALL;
-    bool call_returned       = variants[variantnum].callnum == NO_CALL;
-    bool call_dispatched     = variants[variantnum].call_dispatched;
-    bool in_call             =
+    bool should_suspend  = state != STATE_WAITING_RESUME;
+    bool at_call_entry   = variants[variantnum].callnum != NO_CALL;
+    bool call_returned   = variants[variantnum].callnum == NO_CALL;
+    bool call_dispatched = variants[variantnum].call_dispatched;
+    bool in_call         =
         (state == STATE_IN_MASTERCALL
          || state == STATE_IN_SYSCALL
          || state == STATE_IN_FORKCALL
@@ -480,100 +479,92 @@ void monitor::log_variant_backtrace(int variantnum, int max_depth, int calculate
         || (variants[variantnum].callnum == MVEE_RDTSC_FAKE_SYSCALL)
         || is_segfault                                     // from a signal-delivery-stop
 		|| in_sigsuspend)
-		should_send_sigstop = false;
+		should_suspend = false;
 
-    logfunc("pid: %d - ==================================\n", variants[variantnum].variantpid);
-    logfunc("pid: %d - generating local backtrace for variant: %d\n",
-            variants[variantnum].variantpid,
-            variants[variantnum].variantpid);
+    logfunc("%s - ==================================\n", 
+			call_get_variant_pidstr(variantnum).c_str());
+    logfunc("%s - generating local backtrace for variant\n",
+			call_get_variant_pidstr(variantnum).c_str());
 
-    if (should_send_sigstop)
+    if (should_suspend)
     {
-        logfunc("pid: %d - > variant is currently running or in a syscall. Waiting for SIGSTOP delivery...\n",
-                variants[variantnum].variantpid);
+        logfunc("%s - > variant is currently running or in a syscall. Trying to suspend.\n",
+				call_get_variant_pidstr(variantnum).c_str());
+		
+		if (!interaction::wait(variants[variantnum].variantpid, status, true, true, true))
+		{
+			logfunc("%s - > error while waiting for variant: %d (%s) - status: %s\n",
+					call_get_variant_pidstr(variantnum).c_str(), 
+					errno, strerror(errno),
+					getTextualMVEEWaitStatus(status).c_str()
+				);
+			set_mmap_table->release_lock();
+			return;
+		}
 
-        i = waitpid(variants[variantnum].variantpid, &status, __WALL | WUNTRACED | __WNOTHREAD | WNOHANG);
-
-        if (should_send_sigstop && i <= 0)
+        if (should_suspend && 
+			status.reason == STOP_NOTSTOPPED)
         {
-            long tmp = ptrace(PTRACE_PEEKUSER, variants[variantnum].variantpid, 0, NULL);
-
-            if (tmp != -1)
+            if (interaction::is_suspended(variants[variantnum].variantpid))
             {
-                logfunc("pid: %d - > we were about to send SIGSTOP to this variant but it was already in ptrace-stop!\n",
-                        variants[variantnum].variantpid);
+                logfunc("%s - > we were about to send SIGSTOP to this variant but it was already suspended!\n",
+						call_get_variant_pidstr(variantnum).c_str());
                 goto was_interrupted;
             }
 
-            int  err = syscall(__NR_tgkill, variants[variantnum].varianttgid,
-                               variants[variantnum].variantpid, SIGSTOP);
-
-            if (err)
+            if (!interaction::suspend(variants[variantnum].variantpid, variants[variantnum].varianttgid))
             {
-                logfunc("pid: %d - > signal delivery failed... err = %d (%s)\n",
-                        variants[variantnum].variantpid, errno, strerror(errno));
+                logfunc("%s - > signal delivery failed... err = %d (%s)\n",
+						call_get_variant_pidstr(variantnum).c_str(), errno, strerror(errno));
 				set_mmap_table->release_lock();
                 return;
             }
 
-            i = waitpid(variants[variantnum].variantpid, &status, __WALL | WUNTRACED | __WNOTHREAD);
+			if (interaction::wait(variants[variantnum].variantpid, status))
+			{
+				logfunc("%s - > variant stopped.\n",
+						call_get_variant_pidstr(variantnum).c_str());
+			}
 
-            if (i == -1)
-            {
-                logfunc("pid: %d - > error while waiting for variant: %d (%s)\n",
-                        variants[variantnum].variantpid, errno, strerror(errno));
-				set_mmap_table->release_lock();
-                return;
-            }
-            else if (i != 0)
-            {
-                logfunc("pid: %d - > variant stopped.\n",
-                        variants[variantnum].variantpid);
-            }
-
-            if (WIFEXITED(status))
-            {
-                logfunc("pid: %d - >>> Process %d exited. Status = %d\n",
-                        variants[variantnum].variantpid, i, WEXITSTATUS(status));
-				set_mmap_table->release_lock();
-                return;
-            }
-            else if (WIFSIGNALED(status))
-            {
-                logfunc("pid: %d - >>> Process %d terminated by signal: %s\n",
-                        variants[variantnum].variantpid, i, getTextualSig(WTERMSIG(status)));
-                if (WTERMSIG(status) != SIGSEGV)
+			switch (status.reason)
+			{
+				case STOP_EXIT:
 				{
+					logfunc("%s - >>> Process exited. Status = %d\n",
+							call_get_variant_pidstr(variantnum).c_str(), status.data);
 					set_mmap_table->release_lock();
-                    return;
+					return;
 				}
-            }
-            else if (WIFCONTINUED(status))
-            {
-                logfunc("pid: %d - >>> Process %d continued! (this shouldn't happen!)\n",
-                        variants[variantnum].variantpid, i);
-				set_mmap_table->release_lock();
-                return;
-            }
-            else if (WIFSTOPPED(status))
-            {
-                logfunc("pid: %d - >>> Process %d stopped by signal: %s\n",
-                        variants[variantnum].variantpid, i, getTextualSig(WSTOPSIG(status)));
-            }
-            else
-            {
-                logfunc(">>> Couldn't poll process status...\n",
-                        variants[variantnum].variantpid);
-				set_mmap_table->release_lock();
-                return;
-            }
+				case STOP_KILLED:
+				{
+					logfunc("%s - >>> Process terminated by signal: %s\n",
+							call_get_variant_pidstr(variantnum).c_str(), getTextualSig(status.data));
+					if (WTERMSIG(status) != SIGSEGV)
+					{
+						set_mmap_table->release_lock();
+						return;
+					}
+					break;
+				}
+				case STOP_SIGNAL:
+				{
+					logfunc("%s - >>> Process stopped by signal: %s\n",
+							call_get_variant_pidstr(variantnum).c_str(), getTextualSig(status.data));
+					break;
+				}
+				default:
+				{
+					warnf("%s - >>> Unexpected stop reason\n",
+							call_get_variant_pidstr(variantnum).c_str());
+					break;
+				}
+			}
         }
     }
     else
     {
 was_interrupted:
-        logfunc("pid: %d - > variant is currently suspended\n", variants[variantnum].variantpid);
-        //sync();
+        logfunc("%s - > variant is currently suspended\n", call_get_variant_pidstr(variantnum).c_str());
 
         mvee_syscall_logger logger;
         if (variants[variantnum].callnum > 0 && variants[variantnum].callnum <= MAX_CALLS)
@@ -590,19 +581,19 @@ was_interrupted:
     // Stack walk
     unsigned long      prev_ip    = 0;
     mvee_dwarf_context context(variants[variantnum].variantpid);
-    log_caller_info(variantnum, 0, IP(context.regs), 0, logfunc);
+    log_caller_info(variantnum, 0, IP_IN_REGS(context.regs), 0, logfunc);
     while (1)
     {
         if (set_mmap_table->dwarf_step(variantnum, variants[variantnum].variantpid, &context) != 1
-/*            || (unsigned long)SP(context.regs) > stack_base */
-			  || (unsigned long)IP(context.regs) == prev_ip)
+/*            || (unsigned long)SP_IN_REGS(context.regs) > stack_base */
+			|| (unsigned long)IP_IN_REGS(context.regs) == prev_ip)
         {
             logfunc(">>> end of stack\n");
             break;
         }
 
-        log_caller_info(variantnum, i++, IP(context.regs), 0, logfunc);
-        prev_ip = IP(context.regs);
+        log_caller_info(variantnum, i++, IP_IN_REGS(context.regs), 0, logfunc);
+        prev_ip = IP_IN_REGS(context.regs);
     }
 
     log_registers(variantnum, logfunc);
@@ -626,8 +617,16 @@ void monitor::log_dump_queues(shm_table* shm_table)
 		std::fill(pos.begin(), pos.end(), 0);
 
         for (int i = 0; i < mvee::numvariants; ++i)
+		{
             if (atomic_queue_pos[i] && !variants[i].variant_terminated)
-                pos[i] = mvee_wrap_ptrace(PTRACE_PEEKDATA, variants[i].variantpid, (unsigned long)atomic_queue_pos[i], NULL);
+			{
+                if (!rw::read_primitive<unsigned long>(variants[i].variantpid, (void*) atomic_queue_pos[i], pos[i]))
+				{
+					warnf("%s - Couldn't read atomic buffer pos\n", call_get_variant_pidstr(i).c_str());
+					return;
+				}
+			}
+		}
 
         char                       logname[100];
         sprintf(logname, "%s/Logs/%s_%d.log", mvee::os_get_orig_working_dir().c_str(),
@@ -671,7 +670,7 @@ void monitor::log_dump_queues(shm_table* shm_table)
             fprintf(logfile, "\n\n COUNTER DUMP FOR VARIANT: %d (PID: %d)\n",
                     i, variants[i].variantpid);
 
-            struct mvee_counter* counters = (struct mvee_counter*)mvee_rw_read_data(variants[i].variantpid,
+            struct mvee_counter* counters = (struct mvee_counter*)rw::read_data(variants[i].variantpid,
                                                                                     atomic_counters[i], MVEE_COUNTERS * sizeof(struct mvee_counter), 0);
 
             if (counters)
@@ -911,7 +910,7 @@ void monitor::log_calculate_clock_spread()
 
 	std::vector<double> cntrs(MVEE_COUNTERS);
 
-	struct mvee_counter* counters = (struct mvee_counter*)mvee_rw_read_data(variants[0].variantpid,
+	struct mvee_counter* counters = (struct mvee_counter*)rw::read_data(variants[0].variantpid,
 		atomic_counters[0], MVEE_COUNTERS * sizeof(struct mvee_counter), 0);
 
 	for (int j = 0; j < MVEE_COUNTERS; ++j)
@@ -1026,7 +1025,12 @@ void monitor::log_stack(int variantnum)
 	call_check_regs(variantnum);
 	for (int i = -10; i < 10; ++i)
 	{
-		unsigned long stack_word = mvee_wrap_ptrace(PTRACE_PEEKDATA, variants[variantnum].variantpid, variants[variantnum].regs.rsp + i * sizeof(unsigned long), 0);
+		unsigned long stack_word;
+		
+		if (!rw::read_primitive<unsigned long>(variants[variantnum].variantpid, 
+											   (void*) (SP_IN_REGS(variants[variantnum].regs) + i * sizeof(unsigned long)), 
+											   stack_word))
+			return;
 
 		debugf("stack[rsp + %d] = " PTRSTR "\n", i*sizeof(unsigned long), stack_word);
 	}
@@ -1038,10 +1042,22 @@ void monitor::log_stack(int variantnum)
 -----------------------------------------------------------------------------*/
 void monitor::log_segfault(int variantnum)
 {
-    siginfo_t siginfo = {0};
-    mvee_wrap_ptrace(PTRACE_GETSIGINFO, variants[variantnum].variantpid, 0, (void*)&siginfo);
-    FETCH_IP(variantnum, eip);
-
+	siginfo_t siginfo;
+	unsigned long eip;
+	
+	if (!interaction::get_signal_info(variants[variantnum].variantpid, &siginfo))
+	{
+		warnf("%s - Couldn't get signal info\n", 
+			  call_get_variant_pidstr(variantnum).c_str());
+		return;
+	}
+	
+	if (!interaction::fetch_ip(variants[variantnum].variantpid, eip))
+	{
+		warnf("%s - Couldn't read instruction pointer\n", 
+			  call_get_variant_pidstr(variantnum).c_str());
+	}
+	
 #ifdef MVEE_SUPPORTS_IPMON
 	if (ipmon_initialized && siginfo.si_addr == 0)
 	{
@@ -1123,7 +1139,7 @@ void monitor::log_segfault(int variantnum)
 					if (arg)
 					{
 						// try to read the slave block from mem
-						unsigned char* slave_arg = mvee_rw_read_data(variants[variantnum].variantpid,
+						unsigned char* slave_arg = rw::read_data(variants[variantnum].variantpid,
 																	 (void*)slave_arg_val,
 																	 arg->len - sizeof(unsigned long),
 																	 0);
@@ -1184,19 +1200,30 @@ void monitor::log_hw_bp_event (int variantnum, siginfo_t* sig)
 
     debugf("Hardware Breakpoint hit by variant: %d\n", variants[variantnum].variantpid);
 
-    dr6 = mvee_wrap_ptrace(PTRACE_PEEKUSER, variants[variantnum].variantpid,
-                           offsetof(user, u_debugreg) + 6*sizeof(long), NULL);
+    if (!interaction::read_specific_reg(variants[variantnum].variantpid,
+										offsetof(user, u_debugreg) + 6*sizeof(long), dr6))
+	{
+		warnf("%s - Coulnd't read dr6\n", call_get_variant_pidstr(variantnum).c_str());
+		return;
+	}
 
     for (i = 0; i < 4; ++i)
     {
         if (dr6 & (1 << i))
         {
-            debugf("> this BP at address " PTRSTR " is registered in slot %d and has type %s\n",
-                       variants[variantnum].hw_bps[i], i,
-                       getTextualBreakpointType(variants[variantnum].hw_bps_type[i]));
-            debugf("> current value -> " LONGRESULTSTR " \n",
-                       mvee_wrap_ptrace(PTRACE_PEEKDATA, variants[variantnum].variantpid,
-                                        variants[variantnum].hw_bps[i], NULL));
+			unsigned long ptr;
+			if (!rw::read_primitive<unsigned long>(variants[variantnum].variantpid, (void*) variants[variantnum].hw_bps[i], ptr))
+			{
+				warnf("%s - Coulnd't read value at address 0x" PTRSTR " - This address was set in HW BP register %d\n", 
+					  call_get_variant_pidstr(variantnum).c_str(), variants[variantnum].hw_bps[i], i);
+			}
+			else
+			{
+				debugf("> this BP at address " PTRSTR " is registered in slot %d and has type %s\n",
+					   variants[variantnum].hw_bps[i], i,
+					   getTextualBreakpointType(variants[variantnum].hw_bps_type[i]));
+				debugf("> current value -> " LONGRESULTSTR " \n", ptr);
+			}
             break;
         }
     }
@@ -1680,43 +1707,4 @@ void mvee_log_local_backtrace()
 	for (i=0; i<trace_size; ++i)
 		warnf("[%d] %s\n", i, messages[i]);
 	free(messages);
-}
-
-/*-----------------------------------------------------------------------------
-  mvee_wrap_ptrace - wrapper around ptrace that logs when something went wrong
------------------------------------------------------------------------------*/
-static __thread bool saw_ptrace_fail = false;
-long mvee_wrap_ptrace(unsigned short request, pid_t pid, unsigned long addr, void *data)
-{
-//	debugf("PTRACE(%s, %d, 0x" PTRSTR ", 0x" PTRSTR ")\n",
-//			   getTextualRequest(request), pid, addr, data);
-
-    long result = ptrace((enum __ptrace_request)request, pid, addr, data);
-
-#ifdef MVEE_GENERATE_EXTRA_STATS
-    if (!mvee::in_logging_handler)
-        mvee::log_ptrace_op(0, request, 0);
-#endif
-
-    if (unlikely(result == -1)
-        && errno != 0
-        && mvee::active_monitor
-        && !mvee::active_monitor->is_group_shutting_down()
-		&& !saw_ptrace_fail)
-    {
-        int err = errno;
-		saw_ptrace_fail = true;
-        warnf("==================================\n");
-        warnf("ERROR: ptrace request failed\n");
-        warnf("request  : %d (%s)\n",      request, getTextualRequest(request));
-        warnf("pid      : %d\n",           pid);
-        warnf("addr     : 0x" PTRSTR "\n", addr);
-        warnf("data     : 0x" PTRSTR "\n", (long)data);
-        mvee::active_monitor->log_monitor_state_short(err);
-		mvee_log_local_backtrace();
-        warnf("==================================\n");
-        return -1;
-    }
-
-    return result;
 }

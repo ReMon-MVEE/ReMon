@@ -168,7 +168,7 @@ void mvee_read_lock_result_wake            (void);
     if (was_outer)                                                                     \
     {                                                                                  \
         /* master variant functionality */                                             \
-        if (mvee_interposer_variantnum == 0)                                             \
+        if (mvee_interposer_variantnum == 0)							               \
         {                                                                              \
             /* if we execute during the lock, log, unlock region, we must be */        \
             /* dealing with an atomic function. As such, we should also grab */        \
@@ -252,7 +252,7 @@ void mvee_read_lock_result_wake            (void);
     else                                                                               \
     {                                                                                  \
         /* if it's an inner function, the result does not need to be recorded */       \
-        if (mvee_interposer_variantnum == 0 || slave_should_execute)                     \
+        if (mvee_interposer_variantnum == 0 || slave_should_execute)                   \
             ASN_ ## resulttype(result) orig_func orig_func_args;                       \
     }                                                                                  \
     outer_func = was_outer;

@@ -53,8 +53,6 @@ public:
     }
 };
 
-long mvee_wrap_ptrace                 (unsigned short request, pid_t pid, unsigned long addr, void* data);
-
 /*-----------------------------------------------------------------------------
     Constants
 -----------------------------------------------------------------------------*/
@@ -436,6 +434,12 @@ public:
     static bool                    is_printable_string(char* str, int len);
 
 	// 
+	// converts a string to upper case
+	//
+    static std::string             upcase(const char* lower_case_string);
+
+
+	// 
 	// Convert an "old" integer-style sigset to a "new" sigset_t-style sigset
 	//
     static sigset_t                old_sigset_to_new_sigset(unsigned long old_sigset);
@@ -502,9 +506,10 @@ public:
     static std::map<unsigned long, unsigned char>
                                     syslocks_table;
 
-#ifdef MVEE_GENERATE_EXTRA_STATS
+	//
+	// Set to true when we're executing a logging handler 
+	//
     static __thread bool            in_logging_handler;
-#endif
 
     //
     // Lock/Cond that protects the variables below

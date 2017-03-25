@@ -106,9 +106,9 @@ void mvee::start_variant(int variantnum)
 	// push the basename of the original binary name as argv[0]
 	size_t pos = binary.rfind("/");
 	if (pos != std::string::npos)
-		args.push_front(binary.substr(pos+1).c_str());
+		args.push_front(mvee::strdup(binary.substr(pos+1).c_str()));
 	else
-		args.push_front(binary.c_str());
+		args.push_front(mvee::strdup(binary.c_str()));
 
 	// Build arg array
 	const char** _args = new const char*[args.size()];

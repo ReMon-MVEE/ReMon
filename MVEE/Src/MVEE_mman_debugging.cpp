@@ -9,7 +9,6 @@
     Includes
 -----------------------------------------------------------------------------*/
 #include <sys/mman.h>
-#include <sys/ptrace.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <unistd.h>
@@ -31,6 +30,7 @@
 #include "MVEE_memory.h"
 #include "MVEE_logging.h"
 #include "MVEE_private_arch.h"
+#include "MVEE_interaction.h"
 
 /*-----------------------------------------------------------------------------
     mmap_addr2line_proc class
@@ -59,7 +59,7 @@ mmap_addr2line_proc::mmap_addr2line_proc(std::string& file, int variantnum, pid_
                 addr2line_status = ADDR2LINE_FILE_NO_DEBUG_SYMS;
                 return;
             }
-            unsigned char* vdso_data = mvee_rw_read_data(variantpid, (void*)region_address,
+            unsigned char* vdso_data = rw::read_data(variantpid, (void*)region_address,
                                                          region_size, 0);
             if (!vdso_data)
             {
@@ -323,7 +323,7 @@ void mmap_addr2line_proc::pipe_create(const std::string& lib_name)
 mvee_dwarf_context::mvee_dwarf_context (pid_t variantpid)
 {
     // get initial context
-    mvee_wrap_ptrace(PTRACE_GETREGS, variantpid, 0, (void*)&regs);
+	(void) interaction::read_all_regs(variantpid, &regs);
     cfa = 0;
 }
 
@@ -364,7 +364,7 @@ dwarf_info::dwarf_info(std::string& file, int variantnum, pid_t variantpid, mmap
     if (dwarf_in_memory)
     {
         dwarf_data.dwarf_buffer =
-            mvee_rw_read_data(variantpid, (void*)region_info->region_base_address, region_info->region_size, true);
+            rw::read_data(variantpid, (void*)region_info->region_base_address, region_info->region_size, true);
 
         if (dwarf_data.dwarf_buffer)
             dwarf_elf = elf_memory((char*)dwarf_data.dwarf_buffer, region_info->region_size);
@@ -609,16 +609,16 @@ int mmap_table::dwarf_step (int variantnum, pid_t variantpid, mvee_dwarf_context
     regtable.rt3_rules = NULL;
 
     // map EIP to a region
-    found_region       = get_region_info(variantnum, IP(context->regs));
+    found_region       = get_region_info(variantnum, IP_IN_REGS(context->regs));
     if (!found_region)
     {
         warnf("DWARF: couldn't map EIP " PTRSTR " to a known region for variant: %d (pid: %d)\n",
-                    IP(context->regs), variantnum, variantpid);
+                    IP_IN_REGS(context->regs), variantnum, variantpid);
         goto out;
     }
 
     // fetch the FDE that describes the frame at the specified address
-    pc                 = found_region->map_memory_pc_to_file_pc(variantnum, variantpid, IP(context->regs) - found_region->region_base_address);
+    pc                 = found_region->map_memory_pc_to_file_pc(variantnum, variantpid, IP_IN_REGS(context->regs) - found_region->region_base_address);
 
     // now make sure that we get a valid dwarf info
     info               = found_region->get_dwarf_info(variantnum, variantpid);
@@ -630,11 +630,6 @@ int mmap_table::dwarf_step (int variantnum, pid_t variantpid, mvee_dwarf_context
 #endif
         goto out;
     }
-/*	else
-    {
-        warnf("info: 0x" PTRSTR " - pc: 0x" PTRSTR "\n", info, pc);
-    }
-*/
 
     if (dwarf_get_fde_at_pc(info->fde_list, pc, &fde, &low_pc, &high_pc, &de) != DW_DLV_OK)
     {
@@ -710,7 +705,10 @@ int mmap_table::dwarf_step (int variantnum, pid_t variantpid, mvee_dwarf_context
                 long          old_val = *reg;
 #endif
                 unsigned long addr    = (unsigned long)(context->cfa + (long)regtable.rt3_rules[i].dw_offset_or_block_len);
-                *reg = mvee_wrap_ptrace(PTRACE_PEEKDATA, variantpid, addr, NULL);
+                long tmp;
+				if (!rw::read_primitive<long>(variantpid, (void*) addr, tmp))				
+					warnf("DWARF: Couldn't read DWARF reg at addr 0x" PTRSTR "\n", addr);
+				*reg = tmp;
 #ifdef MVEE_DWARF_DEBUG
                 long          new_val = *reg;
                 debugf("DWARF: updated val: %s - " PTRSTR " => " PTRSTR " -- val was at addr: " PTRSTR "\n", getTextualDWARFReg(i), old_val, new_val, addr);
@@ -794,7 +792,7 @@ int mmap_table::dwarf_step (int variantnum, pid_t variantpid, mvee_dwarf_context
     }
 
 
-    SP(context->regs) = context->cfa;
+    SP_IN_REGS(context->regs) = context->cfa;
     success           = 1;
 
 out:
@@ -974,9 +972,13 @@ std::string mmap_table::get_caller_info
         {
 			if (found_region->region_backing_file_path == "[vdso]")
 			{
-				FETCH_SYSCALL_NO_PID(variantpid, eax);
+				unsigned long syscall_no;
+				if (!interaction::fetch_syscall_no(variantpid, syscall_no))
+					ss << "in vdso - couldn't read syscall no";
+				else
+					ss << "vdso - syscall: " << syscall_no << " (" << getTextualSyscall(syscall_no) << ") - addr: " << STDPTRSTR(address - lib_start_address);
+
 				update_instr_cache = 0;
-				ss << "vdso - syscall: " << eax << " (" << getTextualSyscall(eax) << ") - addr: " << STDPTRSTR(address - lib_start_address);
 				caller_info = "";
 			}
 			else if (found_region->region_backing_file_path == "[anonymous]" &&

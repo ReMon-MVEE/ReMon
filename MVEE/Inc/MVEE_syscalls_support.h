@@ -370,14 +370,14 @@
         std::vector<void*> events(mvee::numvariants);                                                  \
         FILLARGARRAY(numarg, events);                                                                          \
         struct epoll_event master_event, slave_event;                                                          \
-        if (!mvee_rw_read_struct(variants[0].variantpid, events[0], sizeof(struct epoll_event), &master_event))    \
+        if (!rw::read_struct(variants[0].variantpid, events[0], sizeof(struct epoll_event), &master_event))    \
         {                                                                                                      \
             cache_mismatch_info("couldn't read epoll_event\n");                                                        \
             return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;                                        \
         }                                                                                                      \
         for (int i = 1; i < mvee::numvariants; ++i)                                                            \
         {                                                                                                      \
-            if (!mvee_rw_read_struct(variants[i].variantpid, events[i], sizeof(struct epoll_event), &slave_event)) \
+            if (!rw::read_struct(variants[i].variantpid, events[i], sizeof(struct epoll_event), &slave_event)) \
             {                                                                                                  \
                 cache_mismatch_info("couldn't read epoll_event\n");                                                    \
                 return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;                                    \
@@ -429,45 +429,31 @@
 // Replicate buffer contents. Use this only for mastercalls that return the
 // length of the buffer in an argument - TWO POINTER ARGUMENTS!!!
 //
-#define REPLICATEBUFFERANDLEN(bufferarg, lenarg, lenarg_size)                                        \
-    {                                                                                                \
-        if (call_succeeded &&                                                                        \
-            state == STATE_IN_MASTERCALL &&                                                          \
-            ARG ## bufferarg(0) &&                                                                   \
-            ARG ## lenarg(0))                                                                        \
-        {                                                                                            \
-            mvee_word master_word, slave_word;                                                       \
-            long      len = 0;                                                                       \
-            master_word._long = mvee_wrap_ptrace(PTRACE_PEEKDATA,                                    \
-                                                 variants[0].variantpid, ARG ## lenarg(0), NULL);        \
-            switch(lenarg_size)                                                                      \
-            {                                                                                        \
-                case 8: len = master_word._long; break;                                              \
-                case 4: len = master_word._int; break;                                               \
-                case 2: len = master_word._short; break;                                             \
-                case 1: len = master_word._char; break;                                              \
-            }                                                                                        \
-            std::vector<const unsigned char*> argarray(mvee::numvariants);                                  \
-            FILLARGARRAY(bufferarg, argarray);                                                       \
-            call_replicate_buffer(argarray, len);                                                    \
-            for (int j = 1; j < mvee::numvariants; ++j)                                              \
-            {                                                                                        \
-                if (lenarg_size < sizeof(long))                                                      \
-                    slave_word._long = mvee_wrap_ptrace(PTRACE_PEEKDATA,                             \
-                                                        variants[j].variantpid, ARG ## lenarg(j), NULL); \
-                else                                                                                 \
-                    slave_word._long = master_word._long;                                            \
-                                                                                                     \
-                switch(lenarg_size)                                                                  \
-                {                                                                                    \
-                    case 4: slave_word._int   = master_word._int; break;                             \
-                    case 2: slave_word._short = master_word._short; break;                           \
-                    case 1: slave_word._char  = master_word._char; break;                            \
-                }                                                                                    \
-                mvee_wrap_ptrace(PTRACE_POKEDATA,                                                    \
-                                 variants[j].variantpid, ARG ## lenarg(j), (void*)slave_word._long);     \
-            }                                                                                        \
-        }                                                                                            \
+#define REPLICATEBUFFERANDLEN(bufferarg, lenarg, lenarg_type)			\
+    {																	\
+        if (call_succeeded &&											\
+            state == STATE_IN_MASTERCALL &&								\
+            ARG ## bufferarg(0) &&										\
+            ARG ## lenarg(0))											\
+        {																\
+			lenarg_type len;											\
+			if (!rw::read_primitive<lenarg_type>(variants[0].variantpid, (void*) ARG ## lenarg(0), len)) \
+			{															\
+				warnf("%s - couldn't read length\n", call_get_variant_pidstr(0).c_str()); \
+				shutdown(false);										\
+			}															\
+            std::vector<const unsigned char*> argarray(mvee::numvariants); \
+            FILLARGARRAY(bufferarg, argarray);							\
+            call_replicate_buffer(argarray, len);						\
+            for (int j = 1; j < mvee::numvariants; ++j)					\
+            {															\
+				if (!rw::write_primitive<lenarg_type>(variants[j].variantpid, (void*) ARG ## lenarg(j), len)) \
+				{														\
+					warnf("%s - couldn't write length\n", call_get_variant_pidstr(j).c_str()); \
+					shutdown(false);									\
+				}														\
+            }															\
+        }																\
     }
 
 //
@@ -560,11 +546,17 @@
     std::string text_addr;												\
     if (ARG ## sockarg(variantnum) && ARG ## lenarg(variantnum))		\
     {																	\
-        socklen_t        len  = (socklen_t)mvee_wrap_ptrace(PTRACE_PEEKDATA, \
-                                                            variants[variantnum].variantpid, ARG ## lenarg(variantnum), NULL); \
-        struct sockaddr* addr = call_get_sockaddr(variantnum, (struct sockaddr*) ARG ## sockarg(variantnum), len); \
-        text_addr = addr ? getTextualSocketAddr(addr) : "";				\
-        SAFEDELETEARRAY(addr);											\
+		socklen_t len;													\
+		if (!rw::read_primitive<socklen_t>(variants[variantnum].variantpid, \
+										   (void*) ARG ## lenarg(variantnum), len)) \
+		{																\
+			warnf("%s - Failed to read socket text address\n",			\
+				  call_get_variant_pidstr(variantnum).c_str());			\
+			shutdown(false);											\
+		}																\
+		struct sockaddr* addr = call_get_sockaddr(variantnum, (struct sockaddr*) ARG ## sockarg(variantnum), len); \
+		text_addr = addr ? getTextualSocketAddr(addr) : "";				\
+		SAFEDELETEARRAY(addr);											\
     }
 
 //
@@ -586,34 +578,29 @@
 //
 // Map master fds onto slave fds - used at the system call site
 //
-#define MAPFDS(numarg)                                                               \
-    if ((unsigned int)ARG ## numarg(0) != (unsigned int)-1)                          \
-    {                                                                                \
-        fd_info* info = set_fd_table->get_fd_info(ARG ## numarg(0));                 \
-        if (info && !info->master_file)                                              \
-        {                                                                            \
-            for (int i = 1; i < mvee::numvariants; ++i)                              \
-            {                                                                        \
-                debugf("> variant %d - mapped to fd %lu\n", i, info->fds[i]);      \
-                SETARG ## numarg(i, info->fds[i]);                                   \
-            }                                                                        \
-        }                                                                            \
-        else if (!info || info->master_file)                                         \
-        {                                                                            \
-            for (int i = 1; i < mvee::numvariants; ++i)                              \
-            {                                                                        \
-                SETARG ## numarg(i, set_fd_table->get_free_fd(i, ARG ## numarg(i))); \
-            }                                                                        \
-        }                                                                            \
-    }
-
-//
-// Maps them back as we're not allowed to clobber argument registers
-//
-#define UNMAPFDS(numarg)                        \
-    for (int i = 1; i < mvee::numvariants; ++i) \
-    {                                           \
-        SETARG ## numarg(i, ARG ## numarg(0));  \
+#define MAPFDS(numarg)													\
+    if ((unsigned int)ARG ## numarg(0) != (unsigned int)-1)				\
+    {																	\
+        fd_info* info = set_fd_table->get_fd_info(ARG ## numarg(0));	\
+        if (info && !info->master_file)									\
+        {																\
+            for (int i = 1; i < mvee::numvariants; ++i)					\
+            {															\
+				if (ARG ## numarg(0) != info->fds[i])					\
+				{														\
+					debugf("%s - mapped fd %lu to fd %lu\n", call_get_variant_pidstr(i).c_str(), ARG ## numarg(0), info->fds[i]); \
+					call_overwrite_arg_value(i, numarg, info->fds[i], true); \
+				}														\
+            }															\
+        }																\
+        else if (!info || info->master_file)							\
+        {																\
+            for (int i = 1; i < mvee::numvariants; ++i)					\
+            {															\
+				unsigned long new_fd = set_fd_table->get_free_fd(i, ARG ## numarg(i)); \
+				call_overwrite_arg_value(i, numarg, new_fd, true);		\
+            }															\
+        }																\
     }
 
 //
@@ -653,6 +640,44 @@
         }                                               \
     }
 
+#define DOALIASAT(dirfdarg, patharg)									\
+	{																	\
+		int limit = 1;													\
+		if (state != STATE_IN_MASTERCALL)								\
+			limit = mvee::numvariants;									\
+																		\
+		for (int i = 0; i < limit; ++i)									\
+		{																\
+			auto orig_path = set_fd_table->get_full_path(i, variants[i].variantpid, (unsigned long)(int)ARG##dirfdarg(i), (void*)ARG##patharg(i)); \
+			auto alias = mvee::get_alias(i, orig_path);					\
+			if (alias != "")											\
+			{															\
+				debugf("%s - File %s is aliased to %s\n", call_get_variant_pidstr(i).c_str(), orig_path.c_str(), alias.c_str()); \
+				call_overwrite_arg_data(i, patharg, orig_path.length() + 1, (void*) alias.c_str(), alias.length() + 1, true); \
+			}															\
+		}																\
+	}
+
+
+#define DOALIAS(patharg)												\
+	{																	\
+		int limit = 1;													\
+		if (state != STATE_IN_MASTERCALL)								\
+			limit = mvee::numvariants;									\
+																		\
+		for (int i = 0; i < limit; ++i)									\
+		{																\
+			auto orig_path = set_fd_table->get_full_path(i, variants[i].variantpid, AT_FDCWD, (void*)ARG##patharg(i)); \
+			auto alias = mvee::get_alias(i, orig_path);					\
+			if (alias != "")											\
+			{															\
+				debugf("%s - File %s is aliased to %s\n", call_get_variant_pidstr(i).c_str(), orig_path.c_str(), alias.c_str()); \
+				call_overwrite_arg_data(i, patharg, orig_path.length() + 1, (void*) alias.c_str(), alias.length() + 1, true); \
+			}															\
+		}																\
+	}
+
+	
 
 
 

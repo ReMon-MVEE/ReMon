@@ -21,6 +21,7 @@
 #include <sstream>
 #include "MVEE_build_config.h"
 #include "MVEE_private_arch.h"
+#include "MVEE_interaction.h"
 
 /*-----------------------------------------------------------------------------
     Typedefs
@@ -40,24 +41,17 @@ typedef void (monitor:: *mvee_syscall_logger)(int);
 #define NO_MVEE_SCHEDULING                 0                        // mvee won't pin any threads
 #define MVEE_CLEVER_SCHEDULING             1 
 
-#ifndef PTRACE_GETSIGMASK
- #define PTRACE_GETSIGMASK                 (__ptrace_request)0x420a // new since Linux 3.11
-#endif
-#ifndef PTRACE_SETSIGMASK
- #define PTRACE_SETSIGMASK                 (__ptrace_request)0x420b // new since Linux 3.11
-#endif
-
 /*-----------------------------------------------------------------------------
   Enumerations
 -----------------------------------------------------------------------------*/
 enum MonitorState
 {
-    STATE_WAITING_ATTACH,                                           // Waiting to attach to the newly created variants
-    STATE_WAITING_RESUME,                                           // We use PTRACE_O_TRACE[FORK|VFORK|CLONE] so new variants are started with SIGSTOP
-    STATE_NORMAL,                                                   // Normal operation
-    STATE_IN_SYSCALL,                                               // Waiting for syscall to return
-    STATE_IN_FORKCALL,                                              // Waiting for forkcall to return
-    STATE_IN_MASTERCALL                                             // Waiting for mastercall to return
+    STATE_WAITING_ATTACH, // Waiting to attach to the newly created variants
+    STATE_WAITING_RESUME, // Waiting for variants to be ready for resume
+    STATE_NORMAL,         // Normal operation - variants are running and not executing a syscall
+    STATE_IN_SYSCALL,     // Waiting for syscall to return
+    STATE_IN_FORKCALL,    // Waiting for forkcall to return
+    STATE_IN_MASTERCALL   // Waiting for mastercall to return
 };
 
 /*-----------------------------------------------------------------------------
@@ -124,7 +118,7 @@ public:
     int           call_flags;                                       // Result of the call handler
     struct user_regs_struct
                   regs;                                             // Arguments for the syscall are copied into the variantstate just before entering the call
-    long          return_value;                                     // Return of the current syscall. Retrieved using PTRACE_PEEKUSER
+    long          return_value;                                     // Return of the current syscall. 
     long          extended_value;                                   // Extended value to be returned through the EAX register.
 
     unsigned char call_type;                                        // Type of the current system call, i.e. synced/unsynced/unknown
@@ -336,7 +330,7 @@ private:
 	// *************************************************************************
     // Main monitor thread function - This runs the main monitoring loop
 	// *************************************************************************
-    static void* thread                              (void* param);
+    static void* thread                                  (void* param);
 
 	// *************************************************************************
     // System call support (these are all in MVEE_syscalls_support.cpp)
@@ -399,6 +393,11 @@ private:
     std::string      call_serialize_io_vector            (int variantnum, struct iovec* vec, unsigned int vecsz);
     std::string      call_serialize_msgvector            (int variantnum, struct msghdr* msg);
     std::string      call_serialize_io_buffer            (int variantnum, const unsigned char* buf, unsigned long buflen);
+
+	// 
+	// Syscall handler logging helpers
+	//
+	std::string      call_get_variant_pidstr             (int variantnum);
 
 	// 
 	// Replication functions. These accept a pointer to a data structure for
@@ -472,17 +471,39 @@ private:
 	// 
     unsigned char call_is_known_false_positive        (long* precall_flags);
 
+	//
+	// Resume a single variant
 	// 
-	// Resume all variants (generally using PTRACE_SYSCALL)
+	void          call_resume                         (int variantnum);
+
+	// 
+	// Resume all variants
 	//
     void          call_resume_all                     ();
+
+	// 
+	// Replace the syscall number for a single variant with __NR_getpid and then
+	// resume it. This forces the variant to execute sys_getpid instead of
+	// the call it was about to execute
+	// 
+	void         call_resume_fake_syscall             (int variantnum);
+
 
 	// 
 	// Replace the syscall number for all variants with __NR_getpid and then
 	// resume them. This forces all variants to execute sys_getpid instead of
 	// the call they were about to execute
 	// 
-    void          call_resume_fake_syscall            ();
+    void          call_resume_fake_syscall_all        ();
+
+	//
+	// The syscall that has just returned for this variant was denied in the 
+	// CALL handler. This means that the syscall number was replaced by __NR_getpid
+	// and that GHUMVEE will provide the syscall return value.
+	// This function will write that return value based on the information
+	// provided by the CALL handler
+	//
+	void          call_write_denied_syscall_return    (int variantnum);
 
 	// 
 	// Determines if syscall @callnum should be executed in lockstep for variant
@@ -495,13 +516,16 @@ private:
     unsigned char call_precall_get_call_type          (int variantnum, long callnum);
 
 	//
-	// Runs all of the early precall handling (i.e. comparing the syscall
-	// arguments and possibly logging them to the log file). This function is
-	// not executed if the current syscall is not subject to lockstepping.
-	// 
-	// For standard syscalls, this is a wrapper around the log_args and precall
-	// handler functions for the syscall that is currently being executed by the
-	// variants
+	// Calls the argument logging function for the specified syscall (if any)
+	// A default logging function is called if no specialized logger
+	// exists in MVEE_syscall_handlers.cpp
+	//
+	void          call_precall_log_args               (int variantnum, long callnum);
+
+	//
+	// Calls the PRECALL handler for the current syscall. This is only done
+	// if the syscall is synced (i.e., lockstepped). The PRECALL handler
+	// reads the call arguments and asserts that they are equivalent
 	// 
     long          call_precall                        ();
 
@@ -522,6 +546,13 @@ private:
 	// for the syscall that is currently being executed by the variants
 	// 
     long          call_call_dispatch                  ();
+
+	//
+	// Calls the return logging function for the specified syscall (if any)
+	// A default logging function is called if no specialized logger exists
+	// in MVEE_syscalls_handlers.cpp
+	//
+	void         call_postcall_log_return             (int variantnum);
 
 	//
 	// Runs the postcall handling for syscalls that are not subject to
@@ -579,7 +610,7 @@ private:
 
 	//
 	// Injects a syscall into the variants. This function, which should only be
-	// called when the variants are in ptrace-stopped state, overwrites the
+	// called when the variants are all suspended, overwrites the
 	// syscall number and syscall arguments for all variants. It then resumes
 	// them, and waits for the syscalls to return.
 	// 
@@ -591,10 +622,9 @@ private:
 	// *************************************************************************
 
 	//
-	// Processes a signal delivery to variant @index. The wait4 return status
-	// is given in @status.
+	// Processes a signal delivery to variant @index. 
 	//
-    void handle_signal_event                 (int index, int status);
+    void handle_signal_event                 (int index, interaction::mvee_wait_status& status);
 
 	//
 	// Process a SIGTRAP signal, possibly resulting from the execution of an
@@ -612,7 +642,7 @@ private:
 	// 
 	// Processes the creation of a new task by variant @index
 	//
-    void handle_fork_event                   (int index, int event);
+    void handle_fork_event                   (int index, interaction::mvee_wait_status& status);
 
 	//
 	// Processes the entrance into a syscall by variant @index. This function
@@ -645,23 +675,23 @@ private:
 	// Processes the first SIGSTOP we see from variant @index, which we have not
 	// attached to yet
 	//
-    void handle_attach_event                 (int index, int status);
+    void handle_attach_event                 (int index);
 
 	//
 	// Processes the second SIGSTOP we see from variant @index. This second
-	// SIGSTOP is caused by our PTRACE_ATTACH operation.
+	// SIGSTOP is caused by our attach operation.
 	//
     void handle_resume_event                 (int index);
 
 	//
 	// Handles an event from a variant we are not currently attached to
 	//
-    void handle_detach_event                 (pid_t variantpid, int status);
+    void handle_detach_event                 (int variantpid);
 
 	// 
 	// Entrypoint for all event handling
 	//
-    void handle_event                        (pid_t variantpid, int status);
+    void handle_event                        (interaction::mvee_wait_status& status);
 
 	// *************************************************************************
     // Signal specific event handling
@@ -859,11 +889,6 @@ private:
 	// *************************************************************************   
 
 	//
-	// Set PTRACE options for a newly attached variant
-	//
-    int         init_ptrace_options             (int variantnum);
-
-	//
 	// Initialize the variantstate struct for variant @variantnum
 	//
     void        init_variant                    (int variantnum, pid_t variantpid, pid_t varianttgid);
@@ -1038,25 +1063,6 @@ public:
 	}
 };
 
-// Passed to sys_ptrace through the data field
-struct pt_copymem
-{
-    pid_t         source_pid;                                 // PID of the source process
-    unsigned long source_va;                                  // Virtual Address of the source buffer
-    pid_t         dest_pid;                                   // PID of the destination process
-    unsigned long dest_va;                                    // Virtual Address of the destination buffer
-    unsigned long copy_size;                                  //
-};
-
-// Passed to sys_ptrace through the data field
-struct pt_copystring
-{
-    unsigned long source_va;                                  // Virtual Address of the source string
-    unsigned long dest_buffer_va;                             // Virtual Address of the destination buffer
-    unsigned long dest_buffer_size;                           // Size of the destination buffer - if the source string doesn't fit in here, an error is returned
-    unsigned long out_string_size;                            // The kernel will write the string size here
-};
-
 // If our glibc is compiled with MVEE_DEBUG_MALLOC, slave variants will pass an mvee_malloc_error
 // struct to the monitor whenever they detect a divergence in malloc behavior
 struct mvee_malloc_error
@@ -1168,16 +1174,6 @@ struct ipmon_buffer
 #define IPMON_BLOCKING_CALL  64 // The call is expected to block. This is not a distinct call type. It is ORed with one of the above call types.
 #define IPMON_WAIT_FOR_SIGNAL_CALL 512
 
-
-
-/*-----------------------------------------------------------------------------
-  Definitions
------------------------------------------------------------------------------*/
-//
-// Signal number for traps caused by syscalls (requires PTRACE_O_TRACESYSGOOD)
-//
-#define SIGSYSTRAP                  (SIGTRAP | 0x80)
-
 /*-----------------------------------------------------------------------------
   HW breakpoint types
 -----------------------------------------------------------------------------*/
@@ -1243,18 +1239,5 @@ struct ipmon_buffer
 
 #define likely(x)   __builtin_expect((x), 1)
 #define unlikely(x) __builtin_expect((x), 0)
-
-union mvee_word
-{
-    unsigned long  _ulong;
-    long           _long;
-    unsigned int   _uint;
-    int            _int;
-    unsigned short _ushort;
-    short          _short;
-    unsigned char  _uchar;
-    char           _char;
-    pid_t          _pid;
-};
 
 #endif // MVEE_PRIVATE_H_INCLUDED

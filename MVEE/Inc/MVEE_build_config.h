@@ -43,9 +43,12 @@
 // rather than trying to print them as strings
 // #define MVEE_LOG_HEX_DUMPS
 
-// MVEE_NO_RW_LOGGING: when defined, the monitor will not log argument and return buffers
-// for read/write system calls
-#define MVEE_NO_RW_LOGGING
+// MVEE_NO_RW_LOGGING: when defined, the monitor will not log argument and
+// return buffers for read/write system calls
+// not defined: full logging
+// defined and set to 1: 80 chars max
+// defined and set to 2: no logging
+#define MVEE_NO_RW_LOGGING 1
 
 // MVEE_CHECK_SYNC_PRIMITIVES: the MVEE will keep track of which high-level synchronization
 // primitives the variants are using. Requires libc-support. NO LONGER WORKS. FIXME
@@ -65,13 +68,9 @@
 // the time on each clock
 // #define MVEE_CALCULATE_CLOCK_SPREAD
 
-// MVEE_HAVE_MVEE_KERNEL: When defined, the MVEE will assume that the kernel supports
-// the GHUMVEE kernel extensions (PTRACE_COPYMEM and PTRACE_COPYSTRING)
-// #define MVEE_HAVE_MVEE_KERNEL
-
 // MVEE_ALLOW_SHM: When defined, the variants are permitted to attach to sysv shared
 // memory segments even though it is clearly a bad idea to allow them to do so!!!!
-// #define MVEE_ALLOW_SHM
+#define MVEE_ALLOW_SHM
 
 // MVEE_DUMP_IPMON_BUFFER_ON_FLUSH: If defined, GHUMVEE will log the contents of
 // the IP-MON/UTCB buffer whenever it is being flushed 

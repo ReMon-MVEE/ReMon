@@ -13,8 +13,6 @@
 #include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/shm.h>
-#include <sys/wait.h>
-#include <sys/ptrace.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <signal.h>
@@ -36,6 +34,7 @@
 #include "MVEE_syscalls.h"
 #include "MVEE_private_arch.h"
 #include "MVEE_macros.h"
+#include "MVEE_interaction.h"
 
 /*-----------------------------------------------------------------------------
     Static Member Initialization
@@ -52,9 +51,7 @@ __thread monitor*                      mvee::active_monitor                     
 __thread int                           mvee::active_monitorid                    = 0;
 int                                    mvee::shutdown_signal                     = 0;
 std::map<unsigned long, unsigned char> mvee::syslocks_table;
-#ifdef MVEE_GENERATE_EXTRA_STATS
 __thread bool                          mvee::in_logging_handler                  = false;
-#endif
 pthread_mutex_t                        mvee::global_lock                         = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 pthread_cond_t                         mvee::global_cond                         = PTHREAD_COND_INITIALIZER;
 std::map<std::string, std::weak_ptr<mmap_addr2line_proc> >
@@ -111,7 +108,8 @@ std::deque<std::string> mvee::strsplit(const std::string &s, char delim)
 bool mvee::str_ends_with(std::string& search_in_str, const char* suffix)
 {
     std::string search_for_str(suffix);
-    return search_in_str.size() >= search_for_str.size() && search_in_str.rfind(search_for_str) == (search_in_str.size()-search_for_str.size());
+    return search_in_str.size() >= search_for_str.size() && 
+		search_in_str.rfind(search_for_str) == (search_in_str.size()-search_for_str.size());
 }
 
 /*-----------------------------------------------------------------------------
@@ -144,6 +142,16 @@ bool mvee::is_printable_string(char* str, int len)
 }
 
 /*-----------------------------------------------------------------------------
+    upcase
+-----------------------------------------------------------------------------*/
+std::string mvee::upcase(const char* lower_case_string)
+{
+	std::string out(lower_case_string);
+	std::transform(out.begin(), out.end(), out.begin(), ::toupper);
+	return out;
+}
+
+/*-----------------------------------------------------------------------------
     mvee_old_sigset_to_new_sigset
 -----------------------------------------------------------------------------*/
 sigset_t mvee::old_sigset_to_new_sigset(unsigned long old_sigset)
@@ -169,6 +177,15 @@ std::string mvee::get_alias(int variantnum, std::string path)
 	auto alias = aliases[variantnum].find(path);
 	if (alias != aliases[variantnum].end())
 		return alias->second;
+
+	if (path.find("/dev/shm/") == 0 ||
+		path.find("/run/shm/") == 0)
+	{
+		std::stringstream ss;
+		ss << path << "_variant" << variantnum;
+		return ss.str();
+	}
+
 	return "";
 }
 
@@ -1278,7 +1295,6 @@ void mvee::start_unmonitored()
     std::vector<int>   terminated(mvee::numvariants);
     std::vector<pid_t> pids(mvee::numvariants);
     int                i;
-    int                status;
 
     for (i = 0; i < mvee::numvariants; ++i)
     {
@@ -1307,22 +1323,30 @@ void mvee::start_unmonitored()
         // Resume all variants
         while (!all_resumed)
         {
-            int tmp = wait4(-1, &status, WUNTRACED, NULL);
-            if (WIFSTOPPED(status) && WSTOPSIG(status) == SIGSTOP)
-            {
-                kill(tmp, SIGCONT);
+			interaction::mvee_wait_status status;
 
-                for (i = 0; i < mvee::numvariants; ++i)
-                    if (tmp == pids[i])
-                        resumed[i] = 1;
+			if (!interaction::wait(-1, status, false, false) ||
+				status.reason != STOP_SIGNAL ||
+				status.data != SIGSTOP)
+			{
+				warnf("Failed to wait for children - error: %s - status: %s\n",
+					  strerror(errno), getTextualMVEEWaitStatus(status).c_str());
+				exit(-1);
+				return;
+			}
+           
+			kill(status.pid, SIGCONT);
 
-                for (i = 0; i < mvee::numvariants; ++i)
-                    if (!resumed[i])
-                        break;
+			for (i = 0; i < mvee::numvariants; ++i)
+				if (status.pid == pids[i])
+					resumed[i] = 1;
 
-                if (i >= mvee::numvariants)
-                    all_resumed = true;
-            }
+			for (i = 0; i < mvee::numvariants; ++i)
+				if (!resumed[i])
+					break;
+
+			if (i >= mvee::numvariants)
+				all_resumed = true;
         }
 
         for (i = 0; i < mvee::numvariants; ++i)
@@ -1332,11 +1356,23 @@ void mvee::start_unmonitored()
         // Now wait for all variants to terminate...
         while (!all_terminated)
         {
-            int tmp = wait4(-1, &status, WUNTRACED, NULL);
-            if (WIFEXITED(status))
+			interaction::mvee_wait_status status;
+
+			if (!interaction::wait(-1, status, false, false) ||
+				status.reason != STOP_EXIT || 
+				status.reason != STOP_SIGNAL)
+			{
+				warnf("Failed to wait for children - error: %s - status: %s\n",
+					  strerror(errno), 
+					  getTextualMVEEWaitStatus(status).c_str());
+				exit(-1);
+				return;
+			}
+
+            if (status.reason == STOP_EXIT)
             {
                 for (i = 0; i < mvee::numvariants; ++i)
-                    if (tmp == pids[i])
+                    if (status.pid == pids[i])
                         terminated[i] = 1;
 
                 for (i = 0; i < mvee::numvariants; ++i)
@@ -1346,10 +1382,11 @@ void mvee::start_unmonitored()
                 if (i >= mvee::numvariants)
                     all_terminated = true;
             }
-            else if (WIFSTOPPED(status) && WSTOPSIG(status) == SIGSTOP)
+            else if (status.reason == STOP_SIGNAL && 
+					 status.data == SIGSTOP)
             {
                 for (i = 0; i < mvee::numvariants; ++i)
-                    if (tmp == pids[i])
+                    if (status.pid == pids[i])
                         resumed[i] = 1;
 
                 for (i = 0; i < mvee::numvariants; ++i)
@@ -1384,7 +1421,7 @@ void mvee::start_unmonitored()
 -----------------------------------------------------------------------------*/
 void mvee::start_monitored()
 {
-    int                i, res, status;
+    int                i;
     std::vector<pid_t> procs(mvee::numvariants);
     sigset_t           set;
     sigemptyset(&set);
@@ -1420,10 +1457,19 @@ void mvee::start_monitored()
 
         for (int i = 0; i < mvee::numvariants; ++i)
         {
-            res = wait4(procs[i], &status, 0, NULL);
+			interaction::mvee_wait_status status;
 
-            if (WIFSTOPPED(status) && res > 0)
-                mvee_wrap_ptrace(PTRACE_DETACH, procs[i], 0, NULL);
+			if (!interaction::wait(procs[i], status, false, false, false))
+			{
+				warnf("Failed to wait for children - errno: %s - status: %s\n",
+					  strerror(errno), getTextualMVEEWaitStatus(status).c_str());
+				exit(-1);
+				return;
+			}
+
+            if (status.reason == STOP_SIGNAL)
+				if (!interaction::detach(procs[i]))
+					warnf("Failed to detach from variant %d\n", i);
         }
 
         mvee::register_monitor(mvee::active_monitor);
@@ -1497,18 +1543,20 @@ void mvee::start_monitored()
 #endif
 
 
-        // Place the new variant under supervision
-        // Not that this does not stop the variant.
-        // We will raise a SIGSTOP so the parent can set ptrace options
-        // and can issue a PTRACE_SYSCALL request
-        mvee_wrap_ptrace(PTRACE_TRACEME, 0, 0, NULL);
+        // Place the new variant under supervision of the main thread of the
+		// monitor process.
+        if (!interaction::accept_tracing())
+			fprintf(stderr, "Couldn't accept tracing\n");
 
-        // stop the process so we can detach from it
+        // Stop the variant so we can detach the main monitor thread.
         raise(SIGSTOP);
 
+		// Wait in a busy loop while we wait for the designated monitor
+		// thread to attach
         while (!mvee::can_run)
             ;
 
+		// The monitor thread is now attached. It is now safe to execve
 		start_variant(i);
     }
 }
@@ -1704,7 +1752,6 @@ int main(int argc, char *argv[])
 				(*mvee::config_variant_exec)["env"].clear();
 			
 			builtin = atoi(argv[1]);
-//            mvee::numvariants = atoi(argv[2]);
 
 			// Pretend that argv[1] is the new argv[0]
 			if (!mvee::process_opts(argc - 1, &argv[1], true))
