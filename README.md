@@ -37,11 +37,11 @@ You will find the compiled GHUMVEE binary in the MVEE/bin/<your configuration>/ 
  
 ### Configuring GHUMVEE
 
-GHUMVEE contains a number of configurable options and features. Features that severely impact GHUMVEE's performance generally must be configured at compile time by editing the /path/to/ReMon/MVEE/Inc/MVEE_config.h file. Don't forget to recompile GHUMVEE after editing this file.
+GHUMVEE contains a number of configurable options and features. Features that severely impact GHUMVEE's performance generally must be configured at compile time by editing the /path/to/ReMon/MVEE/Inc/MVEE_build_config.h file. Don't forget to recompile GHUMVEE after editing this file.
 
 Features/options with minimal performance impact can be configured by editing the MVEE.ini file in the output folder for your selected GHUMVEE build type (i.e. /path/to/ReMon/MVEE/bin/Release/ or /path/to/ReMon/MVEE/bin/Debug/).
 
-The main feature that you might want to use is **debug logging**. Debugging logging can be enabled by disabling the `MVEE_BENCHMARK` feature in /path/to/ReMon/MVEE/Inc/MVEE_config.h. 
+The main feature that you might want to use is **debug logging**. Debugging logging can be enabled by disabling the `MVEE_BENCHMARK` feature in /path/to/ReMon/MVEE/Inc/MVEE_build_config.h. 
 
 ### Configuring the kernel (AMD64 systems only)
 
@@ -70,7 +70,7 @@ A full overview of RAVEN's options is available in `RAVEN-config.pdf`.
 
 **NOTES:** 
 - The `--` is mandatory in RAVEN mode, even if no program args are passed.
-- The default config file is set up to launch two variants of `/bin/bash -c` by default. Thus, if you were to launch ReMon like this: `./MVEE -- "echo test"`, this would end up executing `/bin/bash -c echo lol`.
+- The default config file is set up to launch two variants of `/bin/bash -c` by default. Thus, if you were to launch ReMon like this: `./MVEE -- "echo test"`, this would end up executing `/bin/bash -c echo test`.
  
 ### Shutting GHUMVEE down
 
