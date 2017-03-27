@@ -270,7 +270,7 @@ namespace interaction
 						{
 							status.reason = STOP_FORK;
 							if (ptrace(PTRACE_GETEVENTMSG,
-									   pid, 0, &status.data) == 0)
+									   status.pid, 0, &status.data) == 0)
 							{
 								status.data = status.data & 0xFFFFFFFF;
 							}

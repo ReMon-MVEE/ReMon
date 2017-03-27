@@ -537,16 +537,14 @@ CALL(open)
 	DOALIAS(1);
 
     int i, result, old_flags, flags;
+	std::string str1 = set_fd_table->get_full_path(0, variants[0].variantpid, AT_FDCWD, (void*)ARG1(0));
+
+	flags  = old_flags = ARG2(0);
+	result = handle_check_open_call(str1.c_str(), &flags, ARG3(0));
+
 	for (i = 0; i < mvee::numvariants; ++i)
-	{
-		std::string str1 = set_fd_table->get_full_path(i, variants[i].variantpid, AT_FDCWD, (void*)ARG1(i));
-
-		flags  = old_flags = ARG2(i);
-		result = handle_check_open_call(str1.c_str(), &flags, ARG3(i));
-
 		if (flags != old_flags)
             SETARG2(i, flags);
-	}
 
     return result;
 }
@@ -1404,15 +1402,23 @@ LOG_ARGS(utime)
 {
 	auto str1 = rw::read_string(variants[variantnum].variantpid, (void*)ARG1(variantnum));
 	struct utimbuf times;
+	std::stringstream timestr;
 	
-	if (!rw::read<struct utimbuf>(variants[variantnum].variantpid, (void*) ARG2(variantnum), times))
-		return;
+	if (ARG2(variantnum))
+	{
+		if (!rw::read<struct utimbuf>(variants[variantnum].variantpid, (void*) ARG2(variantnum), times))
+			return;
+		timestr << "ACTIME: " << times.actime << ", MODTIME: " << times.modtime;
+	}
+	else
+	{
+		timestr << "ACTIME: current, MODTIME: current";
+	}
 	
-	debugf("%s - SYS_UTIME(%s, ACTIME: %llu, MODTIME: %llu)\n", 
+	debugf("%s - SYS_UTIME(%s, %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   str1.c_str(), 
-		   times.actime, 
-		   times.modtime);
+		   timestr.str().c_str());
 }
 
 PRECALL(utime)
@@ -7067,6 +7073,7 @@ LOG_ARGS(utimes)
 {
 	struct timeval utimes[2];
 	auto str1 = rw::read_string(variants[variantnum].variantpid, (void*) ARG1(variantnum));
+	std::stringstream timestr;
 
 	if (ARG2(variantnum))
 	{
@@ -7075,17 +7082,19 @@ LOG_ARGS(utimes)
 			warnf("couldn't read utimes\n");
 			return;
 		}
+
+		timestr << "ACTIME: " << utimes[0].tv_sec << "." << std::setw(6) << std::setfill('0') << utimes[0].tv_usec << std::setw(0)
+				<< ", MODTIME: " << utimes[1].tv_sec << "." << std::setw(6) << std::setfill('0') << utimes[1].tv_usec;
 	}
 	else
 	{
-		gettimeofday(utimes, NULL);
+		timestr << "ACTIME: current, MODTIME: current";
 	}
 
-	debugf("%s - SYS_UTIMES(%s, ACTIME: %ld.%06ld, MODTIME: %ld.%06ld)\n", 
+	debugf("%s - SYS_UTIMES(%s, %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
 		   str1.c_str(),
-		   utimes[0].tv_sec, utimes[0].tv_usec,
-		   utimes[1].tv_sec, utimes[1].tv_usec);
+		   timestr.str().c_str());
 }
 
 PRECALL(utimes)
@@ -7227,12 +7236,12 @@ LOG_ARGS(openat)
 {
 	auto filename = rw::read_string(variants[variantnum].variantpid, (void*)ARG2(variantnum));
 
-	debugf("%s - SYS_OPENAT(%d, %s, 0x%08X, 0x%08X)\n", 
+	debugf("%s - SYS_OPENAT(%d, %s, 0x%08X (%s), 0x%08X (%s))\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   ARG1(variantnum), 
-		   filename.c_str(), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum));
+		   filename.c_str(), 		   
+		   ARG3(variantnum), getTextualFileFlags(ARG3(variantnum)).c_str(),
+		   ARG4(variantnum), getTextualFileMode(ARG4(variantnum) & S_FILEMODEMASK).c_str());
 }
 
 PRECALL(openat)
@@ -7271,17 +7280,15 @@ CALL(openat)
 	DOALIASAT(1, 2);
 
     int i, result, old_flags, flags;
+	std::string str1 = set_fd_table->get_full_path(0, variants[0].variantpid, 
+												   (unsigned long)(int)ARG1(0), (void*)ARG2(0));
+	
+	flags  = old_flags = ARG3(0);
+	result = handle_check_open_call(str1, &flags, ARG4(0));
+
 	for (i = 0; i < mvee::numvariants; ++i)
-	{
-		std::string str1 = set_fd_table->get_full_path(i, variants[i].variantpid, 
-													   (unsigned long)(int)ARG1(i), (void*)ARG2(i));
-
-		flags  = old_flags = ARG3(i);
-		result = handle_check_open_call(str1, &flags, ARG4(i));
-
 		if (flags != old_flags)
             SETARG3(i, flags);
-	}
 
     return result;
 }
@@ -7750,6 +7757,36 @@ CALL(unshare)
   sys_utimensat - (int dirfd, const char *pathname,
   const struct timespec times[2], int flags)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(utimensat)
+{
+	struct timespec times[2];
+	std::stringstream timestr;
+	auto str1 = rw::read_string(variants[variantnum].variantpid, (void*) ARG2(variantnum));
+
+	if (ARG3(variantnum))
+	{
+		if (!rw::read_struct(variants[variantnum].variantpid, (void*) ARG3(variantnum), 2 * sizeof(struct timespec), times))
+		{
+			warnf("%s - couldn't read timespec\n",
+				  call_get_variant_pidstr(variantnum).c_str());
+			return;
+		}
+
+		timestr << "ACTIME: " << times[0].tv_sec << std::setw(9) << std::setfill('0') << times[0].tv_nsec << std::setw(0)
+				<< ", MODTIME: " << times[1].tv_sec << std::setw(9) << std::setfill('0') << times[1].tv_nsec;
+	}
+	else
+	{
+		timestr << "ACTIME: current, MODTIME: current";
+	}
+
+	debugf("%s - SYS_UTIMENSAT(%d, %s, %s)\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   ARG1(variantnum),
+		   str1.c_str(),
+		   timestr.str().c_str());
+}
+
 PRECALL(utimensat)
 {
     std::vector<const char*> argarray(mvee::numvariants);

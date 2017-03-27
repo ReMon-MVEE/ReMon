@@ -781,6 +781,9 @@ void monitor::shutdown(bool success)
 	bool have_running_variants = false;
 
     debugf("monitor returning - success: %d\n", success);
+	if (!success)
+		debugf("> errno: %d (%s)\n", errno, strerror(errno));
+
     if (monitor_terminating)
         return;
 
@@ -2293,7 +2296,9 @@ dont_resolve_segv_origin:
         else if (siginfo.si_pid == mvee::os_getpid())
         {
             debugf("%s - signal %s is ready for injection in variant\n", 
-				   call_get_variant_pidstr(variantnum).c_str(), getTextualSig(signal));
+				   call_get_variant_pidstr(variantnum).c_str(), 
+				   getTextualSig(signal));
+
             if (current_signal_info)
             {
 				// restore the original sender
@@ -2330,7 +2335,8 @@ dont_resolve_segv_origin:
 
                 if (all_ready)
                 {
-                    debugf("%s - signal is ready for injection in all variants. Injecting...\n", call_get_variant_pidstr(variantnum).c_str());
+                    debugf("%s - signal is ready for injection in all variants. Injecting...\n", 
+						   call_get_variant_pidstr(variantnum).c_str());
                     debugf("%s - releasing syslocks for %d (%s)\n", 
 						   call_get_variant_pidstr(variantnum).c_str(),
 						   variants[0].callnumbackup, 
@@ -2341,7 +2347,7 @@ dont_resolve_segv_origin:
                     call_release_syslocks(-1, variants[0].callnumbackup, MVEE_SYSLOCK_FULL | MVEE_SYSLOCK_PRECALL | MVEE_SYSLOCK_POSTCALL);
                     for (int i = 0; i < mvee::numvariants; ++i)
 					{
-						if (!interaction::resume_until_syscall(i, signal))
+						if (!interaction::resume_until_syscall(variants[i].variantpid, signal))
 						{
 							warnf("%s - failed to resume variant after signal injection: %s\n",
 								  call_get_variant_pidstr(i).c_str(), getTextualSig(signal));

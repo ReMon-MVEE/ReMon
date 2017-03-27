@@ -688,17 +688,14 @@ std::string fd_table::get_full_path (int variantnum, pid_t variantpid, unsigned 
 
     // fetch the path and check if it's absolute...
 	std::string tmp_path = rw::read_string(variantpid, path_ptr, 0);
-    if (tmp_path.length() == 0)
-    {
-        warnf("couldn't get full path\n");
-        return tmp_path;
-    }
 
-    if (tmp_path.find("/proc/self/") == 0)
+    if (tmp_path.length() > 0 &&
+		tmp_path.find("/proc/self/") == 0)
     {
         ss << "/proc/" << variantpid << "/" << tmp_path.substr(strlen("/proc/self/"));
     }
-    else if (tmp_path[0] == '/')
+    else if (tmp_path.length() > 0 &&
+			 tmp_path[0] == '/')
     {
         // it's absolute so we can ignore the dirfd...
         ss << tmp_path;
@@ -730,9 +727,12 @@ std::string fd_table::get_full_path (int variantnum, pid_t variantpid, unsigned 
                 ss << fd_info->path;
         }
 
-        if (ss.str()[ss.str().length()-1] != '/')
-            ss << '/';
-        ss << tmp_path;
+		if (tmp_path.length() > 0)
+		{
+			if (ss.str()[ss.str().length()-1] != '/')
+				ss << '/';
+			ss << tmp_path;
+		}
     }
 
 	return mvee::os_normalize_path_name(ss.str());
