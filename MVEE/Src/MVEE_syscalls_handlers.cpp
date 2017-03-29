@@ -493,37 +493,28 @@ PRECALL(open)
 
 	if (!ipmon_fd_handling)
 	{
+		auto orig_path = rw::read_string(variants[0].variantpid, (void*) ARG1(0));
+		if (orig_path.find("/proc/self/") == 0 &&
+			orig_path != "/proc/self/maps" &&
+			orig_path != "/proc/self/exe")
+		{
+			debugf("master sys_open for: %s\n", orig_path.c_str());
+			return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+		}
+
 		auto full_path = set_fd_table->get_full_path(0, variants[0].variantpid, AT_FDCWD, (void*)ARG1(0));
 		if (full_path == "")
 			return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
 
-		if (full_path.find("/proc/self/") == 0 &&
-			full_path != "/proc/self/maps" &&
-			full_path != "/proc/self/exe")
+		if (full_path.find("/dev/shm/") == 0 ||
+			full_path.find("/run/shm/") == 0)
+			return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+		if (full_path.find("/dev/") == 0)
 		{
 			debugf("master sys_open for: %s\n", full_path.c_str());
 			return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 		}
-
-		char* resolved_path = realpath(full_path.c_str(), NULL);
-		if (!resolved_path)
-			resolved_path = strdup(full_path.c_str());
-
-		if (strstr(resolved_path, "/dev/shm/") == resolved_path ||
-			strstr(resolved_path, "/run/shm/") == resolved_path)
-		{
-			free(resolved_path);
-			return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
-		}
-
-		if (strstr(resolved_path, "/dev/") == resolved_path)
-		{
-			debugf("master sys_open for: %s\n", resolved_path);
-			free(resolved_path);
-			return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-		}
-
-		free(resolved_path);
 	}
 
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
@@ -3968,8 +3959,6 @@ PRECALL(wait4)
 
 POSTCALL(wait4)
 {
-    UNMAPPIDS(1);
-
     // we want to replicate the master result even if the call fails
     unsigned long master_result = call_postcall_get_variant_result(0);
 
@@ -4014,7 +4003,7 @@ LOG_ARGS(shmat)
 PRECALL(shmat)
 {
 #ifndef MVEE_ALLOW_SHM
-	CHECKSHMID(1);
+	CHECKARG(1);
 #endif
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
@@ -4039,11 +4028,6 @@ CALL(shmat)
 		&& (int)ARG1(0) == set_fd_table->file_map_id())
 	{
 		disjoint_bases = false;
-		shm_sz = PAGE_SIZE;
-	}
-	else if (variants[0].hidden_buffer_array &&
-		(int)ARG1(0) == variants[0].hidden_buffer_array_id) {
-		disjoint_bases = true;
 		shm_sz = PAGE_SIZE;
 	}
 	else if (ipmon_buffer && (int)ARG1(0) == ipmon_buffer->id)
@@ -4114,49 +4098,7 @@ POSTCALL(shmat)
 		(int)ARG1(0) == atomic_buffer->id)
 	{
 		region_size = atomic_buffer->sz;
-
-		if (atomic_buffer_hidden)
-		{
-			region_name = "[atomic-buffer-hidden]";
-
-			// register into hidden buffer array
-			register_hidden_buffer(MVEE_LIBC_ATOMIC_BUFFER_HIDDEN, atomic_buffer, addresses);
-
-			// clear the return value
-			for (int i = 0; i < mvee::numvariants; ++i)
-				call_postcall_set_variant_result(i, 0);
-		}
-		else
-		{
-			region_name = "[atomic-buffer]";
-		}		
-	}
-	else if (variants[0].hidden_buffer_array && 
-			 (int)ARG1(0) == variants[0].hidden_buffer_array_id)
-	{
-		region_name = "[hidden-buffer-array]";
-		region_size = 4096;
-
-		for (int i = 0; i < mvee::numvariants; ++i)
-		{
-			variants[i].hidden_buffer_array_base = addresses[i];
-			if (!interaction::read_all_regs(variants[i].variantpid, &variants[i].regsbackup))
-			{
-				warnf("Couldn't set gs base for hidden buffer array\n");
-				shutdown(false);
-				return 0;
-			}
-            variants[i].regsbackup.gs_base = addresses[i];
-			if (!interaction::write_all_regs(variants[i].variantpid, &variants[i].regsbackup))
-			{
-				warnf("Couldn't set gs base for hidden buffer array\n");
-				shutdown(false);
-				return 0;
-			}
-			call_postcall_set_variant_result(i, 0);
-
-			atomic_queue_pos[i] = (void*)(addresses[i] + 64 * MVEE_LIBC_ATOMIC_BUFFER_HIDDEN + sizeof(void*) + sizeof(unsigned long));
-		}
+		region_name = "[atomic-buffer]";
 	}
 	else if (ipmon_buffer && (int)ARG1(0) == ipmon_buffer->id)
 	{
@@ -6843,15 +6785,6 @@ PRECALL(setpriority)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-POSTCALL(setpriority)
-{
-    if (ARG1(0) != PRIO_USER)
-    {
-        UNMAPPIDS(2);
-    }
-    return 0;
-}
-
 /*-----------------------------------------------------------------------------
   sys_epoll_wait - (int epfd, struct epoll_event __user* events, 
   int maxevents, int timeout)
@@ -7059,13 +6992,6 @@ PRECALL(tgkill)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
-POSTCALL(tgkill)
-{
-	UNMAPPIDS(1);
-	UNMAPPIDS(2);
-	return 0;
-}
-
 /*-----------------------------------------------------------------------------
   sys_utimes - (char* filename, struct timeval utimes[2])
 -----------------------------------------------------------------------------*/
@@ -7139,8 +7065,6 @@ PRECALL(waitid)
 
 POSTCALL(waitid)
 {
-    UNMAPPIDS(1);
-
     // we want to replicate the master result even if the call fails
     unsigned long master_result = call_postcall_get_variant_result(0);
 

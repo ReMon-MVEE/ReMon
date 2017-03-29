@@ -73,13 +73,6 @@ class fd_table;
 class sighand_table;
 class writeback_info;
 
-struct hidden_buffer_array_entry
-{
-	void*         hidden_buffer_address;
-	unsigned long hidden_buffer_size;
-	char          padding[64 - sizeof(void*) - sizeof(unsigned long)];
-};
-
 class mvee_pending_signal
 {
 public:
@@ -162,11 +155,6 @@ public:
 
 	// IP-MON information
 	mmap_region_info* ipmon_region;
-
-	// Hidden buffer support
-	int           hidden_buffer_array_id;                           // SysV shm id for the hidden buffer array
-	unsigned long hidden_buffer_array_base;                         // base address at which the hidden buffer array is mapped in this variant
-	void*         hidden_buffer_array;                              // pointer to the monitor mapped version of the hidden buffer array
 
     // somehow, the sigset gets corrupted across sigprocmask calls...
     sigset_t      last_sigset;
@@ -957,11 +945,6 @@ private:
     bool is_program_multithreaded        ();
     void check_multithread_state         ();
 
-	// 
-	// Hidden buffer support
-	//
-	void register_hidden_buffer          (int buffer_id, _shm_info* info, std::vector<unsigned long>& addresses);
-
     //
     // Debugging support
     //
@@ -1008,7 +991,6 @@ private:
     _shm_info*                        atomic_buffer;          // thread-local atomic buffer
     std::vector<void*>                atomic_counters;
     std::vector<void*>                atomic_queue_pos;
-	bool                              atomic_buffer_hidden;   // should we hide the pointer to the atomic buffer in the hidden buffer array?
 
     _shm_info*                        ipmon_buffer;
 

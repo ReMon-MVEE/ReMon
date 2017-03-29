@@ -258,7 +258,7 @@ void monitor::call_precall_log_args (int variantnum, long callnum)
 {
 #ifndef MVEE_BENCHMARK
 	mvee_syscall_logger logger;
-	if (callnum >= 0 && callnum <= MAX_CALLS)
+	if (callnum >= 0 && callnum < MAX_CALLS)
 		logger = monitor::syscall_logger_table[callnum][MVEE_LOG_ARGS];
 	else
 		logger = &monitor::log_donthave;
@@ -546,8 +546,7 @@ long monitor::call_call_dispatch ()
 				debugf("MVEE_GET_SHARED_BUFFER call for buffer %d (%s)\n",
 						   buffer_type, getTextualBufferType(buffer_type));
 
-                if (buffer_type == MVEE_LIBC_ATOMIC_BUFFER
-                    || buffer_type == MVEE_LIBC_ATOMIC_BUFFER_HIDDEN)
+                if (buffer_type == MVEE_LIBC_ATOMIC_BUFFER)
                 {
                     is_eip_buffer = 0;
 
@@ -568,8 +567,6 @@ long monitor::call_call_dispatch ()
                         atomic_buffer       = info;
                         requested_slot_size = sizeof(unsigned long);
                         alloc_size          = requested_slot_size * SHARED_QUEUE_SLOTS / (have_many_threads ? 64 : 1);
-						if (buffer_type == MVEE_LIBC_ATOMIC_BUFFER_HIDDEN)
-							atomic_buffer_hidden = true;
                     }
                     else
                     {
@@ -577,25 +574,6 @@ long monitor::call_call_dispatch ()
                     }
 
                 }
-				else if (buffer_type == MVEE_LIBC_HIDDEN_BUFFER_ARRAY)
-				{
-					debugf("Requested Hidden Buffer Array\n");
-
-					if (!variants[0].hidden_buffer_array)
-					{
-						std::vector<unsigned long> addresses(mvee::numvariants);
-						std::fill(addresses.begin(), addresses.end(), NULL);
-						register_hidden_buffer(0, NULL, addresses);						
-					}
-
-					// deny the call and return id of the buffer
-                    for (i = 0; i < mvee::numvariants; ++i)
-                        variants[i].extended_value = (long)variants[i].hidden_buffer_array_id;
-                    result = MVEE_CALL_DENY | MVEE_CALL_RETURN_EXTENDED_VALUE;
-
-					debugf("Variants requested the id for the hidden buffer array\n");
-					break;
-				}
 				else if (buffer_type == MVEE_IPMON_BUFFER)
 				{
 					debugf("Requested IP-MON Replication Buffer\n");
@@ -719,8 +697,7 @@ long monitor::call_call_dispatch ()
                 _shm_info*                                                     info               = NULL;
                 unsigned char                                                  clear_whole_buffer = 1;
 
-                if (ARG1(0) == MVEE_LIBC_ATOMIC_BUFFER
-                    || ARG1(0) == MVEE_LIBC_ATOMIC_BUFFER_HIDDEN)
+                if (ARG1(0) == MVEE_LIBC_ATOMIC_BUFFER)
                 {
                     info = atomic_buffer;
                 }
@@ -827,7 +804,7 @@ void monitor::call_postcall_log_return (int variantnum)
 #ifndef MVEE_BENCHMARK
 	mvee_syscall_logger logger;
 	long callnum = variants[variantnum].prevcallnum;
-	if (callnum >= 0 && callnum <= MAX_CALLS)
+	if (callnum >= 0 && callnum < MAX_CALLS)
 		logger = monitor::syscall_logger_table[callnum][MVEE_LOG_RETURN];
 	else
 		logger = &monitor::log_donthave;

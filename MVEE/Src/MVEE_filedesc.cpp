@@ -212,7 +212,7 @@ bool fd_table::add_missing_fds(std::vector<pid_t> variant_pids)
 	{
 		bool master_has_file = false;
 		int num_fds = 0;
-		int prot = 0;
+//		int prot = 0;
 		i = 0;
 		
 		for (auto fd : missing.second)
@@ -238,7 +238,7 @@ bool fd_table::add_missing_fds(std::vector<pid_t> variant_pids)
 				return false;
 			}
 
-			prot = fd >> 32;
+//			prot = fd >> 32;
 			missing.second[i++] = fd & 0xFFFFFFFF;
 		}
 

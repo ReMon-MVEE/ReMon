@@ -79,9 +79,6 @@ variantstate::variantstate()
     , last_mmap_result (0)
 	, entry_point_address (0)
 	, ipmon_region (NULL)
-	, hidden_buffer_array_id (0)
-	, hidden_buffer_array_base (0)
-	, hidden_buffer_array (NULL)
     , varianttgid (0)
     , pendingpid (0)
     , infinite_loop_ptr (0)
@@ -156,7 +153,6 @@ void monitor::init()
     parentmonitorid                = 0;
     state                          = STATE_NORMAL;
     atomic_buffer                  = NULL;
-	atomic_buffer_hidden           = false;
     ipmon_buffer                   = NULL;
     current_signal                 = 0;
     current_signal_sent            = 0;
@@ -893,10 +889,6 @@ nobacktrace:
         delete atomic_buffer;
     if (ipmon_buffer)
         delete ipmon_buffer;
-
-	if (variants[0].hidden_buffer_array)
-		for (int i = 0; i < mvee::numvariants; ++i)
-			shmdt(variants[i].hidden_buffer_array);
 
     pthread_mutex_lock(&monitor_lock);
     local_detachlist.clear();
@@ -3155,38 +3147,6 @@ bool monitor::hwbp_unset_watch(int variantnum, unsigned long addr)
 
     hwbp_refresh_regs(variantnum);
     return true;
-}
-
-/*-----------------------------------------------------------------------------
-    register_hidden_buffer - used by the UTCB and the secure wall of clocks
-	agent's atomic buffer
------------------------------------------------------------------------------*/
-void monitor::register_hidden_buffer(int buffer_id, _shm_info* info, std::vector<unsigned long>& addresses)
-{
-	// ensure that the hidden buffer array is mapped for each variant
-	for (int i = 0; i < mvee::numvariants; ++i)
-	{
-		if (!variants[i].hidden_buffer_array)
-		{
-			if (!mvee::os_alloc_sysv_sharedmem(PAGE_SIZE, &variants[i].hidden_buffer_array_id,
-											   NULL, &variants[i].hidden_buffer_array))
-			{
-				warnf("couldn't allocate hidden buffer array!\n");
-				shutdown(false);
-				return;
-			}
-
-			debugf("Allocated hidden buffer array for variant %d: " PTRSTR "(" PTRSTR ")\n", i, variants[i].hidden_buffer_array, &(variants[i].hidden_buffer_array));
-		}
-
-		((struct hidden_buffer_array_entry*)variants[i].hidden_buffer_array)[buffer_id].hidden_buffer_address = (void*)addresses[i];
-		
-		if (info)
-			((struct hidden_buffer_array_entry*)variants[i].hidden_buffer_array)[buffer_id].hidden_buffer_size = info->sz / sizeof(unsigned long);
-
-		debugf("Registered buffer %d (%s) in hidden buffer array for variant %d => ptr: 0x" PTRSTR "\n",
-				   buffer_id, getTextualBufferType(buffer_id), i, addresses[i]);
-	}
 }
 
 /*-----------------------------------------------------------------------------

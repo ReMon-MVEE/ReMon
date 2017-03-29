@@ -545,7 +545,7 @@ namespace interaction
 			return false;
 		return true;
 	}
-};
+}
 
 
 

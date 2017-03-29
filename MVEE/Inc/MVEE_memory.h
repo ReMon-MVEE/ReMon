@@ -41,7 +41,7 @@ namespace rw
 	std::string    read_string          (pid_t variantpid, void* addr, ssize_t maxlength=0);
 	bool           read_struct          (pid_t variantpid, void* addr, ssize_t datalength, void* buf);
 
-};
+}
 
 
 /*-----------------------------------------------------------------------------
@@ -160,7 +160,7 @@ namespace rw
 	{
 		return write_data(variantpid, addr, sizeof(T), &value);
 	}
-};
+}
 
 
 #endif // MVEE_MEMORY_H_INCLUDED

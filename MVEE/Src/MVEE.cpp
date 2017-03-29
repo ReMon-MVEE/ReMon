@@ -1359,8 +1359,8 @@ void mvee::start_unmonitored()
 			interaction::mvee_wait_status status;
 
 			if (!interaction::wait(-1, status, false, false) ||
-				status.reason != STOP_EXIT || 
-				status.reason != STOP_SIGNAL)
+				(status.reason != STOP_EXIT && 
+				 status.reason != STOP_SIGNAL))
 			{
 				warnf("Failed to wait for children - error: %s - status: %s\n",
 					  strerror(errno), 

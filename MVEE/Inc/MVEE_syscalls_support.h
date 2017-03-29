@@ -25,31 +25,13 @@
   The CHECKxxx and REPLICATExxx macros therefore only check whether the
   specified argument is non-NULL in the master variant.
 -----------------------------------------------------------------------------*/
-#define STRINGARG(variantnum, numarg) \
-    variants[variantnum].args[numarg].str
-
-#define CSTRINGARG(variantnum, numarg) \
-    variants[variantnum].args[numarg].cstr
-
-#define BUFARG(variantnum, numarg) \
-    variants[variantnum].args[numarg].buf
-
 //
 // Fill an array with the values of a syscall argument in all variants
 //
-#define FILLARGARRAY(numarg, argarray) do {         \
-        for (int i = 0; i < mvee::numvariants; ++i) \
+#define FILLARGARRAY(numarg, argarray) do {						\
+        for (int i = 0; i < mvee::numvariants; ++i)				\
             *(unsigned long*)&argarray[i] = ARG ## numarg(i);	\
 } while (0)
-
-//
-// Change the values of a syscall argument in all variants, given an array
-//
-#define SETARGARRAY(numarg, argarray)  do {         \
-        for (int i = 0; i < mvee::numvariants; ++i) \
-            SETARG ## numarg(i, argarray[i]);       \
-} while (0)
-
 
 //
 // Check whether the arguments are null or valid pointers
@@ -83,26 +65,6 @@
             return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;	\
         }                                                                              \
     }
-
-//
-// The shm ids must either all be equal OR they must 
-// be equal to the variant's hidden buffer array id
-//
-#define CHECKSHMID(numarg)												\
-	for (int i = 1; i < mvee::numvariants; ++i)							\
-	{																	\
-		if (ARG ## numarg(i) != ARG ## numarg(i-1)						\
-			&& (int)ARG ## numarg(i) != variants[i].hidden_buffer_array_id) \
-		{																\
-			cache_mismatch_info("argument %d mismatch - syscall: %ld (%s)\n",	\
-						numarg, variants[0].callnum,						\
-						getTextualSyscall(variants[0].callnum));			\
-			cache_mismatch_info("ARG%d(%d) = 0x" PTRSTR " - ARG%d(%d) = 0x" PTRSTR "\n", \
-						numarg, i, ARG ## numarg(i), numarg, i-1, ARG ## numarg(i-1)); \
-			return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;	\
-		}																\
-	}
-
 
 //
 // Compare the values of the specified sockaddr - POINTER ARGUMENT!!!
@@ -436,7 +398,7 @@
             ARG ## bufferarg(0) &&										\
             ARG ## lenarg(0))											\
         {																\
-			lenarg_type len;											\
+			lenarg_type len = 0;										\
 			if (!rw::read_primitive<lenarg_type>(variants[0].variantpid, (void*) ARG ## lenarg(0), len)) \
 			{															\
 				warnf("%s - couldn't read length\n", call_get_variant_pidstr(0).c_str()); \
@@ -546,7 +508,7 @@
     std::string text_addr;												\
     if (ARG ## sockarg(variantnum) && ARG ## lenarg(variantnum))		\
     {																	\
-		socklen_t len;													\
+		socklen_t len = 0;												\
 		if (!rw::read_primitive<socklen_t>(variants[variantnum].variantpid, \
 										   (void*) ARG ## lenarg(variantnum), len)) \
 		{																\
@@ -619,25 +581,19 @@
 // that the 0 and -1 values have special meanings and do not need to be mapped and that
 // negative values indicate process group values
 //
-#define MAPPIDS(numarg)                                                                                \
-    if (ARG ## numarg(0) != 0 && ARG ## numarg(0) != 1)                                                \
-    {                                                                                                  \
-        pid_t master_pid = (pid_t) ARG ## numarg(0);                                                   \
-        std::vector<pid_t> mapped_pids(mvee::numvariants);                                             \
-        if (mvee::map_master_to_slave_pids((master_pid < -1) ? -master_pid : master_pid, mapped_pids)) \
-        {                                                                                              \
-            for (int i = 1; i < mvee::numvariants; ++i)                                                \
-                SETARG ## numarg(i, mapped_pids[i]);                                                   \
-        }                                                                                              \
-    }
-
-#define UNMAPPIDS(numarg)                               \
-    if (ARG ## numarg(0) != 0 && ARG ## numarg(0) != 1) \
-    {                                                   \
-        for (int i = 1; i < mvee::numvariants; ++i)     \
-        {                                               \
-            SETARG ## numarg(i, ARG ## numarg(0));      \
-        }                                               \
+#define MAPPIDS(numarg)													\
+    if (ARG ## numarg(0) != 0 && ARG ## numarg(0) != 1)					\
+    {																	\
+        pid_t master_pid = (pid_t) ARG ## numarg(0);					\
+			std::vector<pid_t> mapped_pids(mvee::numvariants);			\
+			if (mvee::map_master_to_slave_pids((master_pid < -1) ? -master_pid : master_pid, mapped_pids)) \
+			{															\
+				for (int i = 1; i < mvee::numvariants; ++i)				\
+				{														\
+					if ((pid_t)ARG ## numarg(i) != mapped_pids[i])		\
+						call_overwrite_arg_value(i, numarg, mapped_pids[i], true); \
+				}														\
+			}															\
     }
 
 #define DOALIASAT(dirfdarg, patharg)									\

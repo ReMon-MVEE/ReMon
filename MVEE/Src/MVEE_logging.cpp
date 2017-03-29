@@ -1043,7 +1043,7 @@ void monitor::log_stack(int variantnum)
 void monitor::log_segfault(int variantnum)
 {
 	siginfo_t siginfo;
-	unsigned long eip;
+	unsigned long eip = 0;
 	
 	if (!interaction::get_signal_info(variants[variantnum].variantpid, &siginfo))
 	{
@@ -1112,7 +1112,7 @@ void monitor::log_segfault(int variantnum)
 			{
 				warnf("> Unknown cause - check log files\n");
 			}
-			else if (arg_no < 0)
+			else if ((char)arg_no < 0)
 			{
 				warnf("> Argument Length Mismatch (Syscall: %d - %s - Arg: %d - Slave Length: %d)\n",
 					  master_syscall_no, getTextualSyscall(master_syscall_no),
