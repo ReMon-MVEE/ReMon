@@ -435,7 +435,7 @@ POSTCALL(read)
 LOG_ARGS(write)
 {
 	// writes to negative file descriptors are RAVEN pseudo-syscalls
-	if ((long)ARG1(0) < 0)
+	if ((int)ARG1(variantnum) < 0)
 	{
 		debugf("%s - SYS_WRITE(%d (%s), %d, %d)\n",
 			   call_get_variant_pidstr(variantnum).c_str(), 
@@ -472,7 +472,7 @@ PRECALL(write)
 
     CHECKARG(3);
 
-	if ((long)ARG1(0) >= 0)
+	if ((int)ARG1(0) >= 0)
 		CHECKBUFFER(2, ARG3(0));
 
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
