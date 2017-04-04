@@ -319,7 +319,7 @@ bool monitor::restart_variant(int variantnum)
 		{
 			warnf("%s - Wait failed during restart - error: %s - status: %s\n",
 				  call_get_variant_pidstr(variantnum).c_str(), 
-				  strerror(errno),
+				  getTextualErrno(errno),
 				  getTextualMVEEWaitStatus(status).c_str());
 			shutdown(true);
 			return false;
@@ -353,7 +353,7 @@ bool monitor::restart_variant(int variantnum)
 		{
 			warnf("%s - Wait failed during restart - error: %s - status: %s\n",
 				  call_get_variant_pidstr(variantnum).c_str(), 
-				  strerror(errno),
+				  getTextualErrno(errno),
 				  getTextualMVEEWaitStatus(status).c_str());
 			shutdown(true);
 			return false;
@@ -715,7 +715,7 @@ void monitor::signal_shutdown()
         if (result)
         {
             warnf("tried to signal monitor %d for shutdown but tgkill failed: %s\n",
-                        monitorid, strerror(errno));
+                        monitorid, getTextualErrno(errno));
         }
     }
 }
@@ -778,7 +778,7 @@ void monitor::shutdown(bool success)
 
     debugf("monitor returning - success: %d\n", success);
 	if (!success)
-		debugf("> errno: %d (%s)\n", errno, strerror(errno));
+		debugf("> errno: %d (%s)\n", errno, getTextualErrno(errno));
 
     if (monitor_terminating)
         return;
@@ -1607,8 +1607,9 @@ void monitor::handle_trap_event(int index)
 #ifdef MVEE_HWBP_X86
 			unsigned long dr6;
 			
-			if (!rw::read_primitive<unsigned long>(variants[index].variantpid, 
-												   (void*) (offsetof(user, u_debugreg) + 6*sizeof(long)), dr6))
+			if (!interaction::read_specific_reg(variants[index].variantpid, 
+									   offsetof(user, u_debugreg) + 6*sizeof(long), 
+									   dr6))
 			{
 				warnf("%s - Couldn't read dr6 register\n",
 					  call_get_variant_pidstr(index).c_str());
@@ -2585,7 +2586,7 @@ bool monitor::sig_handle_sigchld_race(std::vector<mvee_pending_signal>::iterator
 					if (!should_shutdown)
 						warnf("%s - waiting error while handling sigchld race in variant: %s - status: %s\n",
 							  call_get_variant_pidstr(i).c_str(),
-							  strerror(errno),
+							  getTextualErrno(errno),
 							  getTextualMVEEWaitStatus(status).c_str());
 					return false;
 				}
@@ -2647,7 +2648,7 @@ bool monitor::sig_handle_sigchld_race(std::vector<mvee_pending_signal>::iterator
 			{
 				warnf("%s - error syncing variant at syscall entry - error: %s - stop status: %s\n",
 					  call_get_variant_pidstr(i).c_str(), 
-					  strerror(errno), 
+					  getTextualErrno(errno), 
 					  getTextualMVEEWaitStatus(status).c_str());
 			}
 			else
@@ -2801,7 +2802,7 @@ bool monitor::sig_prepare_delivery ()
                     warnf("%s - signal delivery failed. sig: %s - error: %s\n",
 						  call_get_variant_pidstr(i).c_str(),
 						  getTextualSig(current_signal),
-						  strerror(errno));
+						  getTextualErrno(errno));
                 }
 
                 // If we're at the entry of a sigsuspend that hasn't been restarted yet, we will call the precall handler next
@@ -2862,7 +2863,7 @@ void monitor::sig_finish_delivery ()
             warnf("%s - signal delivery failed. sig: %s - error: %s\n",
 				  call_get_variant_pidstr(i).c_str(),
 				  getTextualSig(current_signal),
-				  strerror(errno));
+				  getTextualErrno(errno));
         }
     }
 
@@ -2985,7 +2986,7 @@ void monitor::sig_restart_syscall(int variantnum)
 							{
 								warnf("%s - FIXME: Possible error while restarting variant - error: %s - stop status: %s\n", 
 									  call_get_variant_pidstr(i).c_str(),
-									  strerror(errno),
+									  getTextualErrno(errno),
 									  getTextualMVEEWaitStatus(status).c_str());
 							}
 						}
@@ -3039,9 +3040,9 @@ void monitor::hwbp_refresh_regs(int variantnum)
             debugf("%s - setting debug reg %d\n", 
 				   call_get_variant_pidstr(variantnum).c_str(), i);
 
-			if (!rw::write_primitive<unsigned long>(variants[variantnum].variantpid,
-													(void*) (offsetof(user, u_debugreg) + i*sizeof(unsigned long)), 
-													variants[variantnum].hw_bps[i]))
+			if (!interaction::write_specific_reg(variants[variantnum].variantpid,
+												 offsetof(user, u_debugreg) + i*sizeof(unsigned long), 
+												 variants[variantnum].hw_bps[i]))
 			{
 				warnf("%s - Couldn't set debug reg %d\n",
 					  call_get_variant_pidstr(variantnum).c_str(), i);
@@ -3075,9 +3076,9 @@ void monitor::hwbp_refresh_regs(int variantnum)
     debugf("%s - setting ctrl reg\n", 
 		   call_get_variant_pidstr(variantnum).c_str());
 
-	if (!rw::write_primitive<unsigned long>(variants[variantnum].variantpid,
-											(void*) (offsetof(user, u_debugreg) + 7*sizeof(long)), 
-											dr7))
+	if (!interaction::write_specific_reg(variants[variantnum].variantpid,
+										 offsetof(user, u_debugreg) + 7*sizeof(long), 
+										 dr7))
 	{
 		warnf("%s - Couldn't set control debug reg\n",
 			  call_get_variant_pidstr(variantnum).c_str());
@@ -3313,7 +3314,7 @@ void* monitor::thread(void* param)
             mon->handle_event(status);
         else
             debugf("wait failed - error: %s - status: %s\n", 
-				   strerror(errno),
+				   getTextualErrno(errno),
 				   getTextualMVEEWaitStatus(status).c_str());
     }
 

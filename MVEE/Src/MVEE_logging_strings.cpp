@@ -186,7 +186,7 @@ const char* getTextualRequest(unsigned int request)
 -----------------------------------------------------------------------------*/
 const char* getTextualSyscall(long int syscallnum)
 {
-    const char* result = "(unknown)";
+    const char* result = "sys_unknown";
 
     if (syscallnum < 0)
         result = "EXIT";
@@ -211,6 +211,7 @@ const char* getTextualSyscall(long int syscallnum)
             DEF_CASE(MVEE_SET_SYNC_PRIMITIVES_PTR);
             DEF_CASE(MVEE_ALL_HEAPS_ALIGNED);
             DEF_CASE(MVEE_INVOKE_LD);
+			DEF_CASE(MVEE_IPMON_INVOKE);
         }
     }
 
@@ -1271,6 +1272,24 @@ const char* getTextualRAVENCall(int call)
 		DEF_CASE(ESC_EXECVE_FAILURE);
 		DEF_CASE(ESC_RINGBUFF_INIT);
 		DEF_CASE(ESC_RINGBUFF_DESTROY);
+	}
+
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualErrno
+-----------------------------------------------------------------------------*/
+const char* getTextualErrno(int err)
+{
+	const char* result = "Unknown Error";
+
+	switch (err)
+	{
+		DEF_CASE(ENOIPMON);
+		default:
+			result = strerror(err);
+			break;
 	}
 
 	return result;

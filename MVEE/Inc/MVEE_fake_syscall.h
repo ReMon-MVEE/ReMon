@@ -159,4 +159,11 @@ enum mvee_shared_buffer_types
 //
 #define MVEE_INVOKE_LD                 MVEE_FAKE_SYSCALL_BASE + 16
 
+//
+// MVEE_IPMON_INVOKE: This is an actual syscall we add to the kernel.
+// The only time it is invoked directly is when IP-MON checks if it
+// runs on top of an IP-MON compatible kernel
+//
+#define MVEE_IPMON_INVOKE              511
+
 #endif // MVEE_FAKE_SYSCALL_H_INCLUDED

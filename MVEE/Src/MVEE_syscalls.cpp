@@ -152,7 +152,7 @@ void monitor::call_write_denied_syscall_return(int variantnum)
 			   call_get_variant_pidstr(variantnum).c_str(),
 			   mvee::upcase(getTextualSyscall(variants[variantnum].prevcallnum)).c_str(),
 			   -err,
-			   strerror(err));
+			   getTextualErrno(err));
 
 		if (!interaction::write_syscall_return(variants[variantnum].variantpid, (unsigned long) -err))
 		{
@@ -820,7 +820,7 @@ void monitor::call_postcall_log_return (int variantnum)
 			   call_get_variant_pidstr(variantnum).c_str(),
 			   mvee::upcase(getTextualSyscall(callnum)).c_str(),
 			   result,
-			   strerror(-result));
+			   getTextualErrno(-result));
 	}
 	else
 	{
@@ -1061,7 +1061,7 @@ void monitor::call_wait_all()
 			status.data != SIGSYSTRAP)
 		{
 			warnf("call_wait_all - error: %s - status: %s\n", 
-				  strerror(errno), getTextualMVEEWaitStatus(status).c_str());
+				  getTextualErrno(errno), getTextualMVEEWaitStatus(status).c_str());
 			shutdown(false);
 			return;
 		}

@@ -54,7 +54,7 @@ mmap_addr2line_proc::mmap_addr2line_proc(std::string& file, int variantnum, pid_
             FILE*          vdso      = fopen(dump_name.c_str(), "wb+");
             if (!vdso)
             {
-                warnf("couldn't open vdso dump file - err: %s\n", strerror(errno));
+                warnf("couldn't open vdso dump file - err: %s\n", getTextualErrno(errno));
 
                 addr2line_status = ADDR2LINE_FILE_NO_DEBUG_SYMS;
                 return;
@@ -127,7 +127,7 @@ std::string mmap_addr2line_proc::read_internal(const std::string& cmd)
 
     if (write(addr2line_fds[1], tmp.c_str(), tmp.length()) == -1)
     {
-        warnf("can't write cmd to addr2line pipe: %s (err: %s)\n", cmd.c_str(), strerror(errno));
+        warnf("can't write cmd to addr2line pipe: %s (err: %s)\n", cmd.c_str(), getTextualErrno(errno));
         return "";
     }
 
@@ -283,13 +283,13 @@ void mmap_addr2line_proc::pipe_create(const std::string& lib_name)
     /* Parent read/variant write pipe */
     if (pipe(&pipes[0]))
     {
-        warnf("failed to create parent read/variant write pipe - %s\n", strerror(errno));
+        warnf("failed to create parent read/variant write pipe - %s\n", getTextualErrno(errno));
         return;
     }
     /* Child read/parent write pipe */
     if (pipe(&pipes[2]))
     {
-        warnf("failed to create variant read/parent write pipe - %s\n", strerror(errno));
+        warnf("failed to create variant read/parent write pipe - %s\n", getTextualErrno(errno));
         return;
     }
 

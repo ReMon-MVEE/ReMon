@@ -720,7 +720,7 @@ bool mvee::os_alloc_sysv_sharedmem(unsigned long alloc_size, int* id_ptr, int* s
 
 		if (*ptr_ptr == (void*)-1)
 		{
-			warnf("Failed to attach to shared memory block! err = %d (%s)\n", errno, strerror(errno));
+			warnf("Failed to attach to shared memory block! err = %d (%s)\n", errno, getTextualErrno(errno));
 			return false;
 		}
 	}
@@ -842,7 +842,7 @@ std::string mvee::os_get_rpath(std::string& binary)
 		}
 
 		char* path = realpath(rpath.c_str(), NULL);
-		mvee::warnf("realpath = %s (errno: %s)\n", path, strerror(errno));
+		mvee::warnf("realpath = %s (errno: %s)\n", path, getTextualErrno(errno));
 		if (path)
 		{
 			rpath = std::string(path);
@@ -906,7 +906,7 @@ char* mvee::open_signal_file()
 
     if (fd == -1)
     {
-        warnf("couldn't open signal file. Error = %d (%s)\n", errno, strerror(errno));
+        warnf("couldn't open signal file. Error = %d (%s)\n", errno, getTextualErrno(errno));
         return NULL;
     }
 
@@ -914,13 +914,13 @@ char* mvee::open_signal_file()
     int         numwritten  = write(fd, init_buf, 3);
     if (numwritten != 3)
     {
-        warnf("couldn't write to signal file. Error = %d (%s)\n", errno, strerror(errno));
+        warnf("couldn't write to signal file. Error = %d (%s)\n", errno, getTextualErrno(errno));
         return NULL;
     }
     signal_file = (char*)mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
     if (signal_file == (char*)-1)
     {
-        warnf("couldn't map signal file. Error = %d (%s)\n", errno, strerror(errno));
+        warnf("couldn't map signal file. Error = %d (%s)\n", errno, getTextualErrno(errno));
         return signal_file;
     }
 
@@ -1330,7 +1330,7 @@ void mvee::start_unmonitored()
 				status.data != SIGSTOP)
 			{
 				warnf("Failed to wait for children - error: %s - status: %s\n",
-					  strerror(errno), getTextualMVEEWaitStatus(status).c_str());
+					  getTextualErrno(errno), getTextualMVEEWaitStatus(status).c_str());
 				exit(-1);
 				return;
 			}
@@ -1363,7 +1363,7 @@ void mvee::start_unmonitored()
 				 status.reason != STOP_SIGNAL))
 			{
 				warnf("Failed to wait for children - error: %s - status: %s\n",
-					  strerror(errno), 
+					  getTextualErrno(errno), 
 					  getTextualMVEEWaitStatus(status).c_str());
 				exit(-1);
 				return;
@@ -1462,7 +1462,7 @@ void mvee::start_monitored()
 			if (!interaction::wait(procs[i], status, false, false, false))
 			{
 				warnf("Failed to wait for children - errno: %s - status: %s\n",
-					  strerror(errno), getTextualMVEEWaitStatus(status).c_str());
+					  getTextualErrno(errno), getTextualMVEEWaitStatus(status).c_str());
 				exit(-1);
 				return;
 			}

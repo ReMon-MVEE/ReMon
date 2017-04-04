@@ -495,7 +495,7 @@ void monitor::log_variant_backtrace(int variantnum, int max_depth, int calculate
 		{
 			logfunc("%s - > error while waiting for variant: %d (%s) - status: %s\n",
 					call_get_variant_pidstr(variantnum).c_str(), 
-					errno, strerror(errno),
+					errno, getTextualErrno(errno),
 					getTextualMVEEWaitStatus(status).c_str()
 				);
 			set_mmap_table->release_lock();
@@ -515,7 +515,7 @@ void monitor::log_variant_backtrace(int variantnum, int max_depth, int calculate
             if (!interaction::suspend(variants[variantnum].variantpid, variants[variantnum].varianttgid))
             {
                 logfunc("%s - > signal delivery failed... err = %d (%s)\n",
-						call_get_variant_pidstr(variantnum).c_str(), errno, strerror(errno));
+						call_get_variant_pidstr(variantnum).c_str(), errno, getTextualErrno(errno));
 				set_mmap_table->release_lock();
                 return;
             }
@@ -639,7 +639,7 @@ void monitor::log_dump_queues(shm_table* shm_table)
         debugf("dumping queue: %s\n", getTextualBufferType(MVEE_LIBC_ATOMIC_BUFFER));
 
 //        warnf("dumping queue: %s - FILE: %s (%d - %s)\n",
-//                    getTextualBufferType(MVEE_LIBC_ATOMIC_BUFFER), logname, logfile, strerror(errno));
+//                    getTextualBufferType(MVEE_LIBC_ATOMIC_BUFFER), logname, logfile, getTextualErrno(errno));
 
         for (int i = 0; i < mvee::numvariants; ++i)
             fprintf(logfile, "VARIANT %d - POS: %05ld %s\n", i, pos[i],
@@ -706,7 +706,7 @@ void monitor::log_dump_queues(shm_table* shm_table)
         if (!logfile)
             return;
 
-        warnf("dumping queue: %s - FILE: %s (%d - %s)\n", getTextualBufferType(it.first), logname, logfile, strerror(errno));
+        warnf("dumping queue: %s - FILE: %s (%d - %s)\n", getTextualBufferType(it.first), logname, logfile, getTextualErrno(errno));
 
         fprintf(logfile, "===============================================   \n");
         fprintf(logfile, "> Buffer Type             : %d (%s)               \n", it.first, getTextualBufferType(it.first));
@@ -945,7 +945,7 @@ void monitor::log_monitor_state_short(int err)
 {
     warnf("prevcall : %ld (%s)\n", variants[0].prevcallnum, getTextualSyscall(variants[0].prevcallnum));
     warnf("state    : %d (%s)\n",  state,                 getTextualState(state));
-    warnf("errno    : %d (%s)\n",  err,                   strerror(err));
+    warnf("errno    : %d (%s)\n",  err,                   getTextualErrno(err));
 }
 
 /*-----------------------------------------------------------------------------

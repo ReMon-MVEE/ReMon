@@ -718,7 +718,7 @@ void monitor::call_replicate_io_vector(std::vector<struct iovec*>& addresses, lo
 
             if (copied != to_copy)
             {
-                warnf("Failed to replicate io vector. tried to replicate %d bytes - actually replicated %d bytes - errno: %s\n", to_copy, copied, strerror(errno));
+                warnf("Failed to replicate io vector. tried to replicate %d bytes - actually replicated %d bytes - errno: %s\n", to_copy, copied, getTextualErrno(errno));
             }
         }
 
@@ -953,7 +953,7 @@ void monitor::call_replicate_buffer(std::vector<const unsigned char*>& buffers, 
     {
         if ((result = rw::copy_data(variants[0].variantpid, (void*) buffers[0], variants[i].variantpid, (void*) buffers[i], size)) != size)
         {
-            warnf("Failed to replicate buffer. tried to replicate %d bytes - actually replicated %d bytes - errno: %s\n", size, result, strerror(errno));
+            warnf("Failed to replicate buffer. tried to replicate %d bytes - actually replicated %d bytes - errno: %s\n", size, result, getTextualErrno(errno));
         }
     }
 }

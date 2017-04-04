@@ -39,6 +39,7 @@ typedef void (monitor:: *mvee_syscall_logger)(int);
 #define MAP_MVEE_WASSHARED                 0x800000
 #define MVEE_FUTEX_WAIT_TID                30
 #define PR_REGISTER_IPMON                  0xb00b135
+#define ENOIPMON                           256
 
 #define NO_MVEE_SCHEDULING                 0                        // mvee won't pin any threads
 #define MVEE_CLEVER_SCHEDULING             1 

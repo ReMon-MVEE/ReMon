@@ -293,7 +293,7 @@ long monitor::handle_check_open_call(const std::string& full_path, int flags, in
         {
             //warnf("> O_CREAT & O_EXCL\n");
             err = open(full_path.c_str(), flags, mode);
-            //warnf("> SYS_OPEN returned: %d (%s) %d (%s) for O_CREAT & O_EXCL call...\n", err, strerror(-err), errno, strerror(errno));
+            //warnf("> SYS_OPEN returned: %d (%s) %d (%s) for O_CREAT & O_EXCL call...\n", err, getTextualErrno(-err), errno, getTextualErrno(errno));
             if (err != -1)
             {
                 // remove O_CREAT and O_EXCL from the flags and set the new flags
@@ -1868,9 +1868,10 @@ POSTCALL(brk)
 -----------------------------------------------------------------------------*/
 LOG_RETURN(getgid)
 {
+	long result DEBUGVAR =  call_postcall_get_variant_result(variantnum);
 	debugf("%s - SYS_GETGID return: %d (%s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   call_postcall_get_variant_result(variantnum), 
+		   result, 
 		   getTextualGroupId(result).c_str());
 }
 
@@ -4440,7 +4441,7 @@ POSTCALL(mprotect)
 
 					if (!fp)
 					{
-						warnf("Couldn't dump JIT cache for variant %d - tmpfile failed: %s\n", i, strerror(errno));
+						warnf("Couldn't dump JIT cache for variant %d - tmpfile failed: %s\n", i, getTextualErrno(errno));
 						break;
 					}
 
@@ -4461,7 +4462,7 @@ POSTCALL(mprotect)
 
 						if (fwrite(raw_bytes[i] + dump_offset, 1, dump_size, fp) != dump_size)
 						{
-							warnf("Couldn't dump JIT cache for variant %d - fwrite failed: %s\n", i, strerror(errno));
+							warnf("Couldn't dump JIT cache for variant %d - fwrite failed: %s\n", i, getTextualErrno(errno));
 							break;
 						}
 
