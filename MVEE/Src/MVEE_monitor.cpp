@@ -2100,7 +2100,9 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
 {
     siginfo_t siginfo;
 	unsigned long ip = 0, ret;
+#ifndef MVEE_BENCHMARK
 	bool skip_segv = false;
+#endif
 
     // Terminated by unhandled signal
     if (status.reason == STOP_KILLED)

@@ -1249,7 +1249,7 @@ const char* getTextualFileType(int type)
 /*-----------------------------------------------------------------------------
     getTextualRAVENCall
 -----------------------------------------------------------------------------*/
-const char* getTextualRAVENCall(long call)
+const char* getTextualRAVENCall(int call)
 {
 	const char* result = "ESC_UNKNOWN";
 

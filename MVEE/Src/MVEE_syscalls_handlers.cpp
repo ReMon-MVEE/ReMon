@@ -440,7 +440,7 @@ LOG_ARGS(write)
 		debugf("%s - SYS_WRITE(%d (%s), %d, %d)\n",
 			   call_get_variant_pidstr(variantnum).c_str(), 
 			   ARG1(variantnum), 
-			   getTextualRAVENCall(ARG1(variantnum)),
+			   getTextualRAVENCall((int)ARG1(variantnum)),
 			   ARG2(variantnum), 
 			   ARG3(variantnum));
 	}
@@ -1789,12 +1789,10 @@ POSTCALL(times)
 -----------------------------------------------------------------------------*/
 LOG_RETURN(brk)
 {
-	long result  = call_postcall_get_variant_result(variantnum);
-
 	debugf("%s - SYS_BRK(0x" LONGPTRSTR ") return = 0x" LONGPTRSTR "\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   ARG1(variantnum), 
-		   result);
+		   call_postcall_get_variant_result(variantnum));
 }
 
 POSTCALL(brk)
@@ -1870,11 +1868,9 @@ POSTCALL(brk)
 -----------------------------------------------------------------------------*/
 LOG_RETURN(getgid)
 {
-	long result  = call_postcall_get_variant_result(variantnum);
-
 	debugf("%s - SYS_GETGID return: %d (%s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   result, 
+		   call_postcall_get_variant_result(variantnum), 
 		   getTextualGroupId(result).c_str());
 }
 
@@ -2542,7 +2538,7 @@ PRECALL(setresgid)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(rt_sigaction)
 {
-	struct sigaction action = call_get_sigaction(variantnum, (void*) ARG2(variantnum), OLDCALLIFNOT(__NR_rt_sigaction));
+	struct sigaction DEBUGVAR action = call_get_sigaction(variantnum, (void*) ARG2(variantnum), OLDCALLIFNOT(__NR_rt_sigaction));
 
 	debugf("%s - SYS_RT_SIGACTION(%d - %s - %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
@@ -3629,7 +3625,6 @@ PRECALL(recvmsg)
 
 LOG_RETURN(recvmsg)
 {
-	long result  = call_postcall_get_variant_result(variantnum);
 	struct msghdr msg;
 	if (!rw::read<struct msghdr>(variants[variantnum].variantpid, (void*) ARG2(variantnum), msg))
 	{
@@ -3640,7 +3635,7 @@ LOG_RETURN(recvmsg)
 	auto _msg = call_serialize_msgvector(variantnum, &msg);
 	debugf("%s - SYS_RECVMSG return: %d - %s\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   result, 
+		   call_postcall_get_variant_result(variantnum), 
 		   _msg.c_str());
 }
 
@@ -4181,10 +4176,9 @@ POSTCALL(shmat)
 
 LOG_RETURN(shmat)
 {
-	long result  = call_postcall_get_variant_result(variantnum);
-
 	debugf("%s - SYS_SHMAT return: 0x" PTRSTR "\n", 
-		   call_get_variant_pidstr(variantnum).c_str(), result);
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   call_postcall_get_variant_result(variantnum));
 }
 
 /*-----------------------------------------------------------------------------
@@ -4362,11 +4356,9 @@ PRECALL(mprotect)
 
 LOG_RETURN(mprotect)
 {
-	long result  = call_postcall_get_variant_result(variantnum);
-
 	debugf("%s - SYS_MPROTECT return: %d\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   result);
+		   call_postcall_get_variant_result(variantnum));
 }
 
 POSTCALL(mprotect)
@@ -4894,10 +4886,9 @@ POSTCALL(mremap)
 
 LOG_RETURN(mremap)
 {
-	long result  = call_postcall_get_variant_result(variantnum);
-
 	debugf("%s - SYS_MREMAP return: 0x" PTRSTR "\n", 
-		   call_get_variant_pidstr(variantnum).c_str(), result);
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   call_postcall_get_variant_result(variantnum));
 
 #ifdef MVEE_MMAN_DEBUG
     set_mmap_table->print_mmap_table();
@@ -5688,11 +5679,9 @@ POSTCALL(mmap)
 
 LOG_RETURN(mmap)
 {
-	long result  = call_postcall_get_variant_result(variantnum);
-
 	debugf("%s - SYS_MMAP2 return: 0x" PTRSTR "\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   result);
+		   call_postcall_get_variant_result(variantnum));
 
 #ifdef MVEE_MMAN_DEBUG
     set_mmap_table->print_mmap_table();
