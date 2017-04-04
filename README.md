@@ -13,8 +13,8 @@ The current version of **IP-MON** takes quite a lot of manual effort to set up. 
 You will need:
 - A GNU/Linux distribution based on Debian. I **_strongly_** recommend Ubuntu 14.04 x64.
 - Ruby
-- gcc/g++ (version 4.8 or later recommended)
-- LLVM/Clang (version 3.6 or later recommended)
+- gcc (version 4.8 or later recommended)
+- LLVM/Clang with C++14 support (version 3.6 or later recommended)
 - The musl C library (get it at git://git.musl-libc.org/musl or install directly using `sudo apt-get install musl-tools`)
 - Several development packages (see below)
 
