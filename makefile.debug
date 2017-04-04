@@ -4,7 +4,7 @@
 
 BUILD          = Debug
 BUILD_CXX      = clang++
-BUILD_CXXFLAGS = -ggdb -std=c++11 -pedantic-errors -fno-omit-frame-pointer
+BUILD_CXXFLAGS = -ggdb -std=c++14 -pedantic-errors -fno-omit-frame-pointer
 BUILD_LDFLAGS  = -rdynamic
 BUILD_OPT      = no
 

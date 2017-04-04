@@ -596,46 +596,4 @@
 			}															\
     }
 
-#define DOALIASAT(dirfdarg, patharg)									\
-	{																	\
-		int limit = 1;													\
-		if (state != STATE_IN_MASTERCALL)								\
-			limit = mvee::numvariants;									\
-																		\
-		for (int i = 0; i < limit; ++i)									\
-		{																\
-			auto orig_path = set_fd_table->get_full_path(i, variants[i].variantpid, (unsigned long)(int)ARG##dirfdarg(i), (void*)ARG##patharg(i)); \
-			auto alias = mvee::get_alias(i, orig_path);					\
-			if (alias != "")											\
-			{															\
-				debugf("%s - File %s is aliased to %s\n", call_get_variant_pidstr(i).c_str(), orig_path.c_str(), alias.c_str()); \
-				call_overwrite_arg_data(i, patharg, orig_path.length() + 1, (void*) alias.c_str(), alias.length() + 1, true); \
-			}															\
-		}																\
-	}
-
-
-#define DOALIAS(patharg)												\
-	{																	\
-		int limit = 1;													\
-		if (state != STATE_IN_MASTERCALL)								\
-			limit = mvee::numvariants;									\
-																		\
-		for (int i = 0; i < limit; ++i)									\
-		{																\
-			auto orig_path = set_fd_table->get_full_path(i, variants[i].variantpid, AT_FDCWD, (void*)ARG##patharg(i)); \
-			auto alias = mvee::get_alias(i, orig_path);					\
-			if (alias != "")											\
-			{															\
-				debugf("%s - File %s is aliased to %s\n", call_get_variant_pidstr(i).c_str(), orig_path.c_str(), alias.c_str()); \
-				call_overwrite_arg_data(i, patharg, orig_path.length() + 1, (void*) alias.c_str(), alias.length() + 1, true); \
-			}															\
-		}																\
-	}
-
-	
-
-
-
-
 #endif /* MVEE_SYSCALLS_SUPPORT_H_ */

@@ -15,6 +15,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <signal.h>
+#include <fcntl.h>
 #include <memory>
 #include <vector>
 #include <deque>
@@ -22,6 +23,7 @@
 #include "MVEE_build_config.h"
 #include "MVEE_private_arch.h"
 #include "MVEE_interaction.h"
+#include "MVEE_filedesc.h"
 
 /*-----------------------------------------------------------------------------
     Typedefs
@@ -53,6 +55,26 @@ enum MonitorState
     STATE_IN_FORKCALL,    // Waiting for forkcall to return
     STATE_IN_MASTERCALL   // Waiting for mastercall to return
 };
+
+/*-----------------------------------------------------------------------------
+  RAVEN Compatibility
+-----------------------------------------------------------------------------*/
+#define ESC_XCHECK          -1
+#define ESC_XCHECK_VALUES_ONLY      -2
+#define ESC_FUTEX_HACK          -10
+#define ESC_ENTER_LOCK          -11
+//#define ESC_LEAVE_UNLOCK        -12
+#define ESC_LEAVE_LOCK          -12
+#define ESC_XCHECKS_OFF         -42
+#define ESC_XCHECKS_ON          -43
+#define ESC_XCHECKS_OFF_LOCAL       -44
+#define ESC_XCHECKS_ON_LOCAL        -45
+#define ESC_VARIANT_INIT_SYNC       -100
+#define ESC_VARIANT_REACTIVATE      -101 // CRIU depends on this one; please don't change it                       
+#define ESC_ENABLE_SYSCALL_CHECKS   -200
+#define ESC_EXECVE_FAILURE      -210
+#define ESC_RINGBUFF_INIT       -300 // Ring Buffer initialization                                                 
+#define ESC_RINGBUFF_DESTROY        -301 // Ring Buffer destruction        
 
 /*-----------------------------------------------------------------------------
   Classes
@@ -325,6 +347,9 @@ private:
     // These functions mostly support the MVEE<->variant datatransfers
 	// *************************************************************************
 
+	// inline templates here
+	#include "MVEE_syscalls_support_templates.h"
+
 	// 
 	// Check if our cached regs variable is still up to date for variant
 	// @variantnum, possibly refreshing it if necessary 
@@ -429,7 +454,7 @@ private:
 	//
 	// Returns true if we should allow open/openat calls to open file @fullpath
 	//
-    long        handle_check_open_call              (const std::string& full_path, int* flags, int mode);
+    long        handle_check_open_call              (const std::string& full_path, int flags, int mode);
 
 	// 
 	// Fetching the arguments for an execve call is complicated and slow.

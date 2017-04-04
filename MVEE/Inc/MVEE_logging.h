@@ -64,6 +64,7 @@ const char* getTextualXattrFlags        (int flags);
 const char* getTextualTimerType         (int type);
 const char* getTextualSyslogAction      (int action);
 const char* getTextualFileType          (int type);
+const char* getTextualRAVENCall         (long fd);
 std::string getTextualTimerFlags        (int flags);
 std::string getTextualWaitEventType     (int status);
 std::string getTextualEpollEvents       (unsigned int events);

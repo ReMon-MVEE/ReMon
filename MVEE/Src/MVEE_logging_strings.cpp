@@ -1247,6 +1247,36 @@ const char* getTextualFileType(int type)
 }
 
 /*-----------------------------------------------------------------------------
+    getTextualRAVENCall
+-----------------------------------------------------------------------------*/
+const char* getTextualRAVENCall(long call)
+{
+	const char* result = "ESC_UNKNOWN";
+
+	switch(call)
+	{
+		DEF_CASE(ESC_XCHECK);
+		DEF_CASE(ESC_XCHECK_VALUES_ONLY);
+		DEF_CASE(ESC_FUTEX_HACK);
+		DEF_CASE(ESC_ENTER_LOCK);
+//		DEF_CASE(ESC_LEAVE_UNLOCK);
+		DEF_CASE(ESC_LEAVE_LOCK);
+		DEF_CASE(ESC_XCHECKS_OFF);
+		DEF_CASE(ESC_XCHECKS_ON);
+		DEF_CASE(ESC_XCHECKS_OFF_LOCAL);
+		DEF_CASE(ESC_XCHECKS_ON_LOCAL);
+		DEF_CASE(ESC_VARIANT_INIT_SYNC);
+		DEF_CASE(ESC_VARIANT_REACTIVATE);
+		DEF_CASE(ESC_ENABLE_SYSCALL_CHECKS);
+		DEF_CASE(ESC_EXECVE_FAILURE);
+		DEF_CASE(ESC_RINGBUFF_INIT);
+		DEF_CASE(ESC_RINGBUFF_DESTROY);
+	}
+
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
     getTextualTimerFlags
 -----------------------------------------------------------------------------*/
 std::string getTextualTimerFlags(int flags)

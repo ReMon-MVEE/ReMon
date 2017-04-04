@@ -3008,6 +3008,9 @@ void monitor::sig_restart_syscall(int variantnum)
 				return;
 			}
 			call_resume(i);
+
+			debugf("%s - restarted fake syscall in variant\n",
+				   call_get_variant_pidstr(i).c_str());
         }
     }
 }

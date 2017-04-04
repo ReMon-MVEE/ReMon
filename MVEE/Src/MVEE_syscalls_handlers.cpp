@@ -262,7 +262,7 @@ out:
 /*-----------------------------------------------------------------------------
   Helper Functions
 -----------------------------------------------------------------------------*/
-long monitor::handle_check_open_call(const std::string& full_path, int* flags, int mode)
+long monitor::handle_check_open_call(const std::string& full_path, int flags, int mode)
 {
     int err = 0;
 
@@ -289,18 +289,17 @@ long monitor::handle_check_open_call(const std::string& full_path, int* flags, i
         // So let the monitor create the file first, and then let the variants
         // execute the same open() call without O_CREAT and O_EXCL.
         //
-        if ( (*flags & O_CREAT) && (*flags & O_EXCL) )
+        if ( (flags & O_CREAT) && (flags & O_EXCL) )
         {
             //warnf("> O_CREAT & O_EXCL\n");
-            err = open(full_path.c_str(), *flags, mode);
+            err = open(full_path.c_str(), flags, mode);
             //warnf("> SYS_OPEN returned: %d (%s) %d (%s) for O_CREAT & O_EXCL call...\n", err, strerror(-err), errno, strerror(errno));
             if (err != -1)
             {
                 // remove O_CREAT and O_EXCL from the flags and set the new flags
                 // for each variant
-                *flags &= (~O_CREAT & ~O_EXCL);
                 close(err);
-                err     = 0;
+                err = 0;
             }
         }
     }
@@ -435,14 +434,27 @@ POSTCALL(read)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(write)
 {
-	auto buf_str = call_serialize_io_buffer(variantnum, (const unsigned char*) ARG2(variantnum), ARG3(variantnum));
+	// writes to negative file descriptors are RAVEN pseudo-syscalls
+	if ((long)ARG1(0) < 0)
+	{
+		debugf("%s - SYS_WRITE(%d (%s), %d, %d)\n",
+			   call_get_variant_pidstr(variantnum).c_str(), 
+			   ARG1(variantnum), 
+			   getTextualRAVENCall(ARG1(variantnum)),
+			   ARG2(variantnum), 
+			   ARG3(variantnum));
+	}
+	else
+	{
+		auto buf_str = call_serialize_io_buffer(variantnum, (const unsigned char*) ARG2(variantnum), ARG3(variantnum));
 
-	debugf("%s - SYS_WRITE(%d, 0x" PTRSTR " (%s), %d)\n",
-		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   buf_str.c_str(), 
-		   ARG3(variantnum));
+		debugf("%s - SYS_WRITE(%d, 0x" PTRSTR " (%s), %d)\n",
+			   call_get_variant_pidstr(variantnum).c_str(), 
+			   ARG1(variantnum), 
+			   ARG2(variantnum), 
+			   buf_str.c_str(), 
+			   ARG3(variantnum));
+	}
 }
 
 PRECALL(write)
@@ -459,7 +471,9 @@ PRECALL(write)
     }
 
     CHECKARG(3);
-    CHECKBUFFER(2, ARG3(0));
+
+	if ((long)ARG1(0) >= 0)
+		CHECKBUFFER(2, ARG3(0));
 
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
@@ -520,22 +534,45 @@ PRECALL(open)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
+//
+// Some "magic" happens in this call handler.  In most cases, open calls get
+// dispatched as "normal" calls, which means that _ALL_ variants will open the
+// file. This is fine, as it will not increase the system load. There is a bit
+// of a problem when the file is opened with the O_CREAT | O_EXCL flags,
+// however. O_CREAT | O_EXCL ensures that the specified file is created. If it
+// already exists, the call will fail. In GHUMVEE, the first variant to complete
+// the sys_open call will create the file (if it doesn't exist yet) and return a
+// valid fd. Subsequent sys_open completions from other variants will fail
+// because the file already exists. 
+//
+// We work around this by creating the file in the monitor, and stripping the
+// O_EXCL flag.
+// 
 CALL(open)
 {
 	if IS_UNSYNCED_CALL
 		return MVEE_CALL_ALLOW;
 
-	DOALIAS(1);
+	int result = MVEE_CALL_ALLOW, limit = 1;
 
-    int i, result, old_flags, flags;
-	std::string str1 = set_fd_table->get_full_path(0, variants[0].variantpid, AT_FDCWD, (void*)ARG1(0));
+	// If do_alias returns true, we will have found aliases for at least
+	// one variant. In this case, we want to repeat the check_open_call + 
+	// flag stripping iteration below for each variant
+	if (call_do_alias<1>())
+		limit = mvee::numvariants;
 
-	flags  = old_flags = ARG2(0);
-	result = handle_check_open_call(str1.c_str(), &flags, ARG3(0));
+	for (auto i = 0; i < limit; ++i)
+	{
+		auto file = set_fd_table->get_full_path(i, variants[i].variantpid, AT_FDCWD, (void*) ARG1(i));
 
-	for (i = 0; i < mvee::numvariants; ++i)
-		if (flags != old_flags)
-            SETARG2(i, flags);
+		result = handle_check_open_call(file.c_str(), ARG2(i), ARG3(i));
+
+		// strip off the O_CREAT and O_EXCL flags
+		// GHUMVEE will already have created the file in the handle_check_open_call function
+		if (result & MVEE_CALL_ALLOW)
+			if ((ARG2(i) & O_CREAT) && (ARG2(i) & O_EXCL))
+				call_overwrite_arg_value(i, 2, ARG2(i) & (~(O_CREAT | O_EXCL)), true);
+	}
 
     return result;
 }
@@ -719,8 +756,8 @@ PRECALL(link)
 
 CALL(link)
 {
-	DOALIAS(1);
-	DOALIAS(2);
+	(void) call_do_alias<1>();
+	(void) call_do_alias<2>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -760,7 +797,7 @@ PRECALL(unlink)
 
 CALL(unlink)
 {
-	DOALIAS(1);
+	(void) call_do_alias<1>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -1133,7 +1170,7 @@ PRECALL(chdir)
 
 CALL(chdir)
 {
-	DOALIAS(1);
+	(void) call_do_alias<1>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -1190,7 +1227,7 @@ PRECALL(chmod)
 
 CALL(chmod)
 {
-	DOALIAS(1);
+	(void) call_do_alias<1>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -1423,7 +1460,7 @@ PRECALL(utime)
 
 CALL(utime)
 {
-	DOALIAS(1);
+	(void) call_do_alias<1>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -1454,7 +1491,7 @@ PRECALL(mknod)
 
 CALL(mknod)
 {
-	DOALIAS(1);
+	(void) call_do_alias<1>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -1482,7 +1519,7 @@ PRECALL(access)
 
 CALL(access)
 {
-	DOALIAS(1);
+	(void) call_do_alias<1>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -1529,8 +1566,8 @@ PRECALL(rename)
 
 CALL(rename)
 {
-	DOALIAS(1);
-	DOALIAS(2);
+	(void) call_do_alias<1>();
+	(void) call_do_alias<2>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -1557,7 +1594,7 @@ PRECALL(mkdir)
 
 CALL(mkdir)
 {
-	DOALIAS(1);
+	(void) call_do_alias<1>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -1582,7 +1619,7 @@ PRECALL(rmdir)
 
 CALL(rmdir)
 {
-	DOALIAS(1);
+	(void) call_do_alias<1>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -1609,7 +1646,7 @@ PRECALL(creat)
 
 CALL(creat)
 {
-	DOALIAS(1);
+	(void) call_do_alias<1>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -2672,8 +2709,8 @@ PRECALL(symlink)
 
 CALL(symlink)
 {
-	DOALIAS(1);
-	DOALIAS(2);
+	(void) call_do_alias<1>();
+	(void) call_do_alias<2>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -2719,7 +2756,7 @@ CALL(readlink)
 		}
 	}
 
-	DOALIAS(1);
+	(void) call_do_alias<1>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -2958,7 +2995,7 @@ PRECALL(truncate)
 
 CALL(truncate)
 {
-	DOALIAS(1);
+	(void) call_do_alias<1>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -5205,7 +5242,7 @@ PRECALL(chown)
 
 CALL(chown)
 {
-	DOALIAS(1);
+	(void) call_do_alias<1>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -5685,7 +5722,7 @@ PRECALL(truncate64)
 
 CALL(truncate64)
 {
-	DOALIAS(1);
+	(void) call_do_alias<1>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -5721,7 +5758,7 @@ PRECALL(stat)
 
 CALL(stat)
 {
-	DOALIAS(1);
+	(void) call_do_alias<1>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -5749,7 +5786,7 @@ PRECALL(stat64)
 
 CALL(stat64)
 {
-	DOALIAS(1);
+	(void) call_do_alias<1>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -5781,7 +5818,7 @@ PRECALL(lstat)
 
 CALL(lstat)
 {
-	DOALIAS(1);
+	(void) call_do_alias<1>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -5817,7 +5854,7 @@ PRECALL(lstat64)
 
 CALL(lstat64)
 {
-	DOALIAS(1);
+	(void) call_do_alias<1>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -6213,7 +6250,7 @@ PRECALL(setxattr)
 
 CALL(setxattr)
 {
-	DOALIAS(1);
+	(void) call_do_alias<1>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -6276,7 +6313,7 @@ PRECALL(getxattr)
 
 CALL(getxattr)
 {
-	DOALIAS(1);
+	(void) call_do_alias<1>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -6683,7 +6720,7 @@ PRECALL(statfs)
 
 CALL(statfs)
 {
-	DOALIAS(1);
+	(void) call_do_alias<1>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -6718,7 +6755,7 @@ PRECALL(statfs64)
 
 CALL(statfs64)
 {
-	DOALIAS(1);
+	(void) call_do_alias<1>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -6783,6 +6820,19 @@ PRECALL(setpriority)
         return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
     }
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+}
+
+/*-----------------------------------------------------------------------------
+  sys_sched_setscheduler
+-----------------------------------------------------------------------------*/
+PRECALL(sched_setscheduler)
+{
+	return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+}
+
+CALL(sched_setscheduler)
+{
+	return MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
 }
 
 /*-----------------------------------------------------------------------------
@@ -7033,7 +7083,7 @@ PRECALL(utimes)
 
 CALL(utimes)
 {
-	DOALIAS(1);
+	(void) call_do_alias<1>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -7139,7 +7189,7 @@ PRECALL(inotify_add_watch)
 
 CALL(inotify_add_watch)
 {
-	DOALIAS(2);
+	(void) call_do_alias<2>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -7199,20 +7249,29 @@ PRECALL(openat)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
+// See comment above CALL(open) for info on what this function does
 CALL(openat)
 {
-	DOALIASAT(1, 2);
+	int result = MVEE_CALL_ALLOW, limit = 1;
 
-    int i, result, old_flags, flags;
-	std::string str1 = set_fd_table->get_full_path(0, variants[0].variantpid, 
-												   (unsigned long)(int)ARG1(0), (void*)ARG2(0));
-	
-	flags  = old_flags = ARG3(0);
-	result = handle_check_open_call(str1, &flags, ARG4(0));
+	// If do_alias returns true, we will have found aliases for at least
+	// one variant. In this case, we want to repeat the check_open_call + 
+	// flag stripping iteration below for each variant
+	if (call_do_alias_at<1, 2>())
+		limit = mvee::numvariants;
 
-	for (i = 0; i < mvee::numvariants; ++i)
-		if (flags != old_flags)
-            SETARG3(i, flags);
+	for (auto i = 0; i < limit; ++i)
+	{
+		auto file = set_fd_table->get_full_path(i, variants[i].variantpid, (unsigned long)(int)ARG1(i), (void*) ARG2(i));
+
+		result = handle_check_open_call(file.c_str(), ARG3(i), ARG4(i));
+
+		// strip off the O_CREAT and O_EXCL flags
+		// GHUMVEE will already have created the file in the handle_check_open_call function
+		if (result & MVEE_CALL_ALLOW)
+			if ((ARG3(i) & O_CREAT) && (ARG3(i) & O_EXCL))
+				call_overwrite_arg_value(i, 3, ARG3(i) & (~(O_CREAT | O_EXCL)), true);
+	}
 
     return result;
 }
@@ -7264,7 +7323,7 @@ PRECALL(mkdirat)
 
 CALL(mkdirat)
 {
-	DOALIASAT(1, 2);
+	(void) call_do_alias_at<1, 2>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -7298,7 +7357,7 @@ PRECALL(newfstatat)
 
 CALL(newfstatat)
 {
-	DOALIASAT(1, 2);
+	(void) call_do_alias_at<1, 2>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -7332,7 +7391,7 @@ PRECALL(fstatat64)
 
 CALL(fstatat64)
 {
-	DOALIASAT(1, 2);
+	(void) call_do_alias_at<1, 2>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -7415,7 +7474,7 @@ PRECALL(unlinkat)
 
 CALL(unlinkat)
 {
-	DOALIASAT(1, 2);
+	(void) call_do_alias_at<1, 2>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -7449,8 +7508,8 @@ PRECALL(renameat)
 
 CALL(renameat)
 {
-	DOALIASAT(1, 2);
-	DOALIASAT(3, 4);
+	(void) call_do_alias_at<1, 2>();
+	(void) call_do_alias_at<3, 4>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -7487,8 +7546,8 @@ PRECALL(linkat)
 
 CALL(linkat)
 {
-	DOALIASAT(1, 2);
-	DOALIASAT(3, 4);
+	(void) call_do_alias_at<1, 2>();
+	(void) call_do_alias_at<3, 4>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -7519,8 +7578,8 @@ PRECALL(symlinkat)
 
 CALL(symlinkat)
 {
-	DOALIAS(1);
-	DOALIASAT(2, 3);
+	(void) call_do_alias<1>();
+	(void) call_do_alias_at<2, 3>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -7552,7 +7611,7 @@ PRECALL(readlinkat)
 
 CALL(readlinkat)
 {
-	DOALIASAT(1, 2);
+	(void) call_do_alias_at<1, 2>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -7590,7 +7649,7 @@ PRECALL(fchmodat)
 
 CALL(fchmodat)
 {
-	DOALIASAT(1, 2);
+	(void) call_do_alias_at<1, 2>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -7621,7 +7680,7 @@ PRECALL(faccessat)
 
 CALL(faccessat)
 {
-	DOALIASAT(1, 2);
+	(void) call_do_alias_at<1, 2>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -7761,7 +7820,7 @@ PRECALL(utimensat)
 
 CALL(utimensat)
 {
-	DOALIASAT(1, 2);
+	(void) call_do_alias_at<1, 2>();
 	return MVEE_CALL_ALLOW;
 }
 
