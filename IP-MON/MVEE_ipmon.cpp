@@ -1172,7 +1172,7 @@ PRECALL(ioctl)
 		ARG1 = ipmon_get_slave_fd(ARG1);
         return IPMON_EXEC_ALL | IPMON_REPLICATE_MASTER | IPMON_ORDER_CALL;
     }
-	return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
+	return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER | IPMON_ORDER_CALL;
 }
 
 POSTCALL(ioctl)
@@ -1202,6 +1202,56 @@ POSTCALL(ioctl)
 
     return order;
 }
+#else
+# if CURRENT_POLICY < FULL_SYSCALLS
+MAYBE_CHECKED(ioctl)
+{
+	if (ARG2 == FIONREAD)
+		return false;
+	return true;
+}
+
+CALCSIZE(ioctl)
+{
+	COUNTREG(ARG);
+	COUNTREG(ARG);
+
+	switch(ARG2)
+	{
+	    case FIONREAD:
+			COUNTREG(ARG);
+			COUNTBUFFER(RET, ARG3, sizeof(int));
+			break;
+	}
+}
+
+PRECALL(ioctl)
+{
+	CHECKREG(ARG1);
+	CHECKREG(ARG2);
+
+	switch(ARG2)
+	{
+    	case FIONREAD:
+			CHECKPOINTER(ARG3);
+			break;
+	}
+
+	return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
+}
+
+POSTCALL(ioctl)
+{
+	switch(ARG2)
+	{
+    	case FIONREAD:
+			REPLICATEBUFFER(ARG3, sizeof(int));
+			break;
+	}
+
+	return order;
+}
+# endif // CURRENT_POLICY < FULL_SYSCALLS
 #endif
 
 /*-----------------------------------------------------------------------------
@@ -2307,7 +2357,8 @@ CALCSIZE(write)
 	COUNTREG(ARG); // arg1
 	COUNTREG(ARG); // arg2
 	COUNTREG(ARG); // arg3
-	COUNTBUFFER(ARG, ARG2, ARG3);
+	if ((int)ARG1 >= 0)
+		COUNTBUFFER(ARG, ARG2, ARG3);
 }
 
 PRECALL(write)
@@ -2315,8 +2366,19 @@ PRECALL(write)
 	CHECKREG(ARG1);
 	CHECKPOINTER(ARG2);
 	CHECKREG(ARG3);
-	CHECKBUFFER(ARG2, ARG3);
-	return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER | IPMON_MAYBE_BLOCKING(ARG1);
+
+	// RAVEN extended syscall support
+	unsigned long result = IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
+	if ((int)ARG1 >= 0)
+	{
+		CHECKBUFFER(ARG2, ARG3);
+		result |= IPMON_MAYBE_BLOCKING(ARG1);
+	}
+	else
+	{
+		result |= IPMON_ORDER_CALL | IPMON_LOCKSTEP_CALL;
+	}
+	return result;	
 }
 
 /*-----------------------------------------------------------------------------
@@ -2850,61 +2912,6 @@ PRECALL(setsockopt)
 	CHECKBUFFER(ARG4, ARG5);
 	return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
 }
-
-/*-----------------------------------------------------------------------------
-    ioctl - (int fd, unsigned long request, ...)
-
-	ioctl supports many getter calls which we could allow
------------------------------------------------------------------------------*/
-#if CURRENT_POLICY < FULL_SYSCALLS
-MAYBE_CHECKED(ioctl)
-{
-	if (ARG2 == FIONREAD)
-		return false;
-	return true;
-}
-
-CALCSIZE(ioctl)
-{
-	COUNTREG(ARG);
-	COUNTREG(ARG);
-
-	switch(ARG2)
-	{
-	    case FIONREAD:
-			COUNTREG(ARG);
-			COUNTBUFFER(RET, ARG3, sizeof(int));
-			break;
-	}
-}
-
-PRECALL(ioctl)
-{
-	CHECKREG(ARG1);
-	CHECKREG(ARG2);
-
-	switch(ARG2)
-	{
-    	case FIONREAD:
-			CHECKPOINTER(ARG3);
-			break;
-	}
-
-	return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
-}
-
-POSTCALL(ioctl)
-{
-	switch(ARG2)
-	{
-    	case FIONREAD:
-			REPLICATEBUFFER(ARG3, sizeof(int));
-			break;
-	}
-
-	return order;
-}
-#endif
 
 /*-----------------------------------------------------------------------------
     ipmon_syscall_maybe_checked - allows a system call handler to decide whether
@@ -3879,7 +3886,7 @@ void __attribute__((constructor)) init()
 	IPMON_MASK_SET(mask, __NR_preadv);
 	IPMON_MASK_SET(mask, __NR_select);
 	IPMON_MASK_SET(mask, __NR_poll); 
-//	IPMON_MASK_SET(mask, __NR_ioctl);
+	IPMON_MASK_SET(mask, __NR_ioctl);
 # if defined(IPMON_SUPPORT_FUTEX) || defined(IPMON_USE_FUTEXES_FOR_BLOCKING_CALLS)
 	IPMON_MASK_SET(mask, __NR_futex);
 # endif
