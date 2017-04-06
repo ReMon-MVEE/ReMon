@@ -999,6 +999,8 @@ private:
     bool                              ipmon_initialized;
 	bool                              ipmon_mmap_handling;
 	bool                              ipmon_fd_handling;
+    bool                              aliased_open;           // 
+
 
     int                               parentmonitorid;        // monitorid of the monitor that created this monitor...
     MonitorState                      state;                  //

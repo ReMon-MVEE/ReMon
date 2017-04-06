@@ -149,6 +149,7 @@ void monitor::init()
     ipmon_initialized              = false;
 	ipmon_mmap_handling            = false;
 	ipmon_fd_handling              = false;
+	aliased_open                   = false;
     monitorid                      = 0;
     parentmonitorid                = 0;
     state                          = STATE_NORMAL;

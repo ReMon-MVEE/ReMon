@@ -473,7 +473,15 @@ PRECALL(write)
     CHECKARG(3);
 
 	if ((int)ARG1(0) >= 0)
+	{
 		CHECKBUFFER(2, ARG3(0));
+
+		if (set_fd_table->is_fd_unsynced(ARG1(0)))
+		{
+			MAPFDS(1);
+			return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+		}
+	}
 
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
@@ -553,25 +561,38 @@ CALL(open)
 	if IS_UNSYNCED_CALL
 		return MVEE_CALL_ALLOW;
 
-	int result = MVEE_CALL_ALLOW, limit = 1;
+	int result = MVEE_CALL_ALLOW;
 
 	// If do_alias returns true, we will have found aliases for at least
 	// one variant. In this case, we want to repeat the check_open_call + 
 	// flag stripping iteration below for each variant
 	if (call_do_alias<1>())
-		limit = mvee::numvariants;
-
-	for (auto i = 0; i < limit; ++i)
 	{
-		auto file = set_fd_table->get_full_path(i, variants[i].variantpid, AT_FDCWD, (void*) ARG1(i));
+		for (auto i = 0; i < mvee::numvariants; ++i)
+		{
+			auto file = set_fd_table->get_full_path(i, variants[i].variantpid, AT_FDCWD, (void*) ARG1(i));
 
-		result = handle_check_open_call(file.c_str(), ARG2(i), ARG3(i));
+			result = handle_check_open_call(file.c_str(), ARG2(i), ARG3(i));
 
-		// strip off the O_CREAT and O_EXCL flags
-		// GHUMVEE will already have created the file in the handle_check_open_call function
-		if (result & MVEE_CALL_ALLOW)
-			if ((ARG2(i) & O_CREAT) && (ARG2(i) & O_EXCL))
+			// strip off the O_CREAT and O_EXCL flags
+			// GHUMVEE will already have created the file in the handle_check_open_call function
+			if (result & MVEE_CALL_ALLOW)
+				if ((ARG2(i) & O_CREAT) && (ARG2(i) & O_EXCL))
+					call_overwrite_arg_value(i, 2, ARG2(i) & (~(O_CREAT | O_EXCL)), true);
+		}
+
+		aliased_open = true;
+	}
+	else
+	{
+		auto file = set_fd_table->get_full_path(0, variants[0].variantpid, AT_FDCWD, (void*) ARG1(0));
+		result = handle_check_open_call(file.c_str(), ARG2(0), ARG3(0));
+
+		if ((result & MVEE_CALL_ALLOW) && (ARG2(0) & O_CREAT) && (ARG2(0) & O_EXCL))
+			for (auto i = 0; i < mvee::numvariants; ++i)
 				call_overwrite_arg_value(i, 2, ARG2(i) & (~(O_CREAT | O_EXCL)), true);
+
+		aliased_open = false;
 	}
 
     return result;
@@ -625,7 +646,8 @@ POSTCALL(open)
 		}
 
 		if (strstr(resolved_path, "/dev/shm/") == resolved_path ||
-			strstr(resolved_path, "/run/shm/") == resolved_path)
+			strstr(resolved_path, "/run/shm/") == resolved_path ||
+			aliased_open)
 			unsynced = 1;
 
 		FileType type = (unsynced == 0) ? FT_REGULAR : FT_SPECIAL;
@@ -751,14 +773,14 @@ PRECALL(link)
     CHECKPOINTER(2);
     CHECKSTRING(1);
     CHECKSTRING(2);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(link)
-{
-	(void) call_do_alias<1>();
-	(void) call_do_alias<2>();
-	return MVEE_CALL_ALLOW;
+	bool alias1 = call_do_alias<1>();
+	bool alias2 = call_do_alias<2>();
+
+	if (alias1 || alias2)
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
@@ -792,13 +814,10 @@ PRECALL(unlink)
 	auto unlink_file = rw::read_string(variants[0].variantpid, (void*)ARG1(0));
 	set_fd_table->set_file_unlinked(unlink_file.c_str());
 
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
+	if (call_do_alias<1>())
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 
-CALL(unlink)
-{
-	(void) call_do_alias<1>();
-	return MVEE_CALL_ALLOW;
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 POSTCALL(unlink)
@@ -1165,13 +1184,15 @@ PRECALL(chdir)
 {
     CHECKPOINTER(1);
     CHECKSTRING(1);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
-}
 
-CALL(chdir)
-{
-	(void) call_do_alias<1>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias<1>())
+	{
+		// TODO/FIXME: set_fd_table's cwd needs to be a vector
+		warnf("Aliased chdir - this is not fully supported right now\n");
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
 POSTCALL(chdir)
@@ -1222,13 +1243,11 @@ PRECALL(chmod)
     CHECKPOINTER(1);
     CHECKARG(2);
     CHECKSTRING(1);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(chmod)
-{
-	(void) call_do_alias<1>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias<1>())
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1238,6 +1257,13 @@ PRECALL(fchmod)
 {
     CHECKARG(2);
     CHECKFD(1);
+
+	if (set_fd_table->is_fd_unsynced(ARG1(0)))
+    {
+        MAPFDS(1);
+        return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+    }
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -1258,6 +1284,13 @@ PRECALL(lseek)
     CHECKARG(3);
     CHECKARG(2);
     CHECKFD(1);
+
+    if (set_fd_table->is_fd_unsynced(ARG1(0)))
+    {
+        MAPFDS(1);
+        return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+    }
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -1328,6 +1361,15 @@ PRECALL(sendfile)
     CHECKFD(2);
     CHECKPOINTER(3);
     CHECKARG(4);
+
+    if (set_fd_table->is_fd_unsynced(ARG1(0)) ||
+		set_fd_table->is_fd_unsynced(ARG2(0)))
+    {
+        MAPFDS(1);
+		MAPFDS(2);
+        return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+    }
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -1455,13 +1497,11 @@ PRECALL(utime)
     CHECKPOINTER(2);
     CHECKSTRING(1);
     CHECKBUFFER(2, sizeof(struct utimbuf));
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(utime)
-{
-	(void) call_do_alias<1>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias<1>())
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1486,13 +1526,11 @@ PRECALL(mknod)
 	CHECKARG(2);
 	CHECKARG(3);
 	CHECKSTRING(1);
-	return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(mknod)
-{
-	(void) call_do_alias<1>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias<1>())
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+	return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1514,13 +1552,11 @@ PRECALL(access)
     CHECKPOINTER(1);
     CHECKARG(2);
     CHECKSTRING(1);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(access)
-{
-	(void) call_do_alias<1>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias<1>())
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1561,14 +1597,14 @@ PRECALL(rename)
     CHECKPOINTER(2);
     CHECKSTRING(1);
     CHECKSTRING(2);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(rename)
-{
-	(void) call_do_alias<1>();
-	(void) call_do_alias<2>();
-	return MVEE_CALL_ALLOW;
+	bool alias1 = call_do_alias<1>();
+	bool alias2 = call_do_alias<2>();
+
+	if (alias1 || alias2)
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1589,13 +1625,11 @@ PRECALL(mkdir)
     CHECKPOINTER(1);
     CHECKARG(2);
     CHECKSTRING(1);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(mkdir)
-{
-	(void) call_do_alias<1>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias<1>())
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1614,13 +1648,11 @@ PRECALL(rmdir)
 {
     CHECKPOINTER(1);
     CHECKSTRING(1);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(rmdir)
-{
-	(void) call_do_alias<1>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias<1>())
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1641,13 +1673,11 @@ PRECALL(creat)
     CHECKPOINTER(1);
     CHECKSTRING(1);
     CHECKARG(2);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
-}
 
-CALL(creat)
-{
-	(void) call_do_alias<1>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias<1>())
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
 POSTCALL(creat)
@@ -2269,6 +2299,13 @@ PRECALL(flock)
 {
     CHECKFD(1);
     CHECKARG(2);
+
+	if (set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -2701,14 +2738,14 @@ PRECALL(symlink)
     CHECKPOINTER(2);
     CHECKSTRING(2);
     CHECKSTRING(1);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(symlink)
-{
-	(void) call_do_alias<1>();
-	(void) call_do_alias<2>();
-	return MVEE_CALL_ALLOW;
+	bool alias1 = call_do_alias<1>();
+	bool alias2 = call_do_alias<2>();
+
+	if (alias1 || alias2)
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
@@ -2730,6 +2767,10 @@ PRECALL(readlink)
     CHECKPOINTER(2);
     CHECKARG(3);
     CHECKSTRING(1);
+
+	if (call_do_alias<1>())
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -2753,7 +2794,6 @@ CALL(readlink)
 		}
 	}
 
-	(void) call_do_alias<1>();
 	return MVEE_CALL_ALLOW;
 }
 
@@ -2987,22 +3027,35 @@ PRECALL(truncate)
     CHECKPOINTER(1);
     CHECKARG(2);
     CHECKSTRING(1);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(truncate)
-{
-	(void) call_do_alias<1>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias<1>())
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
   sys_ftruncate - (unsigned int  fd, unsigned long  length)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(ftruncate)
+{
+	debugf("%s - SYS_FTRUNCATE(%d, %ld)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (unsigned int)ARG1(variantnum), 
+		   ARG2(variantnum));
+}
+
 PRECALL(ftruncate)
 {
     CHECKARG(2);
     CHECKFD(1);
+
+	if (set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -4231,6 +4284,13 @@ LOG_RETURN(ipc)
 PRECALL(fsync)
 {
     CHECKFD(1);
+
+	if (set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -4612,6 +4672,12 @@ PRECALL(_llseek)
     CHECKARG(5);
     CHECKFD(1);
 
+	if (set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -4630,6 +4696,13 @@ PRECALL(getdents)
     CHECKPOINTER(2);
     CHECKARG(3);
     CHECKFD(1);
+
+	if (set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -4749,6 +4822,13 @@ PRECALL(readv)
     CHECKARG(3);
     CHECKFD(1);
     CHECKVECTORLAYOUT(2, ARG3(0));
+
+	if (set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -4791,6 +4871,13 @@ PRECALL(writev)
     CHECKARG(3);
     CHECKFD(1);
     CHECKVECTOR(2, ARG3(0));
+
+	if (set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -4800,6 +4887,13 @@ PRECALL(writev)
 PRECALL(fdatasync)
 {
     CHECKFD(1);
+
+	if (set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -5161,6 +5255,13 @@ PRECALL(pread64)
     CHECKARG(3);
     CHECKARG(4);
     CHECKFD(1);
+
+	if (set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -5204,6 +5305,13 @@ PRECALL(pwrite64)
     CHECKARG(4);
     CHECKFD(1);
     CHECKBUFFER(2, ARG3(0));
+
+	if (set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -5229,13 +5337,11 @@ PRECALL(chown)
     CHECKARG(3);
     CHECKARG(2);
     CHECKSTRING(1);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(chown)
-{
-	(void) call_do_alias<1>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias<1>())
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
@@ -5246,6 +5352,13 @@ PRECALL(fchown)
     CHECKFD(1);
     CHECKARG(2);
     CHECKARG(3);
+
+	if (set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -5707,13 +5820,11 @@ PRECALL(truncate64)
     CHECKPOINTER(1);
     CHECKARG(2);
     CHECKSTRING(1);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(truncate64)
-{
-	(void) call_do_alias<1>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias<1>())
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
@@ -5723,6 +5834,13 @@ PRECALL(ftruncate64)
 {
     CHECKARG(2);
     CHECKFD(1);
+
+	if (set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -5743,13 +5861,11 @@ PRECALL(stat)
     CHECKPOINTER(1);
     CHECKSTRING(1);
     CHECKPOINTER(2);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(stat)
-{
-	(void) call_do_alias<1>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias<1>())
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 POSTCALL(stat)
@@ -5771,13 +5887,11 @@ LOG_ARGS(stat64)
 PRECALL(stat64)
 {
     CHECKSTRING(1);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(stat64)
-{
-	(void) call_do_alias<1>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias<1>())
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 POSTCALL(stat64)
@@ -5803,13 +5917,11 @@ PRECALL(lstat)
     CHECKPOINTER(1);
     CHECKSTRING(1);
     CHECKPOINTER(2);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(lstat)
-{
-	(void) call_do_alias<1>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias<1>())
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 POSTCALL(lstat)
@@ -5839,13 +5951,11 @@ PRECALL(lstat64)
     CHECKPOINTER(1);
     CHECKSTRING(1);
     CHECKPOINTER(2);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(lstat64)
-{
-	(void) call_do_alias<1>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias<1>())
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 POSTCALL(lstat64)
@@ -6040,6 +6150,13 @@ PRECALL(getdents64)
     CHECKPOINTER(2);
     CHECKARG(3);
     CHECKFD(1);
+
+	if (set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -6235,13 +6352,11 @@ PRECALL(setxattr)
     CHECKPOINTER(3);
     CHECKBUFFER(3, ARG4(0));
     CHECKARG(5);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(setxattr)
-{
-	(void) call_do_alias<1>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias<1>())
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
@@ -6270,6 +6385,13 @@ PRECALL(fsetxattr)
     CHECKPOINTER(3);
     CHECKBUFFER(3, ARG4(0));
     CHECKARG(5);
+
+	if (set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -6298,13 +6420,11 @@ PRECALL(getxattr)
     CHECKSTRING(2);
     CHECKPOINTER(3);
     CHECKARG(4);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(getxattr)
-{
-	(void) call_do_alias<1>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias<1>())
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 POSTCALL(getxattr)
@@ -6336,6 +6456,13 @@ PRECALL(fgetxattr)
     CHECKSTRING(2);
     CHECKPOINTER(3);
     CHECKARG(4);
+
+	if (set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -6705,13 +6832,11 @@ PRECALL(statfs)
     CHECKPOINTER(1);
     CHECKSTRING(1);
     CHECKPOINTER(2);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(statfs)
-{
-	(void) call_do_alias<1>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias<1>())
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 POSTCALL(statfs)
@@ -6740,13 +6865,11 @@ PRECALL(statfs64)
     CHECKSTRING(1);
     CHECKARG(2);
     CHECKPOINTER(3);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(statfs64)
-{
-	(void) call_do_alias<1>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias<1>())
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 POSTCALL(statfs64)
@@ -6763,6 +6886,13 @@ PRECALL(fstatfs)
 {
     CHECKFD(1);
     CHECKPOINTER(2);
+
+	if (set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -6777,6 +6907,13 @@ PRECALL(fstatfs64)
     CHECKARG(2);
     CHECKFD(1);
     CHECKPOINTER(3);
+
+	if (set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -7068,13 +7205,11 @@ PRECALL(utimes)
     CHECKPOINTER(1);
     CHECKSTRING(1);
     CHECKBUFFER(2, 2 * sizeof(struct timeval));
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(utimes)
-{
-	(void) call_do_alias<1>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias<1>())
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
@@ -7174,13 +7309,11 @@ PRECALL(inotify_add_watch)
     CHECKARG(1);
 	CHECKSTRING(2);
 	CHECKARG(3);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(inotify_add_watch)
-{
-	(void) call_do_alias<2>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias<2>())
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
@@ -7242,25 +7375,38 @@ PRECALL(openat)
 // See comment above CALL(open) for info on what this function does
 CALL(openat)
 {
-	int result = MVEE_CALL_ALLOW, limit = 1;
+	int result = MVEE_CALL_ALLOW;
 
 	// If do_alias returns true, we will have found aliases for at least
 	// one variant. In this case, we want to repeat the check_open_call + 
 	// flag stripping iteration below for each variant
 	if (call_do_alias_at<1, 2>())
-		limit = mvee::numvariants;
-
-	for (auto i = 0; i < limit; ++i)
 	{
-		auto file = set_fd_table->get_full_path(i, variants[i].variantpid, (unsigned long)(int)ARG1(i), (void*) ARG2(i));
+		for (auto i = 0; i < mvee::numvariants; ++i)
+		{
+			auto file = set_fd_table->get_full_path(i, variants[i].variantpid, (unsigned long)(int)ARG1(i), (void*) ARG2(i));
 
-		result = handle_check_open_call(file.c_str(), ARG3(i), ARG4(i));
+			result = handle_check_open_call(file.c_str(), ARG3(i), ARG4(i));
 
-		// strip off the O_CREAT and O_EXCL flags
-		// GHUMVEE will already have created the file in the handle_check_open_call function
-		if (result & MVEE_CALL_ALLOW)
-			if ((ARG3(i) & O_CREAT) && (ARG3(i) & O_EXCL))
+			// strip off the O_CREAT and O_EXCL flags
+			// GHUMVEE will already have created the file in the handle_check_open_call function
+			if (result & MVEE_CALL_ALLOW)
+				if ((ARG3(i) & O_CREAT) && (ARG3(i) & O_EXCL))
+					call_overwrite_arg_value(i, 3, ARG3(i) & (~(O_CREAT | O_EXCL)), true);
+		}
+
+		aliased_open = true;
+	}
+	else
+	{
+		auto file = set_fd_table->get_full_path(0, variants[0].variantpid, (unsigned long)(int)ARG1(0), (void*) ARG2(0));		
+		result = handle_check_open_call(file.c_str(), ARG3(0), ARG4(0));
+		
+		if ((result & MVEE_CALL_ALLOW) && (ARG3(0) & O_CREAT) && (ARG3(0) & O_EXCL))
+			for (auto i = 0; i < mvee::numvariants; ++i)
 				call_overwrite_arg_value(i, 3, ARG3(i) & (~(O_CREAT | O_EXCL)), true);
+		
+		aliased_open = false;
 	}
 
     return result;
@@ -7277,7 +7423,7 @@ POSTCALL(openat)
 
         std::vector<unsigned long> fds           = call_postcall_get_result_vector();
         REPLICATEFDRESULT();
-        set_fd_table->create_fd_info(FT_REGULAR, fds, resolved_path, ARG3(0), ARG3(0) & O_CLOEXEC, state == STATE_IN_MASTERCALL, false);
+        set_fd_table->create_fd_info(FT_REGULAR, fds, resolved_path, ARG3(0), ARG3(0) & O_CLOEXEC, state == STATE_IN_MASTERCALL, aliased_open);
 #ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
 #endif
@@ -7308,13 +7454,15 @@ PRECALL(mkdirat)
     CHECKPOINTER(2);
     CHECKSTRING(2);
     CHECKFD(1);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(mkdirat)
-{
-	(void) call_do_alias_at<1, 2>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias_at<1, 2>() ||
+		set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
@@ -7342,13 +7490,15 @@ PRECALL(newfstatat)
     CHECKARG(4);
     CHECKFD(1);
     CHECKSTRING(2);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(newfstatat)
-{
-	(void) call_do_alias_at<1, 2>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias_at<1, 2>() || 
+		set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 POSTCALL(newfstatat)
@@ -7376,13 +7526,15 @@ PRECALL(fstatat64)
     CHECKARG(4);
     CHECKFD(1);
     CHECKSTRING(2);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(fstatat64)
-{
-	(void) call_do_alias_at<1, 2>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias_at<1, 2>() || 
+		set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 LOG_RETURN(fstatat64)
@@ -7459,13 +7611,14 @@ PRECALL(unlinkat)
 	std::string full_path = set_fd_table->get_full_path(0, variants[0].variantpid, (unsigned long)(int)ARG1(0), (void*)ARG2(0));
 	set_fd_table->set_file_unlinked(full_path.c_str());
 
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
+	if (call_do_alias_at<1, 2>() ||
+		set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
 
-CALL(unlinkat)
-{
-	(void) call_do_alias_at<1, 2>();
-	return MVEE_CALL_ALLOW;
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
@@ -7493,14 +7646,21 @@ PRECALL(renameat)
     CHECKPOINTER(4);
     CHECKSTRING(4);
     CHECKSTRING(2);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(renameat)
-{
-	(void) call_do_alias_at<1, 2>();
-	(void) call_do_alias_at<3, 4>();
-	return MVEE_CALL_ALLOW;
+	bool alias1 = call_do_alias_at<1, 2>();
+	bool alias2 = call_do_alias_at<3, 4>();
+
+	if (alias1 || 
+		alias2 ||
+		set_fd_table->is_fd_unsynced(ARG1(0)) ||
+		set_fd_table->is_fd_unsynced(ARG3(0)))
+	{
+		MAPFDS(1);
+		MAPFDS(2);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
@@ -7531,14 +7691,20 @@ PRECALL(linkat)
     CHECKFD(1);
     CHECKSTRING(4);
     CHECKSTRING(2);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(linkat)
-{
-	(void) call_do_alias_at<1, 2>();
-	(void) call_do_alias_at<3, 4>();
-	return MVEE_CALL_ALLOW;
+	bool alias1 = call_do_alias_at<1, 2>();
+	bool alias2 = call_do_alias_at<3, 4>();
+
+	if (alias1 || 
+		alias2 ||
+		set_fd_table->is_fd_unsynced(ARG1(0)) ||
+		set_fd_table->is_fd_unsynced(ARG3(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
@@ -7563,14 +7729,19 @@ PRECALL(symlinkat)
     CHECKFD(2);
     CHECKSTRING(3);
     CHECKSTRING(1);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(symlinkat)
-{
-	(void) call_do_alias<1>();
-	(void) call_do_alias_at<2, 3>();
-	return MVEE_CALL_ALLOW;
+	bool alias1 = call_do_alias<1>();
+	bool alias2 = call_do_alias_at<2, 3>();
+
+	if (alias1 || 
+		alias2 || 
+		set_fd_table->is_fd_unsynced(ARG2(0)))
+	{
+		MAPFDS(2);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
@@ -7596,13 +7767,15 @@ PRECALL(readlinkat)
     CHECKARG(4);
     CHECKFD(1);
     CHECKSTRING(2);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(readlinkat)
-{
-	(void) call_do_alias_at<1, 2>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias_at<1, 2>() || 
+		set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 POSTCALL(readlinkat)
@@ -7634,13 +7807,15 @@ PRECALL(fchmodat)
     CHECKFD(1);
     CHECKSTRING(2);
     CHECKARG(3);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(fchmodat)
-{
-	(void) call_do_alias_at<1, 2>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias_at<1, 2>() || 
+		set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
@@ -7665,13 +7840,15 @@ PRECALL(faccessat)
     CHECKARG(3);
     CHECKFD(1);
     CHECKSTRING(2);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
 
-CALL(faccessat)
-{
-	(void) call_do_alias_at<1, 2>();
-	return MVEE_CALL_ALLOW;
+	if (call_do_alias_at<1, 2>() || 
+		set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
@@ -7805,13 +7982,14 @@ PRECALL(utimensat)
             return MVEE_PRECALL_ARGS_MISMATCH(3) | MVEE_PRECALL_CALL_DENY;
     }
 
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-}
+	if (call_do_alias_at<1, 2>() || 
+		set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
 
-CALL(utimensat)
-{
-	(void) call_do_alias_at<1, 2>();
-	return MVEE_CALL_ALLOW;
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
@@ -7859,6 +8037,13 @@ PRECALL(fallocate)
     CHECKARG(2);
     CHECKARG(3);
     CHECKARG(4);
+
+	if (set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -7873,6 +8058,13 @@ PRECALL(timerfd_settime)
     CHECKPOINTER(3);
     CHECKPOINTER(4);
     CHECKBUFFER(3, sizeof(struct itimerspec));
+
+	if (set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -7890,6 +8082,13 @@ PRECALL(timerfd_gettime)
 {
     CHECKFD(1);
     CHECKPOINTER(2);
+
+	if (set_fd_table->is_fd_unsynced(ARG1(0)))
+	{
+		MAPFDS(1);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
