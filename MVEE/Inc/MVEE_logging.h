@@ -13,7 +13,8 @@
 -----------------------------------------------------------------------------*/
 #include <sched.h>
 #include <string>
-#include "MVEE_config.h"
+#include "MVEE_build_config.h"
+#include "MVEE_interaction.h"
 
 /*-----------------------------------------------------------------------------
     Logging Prototypes
@@ -63,6 +64,8 @@ const char* getTextualXattrFlags        (int flags);
 const char* getTextualTimerType         (int type);
 const char* getTextualSyslogAction      (int action);
 const char* getTextualFileType          (int type);
+const char* getTextualRAVENCall         (int fd);
+const char* getTextualErrno             (int err);
 std::string getTextualTimerFlags        (int flags);
 std::string getTextualWaitEventType     (int status);
 std::string getTextualEpollEvents       (unsigned int events);
@@ -85,5 +88,10 @@ std::string getTextualGroups            (int cnt, gid_t* gids);
 std::string getTextualSigactionFlags    (unsigned int flags);
 std::string getTextualPerfFlags         (unsigned long flags);
 std::string getTextualShmFlags          (unsigned long flags);
+std::string getTextualInotifyMask       (unsigned long mask);
+std::string getTextualUnlinkFlags       (int flags);
+std::string getTextualLinkFlags         (int flags);
+std::string getTextualChmodFlags        (int flags);
+std::string getTextualMVEEWaitStatus    (interaction::mvee_wait_status& status);
 
 #endif // MVEE_LOGGING_H_INCLUDED

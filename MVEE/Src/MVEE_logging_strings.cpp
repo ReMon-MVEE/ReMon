@@ -15,6 +15,7 @@
 #include <sys/xattr.h>
 #include <sys/un.h>
 #include <sys/timerfd.h>
+#include <sys/inotify.h>
 #include <linux/net.h>
 #include <linux/futex.h>
 #include <linux/socket.h>
@@ -39,6 +40,7 @@
 #include "MVEE_fake_syscall.h"
 #include "MVEE_memory.h"
 #include "MVEE_filedesc.h"
+#include "MVEE_interaction.h"
 
 /*-----------------------------------------------------------------------------
     Flag Check Macro
@@ -51,26 +53,26 @@
         str += #flag;                                                       \
     }
 
+#define DEF_CASE(a) \
+	case a:			\
+	result = #a;	\
+	break;
+
 /*-----------------------------------------------------------------------------
     getTextualState
 -----------------------------------------------------------------------------*/
-const char* getTextualState(unsigned int dwState)
+const char* getTextualState(unsigned int state)
 {
     const char* result = "UNKNOWN";
 
-#define DEF_STATE(a) \
-    case a:          \
-        result = #a; \
-        break;
-
-    switch(dwState)
+    switch(state)
     {
-        DEF_STATE(STATE_WAITING_ATTACH);
-        DEF_STATE(STATE_WAITING_RESUME);
-        DEF_STATE(STATE_NORMAL);
-        DEF_STATE(STATE_IN_SYSCALL);
-        DEF_STATE(STATE_IN_MASTERCALL);
-        DEF_STATE(STATE_IN_FORKCALL);
+        DEF_CASE(STATE_WAITING_ATTACH);
+        DEF_CASE(STATE_WAITING_RESUME);
+        DEF_CASE(STATE_NORMAL);
+        DEF_CASE(STATE_IN_SYSCALL);
+        DEF_CASE(STATE_IN_MASTERCALL);
+        DEF_CASE(STATE_IN_FORKCALL);
     }
 
     return result;
@@ -79,53 +81,49 @@ const char* getTextualState(unsigned int dwState)
 /*-----------------------------------------------------------------------------
     getTextualSig
 -----------------------------------------------------------------------------*/
-const char* getTextualSig(unsigned int dwSignal)
+const char* getTextualSig(unsigned int sig)
 {
     const char* result = "UNKNOWN";
 
-#define DEF_SIGNAL(a) case a: \
-        result = #a;          \
-        break;                \
-
-    switch(dwSignal)
+    switch(sig)
     {
-        DEF_SIGNAL(SIGALRM)
-        DEF_SIGNAL(SIGHUP)
-        DEF_SIGNAL(SIGINT)
-        DEF_SIGNAL(SIGKILL)
-        DEF_SIGNAL(SIGPIPE)
-        DEF_SIGNAL(SIGPOLL)
-        DEF_SIGNAL(SIGPROF)
-        DEF_SIGNAL(SIGTERM)
-        DEF_SIGNAL(SIGUSR1)
-        DEF_SIGNAL(SIGUSR2)
-        DEF_SIGNAL(SIGVTALRM)
-//        DEF_SIGNAL(STKFLT) - Undefined on linux
-        DEF_SIGNAL(SIGPWR)
-        DEF_SIGNAL(SIGWINCH)
-        DEF_SIGNAL(SIGCHLD)
-        DEF_SIGNAL(SIGURG)
-        DEF_SIGNAL(SIGTSTP)
-        DEF_SIGNAL(SIGTTIN)
-        DEF_SIGNAL(SIGTTOU)
-        DEF_SIGNAL(SIGSTOP)
-        DEF_SIGNAL(SIGCONT)
-        DEF_SIGNAL(SIGABRT)
-        DEF_SIGNAL(SIGFPE)
-        DEF_SIGNAL(SIGILL)
-        DEF_SIGNAL(SIGQUIT)
-        DEF_SIGNAL(SIGSEGV)
+        DEF_CASE(SIGALRM)
+        DEF_CASE(SIGHUP)
+        DEF_CASE(SIGINT)
+        DEF_CASE(SIGKILL)
+        DEF_CASE(SIGPIPE)
+        DEF_CASE(SIGPOLL)
+        DEF_CASE(SIGPROF)
+        DEF_CASE(SIGTERM)
+        DEF_CASE(SIGUSR1)
+        DEF_CASE(SIGUSR2)
+        DEF_CASE(SIGVTALRM)
+//        DEF_CASE(STKFLT) - Undefined on linux
+        DEF_CASE(SIGPWR)
+        DEF_CASE(SIGWINCH)
+        DEF_CASE(SIGCHLD)
+        DEF_CASE(SIGURG)
+        DEF_CASE(SIGTSTP)
+        DEF_CASE(SIGTTIN)
+        DEF_CASE(SIGTTOU)
+        DEF_CASE(SIGSTOP)
+        DEF_CASE(SIGCONT)
+        DEF_CASE(SIGABRT)
+        DEF_CASE(SIGFPE)
+        DEF_CASE(SIGILL)
+        DEF_CASE(SIGQUIT)
+        DEF_CASE(SIGSEGV)
 #if SIGTRAP != SIGSYSTRAP
-        DEF_SIGNAL(SIGSYSTRAP)
+        DEF_CASE(SIGSYSTRAP)
 #endif
-        DEF_SIGNAL(SIGTRAP)
-        DEF_SIGNAL(SIGSYS)
-//        DEF_SIGNAL(SIGEMT) - Undefined on linux
-        DEF_SIGNAL(SIGBUS)
-        DEF_SIGNAL(SIGXCPU)
-        DEF_SIGNAL(SIGXFSZ)
-        DEF_SIGNAL(SIGCANCEL)
-        DEF_SIGNAL(SIGSETXID)
+        DEF_CASE(SIGTRAP)
+        DEF_CASE(SIGSYS)
+//        DEF_CASE(SIGEMT) - Undefined on linux
+        DEF_CASE(SIGBUS)
+        DEF_CASE(SIGXCPU)
+        DEF_CASE(SIGXFSZ)
+        DEF_CASE(SIGCANCEL)
+        DEF_CASE(SIGSETXID)
     }
 
     return result;
@@ -138,15 +136,11 @@ const char* getTextualSigHow(int how)
 {
     const char* result = "SIG_???";
 
-#define DEF_HOW(a) case a: \
-        result = #a;       \
-        break;             \
-
     switch(how)
     {
-        DEF_HOW(SIG_BLOCK);
-        DEF_HOW(SIG_UNBLOCK);
-        DEF_HOW(SIG_SETMASK);
+        DEF_CASE(SIG_BLOCK);
+        DEF_CASE(SIG_UNBLOCK);
+        DEF_CASE(SIG_SETMASK);
     }
 
     return result;
@@ -155,40 +149,33 @@ const char* getTextualSigHow(int how)
 /*-----------------------------------------------------------------------------
     getTextualRequest
 -----------------------------------------------------------------------------*/
-const char* getTextualRequest(unsigned int dwRequest)
+const char* getTextualRequest(unsigned int request)
 {
     const char* result = "PTRACE_UNKNOWN";
 
-#define DEF_REQUEST(a) \
-    case a:            \
-        result = #a;   \
-        break;
-
-    switch(dwRequest)
+    switch(request)
     {
-        DEF_REQUEST(PTRACE_TRACEME);
-        DEF_REQUEST(PTRACE_PEEKTEXT);
-        DEF_REQUEST(PTRACE_PEEKDATA);
-        DEF_REQUEST(PTRACE_PEEKUSER);
-        DEF_REQUEST(PTRACE_POKETEXT);
-        DEF_REQUEST(PTRACE_POKEDATA);
-        DEF_REQUEST(PTRACE_POKEUSER);
-        DEF_REQUEST(PTRACE_CONT);
-        DEF_REQUEST(PTRACE_KILL);
-        DEF_REQUEST(PTRACE_SINGLESTEP);
-        DEF_REQUEST(PTRACE_ATTACH);
-        DEF_REQUEST(PTRACE_DETACH);
-        DEF_REQUEST(PTRACE_SYSCALL);
-        DEF_REQUEST(PTRACE_SETOPTIONS);
-        DEF_REQUEST(PTRACE_GETREGS);
-        DEF_REQUEST(PTRACE_SETREGS);
-        DEF_REQUEST(PTRACE_GETEVENTMSG);
-        DEF_REQUEST(PTRACE_GETSIGINFO);
-        DEF_REQUEST(PTRACE_SETSIGINFO);
-        DEF_REQUEST(PTRACE_EXT_COPYMEM);
-        DEF_REQUEST(PTRACE_EXT_COPYSTRING);
-        DEF_REQUEST(PROCESS_VM_READV);
-        DEF_REQUEST(PROCESS_VM_WRITEV);
+        DEF_CASE(PTRACE_TRACEME);
+        DEF_CASE(PTRACE_PEEKTEXT);
+        DEF_CASE(PTRACE_PEEKDATA);
+        DEF_CASE(PTRACE_PEEKUSER);
+        DEF_CASE(PTRACE_POKETEXT);
+        DEF_CASE(PTRACE_POKEDATA);
+        DEF_CASE(PTRACE_POKEUSER);
+        DEF_CASE(PTRACE_CONT);
+        DEF_CASE(PTRACE_KILL);
+        DEF_CASE(PTRACE_SINGLESTEP);
+        DEF_CASE(PTRACE_ATTACH);
+        DEF_CASE(PTRACE_DETACH);
+        DEF_CASE(PTRACE_SYSCALL);
+        DEF_CASE(PTRACE_SETOPTIONS);
+        DEF_CASE(PTRACE_GETREGS);
+        DEF_CASE(PTRACE_SETREGS);
+        DEF_CASE(PTRACE_GETEVENTMSG);
+        DEF_CASE(PTRACE_GETSIGINFO);
+        DEF_CASE(PTRACE_SETSIGINFO);
+        DEF_CASE(PROCESS_VM_READV);
+        DEF_CASE(PROCESS_VM_WRITEV);
     }
 
     return result;
@@ -199,12 +186,7 @@ const char* getTextualRequest(unsigned int dwRequest)
 -----------------------------------------------------------------------------*/
 const char* getTextualSyscall(long int syscallnum)
 {
-    const char* result = "(unknown)";
-
-#define DEF_SYSCALL(a) \
-    case a:            \
-        result = #a;   \
-        break;
+    const char* result = "sys_unknown";
 
     if (syscallnum < 0)
         result = "EXIT";
@@ -215,20 +197,21 @@ const char* getTextualSyscall(long int syscallnum)
         // fake syscall numbers defined by monitor
         switch (syscallnum)
         {
-            DEF_SYSCALL(NO_CALL);
-            DEF_SYSCALL(MVEE_RDTSC_FAKE_SYSCALL);
-            DEF_SYSCALL(MVEE_GET_MASTERTHREAD_ID);
-            DEF_SYSCALL(MVEE_GET_SHARED_BUFFER);
-            DEF_SYSCALL(MVEE_FLUSH_SHARED_BUFFER);
-            DEF_SYSCALL(MVEE_SET_INFINITE_LOOP_PTR);
-            DEF_SYSCALL(MVEE_TOGGLESYNC);
-            DEF_SYSCALL(MVEE_SET_SHARED_BUFFER_POS_PTR);
-            DEF_SYSCALL(MVEE_RUNS_UNDER_MVEE_CONTROL);
-            DEF_SYSCALL(MVEE_GET_THREAD_NUM);
-            DEF_SYSCALL(MVEE_RESOLVE_SYMBOL);
-            DEF_SYSCALL(MVEE_SET_SYNC_PRIMITIVES_PTR);
-            DEF_SYSCALL(MVEE_ALL_HEAPS_ALIGNED);
-            DEF_SYSCALL(MVEE_INVOKE_LD);
+            DEF_CASE(NO_CALL);
+            DEF_CASE(MVEE_RDTSC_FAKE_SYSCALL);
+            DEF_CASE(MVEE_GET_MASTERTHREAD_ID);
+            DEF_CASE(MVEE_GET_SHARED_BUFFER);
+            DEF_CASE(MVEE_FLUSH_SHARED_BUFFER);
+            DEF_CASE(MVEE_SET_INFINITE_LOOP_PTR);
+            DEF_CASE(MVEE_TOGGLESYNC);
+            DEF_CASE(MVEE_SET_SHARED_BUFFER_POS_PTR);
+            DEF_CASE(MVEE_RUNS_UNDER_MVEE_CONTROL);
+            DEF_CASE(MVEE_GET_THREAD_NUM);
+            DEF_CASE(MVEE_RESOLVE_SYMBOL);
+            DEF_CASE(MVEE_SET_SYNC_PRIMITIVES_PTR);
+            DEF_CASE(MVEE_ALL_HEAPS_ALIGNED);
+            DEF_CASE(MVEE_INVOKE_LD);
+			DEF_CASE(MVEE_IPMON_INVOKE);
         }
     }
 
@@ -242,31 +225,26 @@ const char* getTextualSocketCall(long int sockcallnum)
 {
     const char* result = "UNKNOWN";
 
-#define DEF_SOCKETCALL(a) \
-    case a:               \
-        result = #a;      \
-        break;
-
     switch(sockcallnum)
     {
-        DEF_SOCKETCALL(SYS_SOCKET);
-        DEF_SOCKETCALL(SYS_BIND);
-        DEF_SOCKETCALL(SYS_CONNECT);
-        DEF_SOCKETCALL(SYS_LISTEN);
-        DEF_SOCKETCALL(SYS_ACCEPT);
-        DEF_SOCKETCALL(SYS_GETSOCKNAME);
-        DEF_SOCKETCALL(SYS_GETPEERNAME);
-        DEF_SOCKETCALL(SYS_SOCKETPAIR);
-        DEF_SOCKETCALL(SYS_SEND);
-        DEF_SOCKETCALL(SYS_SENDTO);
-        DEF_SOCKETCALL(SYS_RECV);
-        DEF_SOCKETCALL(SYS_RECVFROM);
-        DEF_SOCKETCALL(SYS_SHUTDOWN);
-        DEF_SOCKETCALL(SYS_SETSOCKOPT);
-        DEF_SOCKETCALL(SYS_GETSOCKOPT);
-        DEF_SOCKETCALL(SYS_SENDMSG);
-        DEF_SOCKETCALL(SYS_RECVMSG);
-        DEF_SOCKETCALL(SYS_ACCEPT4);
+        DEF_CASE(SYS_SOCKET);
+        DEF_CASE(SYS_BIND);
+        DEF_CASE(SYS_CONNECT);
+        DEF_CASE(SYS_LISTEN);
+        DEF_CASE(SYS_ACCEPT);
+        DEF_CASE(SYS_GETSOCKNAME);
+        DEF_CASE(SYS_GETPEERNAME);
+        DEF_CASE(SYS_SOCKETPAIR);
+        DEF_CASE(SYS_SEND);
+        DEF_CASE(SYS_SENDTO);
+        DEF_CASE(SYS_RECV);
+        DEF_CASE(SYS_RECVFROM);
+        DEF_CASE(SYS_SHUTDOWN);
+        DEF_CASE(SYS_SETSOCKOPT);
+        DEF_CASE(SYS_GETSOCKOPT);
+        DEF_CASE(SYS_SENDMSG);
+        DEF_CASE(SYS_RECVMSG);
+        DEF_CASE(SYS_ACCEPT4);
     }
 
     return result;
@@ -279,56 +257,51 @@ const char* getTextualSocketFamily(long int family)
 {
     const char* result = "UNKNOWN";
 
-#define DEF_SOCKETFAMILY(a) \
-    case a:                 \
-        result = #a;        \
-        break;
-
     switch(family)
     {
-        DEF_SOCKETFAMILY(AF_UNSPEC);
-        DEF_SOCKETFAMILY(AF_LOCAL);
-        //DEF_SOCKETFAMILY(AF_UNIX);
-        //DEF_SOCKETFAMILY(AF_FILE);
-        DEF_SOCKETFAMILY(AF_INET);
-        DEF_SOCKETFAMILY(AF_AX25);
-        DEF_SOCKETFAMILY(AF_IPX);
-        DEF_SOCKETFAMILY(AF_APPLETALK);
-        DEF_SOCKETFAMILY(AF_NETROM);
-        DEF_SOCKETFAMILY(AF_BRIDGE);
-        DEF_SOCKETFAMILY(AF_ATMPVC);
-        DEF_SOCKETFAMILY(AF_X25);
-        DEF_SOCKETFAMILY(AF_INET6);
-        DEF_SOCKETFAMILY(AF_ROSE);
-        DEF_SOCKETFAMILY(AF_DECnet);
-        DEF_SOCKETFAMILY(AF_NETBEUI);
-        DEF_SOCKETFAMILY(AF_SECURITY);
-        DEF_SOCKETFAMILY(AF_KEY);
-        DEF_SOCKETFAMILY(AF_NETLINK);
-        //DEF_SOCKETFAMILY(AF_ROUTE);
-        DEF_SOCKETFAMILY(AF_PACKET);
-        DEF_SOCKETFAMILY(AF_ASH);
-        DEF_SOCKETFAMILY(AF_ECONET);
-        DEF_SOCKETFAMILY(AF_ATMSVC);
-        DEF_SOCKETFAMILY(AF_RDS);
-        DEF_SOCKETFAMILY(AF_SNA);
-        DEF_SOCKETFAMILY(AF_IRDA);
-        DEF_SOCKETFAMILY(AF_PPPOX);
-        DEF_SOCKETFAMILY(AF_WANPIPE);
-        DEF_SOCKETFAMILY(AF_LLC);
-        DEF_SOCKETFAMILY(AF_CAN);
-        DEF_SOCKETFAMILY(AF_TIPC);
-        DEF_SOCKETFAMILY(AF_BLUETOOTH);
-        DEF_SOCKETFAMILY(AF_IUCV);
-        DEF_SOCKETFAMILY(AF_RXRPC);
-        DEF_SOCKETFAMILY(AF_ISDN);
-        DEF_SOCKETFAMILY(AF_PHONET);
-        DEF_SOCKETFAMILY(AF_IEEE802154);
-        DEF_SOCKETFAMILY(AF_CAIF);
-        DEF_SOCKETFAMILY(AF_ALG);
-        DEF_SOCKETFAMILY(AF_NFC);
-        DEF_SOCKETFAMILY(AF_VSOCK);
-        DEF_SOCKETFAMILY(AF_MAX);
+        DEF_CASE(AF_UNSPEC);
+        DEF_CASE(AF_LOCAL);
+        //DEF_CASE(AF_UNIX);
+        //DEF_CASE(AF_FILE);
+        DEF_CASE(AF_INET);
+        DEF_CASE(AF_AX25);
+        DEF_CASE(AF_IPX);
+        DEF_CASE(AF_APPLETALK);
+        DEF_CASE(AF_NETROM);
+        DEF_CASE(AF_BRIDGE);
+        DEF_CASE(AF_ATMPVC);
+        DEF_CASE(AF_X25);
+        DEF_CASE(AF_INET6);
+        DEF_CASE(AF_ROSE);
+        DEF_CASE(AF_DECnet);
+        DEF_CASE(AF_NETBEUI);
+        DEF_CASE(AF_SECURITY);
+        DEF_CASE(AF_KEY);
+        DEF_CASE(AF_NETLINK);
+        //DEF_CASE(AF_ROUTE);
+        DEF_CASE(AF_PACKET);
+        DEF_CASE(AF_ASH);
+        DEF_CASE(AF_ECONET);
+        DEF_CASE(AF_ATMSVC);
+        DEF_CASE(AF_RDS);
+        DEF_CASE(AF_SNA);
+        DEF_CASE(AF_IRDA);
+        DEF_CASE(AF_PPPOX);
+        DEF_CASE(AF_WANPIPE);
+        DEF_CASE(AF_LLC);
+        DEF_CASE(AF_CAN);
+        DEF_CASE(AF_TIPC);
+        DEF_CASE(AF_BLUETOOTH);
+        DEF_CASE(AF_IUCV);
+        DEF_CASE(AF_RXRPC);
+        DEF_CASE(AF_ISDN);
+        DEF_CASE(AF_PHONET);
+        DEF_CASE(AF_IEEE802154);
+        DEF_CASE(AF_CAIF);
+        DEF_CASE(AF_ALG);
+        DEF_CASE(AF_NFC);
+        DEF_CASE(AF_VSOCK);
+        DEF_CASE(AF_MAX);
     }
 
     return result;
@@ -341,53 +314,48 @@ const char* getTextualSocketProtocol(long int proto)
 {
     const char* result = "UNKNOWN";
 
-#define DEF_SOCKETPROTOCOL(a) \
-    case a:                   \
-        result = #a;          \
-        break;
-
     switch(proto)
     {
-        DEF_SOCKETPROTOCOL(PF_UNSPEC);
-        DEF_SOCKETPROTOCOL(PF_LOCAL);
-        DEF_SOCKETPROTOCOL(PF_INET);
-        DEF_SOCKETPROTOCOL(PF_AX25);
-        DEF_SOCKETPROTOCOL(PF_IPX);
-        DEF_SOCKETPROTOCOL(PF_APPLETALK);
-        DEF_SOCKETPROTOCOL(PF_NETROM);
-        DEF_SOCKETPROTOCOL(PF_BRIDGE);
-        DEF_SOCKETPROTOCOL(PF_ATMPVC);
-        DEF_SOCKETPROTOCOL(PF_X25);
-        DEF_SOCKETPROTOCOL(PF_INET6);
-        DEF_SOCKETPROTOCOL(PF_ROSE);
-        DEF_SOCKETPROTOCOL(PF_DECnet);
-        DEF_SOCKETPROTOCOL(PF_NETBEUI);
-        DEF_SOCKETPROTOCOL(PF_SECURITY);
-        DEF_SOCKETPROTOCOL(PF_KEY);
-        DEF_SOCKETPROTOCOL(PF_NETLINK);
-        DEF_SOCKETPROTOCOL(PF_PACKET);
-        DEF_SOCKETPROTOCOL(PF_ASH);
-        DEF_SOCKETPROTOCOL(PF_ECONET);
-        DEF_SOCKETPROTOCOL(PF_ATMSVC);
-        DEF_SOCKETPROTOCOL(PF_RDS);
-        DEF_SOCKETPROTOCOL(PF_SNA);
-        DEF_SOCKETPROTOCOL(PF_IRDA);
-        DEF_SOCKETPROTOCOL(PF_PPPOX);
-        DEF_SOCKETPROTOCOL(PF_WANPIPE);
-        DEF_SOCKETPROTOCOL(PF_LLC);
-        DEF_SOCKETPROTOCOL(PF_CAN);
-        DEF_SOCKETPROTOCOL(PF_TIPC);
-        DEF_SOCKETPROTOCOL(PF_BLUETOOTH);
-        DEF_SOCKETPROTOCOL(PF_IUCV);
-        DEF_SOCKETPROTOCOL(PF_RXRPC);
-        DEF_SOCKETPROTOCOL(PF_ISDN);
-        DEF_SOCKETPROTOCOL(PF_PHONET);
-        DEF_SOCKETPROTOCOL(PF_IEEE802154);
-        DEF_SOCKETPROTOCOL(PF_CAIF);
-        DEF_SOCKETPROTOCOL(PF_ALG);
-        DEF_SOCKETPROTOCOL(PF_NFC);
-        DEF_SOCKETPROTOCOL(PF_VSOCK);
-        DEF_SOCKETPROTOCOL(PF_MAX);
+        DEF_CASE(PF_UNSPEC);
+        DEF_CASE(PF_LOCAL);
+        DEF_CASE(PF_INET);
+        DEF_CASE(PF_AX25);
+        DEF_CASE(PF_IPX);
+        DEF_CASE(PF_APPLETALK);
+        DEF_CASE(PF_NETROM);
+        DEF_CASE(PF_BRIDGE);
+        DEF_CASE(PF_ATMPVC);
+        DEF_CASE(PF_X25);
+        DEF_CASE(PF_INET6);
+        DEF_CASE(PF_ROSE);
+        DEF_CASE(PF_DECnet);
+        DEF_CASE(PF_NETBEUI);
+        DEF_CASE(PF_SECURITY);
+        DEF_CASE(PF_KEY);
+        DEF_CASE(PF_NETLINK);
+        DEF_CASE(PF_PACKET);
+        DEF_CASE(PF_ASH);
+        DEF_CASE(PF_ECONET);
+        DEF_CASE(PF_ATMSVC);
+        DEF_CASE(PF_RDS);
+        DEF_CASE(PF_SNA);
+        DEF_CASE(PF_IRDA);
+        DEF_CASE(PF_PPPOX);
+        DEF_CASE(PF_WANPIPE);
+        DEF_CASE(PF_LLC);
+        DEF_CASE(PF_CAN);
+        DEF_CASE(PF_TIPC);
+        DEF_CASE(PF_BLUETOOTH);
+        DEF_CASE(PF_IUCV);
+        DEF_CASE(PF_RXRPC);
+        DEF_CASE(PF_ISDN);
+        DEF_CASE(PF_PHONET);
+        DEF_CASE(PF_IEEE802154);
+        DEF_CASE(PF_CAIF);
+        DEF_CASE(PF_ALG);
+        DEF_CASE(PF_NFC);
+        DEF_CASE(PF_VSOCK);
+        DEF_CASE(PF_MAX);
     }
 
     return result;
@@ -400,15 +368,10 @@ const char* getTextualSocketShutdownHow(long int how)
 {
     const char* result = "UNKNOWN";
 
-#define DEF_SOCKETSHUTDOWNHOW(a) \
-    case a:                      \
-        result = #a;             \
-        break;
-
     switch(how)
     {
-        DEF_SOCKETSHUTDOWNHOW(SHUT_WR);
-        DEF_SOCKETSHUTDOWNHOW(SHUT_RDWR);
+        DEF_CASE(SHUT_WR);
+        DEF_CASE(SHUT_RDWR);
     }
 
     return result;
@@ -421,23 +384,18 @@ const char* getTextualSEGVCode(int code)
 {
     const char* result = "(unknown)";
 
-#define DEF_SEGVCODE(a) \
-    case a:             \
-        result = #a;    \
-        break;
-
     switch (code)
     {
-        DEF_SEGVCODE(SI_USER);
-        DEF_SEGVCODE(SI_KERNEL);
-        DEF_SEGVCODE(SI_QUEUE);
-        DEF_SEGVCODE(SI_TIMER);
-        DEF_SEGVCODE(SI_MESGQ);
-        DEF_SEGVCODE(SI_ASYNCIO);
-        DEF_SEGVCODE(SI_SIGIO);
-        DEF_SEGVCODE(SI_TKILL);
-        DEF_SEGVCODE(SEGV_MAPERR);
-        DEF_SEGVCODE(SEGV_ACCERR);
+        DEF_CASE(SI_USER);
+        DEF_CASE(SI_KERNEL);
+        DEF_CASE(SI_QUEUE);
+        DEF_CASE(SI_TIMER);
+        DEF_CASE(SI_MESGQ);
+        DEF_CASE(SI_ASYNCIO);
+        DEF_CASE(SI_SIGIO);
+        DEF_CASE(SI_TKILL);
+        DEF_CASE(SEGV_MAPERR);
+        DEF_CASE(SEGV_ACCERR);
     }
 
     return result;
@@ -450,31 +408,26 @@ const char* getTextualFcntlCmd(int cmd)
 {
     const char* result = "(unknown)";
 
-#define DEF_FCNTLCMD(a) \
-    case a:             \
-        result = #a;    \
-        break;
-
     switch (cmd)
     {
-        DEF_FCNTLCMD(F_DUPFD);
-        DEF_FCNTLCMD(F_GETFD);
-        DEF_FCNTLCMD(F_SETFD);
-        DEF_FCNTLCMD(F_GETFL);
-        DEF_FCNTLCMD(F_SETFL);
-        DEF_FCNTLCMD(F_GETLK);
-        DEF_FCNTLCMD(F_SETLK);
-        DEF_FCNTLCMD(F_SETLKW);
-        //DEF_FCNTLCMD(F_GETLK64);
-        //DEF_FCNTLCMD(F_SETLK64);
-        //DEF_FCNTLCMD(F_SETLKW64);
-        DEF_FCNTLCMD(F_SETOWN);
-        DEF_FCNTLCMD(F_GETOWN);
-        DEF_FCNTLCMD(F_SETSIG);
-        DEF_FCNTLCMD(F_GETSIG);
-        DEF_FCNTLCMD(F_SETLEASE);
-        DEF_FCNTLCMD(F_GETLEASE);
-        DEF_FCNTLCMD(F_NOTIFY);
+        DEF_CASE(F_DUPFD);
+        DEF_CASE(F_GETFD);
+        DEF_CASE(F_SETFD);
+        DEF_CASE(F_GETFL);
+        DEF_CASE(F_SETFL);
+        DEF_CASE(F_GETLK);
+        DEF_CASE(F_SETLK);
+        DEF_CASE(F_SETLKW);
+        //DEF_CASE(F_GETLK64);
+        //DEF_CASE(F_SETLK64);
+        //DEF_CASE(F_SETLKW64);
+        DEF_CASE(F_SETOWN);
+        DEF_CASE(F_GETOWN);
+        DEF_CASE(F_SETSIG);
+        DEF_CASE(F_GETSIG);
+        DEF_CASE(F_SETLEASE);
+        DEF_CASE(F_GETLEASE);
+        DEF_CASE(F_NOTIFY);
     }
 
     return result;
@@ -487,16 +440,11 @@ const char* getTextualFlockType(unsigned int type)
 {
     const char* result = "(unknown)";
 
-#define DEF_FLOCKTYPE(a) \
-    case a:              \
-        result = #a;     \
-        break;
-
     switch (type)
     {
-        DEF_FLOCKTYPE(LOCK_SH);
-        DEF_FLOCKTYPE(LOCK_EX);
-        DEF_FLOCKTYPE(LOCK_UN);
+        DEF_CASE(LOCK_SH);
+        DEF_CASE(LOCK_EX);
+        DEF_CASE(LOCK_UN);
     }
 
     return result;
@@ -510,28 +458,23 @@ const char* getTextualKernelError (int err)
 {
     const char* result = "(unknown)";
 
-#define DEF_KERNEL_ERROR(a) \
-    case a:                 \
-        result = #a;        \
-        break;
-
     switch (err)
     {
-        DEF_KERNEL_ERROR(ERESTARTSYS);
-        DEF_KERNEL_ERROR(ERESTARTNOINTR);
-        DEF_KERNEL_ERROR(ERESTARTNOHAND);
-        DEF_KERNEL_ERROR(ENOIOCTLCMD);
-        DEF_KERNEL_ERROR(ERESTART_RESTARTBLOCK);
-        DEF_KERNEL_ERROR(EBADHANDLE);
-        DEF_KERNEL_ERROR(ENOTSYNC);
-        DEF_KERNEL_ERROR(EBADCOOKIE);
-        DEF_KERNEL_ERROR(ENOTSUPP);
-        DEF_KERNEL_ERROR(ETOOSMALL);
-        DEF_KERNEL_ERROR(ESERVERFAULT);
-        DEF_KERNEL_ERROR(EBADTYPE);
-        DEF_KERNEL_ERROR(EJUKEBOX);
-        DEF_KERNEL_ERROR(EIOCBQUEUED);
-        DEF_KERNEL_ERROR(EIOCBRETRY);
+        DEF_CASE(ERESTARTSYS);
+        DEF_CASE(ERESTARTNOINTR);
+        DEF_CASE(ERESTARTNOHAND);
+        DEF_CASE(ENOIOCTLCMD);
+        DEF_CASE(ERESTART_RESTARTBLOCK);
+        DEF_CASE(EBADHANDLE);
+        DEF_CASE(ENOTSYNC);
+        DEF_CASE(EBADCOOKIE);
+        DEF_CASE(ENOTSUPP);
+        DEF_CASE(ETOOSMALL);
+        DEF_CASE(ESERVERFAULT);
+        DEF_CASE(EBADTYPE);
+        DEF_CASE(EJUKEBOX);
+        DEF_CASE(EIOCBQUEUED);
+        DEF_CASE(EIOCBRETRY);
     }
 
     return result;
@@ -544,16 +487,11 @@ const char* getTextualProcmaskRequest(int how)
 {
     const char* result = "(unknown)";
 
-#define DEF_PROCMASKHOW(a) \
-    case a:                \
-        result = #a;       \
-        break;
-
     switch(how)
     {
-        DEF_PROCMASKHOW(SIG_BLOCK);
-        DEF_PROCMASKHOW(SIG_UNBLOCK);
-        DEF_PROCMASKHOW(SIG_SETMASK);
+        DEF_CASE(SIG_BLOCK);
+        DEF_CASE(SIG_UNBLOCK);
+        DEF_CASE(SIG_SETMASK);
     }
 
     return result;
@@ -566,39 +504,34 @@ const char* getTextualFutexOp(int op)
 {
     const char* result = "(unknown)";
 
-#define DEF_FUTEX_OP(a) \
-    case a:             \
-        result = #a;    \
-        break;
-
     switch(op)
     {
-        DEF_FUTEX_OP(FUTEX_WAIT);
-        DEF_FUTEX_OP(FUTEX_WAKE);
-        DEF_FUTEX_OP(FUTEX_FD);
-        DEF_FUTEX_OP(FUTEX_REQUEUE);
-        DEF_FUTEX_OP(FUTEX_CMP_REQUEUE);
-        DEF_FUTEX_OP(FUTEX_WAKE_OP);
-        DEF_FUTEX_OP(FUTEX_LOCK_PI);
-        DEF_FUTEX_OP(FUTEX_UNLOCK_PI);
-        DEF_FUTEX_OP(FUTEX_TRYLOCK_PI);
-        DEF_FUTEX_OP(FUTEX_WAIT_BITSET);
-        DEF_FUTEX_OP(FUTEX_WAKE_BITSET);
-        DEF_FUTEX_OP(FUTEX_WAIT_REQUEUE_PI);
-        DEF_FUTEX_OP(FUTEX_CMP_REQUEUE_PI);
-        DEF_FUTEX_OP(FUTEX_WAIT_PRIVATE);
-        DEF_FUTEX_OP(FUTEX_WAKE_PRIVATE);
-        DEF_FUTEX_OP(FUTEX_REQUEUE_PRIVATE);
-        DEF_FUTEX_OP(FUTEX_CMP_REQUEUE_PRIVATE);
-        DEF_FUTEX_OP(FUTEX_WAKE_OP_PRIVATE);
-        DEF_FUTEX_OP(FUTEX_LOCK_PI_PRIVATE);
-        DEF_FUTEX_OP(FUTEX_UNLOCK_PI_PRIVATE);
-        DEF_FUTEX_OP(FUTEX_TRYLOCK_PI_PRIVATE);
-        DEF_FUTEX_OP(FUTEX_WAIT_BITSET_PRIVATE);
-        DEF_FUTEX_OP(FUTEX_WAKE_BITSET_PRIVATE);
-        DEF_FUTEX_OP(FUTEX_WAIT_REQUEUE_PI_PRIVATE);
-        DEF_FUTEX_OP(FUTEX_CMP_REQUEUE_PI_PRIVATE);
-        DEF_FUTEX_OP(MVEE_FUTEX_WAIT_TID);
+        DEF_CASE(FUTEX_WAIT);
+        DEF_CASE(FUTEX_WAKE);
+        DEF_CASE(FUTEX_FD);
+        DEF_CASE(FUTEX_REQUEUE);
+        DEF_CASE(FUTEX_CMP_REQUEUE);
+        DEF_CASE(FUTEX_WAKE_OP);
+        DEF_CASE(FUTEX_LOCK_PI);
+        DEF_CASE(FUTEX_UNLOCK_PI);
+        DEF_CASE(FUTEX_TRYLOCK_PI);
+        DEF_CASE(FUTEX_WAIT_BITSET);
+        DEF_CASE(FUTEX_WAKE_BITSET);
+        DEF_CASE(FUTEX_WAIT_REQUEUE_PI);
+        DEF_CASE(FUTEX_CMP_REQUEUE_PI);
+        DEF_CASE(FUTEX_WAIT_PRIVATE);
+        DEF_CASE(FUTEX_WAKE_PRIVATE);
+        DEF_CASE(FUTEX_REQUEUE_PRIVATE);
+        DEF_CASE(FUTEX_CMP_REQUEUE_PRIVATE);
+        DEF_CASE(FUTEX_WAKE_OP_PRIVATE);
+        DEF_CASE(FUTEX_LOCK_PI_PRIVATE);
+        DEF_CASE(FUTEX_UNLOCK_PI_PRIVATE);
+        DEF_CASE(FUTEX_TRYLOCK_PI_PRIVATE);
+        DEF_CASE(FUTEX_WAIT_BITSET_PRIVATE);
+        DEF_CASE(FUTEX_WAKE_BITSET_PRIVATE);
+        DEF_CASE(FUTEX_WAIT_REQUEUE_PI_PRIVATE);
+        DEF_CASE(FUTEX_CMP_REQUEUE_PI_PRIVATE);
+        DEF_CASE(MVEE_FUTEX_WAIT_TID);
     }
 
     return result;
@@ -611,50 +544,46 @@ const char* getTextualAtomicType(int atomic_type)
 {
     const char* result = "(unknown)";
 
-  #define DEF_BASE_ATOMIC(a) \
-    case a:                  \
-        result = #a;         \
-        break;
-  #define DEF_EXTENDED_ATOMIC(a)        \
+#define DEF_EXTENDED_ATOMIC(a)			\
     case a + __MVEE_BASE_ATOMICS_MAX__: \
         result = #a;                    \
         break;
 
     switch(atomic_type)
     {
-        DEF_BASE_ATOMIC(ATOMIC_FORCED_READ);
-        DEF_BASE_ATOMIC(ATOMIC_LOAD);
-        DEF_BASE_ATOMIC(ATOMIC_LOAD_MAX);
-        DEF_BASE_ATOMIC(CATOMIC_COMPARE_AND_EXCHANGE_VAL_ACQ);
-        DEF_BASE_ATOMIC(CATOMIC_COMPARE_AND_EXCHANGE_BOOL_ACQ);
-        DEF_BASE_ATOMIC(CATOMIC_AND);
-        DEF_BASE_ATOMIC(CATOMIC_OR);
-        DEF_BASE_ATOMIC(CATOMIC_EXCHANGE_AND_ADD);
-        DEF_BASE_ATOMIC(CATOMIC_ADD);
-        DEF_BASE_ATOMIC(CATOMIC_INCREMENT);
-        DEF_BASE_ATOMIC(CATOMIC_DECREMENT);
-        DEF_BASE_ATOMIC(CATOMIC_MAX);
-        DEF_BASE_ATOMIC(ATOMIC_COMPARE_AND_EXCHANGE_VAL_ACQ);
-        DEF_BASE_ATOMIC(ATOMIC_COMPARE_AND_EXCHANGE_BOOL_ACQ);
-        DEF_BASE_ATOMIC(ATOMIC_EXCHANGE_ACQ);
-        DEF_BASE_ATOMIC(ATOMIC_EXCHANGE_AND_ADD);
-        DEF_BASE_ATOMIC(ATOMIC_INCREMENT_AND_TEST);
-        DEF_BASE_ATOMIC(ATOMIC_DECREMENT_AND_TEST);
-        DEF_BASE_ATOMIC(ATOMIC_ADD_ZERO);
-        DEF_BASE_ATOMIC(ATOMIC_ADD);
-        DEF_BASE_ATOMIC(ATOMIC_INCREMENT);
-        DEF_BASE_ATOMIC(ATOMIC_DECREMENT);
-        DEF_BASE_ATOMIC(ATOMIC_BIT_TEST_SET);
-        DEF_BASE_ATOMIC(ATOMIC_BIT_SET);
-        DEF_BASE_ATOMIC(ATOMIC_AND);
-        DEF_BASE_ATOMIC(ATOMIC_STORE);
-        DEF_BASE_ATOMIC(ATOMIC_MAX);
-        DEF_BASE_ATOMIC(ATOMIC_DECREMENT_IF_POSITIVE);
-        DEF_BASE_ATOMIC(__THREAD_ATOMIC_CMPXCHG_VAL);
-        DEF_BASE_ATOMIC(__THREAD_ATOMIC_AND);
-        DEF_BASE_ATOMIC(__THREAD_ATOMIC_BIT_SET);
-        DEF_BASE_ATOMIC(___UNKNOWN_LOCK_TYPE___);
-        //DEF_BASE_ATOMIC(__MVEE_BASE_ATOMICS_MAX__);
+        DEF_CASE(ATOMIC_FORCED_READ);
+        DEF_CASE(ATOMIC_LOAD);
+        DEF_CASE(ATOMIC_LOAD_MAX);
+        DEF_CASE(CATOMIC_COMPARE_AND_EXCHANGE_VAL_ACQ);
+        DEF_CASE(CATOMIC_COMPARE_AND_EXCHANGE_BOOL_ACQ);
+        DEF_CASE(CATOMIC_AND);
+        DEF_CASE(CATOMIC_OR);
+        DEF_CASE(CATOMIC_EXCHANGE_AND_ADD);
+        DEF_CASE(CATOMIC_ADD);
+        DEF_CASE(CATOMIC_INCREMENT);
+        DEF_CASE(CATOMIC_DECREMENT);
+        DEF_CASE(CATOMIC_MAX);
+        DEF_CASE(ATOMIC_COMPARE_AND_EXCHANGE_VAL_ACQ);
+        DEF_CASE(ATOMIC_COMPARE_AND_EXCHANGE_BOOL_ACQ);
+        DEF_CASE(ATOMIC_EXCHANGE_ACQ);
+        DEF_CASE(ATOMIC_EXCHANGE_AND_ADD);
+        DEF_CASE(ATOMIC_INCREMENT_AND_TEST);
+        DEF_CASE(ATOMIC_DECREMENT_AND_TEST);
+        DEF_CASE(ATOMIC_ADD_ZERO);
+        DEF_CASE(ATOMIC_ADD);
+        DEF_CASE(ATOMIC_INCREMENT);
+        DEF_CASE(ATOMIC_DECREMENT);
+        DEF_CASE(ATOMIC_BIT_TEST_SET);
+        DEF_CASE(ATOMIC_BIT_SET);
+        DEF_CASE(ATOMIC_AND);
+        DEF_CASE(ATOMIC_STORE);
+        DEF_CASE(ATOMIC_MAX);
+        DEF_CASE(ATOMIC_DECREMENT_IF_POSITIVE);
+        DEF_CASE(__THREAD_ATOMIC_CMPXCHG_VAL);
+        DEF_CASE(__THREAD_ATOMIC_AND);
+        DEF_CASE(__THREAD_ATOMIC_BIT_SET);
+        DEF_CASE(___UNKNOWN_LOCK_TYPE___);
+        //DEF_CASE(__MVEE_BASE_ATOMICS_MAX__);
 
         DEF_EXTENDED_ATOMIC(mvee_atomic_load_n);
         DEF_EXTENDED_ATOMIC(mvee_atomic_load);
@@ -709,17 +638,12 @@ const char* getTextualBreakpointType(int bp_type)
 {
     const char* result = "(unknown)";
 
-  #define DEF_BP_TYPE(a) \
-    case a:              \
-        result = #a;     \
-        break;
-
     switch(bp_type)
     {
-        DEF_BP_TYPE(MVEE_BP_EXEC_ONLY);
-        DEF_BP_TYPE(MVEE_BP_WRITE_ONLY);
-        DEF_BP_TYPE(MVEE_BP_READ_WRITE);
-        DEF_BP_TYPE(MVEE_BP_READ_WRITE_NO_FETCH);
+        DEF_CASE(MVEE_BP_EXEC_ONLY);
+        DEF_CASE(MVEE_BP_WRITE_ONLY);
+        DEF_CASE(MVEE_BP_READ_WRITE);
+        DEF_CASE(MVEE_BP_READ_WRITE_NO_FETCH);
     }
 
     return result;
@@ -732,34 +656,29 @@ const char* getTextualBufferType(int buffer_type)
 {
     const char* result = "(unknown)";
 
-  #define DEF_BUFFER_TYPE(a) \
-    case a:                  \
-        result = #a;         \
-        break;
-
     switch(buffer_type)
     {
-        DEF_BUFFER_TYPE(MVEE_PTHREAD_LOCK_BUFFER);
-        DEF_BUFFER_TYPE(MVEE_GTK_HASH_BUFFER);
-        DEF_BUFFER_TYPE(MVEE_ORBIT_REQUEST_BUFFER);
-        DEF_BUFFER_TYPE(MVEE_LIBC_LOCK_BUFFER);
-        DEF_BUFFER_TYPE(MVEE_GLIB_HASH_BUFFER);
-        DEF_BUFFER_TYPE(MVEE_PANGO_HASH_BUFFER);
-        DEF_BUFFER_TYPE(MVEE_REALLOC_BUFFER);
-        DEF_BUFFER_TYPE(MVEE_UNO_HASH_BUFFER);
-        DEF_BUFFER_TYPE(MVEE_RAND_BUFFER);
-//		DEF_BUFFER_TYPE(MVEE_LIBC_LOCK_EIP_BUFFER);
-        DEF_BUFFER_TYPE(MVEE_JDK_ATOMIC_BUFFER);
-        DEF_BUFFER_TYPE(MVEE_LIBC_MALLOC_DEBUG_BUFFER);
-        DEF_BUFFER_TYPE(MVEE_GCCLIBS_BUFFER);
-        DEF_BUFFER_TYPE(MVEE_LIBC_ATOMIC_BUFFER);
-        DEF_BUFFER_TYPE(MVEE_UTCB_BUFFER);
-        DEF_BUFFER_TYPE(MVEE_LIBC_LOCK_BUFFER_PARTIAL);
-        DEF_BUFFER_TYPE(MVEE_LIBC_ATOMIC_BUFFER_HIDDEN);
-		DEF_BUFFER_TYPE(MVEE_LIBC_HIDDEN_BUFFER_ARRAY);
-		DEF_BUFFER_TYPE(MVEE_UTCB_REG_FILE_MAP);
-        DEF_BUFFER_TYPE(MVEE_IPMON_BUFFER);
-        DEF_BUFFER_TYPE(MVEE_IPMON_REG_FILE_MAP);
+        DEF_CASE(MVEE_PTHREAD_LOCK_BUFFER);
+        DEF_CASE(MVEE_GTK_HASH_BUFFER);
+        DEF_CASE(MVEE_ORBIT_REQUEST_BUFFER);
+        DEF_CASE(MVEE_LIBC_LOCK_BUFFER);
+        DEF_CASE(MVEE_GLIB_HASH_BUFFER);
+        DEF_CASE(MVEE_PANGO_HASH_BUFFER);
+        DEF_CASE(MVEE_REALLOC_BUFFER);
+        DEF_CASE(MVEE_UNO_HASH_BUFFER);
+        DEF_CASE(MVEE_RAND_BUFFER);
+//		DEF_CASE(MVEE_LIBC_LOCK_EIP_BUFFER);
+        DEF_CASE(MVEE_JDK_ATOMIC_BUFFER);
+        DEF_CASE(MVEE_LIBC_MALLOC_DEBUG_BUFFER);
+        DEF_CASE(MVEE_GCCLIBS_BUFFER);
+        DEF_CASE(MVEE_LIBC_ATOMIC_BUFFER);
+        DEF_CASE(MVEE_UTCB_BUFFER);
+        DEF_CASE(MVEE_LIBC_LOCK_BUFFER_PARTIAL);
+        DEF_CASE(MVEE_LIBC_ATOMIC_BUFFER_HIDDEN);
+		DEF_CASE(MVEE_LIBC_HIDDEN_BUFFER_ARRAY);
+		DEF_CASE(MVEE_UTCB_REG_FILE_MAP);
+        DEF_CASE(MVEE_IPMON_BUFFER);
+        DEF_CASE(MVEE_IPMON_REG_FILE_MAP);
     }
 
     return result;
@@ -772,29 +691,24 @@ const char* getTextualRlimitType(int rlimit_type)
 {
     const char* result = "(unknown)";
 
-    #define DEF_RLIMIT_TYPE(a) \
-    case a:                    \
-        result = #a;           \
-        break;
-
     switch(rlimit_type)
     {
-        DEF_RLIMIT_TYPE(RLIMIT_AS);
-        DEF_RLIMIT_TYPE(RLIMIT_CORE);
-        DEF_RLIMIT_TYPE(RLIMIT_CPU);
-        DEF_RLIMIT_TYPE(RLIMIT_DATA);
-        DEF_RLIMIT_TYPE(RLIMIT_FSIZE);
-        DEF_RLIMIT_TYPE(RLIMIT_LOCKS);
-        DEF_RLIMIT_TYPE(RLIMIT_MEMLOCK);
-        DEF_RLIMIT_TYPE(RLIMIT_MSGQUEUE);
-        DEF_RLIMIT_TYPE(RLIMIT_NICE);
-        DEF_RLIMIT_TYPE(RLIMIT_NOFILE);
-        DEF_RLIMIT_TYPE(RLIMIT_NPROC);
-        DEF_RLIMIT_TYPE(RLIMIT_RSS);
-        DEF_RLIMIT_TYPE(RLIMIT_RTPRIO);
-        DEF_RLIMIT_TYPE(RLIMIT_RTTIME);
-        DEF_RLIMIT_TYPE(RLIMIT_SIGPENDING);
-        DEF_RLIMIT_TYPE(RLIMIT_STACK);
+        DEF_CASE(RLIMIT_AS);
+        DEF_CASE(RLIMIT_CORE);
+        DEF_CASE(RLIMIT_CPU);
+        DEF_CASE(RLIMIT_DATA);
+        DEF_CASE(RLIMIT_FSIZE);
+        DEF_CASE(RLIMIT_LOCKS);
+        DEF_CASE(RLIMIT_MEMLOCK);
+        DEF_CASE(RLIMIT_MSGQUEUE);
+        DEF_CASE(RLIMIT_NICE);
+        DEF_CASE(RLIMIT_NOFILE);
+        DEF_CASE(RLIMIT_NPROC);
+        DEF_CASE(RLIMIT_RSS);
+        DEF_CASE(RLIMIT_RTPRIO);
+        DEF_CASE(RLIMIT_RTTIME);
+        DEF_CASE(RLIMIT_SIGPENDING);
+        DEF_CASE(RLIMIT_STACK);
     }
 
     return result;
@@ -807,25 +721,20 @@ const char* getTextualAllocType(int alloc_type)
 {
     const char* result = "(unknown)";
 
-    #define DEF_ALLOC_TYPE(a) \
-    case a:                   \
-        result = #a;          \
-        break;
-
     switch(alloc_type)
     {
-        DEF_ALLOC_TYPE(LIBC_MALLOC);
-        DEF_ALLOC_TYPE(LIBC_FREE);
-        DEF_ALLOC_TYPE(LIBC_REALLOC);
-        DEF_ALLOC_TYPE(LIBC_MEMALIGN);
-        DEF_ALLOC_TYPE(LIBC_CALLOC);
-        DEF_ALLOC_TYPE(MALLOC_TRIM);
-        DEF_ALLOC_TYPE(HEAP_TRIM);
-        DEF_ALLOC_TYPE(MALLOC_CONSOLIDATE);
-        DEF_ALLOC_TYPE(ARENA_GET2);
-        DEF_ALLOC_TYPE(_INT_MALLOC);
-        DEF_ALLOC_TYPE(_INT_FREE);
-        DEF_ALLOC_TYPE(_INT_REALLOC);
+        DEF_CASE(LIBC_MALLOC);
+        DEF_CASE(LIBC_FREE);
+        DEF_CASE(LIBC_REALLOC);
+        DEF_CASE(LIBC_MEMALIGN);
+        DEF_CASE(LIBC_CALLOC);
+        DEF_CASE(MALLOC_TRIM);
+        DEF_CASE(HEAP_TRIM);
+        DEF_CASE(MALLOC_CONSOLIDATE);
+        DEF_CASE(ARENA_GET2);
+        DEF_CASE(_INT_MALLOC);
+        DEF_CASE(_INT_FREE);
+        DEF_CASE(_INT_REALLOC);
     }
 
     return result;
@@ -1014,20 +923,15 @@ const char* getTextualDWARFConstant(int constant)
 {
     const char* result = "(unknown)";
 
-  #define DEF_CONST(a) \
-    case a:            \
-        result = #a;   \
-        break;
-
     switch(constant)
     {
-        DEF_CONST(DW_EXPR_OFFSET);
-        DEF_CONST(DW_EXPR_VAL_OFFSET);
-        DEF_CONST(DW_EXPR_EXPRESSION);
-        DEF_CONST(DW_EXPR_VAL_EXPRESSION);
-        DEF_CONST(DW_FRAME_SAME_VAL);
-        DEF_CONST(DW_FRAME_UNDEFINED_VAL);
-        DEF_CONST(DW_FRAME_CFA_COL3);
+        DEF_CASE(DW_EXPR_OFFSET);
+        DEF_CASE(DW_EXPR_VAL_OFFSET);
+        DEF_CASE(DW_EXPR_EXPRESSION);
+        DEF_CASE(DW_EXPR_VAL_EXPRESSION);
+        DEF_CASE(DW_FRAME_SAME_VAL);
+        DEF_CASE(DW_FRAME_UNDEFINED_VAL);
+        DEF_CASE(DW_FRAME_CFA_COL3);
     }
 
     return result;
@@ -1040,184 +944,179 @@ const char* getTextualDWARFOp (int op)
 {
     const char* result = "(unknown)";
 
-  #define DEF_OP(a)  \
-    case a:          \
-        result = #a; \
-        break;
-
     switch(op)
     {
-        DEF_OP(DW_OP_addr);
-        DEF_OP(DW_OP_deref);
-        DEF_OP(DW_OP_const1u);
-        DEF_OP(DW_OP_const1s);
-        DEF_OP(DW_OP_const2u);
-        DEF_OP(DW_OP_const2s);
-        DEF_OP(DW_OP_const4u);
-        DEF_OP(DW_OP_const4s);
-        DEF_OP(DW_OP_const8u);
-        DEF_OP(DW_OP_const8s);
-        DEF_OP(DW_OP_constu);
-        DEF_OP(DW_OP_consts);
-        DEF_OP(DW_OP_dup);
-        DEF_OP(DW_OP_drop);
-        DEF_OP(DW_OP_over);
-        DEF_OP(DW_OP_pick);
-        DEF_OP(DW_OP_swap);
-        DEF_OP(DW_OP_rot);
-        DEF_OP(DW_OP_xderef);
-        DEF_OP(DW_OP_abs);
-        DEF_OP(DW_OP_and);
-        DEF_OP(DW_OP_div);
-        DEF_OP(DW_OP_minus);
-        DEF_OP(DW_OP_mod);
-        DEF_OP(DW_OP_mul);
-        DEF_OP(DW_OP_neg);
-        DEF_OP(DW_OP_not);
-        DEF_OP(DW_OP_or);
-        DEF_OP(DW_OP_plus);
-        DEF_OP(DW_OP_plus_uconst);
-        DEF_OP(DW_OP_shl);
-        DEF_OP(DW_OP_shr);
-        DEF_OP(DW_OP_shra);
-        DEF_OP(DW_OP_xor);
-        DEF_OP(DW_OP_bra);
-        DEF_OP(DW_OP_eq);
-        DEF_OP(DW_OP_ge);
-        DEF_OP(DW_OP_gt);
-        DEF_OP(DW_OP_le);
-        DEF_OP(DW_OP_lt);
-        DEF_OP(DW_OP_ne);
-        DEF_OP(DW_OP_skip);
-        DEF_OP(DW_OP_lit0);
-        DEF_OP(DW_OP_lit1);
-        DEF_OP(DW_OP_lit2);
-        DEF_OP(DW_OP_lit3);
-        DEF_OP(DW_OP_lit4);
-        DEF_OP(DW_OP_lit5);
-        DEF_OP(DW_OP_lit6);
-        DEF_OP(DW_OP_lit7);
-        DEF_OP(DW_OP_lit8);
-        DEF_OP(DW_OP_lit9);
-        DEF_OP(DW_OP_lit10);
-        DEF_OP(DW_OP_lit11);
-        DEF_OP(DW_OP_lit12);
-        DEF_OP(DW_OP_lit13);
-        DEF_OP(DW_OP_lit14);
-        DEF_OP(DW_OP_lit15);
-        DEF_OP(DW_OP_lit16);
-        DEF_OP(DW_OP_lit17);
-        DEF_OP(DW_OP_lit18);
-        DEF_OP(DW_OP_lit19);
-        DEF_OP(DW_OP_lit20);
-        DEF_OP(DW_OP_lit21);
-        DEF_OP(DW_OP_lit22);
-        DEF_OP(DW_OP_lit23);
-        DEF_OP(DW_OP_lit24);
-        DEF_OP(DW_OP_lit25);
-        DEF_OP(DW_OP_lit26);
-        DEF_OP(DW_OP_lit27);
-        DEF_OP(DW_OP_lit28);
-        DEF_OP(DW_OP_lit29);
-        DEF_OP(DW_OP_lit30);
-        DEF_OP(DW_OP_lit31);
-        DEF_OP(DW_OP_reg0);
-        DEF_OP(DW_OP_reg1);
-        DEF_OP(DW_OP_reg2);
-        DEF_OP(DW_OP_reg3);
-        DEF_OP(DW_OP_reg4);
-        DEF_OP(DW_OP_reg5);
-        DEF_OP(DW_OP_reg6);
-        DEF_OP(DW_OP_reg7);
-        DEF_OP(DW_OP_reg8);
-        DEF_OP(DW_OP_reg9);
-        DEF_OP(DW_OP_reg10);
-        DEF_OP(DW_OP_reg11);
-        DEF_OP(DW_OP_reg12);
-        DEF_OP(DW_OP_reg13);
-        DEF_OP(DW_OP_reg14);
-        DEF_OP(DW_OP_reg15);
-        DEF_OP(DW_OP_reg16);
-        DEF_OP(DW_OP_reg17);
-        DEF_OP(DW_OP_reg18);
-        DEF_OP(DW_OP_reg19);
-        DEF_OP(DW_OP_reg20);
-        DEF_OP(DW_OP_reg21);
-        DEF_OP(DW_OP_reg22);
-        DEF_OP(DW_OP_reg23);
-        DEF_OP(DW_OP_reg24);
-        DEF_OP(DW_OP_reg25);
-        DEF_OP(DW_OP_reg26);
-        DEF_OP(DW_OP_reg27);
-        DEF_OP(DW_OP_reg28);
-        DEF_OP(DW_OP_reg29);
-        DEF_OP(DW_OP_reg30);
-        DEF_OP(DW_OP_reg31);
-        DEF_OP(DW_OP_breg0);
-        DEF_OP(DW_OP_breg1);
-        DEF_OP(DW_OP_breg2);
-        DEF_OP(DW_OP_breg3);
-        DEF_OP(DW_OP_breg4);
-        DEF_OP(DW_OP_breg5);
-        DEF_OP(DW_OP_breg6);
-        DEF_OP(DW_OP_breg7);
-        DEF_OP(DW_OP_breg8);
-        DEF_OP(DW_OP_breg9);
-        DEF_OP(DW_OP_breg10);
-        DEF_OP(DW_OP_breg11);
-        DEF_OP(DW_OP_breg12);
-        DEF_OP(DW_OP_breg13);
-        DEF_OP(DW_OP_breg14);
-        DEF_OP(DW_OP_breg15);
-        DEF_OP(DW_OP_breg16);
-        DEF_OP(DW_OP_breg17);
-        DEF_OP(DW_OP_breg18);
-        DEF_OP(DW_OP_breg19);
-        DEF_OP(DW_OP_breg20);
-        DEF_OP(DW_OP_breg21);
-        DEF_OP(DW_OP_breg22);
-        DEF_OP(DW_OP_breg23);
-        DEF_OP(DW_OP_breg24);
-        DEF_OP(DW_OP_breg25);
-        DEF_OP(DW_OP_breg26);
-        DEF_OP(DW_OP_breg27);
-        DEF_OP(DW_OP_breg28);
-        DEF_OP(DW_OP_breg29);
-        DEF_OP(DW_OP_breg30);
-        DEF_OP(DW_OP_breg31);
-        DEF_OP(DW_OP_regx);
-        DEF_OP(DW_OP_fbreg);
-        DEF_OP(DW_OP_bregx);
-        DEF_OP(DW_OP_piece);
-        DEF_OP(DW_OP_deref_size);
-        DEF_OP(DW_OP_xderef_size);
-        DEF_OP(DW_OP_nop);
-        DEF_OP(DW_OP_push_object_address);
-        DEF_OP(DW_OP_call2);
-        DEF_OP(DW_OP_call4);
-        DEF_OP(DW_OP_call_ref);
-        DEF_OP(DW_OP_form_tls_address);
-        DEF_OP(DW_OP_call_frame_cfa);
-        DEF_OP(DW_OP_bit_piece);
-        DEF_OP(DW_OP_implicit_value);
-        DEF_OP(DW_OP_stack_value);
-        DEF_OP(DW_OP_GNU_push_tls_address);
-        //DEF_OP(DW_OP_lo_user);
-        DEF_OP(DW_OP_GNU_uninit);
-        DEF_OP(DW_OP_GNU_encoded_addr);
-        DEF_OP(DW_OP_GNU_implicit_pointer);
-        DEF_OP(DW_OP_GNU_entry_value);
-        //DEF_OP(DW_OP_HP_unknown);
-        DEF_OP(DW_OP_HP_is_value);
-        DEF_OP(DW_OP_HP_fltconst4);
-        DEF_OP(DW_OP_HP_fltconst8);
-        DEF_OP(DW_OP_HP_mod_range);
-        DEF_OP(DW_OP_HP_unmod_range);
-        DEF_OP(DW_OP_HP_tls);
-        DEF_OP(DW_OP_INTEL_bit_piece);
-        //DEF_OP(DW_OP_APPLE_uninit);
-        DEF_OP(DW_OP_PGI_omp_thread_num);
-        DEF_OP(DW_OP_hi_user);
+        DEF_CASE(DW_OP_addr);
+        DEF_CASE(DW_OP_deref);
+        DEF_CASE(DW_OP_const1u);
+        DEF_CASE(DW_OP_const1s);
+        DEF_CASE(DW_OP_const2u);
+        DEF_CASE(DW_OP_const2s);
+        DEF_CASE(DW_OP_const4u);
+        DEF_CASE(DW_OP_const4s);
+        DEF_CASE(DW_OP_const8u);
+        DEF_CASE(DW_OP_const8s);
+        DEF_CASE(DW_OP_constu);
+        DEF_CASE(DW_OP_consts);
+        DEF_CASE(DW_OP_dup);
+        DEF_CASE(DW_OP_drop);
+        DEF_CASE(DW_OP_over);
+        DEF_CASE(DW_OP_pick);
+        DEF_CASE(DW_OP_swap);
+        DEF_CASE(DW_OP_rot);
+        DEF_CASE(DW_OP_xderef);
+        DEF_CASE(DW_OP_abs);
+        DEF_CASE(DW_OP_and);
+        DEF_CASE(DW_OP_div);
+        DEF_CASE(DW_OP_minus);
+        DEF_CASE(DW_OP_mod);
+        DEF_CASE(DW_OP_mul);
+        DEF_CASE(DW_OP_neg);
+        DEF_CASE(DW_OP_not);
+        DEF_CASE(DW_OP_or);
+        DEF_CASE(DW_OP_plus);
+        DEF_CASE(DW_OP_plus_uconst);
+        DEF_CASE(DW_OP_shl);
+        DEF_CASE(DW_OP_shr);
+        DEF_CASE(DW_OP_shra);
+        DEF_CASE(DW_OP_xor);
+        DEF_CASE(DW_OP_bra);
+        DEF_CASE(DW_OP_eq);
+        DEF_CASE(DW_OP_ge);
+        DEF_CASE(DW_OP_gt);
+        DEF_CASE(DW_OP_le);
+        DEF_CASE(DW_OP_lt);
+        DEF_CASE(DW_OP_ne);
+        DEF_CASE(DW_OP_skip);
+        DEF_CASE(DW_OP_lit0);
+        DEF_CASE(DW_OP_lit1);
+        DEF_CASE(DW_OP_lit2);
+        DEF_CASE(DW_OP_lit3);
+        DEF_CASE(DW_OP_lit4);
+        DEF_CASE(DW_OP_lit5);
+        DEF_CASE(DW_OP_lit6);
+        DEF_CASE(DW_OP_lit7);
+        DEF_CASE(DW_OP_lit8);
+        DEF_CASE(DW_OP_lit9);
+        DEF_CASE(DW_OP_lit10);
+        DEF_CASE(DW_OP_lit11);
+        DEF_CASE(DW_OP_lit12);
+        DEF_CASE(DW_OP_lit13);
+        DEF_CASE(DW_OP_lit14);
+        DEF_CASE(DW_OP_lit15);
+        DEF_CASE(DW_OP_lit16);
+        DEF_CASE(DW_OP_lit17);
+        DEF_CASE(DW_OP_lit18);
+        DEF_CASE(DW_OP_lit19);
+        DEF_CASE(DW_OP_lit20);
+        DEF_CASE(DW_OP_lit21);
+        DEF_CASE(DW_OP_lit22);
+        DEF_CASE(DW_OP_lit23);
+        DEF_CASE(DW_OP_lit24);
+        DEF_CASE(DW_OP_lit25);
+        DEF_CASE(DW_OP_lit26);
+        DEF_CASE(DW_OP_lit27);
+        DEF_CASE(DW_OP_lit28);
+        DEF_CASE(DW_OP_lit29);
+        DEF_CASE(DW_OP_lit30);
+        DEF_CASE(DW_OP_lit31);
+        DEF_CASE(DW_OP_reg0);
+        DEF_CASE(DW_OP_reg1);
+        DEF_CASE(DW_OP_reg2);
+        DEF_CASE(DW_OP_reg3);
+        DEF_CASE(DW_OP_reg4);
+        DEF_CASE(DW_OP_reg5);
+        DEF_CASE(DW_OP_reg6);
+        DEF_CASE(DW_OP_reg7);
+        DEF_CASE(DW_OP_reg8);
+        DEF_CASE(DW_OP_reg9);
+        DEF_CASE(DW_OP_reg10);
+        DEF_CASE(DW_OP_reg11);
+        DEF_CASE(DW_OP_reg12);
+        DEF_CASE(DW_OP_reg13);
+        DEF_CASE(DW_OP_reg14);
+        DEF_CASE(DW_OP_reg15);
+        DEF_CASE(DW_OP_reg16);
+        DEF_CASE(DW_OP_reg17);
+        DEF_CASE(DW_OP_reg18);
+        DEF_CASE(DW_OP_reg19);
+        DEF_CASE(DW_OP_reg20);
+        DEF_CASE(DW_OP_reg21);
+        DEF_CASE(DW_OP_reg22);
+        DEF_CASE(DW_OP_reg23);
+        DEF_CASE(DW_OP_reg24);
+        DEF_CASE(DW_OP_reg25);
+        DEF_CASE(DW_OP_reg26);
+        DEF_CASE(DW_OP_reg27);
+        DEF_CASE(DW_OP_reg28);
+        DEF_CASE(DW_OP_reg29);
+        DEF_CASE(DW_OP_reg30);
+        DEF_CASE(DW_OP_reg31);
+        DEF_CASE(DW_OP_breg0);
+        DEF_CASE(DW_OP_breg1);
+        DEF_CASE(DW_OP_breg2);
+        DEF_CASE(DW_OP_breg3);
+        DEF_CASE(DW_OP_breg4);
+        DEF_CASE(DW_OP_breg5);
+        DEF_CASE(DW_OP_breg6);
+        DEF_CASE(DW_OP_breg7);
+        DEF_CASE(DW_OP_breg8);
+        DEF_CASE(DW_OP_breg9);
+        DEF_CASE(DW_OP_breg10);
+        DEF_CASE(DW_OP_breg11);
+        DEF_CASE(DW_OP_breg12);
+        DEF_CASE(DW_OP_breg13);
+        DEF_CASE(DW_OP_breg14);
+        DEF_CASE(DW_OP_breg15);
+        DEF_CASE(DW_OP_breg16);
+        DEF_CASE(DW_OP_breg17);
+        DEF_CASE(DW_OP_breg18);
+        DEF_CASE(DW_OP_breg19);
+        DEF_CASE(DW_OP_breg20);
+        DEF_CASE(DW_OP_breg21);
+        DEF_CASE(DW_OP_breg22);
+        DEF_CASE(DW_OP_breg23);
+        DEF_CASE(DW_OP_breg24);
+        DEF_CASE(DW_OP_breg25);
+        DEF_CASE(DW_OP_breg26);
+        DEF_CASE(DW_OP_breg27);
+        DEF_CASE(DW_OP_breg28);
+        DEF_CASE(DW_OP_breg29);
+        DEF_CASE(DW_OP_breg30);
+        DEF_CASE(DW_OP_breg31);
+        DEF_CASE(DW_OP_regx);
+        DEF_CASE(DW_OP_fbreg);
+        DEF_CASE(DW_OP_bregx);
+        DEF_CASE(DW_OP_piece);
+        DEF_CASE(DW_OP_deref_size);
+        DEF_CASE(DW_OP_xderef_size);
+        DEF_CASE(DW_OP_nop);
+        DEF_CASE(DW_OP_push_object_address);
+        DEF_CASE(DW_OP_call2);
+        DEF_CASE(DW_OP_call4);
+        DEF_CASE(DW_OP_call_ref);
+        DEF_CASE(DW_OP_form_tls_address);
+        DEF_CASE(DW_OP_call_frame_cfa);
+        DEF_CASE(DW_OP_bit_piece);
+        DEF_CASE(DW_OP_implicit_value);
+        DEF_CASE(DW_OP_stack_value);
+        DEF_CASE(DW_OP_GNU_push_tls_address);
+        //DEF_CASE(DW_OP_lo_user);
+        DEF_CASE(DW_OP_GNU_uninit);
+        DEF_CASE(DW_OP_GNU_encoded_addr);
+        DEF_CASE(DW_OP_GNU_implicit_pointer);
+        DEF_CASE(DW_OP_GNU_entry_value);
+        //DEF_CASE(DW_OP_HP_unknown);
+        DEF_CASE(DW_OP_HP_is_value);
+        DEF_CASE(DW_OP_HP_fltconst4);
+        DEF_CASE(DW_OP_HP_fltconst8);
+        DEF_CASE(DW_OP_HP_mod_range);
+        DEF_CASE(DW_OP_HP_unmod_range);
+        DEF_CASE(DW_OP_HP_tls);
+        DEF_CASE(DW_OP_INTEL_bit_piece);
+        //DEF_CASE(DW_OP_APPLE_uninit);
+        DEF_CASE(DW_OP_PGI_omp_thread_num);
+        DEF_CASE(DW_OP_hi_user);
     }
 
     return result;
@@ -1241,16 +1140,11 @@ const char* getTextualEpollOp(int op)
 {
     const char* result = "(unknown)";
 
-#define DEF_OP(a)    \
-    case a:          \
-        result = #a; \
-        break;
-
     switch(op)
     {
-        DEF_OP(EPOLL_CTL_ADD);
-        DEF_OP(EPOLL_CTL_MOD);
-        DEF_OP(EPOLL_CTL_DEL);
+        DEF_CASE(EPOLL_CTL_ADD);
+        DEF_CASE(EPOLL_CTL_MOD);
+        DEF_CASE(EPOLL_CTL_DEL);
     }
 
     return result;
@@ -1263,16 +1157,11 @@ const char* getTextualEventFdFlags(int flags)
 {
     const char* result = "(unknown)";
 
-#define DEF_EFD(a)   \
-    case a:          \
-        result = #a; \
-        break;
-
     switch(flags)
     {
-        DEF_EFD(EFD_CLOEXEC);
-        DEF_EFD(EFD_NONBLOCK);
-        DEF_EFD(EFD_SEMAPHORE);
+        DEF_CASE(EFD_CLOEXEC);
+        DEF_CASE(EFD_NONBLOCK);
+        DEF_CASE(EFD_SEMAPHORE);
     }
 
     return result;
@@ -1285,15 +1174,10 @@ const char* getTextualXattrFlags(int flags)
 {
     const char* result = "(unknown)";
 
-#define DEF_XATTRFLAG(a) \
-    case a:              \
-        result = #a;     \
-        break;
-
     switch(flags)
     {
-        DEF_XATTRFLAG(XATTR_CREATE);
-        DEF_XATTRFLAG(XATTR_REPLACE);
+        DEF_CASE(XATTR_CREATE);
+        DEF_CASE(XATTR_REPLACE);
     }
 
     return result;
@@ -1306,15 +1190,10 @@ const char* getTextualTimerType(int type)
 {
     const char* result = "(unknown)";
 
-#define DEF_TIMERTYPE(a) \
-    case a:              \
-        result = #a;     \
-        break;
-
     switch(type)
     {
-        DEF_TIMERTYPE(CLOCK_REALTIME);
-        DEF_TIMERTYPE(CLOCK_MONOTONIC);
+        DEF_CASE(CLOCK_REALTIME);
+        DEF_CASE(CLOCK_MONOTONIC);
     }
 
     return result;
@@ -1327,24 +1206,19 @@ const char* getTextualSyslogAction(int action)
 {
     const char* result = "(unknown)";
 
-#define DEF_ACTION(a) \
-    case a:           \
-        result = #a;  \
-        break;
-
     switch(action)
     {
-        DEF_ACTION(SYSLOG_ACTION_CLOSE);
-        DEF_ACTION(SYSLOG_ACTION_OPEN);
-        DEF_ACTION(SYSLOG_ACTION_READ);
-        DEF_ACTION(SYSLOG_ACTION_READ_ALL);
-        DEF_ACTION(SYSLOG_ACTION_READ_CLEAR);
-        DEF_ACTION(SYSLOG_ACTION_CLEAR);
-        DEF_ACTION(SYSLOG_ACTION_CONSOLE_OFF);
-        DEF_ACTION(SYSLOG_ACTION_CONSOLE_ON);
-        DEF_ACTION(SYSLOG_ACTION_CONSOLE_LEVEL);
-        DEF_ACTION(SYSLOG_ACTION_SIZE_UNREAD);
-        DEF_ACTION(SYSLOG_ACTION_SIZE_BUFFER);
+        DEF_CASE(SYSLOG_ACTION_CLOSE);
+        DEF_CASE(SYSLOG_ACTION_OPEN);
+        DEF_CASE(SYSLOG_ACTION_READ);
+        DEF_CASE(SYSLOG_ACTION_READ_ALL);
+        DEF_CASE(SYSLOG_ACTION_READ_CLEAR);
+        DEF_CASE(SYSLOG_ACTION_CLEAR);
+        DEF_CASE(SYSLOG_ACTION_CONSOLE_OFF);
+        DEF_CASE(SYSLOG_ACTION_CONSOLE_ON);
+        DEF_CASE(SYSLOG_ACTION_CONSOLE_LEVEL);
+        DEF_CASE(SYSLOG_ACTION_SIZE_UNREAD);
+        DEF_CASE(SYSLOG_ACTION_SIZE_BUFFER);
     }
 
     return result;
@@ -1357,25 +1231,68 @@ const char* getTextualFileType(int type)
 {
     const char* result = "(unknown)";
 
-#define DEF_TYPE(a) \
-    case a:           \
-        result = #a;  \
-        break;
-
     switch(type)
     {
-		DEF_TYPE(FT_UNKNOWN);
-		DEF_TYPE(FT_REGULAR);
-		DEF_TYPE(FT_PIPE_BLOCKING);
-		DEF_TYPE(FT_PIPE_NON_BLOCKING);
-		DEF_TYPE(FT_SOCKET_BLOCKING);
-		DEF_TYPE(FT_SOCKET_NON_BLOCKING);
-		DEF_TYPE(FT_POLL_BLOCKING);
-		DEF_TYPE(FT_POLL_NON_BLOCKING);
-		DEF_TYPE(FT_SPECIAL);
+		DEF_CASE(FT_UNKNOWN);
+		DEF_CASE(FT_REGULAR);
+		DEF_CASE(FT_PIPE_BLOCKING);
+		DEF_CASE(FT_PIPE_NON_BLOCKING);
+		DEF_CASE(FT_SOCKET_BLOCKING);
+		DEF_CASE(FT_SOCKET_NON_BLOCKING);
+		DEF_CASE(FT_POLL_BLOCKING);
+		DEF_CASE(FT_POLL_NON_BLOCKING);
+		DEF_CASE(FT_SPECIAL);
     }
 
     return result;
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualRAVENCall
+-----------------------------------------------------------------------------*/
+const char* getTextualRAVENCall(int call)
+{
+	const char* result = "ESC_UNKNOWN";
+
+	switch(call)
+	{
+		DEF_CASE(ESC_XCHECK);
+		DEF_CASE(ESC_XCHECK_VALUES_ONLY);
+		DEF_CASE(ESC_FUTEX_HACK);
+		DEF_CASE(ESC_ENTER_LOCK);
+//		DEF_CASE(ESC_LEAVE_UNLOCK);
+		DEF_CASE(ESC_LEAVE_LOCK);
+		DEF_CASE(ESC_XCHECKS_OFF);
+		DEF_CASE(ESC_XCHECKS_ON);
+		DEF_CASE(ESC_XCHECKS_OFF_LOCAL);
+		DEF_CASE(ESC_XCHECKS_ON_LOCAL);
+		DEF_CASE(ESC_VARIANT_INIT_SYNC);
+		DEF_CASE(ESC_VARIANT_REACTIVATE);
+		DEF_CASE(ESC_ENABLE_SYSCALL_CHECKS);
+		DEF_CASE(ESC_EXECVE_FAILURE);
+		DEF_CASE(ESC_RINGBUFF_INIT);
+		DEF_CASE(ESC_RINGBUFF_DESTROY);
+	}
+
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualErrno
+-----------------------------------------------------------------------------*/
+const char* getTextualErrno(int err)
+{
+	const char* result = "Unknown Error";
+
+	switch (err)
+	{
+		DEF_CASE(ENOIPMON);
+		default:
+			result = strerror(err);
+			break;
+	}
+
+	return result;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1451,6 +1368,7 @@ std::string getTextualFileMode(int mode)
 {
     std::string result;
 
+	// Permissions
     TEST_FLAG(mode, S_IRUSR, result);
     TEST_FLAG(mode, S_IWUSR, result);
     TEST_FLAG(mode, S_IXUSR, result);
@@ -1460,6 +1378,16 @@ std::string getTextualFileMode(int mode)
     TEST_FLAG(mode, S_IROTH, result);
     TEST_FLAG(mode, S_IWOTH, result);
     TEST_FLAG(mode, S_IXOTH, result);
+
+	// File Types
+    TEST_FLAG(mode, S_IFMT, result);
+    TEST_FLAG(mode, S_IFDIR, result);
+    TEST_FLAG(mode, S_IFCHR, result);
+    TEST_FLAG(mode, S_IFBLK, result);
+    TEST_FLAG(mode, S_IFREG, result);
+    TEST_FLAG(mode, S_IFIFO, result);
+    TEST_FLAG(mode, S_IFLNK, result);
+    TEST_FLAG(mode, S_IFSOCK, result);
 
     return result;
 }
@@ -1833,4 +1761,119 @@ std::string getTextualShmFlags(unsigned long flags)
     TEST_FLAG(flags, SHM_EXEC  , result);
 
     return result;
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualInotifyMask
+-----------------------------------------------------------------------------*/
+std::string getTextualInotifyMask(unsigned long mask)
+{
+	std::string result;
+
+	if ((mask & IN_ALL_EVENTS) == IN_ALL_EVENTS)
+	{
+		TEST_FLAG(mask, IN_ALL_EVENTS    , result);
+	}
+	else
+	{
+		TEST_FLAG(mask, IN_ACCESS        , result);
+		TEST_FLAG(mask, IN_ATTRIB        , result);
+		TEST_FLAG(mask, IN_CLOSE_WRITE   , result);
+		TEST_FLAG(mask, IN_CLOSE_NOWRITE , result);
+		TEST_FLAG(mask, IN_CREATE        , result);
+		TEST_FLAG(mask, IN_DELETE        , result);
+		TEST_FLAG(mask, IN_DELETE_SELF   , result);
+		TEST_FLAG(mask, IN_MODIFY        , result);
+		TEST_FLAG(mask, IN_MOVE_SELF     , result);
+		TEST_FLAG(mask, IN_MOVED_FROM    , result);
+		TEST_FLAG(mask, IN_MOVED_TO      , result);
+		TEST_FLAG(mask, IN_OPEN          , result);
+	}
+
+	TEST_FLAG(mask, IN_DONT_FOLLOW       , result);
+	TEST_FLAG(mask, IN_EXCL_UNLINK       , result);
+	TEST_FLAG(mask, IN_MASK_ADD          , result);
+	TEST_FLAG(mask, IN_ONESHOT           , result);
+	TEST_FLAG(mask, IN_ONLYDIR           , result);
+	TEST_FLAG(mask, IN_IGNORED           , result);
+	TEST_FLAG(mask, IN_ISDIR             , result);
+	TEST_FLAG(mask, IN_Q_OVERFLOW        , result);
+	TEST_FLAG(mask, IN_UNMOUNT           , result);
+
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualUnlinkFlags
+-----------------------------------------------------------------------------*/
+std::string getTextualUnlinkFlags (int flags)
+{
+	std::string result;
+
+	TEST_FLAG(flags, AT_REMOVEDIR, result);
+
+	return result;	
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualLinkFlags
+-----------------------------------------------------------------------------*/
+std::string getTextualLinkFlags (int flags)
+{
+	std::string result;
+
+	TEST_FLAG(flags, AT_EMPTY_PATH     , result);
+	TEST_FLAG(flags, AT_SYMLINK_FOLLOW , result);
+
+	return result;	
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualChmodFlags
+-----------------------------------------------------------------------------*/
+std::string getTextualChmodFlags (int flags)
+{
+	std::string result;
+
+	TEST_FLAG(flags, AT_SYMLINK_FOLLOW , result);
+
+	return result;	
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualMVEEWaitStatus
+-----------------------------------------------------------------------------*/
+std::string getTextualMVEEWaitStatus (interaction::mvee_wait_status& status)
+{
+	std::stringstream ss;
+
+	ss << "[PID: " << status.pid << ", reason: ";
+
+	switch (status.reason)
+	{
+		case STOP_NOTSTOPPED: 
+			ss << "STOP_NOTSTOPPED";
+			break;
+		case STOP_SYSCALL:
+			ss << "STOP_SYSCALL";
+			break;
+		case STOP_SIGNAL:
+			ss << "STOP_SIGNAL";
+			break;
+		case STOP_EXECVE:
+			ss << "STOP_EXECVE";
+			break;
+		case STOP_FORK:
+			ss << "STOP_FORK";
+			break;
+		case STOP_EXIT:
+			ss << "STOP_EXIT";
+			break;
+		case STOP_KILLED:
+			ss << "STOP_KILLED";
+			break;
+	}
+
+	ss << ", sig: " << getTextualSig(status.data) << "]";
+	return ss.str();
 }

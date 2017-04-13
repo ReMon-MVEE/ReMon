@@ -20,13 +20,12 @@
 #include <string>
 #include <deque>
 #include <set>
-#include "MVEE_config.h"
+#include "MVEE_build_config.h"
+#include <json/json.h>
 
 /*-----------------------------------------------------------------------------
     Forward Declarations
 -----------------------------------------------------------------------------*/
-struct config_t;
-struct config_setting_t;
 class monitor;
 class detachedvariant;
 class mmap_addr2line_proc;
@@ -54,8 +53,6 @@ public:
     }
 };
 
-long mvee_wrap_ptrace                 (unsigned short request, pid_t pid, unsigned long addr, void *data, int allow_even_if_shutting_down=0);
-
 /*-----------------------------------------------------------------------------
     Constants
 -----------------------------------------------------------------------------*/
@@ -63,33 +60,8 @@ long mvee_wrap_ptrace                 (unsigned short request, pid_t pid, unsign
 #define NO_CALL   0x01000000
 
 /*-----------------------------------------------------------------------------
-    GHUMVEE Config File Configuration - refer to the default MVEE.ini for
-    documentation.
+    Global MVEE state
 -----------------------------------------------------------------------------*/
-struct mvee_config
-{
-	unsigned char mvee_use_ipmon;
-    unsigned char mvee_hide_vdso;
-    unsigned char mvee_intercept_tsc;
-    unsigned char mvee_use_dcl;
-    unsigned char mvee_allow_setaffinity;
-    unsigned char mvee_use_system_libc;
-    unsigned char mvee_use_system_libgomp;
-    unsigned char mvee_use_system_libstdcpp;
-    unsigned char mvee_use_system_libgfortran;
-    unsigned char mvee_use_system_gnomelibs;
-    const char*   mvee_root_path;
-    const char*   mvee_libc_path;
-    const char*   mvee_libgomp_path;
-    const char*   mvee_libstdcpp_path;
-    const char*   mvee_libgfortran_path;
-    const char*   mvee_gnomelibs_path;
-	const char*   mvee_spec2006_path;
-	const char*   mvee_parsec2_path;
-	const char*   mvee_parsec3_path;
-    config_t*     config;
-};
-
 //
 // This represents the global state of the MVEE.
 //
@@ -178,16 +150,22 @@ public:
 	// the process.
     //
     static void init_config                 ();
+	static void init_config_set_defaults    ();
+	static bool process_opts                (int argc, char** argv, bool add_args);
+	static void add_argv                    (const char* arg);
 
-	// 
-	// Parse a commandline option for the MVEE
-	//
-    static void process_opt                 (char* opt);
 
 	//
 	// Asynchronously request a shutdown of the entire MVEE
 	//
     static void request_shutdown            (bool should_backtrace);
+
+	//
+	// Implemented in MVEE_config.cpp. Sets up the config to launch a known
+	// variant set. We mainly use this to create shortcuts for benchmarks
+	//
+	static void        set_builtin_config     (int builtin);
+
 
     // *************************************************************************
     // Monitor Management - Implemented in MVEE.cpp
@@ -293,6 +271,20 @@ public:
 	//
     static bool map_master_to_slave_pids    (pid_t master_pid, std::vector<pid_t>& slave_pids);
 
+	// 
+	// Returns true if the process with the specified pid is one of the variants
+	// we're monitoring
+	//
+	static bool is_monitored_variant                 (pid_t variant_pid);
+
+	//
+	// Check if the specified variant has an alias for the specified path.
+	// If so, return that alias. If not, return ""
+	//
+	static bool        are_aliases                   (std::vector<std::string> paths);
+	static std::string get_alias                     (int variant_num, std::string path_name);
+	static void        init_aliases                  ();
+
     // *************************************************************************
     // OS/Environment configuration
     // *************************************************************************
@@ -357,6 +349,11 @@ public:
 	// Get the full path to the default ELF interpreter on the host machine
 	// 
     static std::string   os_get_interp               ();
+
+	//
+	// Test if the specified binary is dynamically linked and/or PIE
+	//
+	static bool          os_can_load_indirect        (std::string& image);
 
 	// 
 	// Determine the name of the interpreter to be used to execute @file
@@ -437,6 +434,12 @@ public:
     static bool                    is_printable_string(char* str, int len);
 
 	// 
+	// converts a string to upper case
+	//
+    static std::string             upcase(const char* lower_case_string);
+
+
+	// 
 	// Convert an "old" integer-style sigset to a "new" sigset_t-style sigset
 	//
     static sigset_t                old_sigset_to_new_sigset(unsigned long old_sigset);
@@ -449,39 +452,40 @@ public:
     static void unlock                      ();
     
     // *************************************************************************
-    // Monitor/Demo settings and properties. All of these are initialized during
+    // Monitor settings and properties. All of these are initialized during
     // monitor startup and not modified afterwards. It is therefore safe to read
     // these without holding the mvee lock 
 	// *************************************************************************
 
-    // set to true if we're running a native benchmark
-    static bool                     no_monitoring;
-
-    // command line arguments passed to the demo
-    static std::vector<std::string> demo_args;
-
-    // number of the demo we're running (cfr. MVEE_demos.cpp)
-    static int                      demo_num;
-
-    // Set to true if we're tracking performance counters for this demo
-#ifdef MVEE_ALLOW_PERF
-    static bool                     use_perf;
-#endif
-
     // Number of variants we're running
     static int                      numvariants;
 
-    // (optional) custom LD_LIBRARY_PATH to be used in the variants
-    static std::string              custom_library_path;
+	// Spec ids for the variants we're running
+	static std::vector<std::string> variant_ids;
+
+	// Temporary arguments list passed through the command line
+	static std::vector<std::string> tmp_argv;
+
+	// RAVEN aliasing support
+	// For each variant, we keep a map of path names -> aliases
+	// If the variant opens/starts a file that's in the map,
+	// we will translate it to the alias first.
+	static std::vector<
+		std::map<std::string, std::string>>
+		aliases;
+	// Maps aliases onto their source path names
+	static std::vector<
+		std::map<std::string, std::string>>
+		reverse_aliases;
 
     // Configuration read from MVEE.ini
-    static struct mvee_config       config;
-
-    // (optional) schedule type for this demo
-    static unsigned int             demo_schedule_type;
-
-    // (optional) set to true if we're running a program with over 100 simultaneous threads
-    static bool                     demo_has_many_threads;
+	static std::string              config_file_name;
+	static std::string              config_variant_set;
+	static bool                     config_show;
+    static Json::Value              config;
+	static Json::Value*             config_variant_global;
+	static Json::Value*             config_variant_exec;
+	static Json::Value*             config_monitor;
 
     // monitor object and id of the monitor we're running in this thread
     // we used to use this for almost everything but nowadays it's really just here
@@ -502,9 +506,10 @@ public:
     static std::map<unsigned long, unsigned char>
                                     syslocks_table;
 
-#ifdef MVEE_GENERATE_EXTRA_STATS
+	//
+	// Set to true when we're executing a logging handler 
+	//
     static __thread bool            in_logging_handler;
-#endif
 
     //
     // Lock/Cond that protects the variables below
@@ -562,65 +567,23 @@ private:
 	// 
     static void        add_library_path       (const char* library_path, bool append_arch_suffix=true, bool prepend_mvee_root=true);
 
-	// 
-	// Serializes the argv vector for the current variant. This is called just
-	// after forking the variants off from the main MVEE process. At this point,
-	// the global state of the MVEE is still visible to the variants because 
-	// they haven't execve'd yet.
 	//
-    static std::string prepare_argv           ();
+	// Implemented in MVEE_variant_launch.cpp. Set up the environment variables
+	// for the current variant. This is called just after forking the variants
+	// off from the main MVEE process, but before they have execve'd.
+	//
+    static void        setup_env              (int variantnum);
 
 	//
-	// Implemented in MVEE_demos.cpp. This is where we configure the MVEE to run
-	// the specified demo.  This function runs in the context of the main MVEE
-	// process, after the variants have been forked off, but before they have
-	// execve'd.
-	// 
-    static void        set_demo_options       (int demonum);
-
+	// Starts the specified variant using the loaded configuration
 	//
-	// Implemented in MVEE_demos.cpp. Set up the environment variables for the
-	// current variant. This is called just after forking the variants off from
-	// the main MVEE process, but before they have execve'd.
-	//
-    static void        setup_env              (int demonum, bool native);
-
-	//
-	// Implemented in MVEE_demos.cpp. This function starts the specified demo
-	// in the context of one of the variant processes. This is usually as simple
-	// as calling execve.
-	//
-    static void        start_demo             (int demonum, int variantindex, bool native);
-
-	// 
-	// Starts a variant directly (i.e. without using a shell to interpret the
-	// startup command)
-	// 
-	static void        start_variant_direct   (const char* path, ...);
-
-	// 
-	// Starts a variant indirectly by executing a shell that interprets the
-	// specified command.
-	//
-	static void        start_variant_indirect (const char* cmd);
+	static void        start_variant          (int variantnum);
 
 	//
 	// Get the name of the SPEC2006 profile to be used to run the current
 	// variant
 	//
 	static const char* get_spec_profile       (bool native);
-
-	// *************************************************************************
-    // Config Initialization - This is our interface to the MVEE.ini file
-	// *************************************************************************	
-    static config_setting_t* config_setting_lookup_or_create(config_t* config, const char* path, int type);
-    static void              config_store_uchar (config_t* config, const char* path, unsigned char value);
-    static void              config_store_string (config_t* config, const char* path, const char* value);
-    static void              config_store(unsigned char config_type, config_t* config, const char* path, void* value);
-    static void              mvee_config_to_config_t (config_t* config);
-    static void              config_lookup_uchar (config_t* config, const char* path, unsigned char* value);
-    static void              config_lookup (unsigned char config_type, config_t* config, const char* path, void* value);
-    static void              config_t_to_mvee_config (config_t* config);
 
 	// *************************************************************************
     // Monitor management
@@ -692,9 +655,8 @@ private:
     static FILE*                                ptrace_logfile;
     static FILE*                                datatransfer_logfile;
     static FILE*                                lockstats_logfile;
-    static double                               initialtime;
+    static double                               startup_time;
     static pthread_mutex_t                      loglock;
-    static bool                                 print_to_stdout;
 };
 
 

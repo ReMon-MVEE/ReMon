@@ -56,6 +56,7 @@ void shm_table::init()
 #ifdef MVEE_GENERATE_LOCKSTATS
     op_cnt_total   = 0;
     prev_thread_id = 0;
+	bounce_cnt     = 0;
 #endif
 }
 
@@ -96,7 +97,7 @@ void shm_table::update_lock_stats(unsigned char shm_type, _shm_info* info)
 {
 #ifdef MVEE_GENERATE_LOCKSTATS
 
-    if (shm_type != MVEE_LIBC_LOCK_LOCK_BUFFER
+    if (shm_type != MVEE_LIBC_LOCK_BUFFER_PARTIAL
         || !info->ptr)
         return;
 

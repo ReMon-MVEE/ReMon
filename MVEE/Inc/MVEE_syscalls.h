@@ -59,7 +59,7 @@
 // In BENCHMARK mode, GHUMVEE disables all logging.
 //
 // BENCHMARK mode can be enabled by defining the MVEE_BENCHMARK preprocessor
-// flag in MVEE/Inc/MVEE_config.h.
+// flag in MVEE/Inc/MVEE_build_config.h.
 //
 // *****************************************************************************
 // There are _SIX_ types of syscall handlers:
@@ -69,8 +69,9 @@
 //
 // Called for                : all syscalls
 // Called in BENCHMARK mode  : YES
-// variants[x].callnum valid : NO
-// variants[x].regs valid    : NO
+// variantnum argument       : number of the variant
+// variants[x].callnum valid : YES
+// variants[x].regs valid    : YES
 //
 // GHUMVEE calls this handler to determine the synchronization mode for the
 // corresponding syscall. If the function returns MVEE_CALL_TYPE_UNSYNCED, then
@@ -83,8 +84,9 @@
 //
 // Called for                : all syscalls
 // Called in BENCHMARK mode  : NO
-// variants[x].callnum valid : NO
-// variants[x].regs valid    : NO
+// variantnum argument       : number of the variant
+// variants[x].callnum valid : YES
+// variants[x].regs valid    : YES
 //
 // GHUMVEE calls this handler at the entrance of a syscall. The handler logs
 // the system call arguments for the syscall being executed. The return value
@@ -95,6 +97,7 @@
 //
 // Called for                : synced syscalls only
 // Called in BENCHMARK mode  : YES
+// variantnum argument       : -1
 // variants[x].callnum valid : YES
 // variants[x].regs valid    : YES
 //
@@ -108,6 +111,7 @@
 //
 // Called for                : all syscalls
 // Called in BENCHMARK mode  : YES
+// variantnum argument       : -1 for synced calls, number of the variant for unsynced calls
 // variants[x].callnum valid : YES
 // variants[x].regs valid    : YES
 //
@@ -122,17 +126,20 @@
 //
 // Called for                : all syscalls
 // Called in BENCHMARK mode  : NO
+// variantnum argument       : number of the variant
 // variants[x].callnum valid : YES
 // variants[x].regs valid    : YES
 //
 // Similar to the log_args handlers, these handler functions log the syscall
-// results for the corresponding system call.
+// results for the corresponding system call. This handler ONLY gets called for
+// syscalls that did NOT return an error.
 // 
 // 6) postcall handler (Optional):
 // -------------------------------
 //
 // Called for                : all syscalls
 // Called in BENCHMARK mode  : YES
+// variantnum argument       : -1 for synced calls, number of the variant for unsynced calls
 // variants[x].callnum valid : NO
 // variants[x].regs valid    : YES
 //
@@ -148,7 +155,7 @@
 /*-----------------------------------------------------------------------------
     Includes
 -----------------------------------------------------------------------------*/
-#include "MVEE_config.h"
+#include "MVEE_build_config.h"
 
 /*-----------------------------------------------------------------------------
     Syscall Handler Definitions
@@ -181,7 +188,6 @@
 // Possible return values of the CALL system call handler
 #define MVEE_CALL_ALLOW                   0x0001                    // Allow the variant(s) to be resumed from the syscall entry site, without modifying their syscall number or arguments
 #define MVEE_CALL_DENY                    0x0002                    // Allow the variant(s) to be resumed from the syscall entry site, but replace their syscall number by __NR_getpid
-#define MVEE_CALL_HANDLED_UNSYNCED_CALL   0x0004                    // Debugging aid
 #define MVEE_CALL_ERROR                   0x0004                    
 #define MVEE_CALL_VALUE                   0x0008
 #define MVEE_CALL_RETURN_ERROR(a) (0x0004 | (a << 6))               // Used in conjunction with MVEE_CALL_DENY. Return error <a> from the denied syscall (this is equivalent to MVEE_CALL_RETURN_VALUE(-a))
@@ -195,6 +201,9 @@
 
 #define MVEE_HANDLER_DONTHAVE             (&monitor::handle_donthave)
 #define MVEE_HANDLER_DONTNEED             (&monitor::handle_dontneed)
+#define MVEE_LOGGER_DONTHAVE              (&monitor::log_donthave)
+#define MVEE_LOGGER_DONTNEED              (&monitor::log_dontneed)
+
 
 // Types of locks a system call handler might need - these are managed from MVEE/Src/MVEE_syscalls.cpp
 #define MVEE_SYSLOCK_MMAN                 (1 << 0)                  // syscall needs mman lock
@@ -204,5 +213,43 @@
 #define MVEE_SYSLOCK_FULL                 (1 << 4)                  // syslocks need to be held accross the call
 #define MVEE_SYSLOCK_PRECALL              (1 << 5)                  // syslocks need to be held before the call only
 #define MVEE_SYSLOCK_POSTCALL             (1 << 6)                  // syslocks need to be held after the call only
+
+//
+// Function declaration macros
+//
+#define GET_CALL_TYPE(syscall_name) \
+	long monitor::handle_##syscall_name##_get_call_type(int variantnum)
+
+#define LOG_ARGS(syscall_name) \
+	void monitor::handle_##syscall_name##_log_args(int variantnum)
+
+#define PRECALL(syscall_name) \
+	long monitor::handle_##syscall_name##_precall(int variantnum)
+
+#define CALL(syscall_name) \
+	long monitor::handle_##syscall_name##_call(int variantnum)
+
+#define POSTCALL(syscall_name) \
+	long monitor::handle_##syscall_name##_postcall(int variantnum)
+
+#define LOG_RETURN(syscall_name) \
+	void monitor::handle_##syscall_name##_log_return(int variantnum)
+
+//
+// Call type checking macros
+//
+
+//
+// if true, the call we're looking at was not subject to lockstepping
+//
+#define IS_UNSYNCED_CALL						\
+	(variantnum != -1)
+
+//
+// similarly, if this is true, we're looking at a call that is subject to
+// lockstepping
+//
+#define IS_SYNCED_CALL							\
+	(variantnum == -1)
 
 #endif // MVEE_SYSCALLS_H_INCLUDED

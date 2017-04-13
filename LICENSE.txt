@@ -5,10 +5,6 @@ This license applies to the following files:
 - patches/linux-3.13-ipmon.patch
 - The entire IP-MON folder
 
-Some of the files in the exploits/BROP folder were downloaded from
-http://www.scs.stanford.edu/brop/. The licensing terms for these files are
-unknown.
-
 Unless otherwise specified, all other files in the repository are available
 under the licensing terms in GHUMVEELICENSE.txt.
 

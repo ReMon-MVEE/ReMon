@@ -18,45 +18,6 @@
 #include <alloca.h>
 #include <string.h>
 
-STATIC INLINE unsigned long syscall_data_len(unsigned long entry_offset);
-
-/*-----------------------------------------------------------------------------
-  Helper functions for dealing with offset/ptr differences
------------------------------------------------------------------------------*/
-
-/* both ipmon_cmp_data_offset_ptr and ipmon_cmp_ptr_ptr compare the data in a (struct ipmon_syscall_data)->data, and thus take into account that offset! */
-
-STATIC INLINE int ipmon_cmp_data_offset_ptr(unsigned long data_offset, const void* ptr, size_t sz)
-{
-	return ipmon_memcmp_offset_ptr(data_offset + offsetof(struct ipmon_syscall_data, data), ptr, sz);
-}
-
-STATIC INLINE int ipmon_cmp_data_ptr_ptr(struct ipmon_syscall_data* data, const void* ptr, size_t sz)
-{
-	return ipmon_memcmp_ptr_ptr(data->data, ptr, sz);
-}
-
-STATIC INLINE void ipmon_copy_to_offset_from_ptr(unsigned long dst_offset, unsigned long* src_ptr)
-{
-	__asm__ volatile ("movq (%0), %%rax;"
-					  "movq %%rax, (%%" RB_REGISTER ", %1);"
-					  :: "r"(src_ptr), "r"(dst_offset) : "%rax");
-}
-
-STATIC INLINE void ipmon_copy_to_offset_from_value(unsigned long dst_offset, unsigned long src_val)
-{
-	__asm__ volatile ("movq %0, (%%" RB_REGISTER ", %1);"
-					  :: "r"(src_val), "r"(dst_offset));
-}
-
-STATIC INLINE unsigned long ipmon_get_long_from_offset(unsigned long src_offset)
-{
-	unsigned long result;
-	__asm__ volatile ("mov (%%" RB_REGISTER ", %1), %0;"
-					  : "+r"(result) : "r"(src_offset));
-	return result;
-}
-
 /*-----------------------------------------------------------------------------
     IP-MON Helper functions for argument/return size calculation
 
@@ -215,7 +176,7 @@ STATIC INLINE int ipmon_iovec_layout_serialize(void* dst, struct iovec* src, int
 STATIC INLINE int ipmon_msg_layout_serialize(void* dst, struct msghdr* hdr, int elems)
 {
 	struct msghdr* target = (struct msghdr*)dst;
-	ipmon_memset_ptr(target, 0, sizeof(struct msghdr));
+	memset(target, 0, sizeof(struct msghdr));
 
 	target->msg_iovlen = hdr->msg_iovlen;
 	target->msg_namelen = hdr->msg_namelen;
@@ -255,7 +216,7 @@ STATIC INLINE int ipmon_iovec_serialize(void* dst, struct iovec* src, int elems,
 
 		if (to_copy > 0)
 		{
-			ipmon_memcpy_ptr_ptr((void*)((unsigned long)dst + offset),
+			memcpy((void*)((unsigned long)dst + offset),
 				   src[i].iov_base,
 				   to_copy);
 
@@ -271,7 +232,7 @@ STATIC INLINE int ipmon_msg_serialize(void* dst, struct msghdr* src, int elems, 
 {
 	// serialize the header itself
 	struct msghdr* target = (struct msghdr*)dst;
-	ipmon_memset_ptr(target, 0, sizeof(struct msghdr));
+	memset(target, 0, sizeof(struct msghdr));
 
 	target->msg_iovlen = src->msg_iovlen;
 	target->msg_namelen = src->msg_namelen;
@@ -280,7 +241,7 @@ STATIC INLINE int ipmon_msg_serialize(void* dst, struct msghdr* src, int elems, 
 
 	// serialize the name
 	if (src->msg_namelen)
-		ipmon_memcpy_ptr_ptr((void*)((unsigned long)target + sizeof(struct msghdr)), src->msg_name, src->msg_namelen);
+		memcpy((void*)((unsigned long)target + sizeof(struct msghdr)), src->msg_name, src->msg_namelen);
 
 	// serialize control messages (THIS SUCKS!)
 	int offset = sizeof(struct msghdr) + src->msg_namelen;
@@ -288,7 +249,7 @@ STATIC INLINE int ipmon_msg_serialize(void* dst, struct msghdr* src, int elems, 
 	// there might be uninitialized shit between the messages. Get rid of it...
 	if (src->msg_controllen)
 	{
-		ipmon_memcpy_ptr_ptr((void*)((unsigned long)target + offset), src->msg_control, src->msg_controllen);
+		memcpy((void*)((unsigned long)target + offset), src->msg_control, src->msg_controllen);
 
 		struct cmsghdr* cmsg = CMSG_FIRSTHDR(src);
 		struct cmsghdr* next;
@@ -298,7 +259,7 @@ STATIC INLINE int ipmon_msg_serialize(void* dst, struct msghdr* src, int elems, 
 
 			if ((unsigned long)next > (unsigned long)cmsg + cmsg->cmsg_len)
 			{
-				ipmon_memset_ptr((void*)((unsigned long)target + offset + cmsg->cmsg_len),
+				memset((void*)((unsigned long)target + offset + cmsg->cmsg_len),
 					   0,
 					   (unsigned long)next - ((unsigned long)cmsg + cmsg->cmsg_len));
 			}
@@ -351,7 +312,7 @@ STATIC INLINE int ipmon_iovec_deserialize(struct iovec* dst, void* src, int elem
 
 		if (to_copy > 0)
 		{
-			ipmon_memcpy_ptr_ptr(dst[i].iov_base,
+			memcpy(dst[i].iov_base,
 				   (void*)((unsigned long)src + offset),
 				   to_copy);
 
@@ -372,9 +333,9 @@ STATIC INLINE int ipmon_msg_deserialize(struct msghdr* dst, void* src, int elems
 	dst->msg_flags = hdr->msg_flags;
 
 	if (hdr->msg_namelen)
-		ipmon_memcpy_ptr_ptr(dst->msg_name, (void*)((unsigned long)src + sizeof(struct msghdr)), hdr->msg_namelen);
+		memcpy(dst->msg_name, (void*)((unsigned long)src + sizeof(struct msghdr)), hdr->msg_namelen);
 	if (hdr->msg_controllen)
-		ipmon_memcpy_ptr_ptr(dst->msg_control, (void*)((unsigned long)src + sizeof(struct msghdr) + hdr->msg_namelen), hdr->msg_controllen);
+		memcpy(dst->msg_control, (void*)((unsigned long)src + sizeof(struct msghdr) + hdr->msg_namelen), hdr->msg_controllen);
 
 	int offset = sizeof(struct msghdr) + hdr->msg_namelen + hdr->msg_controllen;
 	
@@ -423,17 +384,6 @@ STATIC INLINE int ipmon_ptrcmp(struct ipmon_syscall_data* data, const void* ptr2
 	return 0;
 }
 
-STATIC INLINE int ipmon_ptrcmp_offset_ptr(unsigned long data_offset, const void* ptr2, size_t sz)
-{
-	long _ptr1 = ipmon_get_long_from_offset(data_offset + offsetof(struct ipmon_syscall_data, data));
-	long _ptr2 = *(long*) ptr2;
-
-	if ((_ptr1 | _ptr2) && (!_ptr1 || !_ptr2))
-		return 1;
-
-	return 0;
-}
-
 STATIC INLINE int ipmon_wordcmp(struct ipmon_syscall_data* data, const void* ptr, size_t sz)
 {
 	long word1 = *(long*) data->data;
@@ -445,25 +395,12 @@ STATIC INLINE int ipmon_wordcmp(struct ipmon_syscall_data* data, const void* ptr
 	return 0;
 }
 
-STATIC INLINE int ipmon_wordcmp_offset_ptr(unsigned long data_offset, const void* ptr, size_t sz)
-{
-	long word1 = ipmon_get_long_from_offset(data_offset + offsetof(struct ipmon_syscall_data, data));
-	long word2 = *(long*) ptr;
-
-	if (word1 != word2)
-		return 2;
-
-	return 0;
-}
-
-
-
 STATIC INLINE int ipmon_cmp(struct ipmon_syscall_data* data, const void* ptr, size_t sz)
 {
-	return ipmon_memcmp_ptr_ptr(data->data, ptr, sz);
+	return memcmp(data->data, ptr, sz);
 }
 
-STATIC INLINE int ipmon_iovec_cmp_offset_ptr(unsigned long data_offset, const void* ptr, size_t bytes)
+STATIC INLINE int ipmon_iovec_cmp(struct ipmon_syscall_data* data, const void* ptr, size_t bytes)
 {	
 	struct iovec* iov = (struct iovec*)ptr;
 
@@ -472,10 +409,10 @@ STATIC INLINE int ipmon_iovec_cmp_offset_ptr(unsigned long data_offset, const vo
 	void* tmp = alloca(alloc_size);
 	ipmon_iovec_serialize(tmp, iov, elems, bytes);
 
-	return ipmon_cmp_data_offset_ptr(data_offset, tmp, alloc_size);
+	return ipmon_cmp(data, tmp, alloc_size);
 }
 
-STATIC INLINE int ipmon_iovec_layout_cmp_offset_ptr(unsigned long data_offset, const void* ptr, size_t iovcnt)
+STATIC INLINE int ipmon_iovec_layout_cmp(struct ipmon_syscall_data* data, const void* ptr, size_t iovcnt)
 {
 	struct iovec* iov = (struct iovec*)ptr;
 
@@ -484,10 +421,10 @@ STATIC INLINE int ipmon_iovec_layout_cmp_offset_ptr(unsigned long data_offset, c
 	void* tmp = alloca(alloc_size);
 	ipmon_iovec_layout_serialize(tmp, iov, iovcnt);
 
-	return ipmon_cmp_data_offset_ptr(data_offset, tmp, alloc_size);
+	return ipmon_cmp(data, tmp, alloc_size);
 }
 
-STATIC INLINE int ipmon_msg_cmp_offset_ptr(unsigned long data_offset, const void* ptr, size_t bytes)
+STATIC INLINE int ipmon_msg_cmp(struct ipmon_syscall_data* data, const void* ptr, size_t bytes)
 {
 	struct msghdr* hdr = (struct msghdr*)ptr;
 
@@ -496,10 +433,10 @@ STATIC INLINE int ipmon_msg_cmp_offset_ptr(unsigned long data_offset, const void
 	void* tmp = alloca(alloc_size);
 	ipmon_msg_serialize(tmp, hdr, elems, bytes);
 
-	return ipmon_cmp_data_offset_ptr(data_offset, tmp, alloc_size);
+	return ipmon_cmp(data, tmp, alloc_size);
 }
 
-STATIC INLINE int ipmon_msg_layout_cmp_offset_ptr(unsigned long data_offset, const void* ptr, size_t dummy)
+STATIC INLINE int ipmon_msg_layout_cmp(struct ipmon_syscall_data* data, const void* ptr, size_t dummy)
 {
 	struct msghdr* hdr = (struct msghdr*)ptr;
 
@@ -508,10 +445,10 @@ STATIC INLINE int ipmon_msg_layout_cmp_offset_ptr(unsigned long data_offset, con
 	void* tmp = alloca(alloc_size);
 	ipmon_msg_layout_serialize(tmp, hdr, hdr->msg_iovlen);
 
-	return ipmon_cmp_data_offset_ptr(data_offset, tmp, alloc_size);
+	return ipmon_cmp(data, tmp, alloc_size);
 }
 
-STATIC INLINE int ipmon_mmsg_cmp_offset_ptr(unsigned long data_offset, const void* ptr, size_t msgs_to_compare)
+STATIC INLINE int ipmon_mmsg_cmp(struct ipmon_syscall_data* data, const void* ptr, size_t msgs_to_compare)
 {
 	struct mmsghdr* hdr = (struct mmsghdr*)ptr;
 
@@ -520,10 +457,10 @@ STATIC INLINE int ipmon_mmsg_cmp_offset_ptr(unsigned long data_offset, const voi
 	void* tmp = alloca(alloc_size);
 	ipmon_mmsg_serialize(tmp, hdr, msgs_to_compare);
 
-	return ipmon_cmp_data_offset_ptr(data_offset, tmp, alloc_size);
+	return ipmon_cmp(data, tmp, alloc_size);
 }
 
-STATIC INLINE int ipmon_mmsg_layout_cmp_offset_ptr(unsigned long data_offset, const void* ptr, size_t len)
+STATIC INLINE int ipmon_mmsg_layout_cmp(struct ipmon_syscall_data* data, const void* ptr, size_t len)
 {
 	struct mmsghdr* hdr = (struct mmsghdr*)ptr;
 
@@ -532,7 +469,7 @@ STATIC INLINE int ipmon_mmsg_layout_cmp_offset_ptr(unsigned long data_offset, co
 	void* tmp = alloca(alloc_size);
 	ipmon_mmsg_layout_serialize(tmp, hdr, len);
 
-	return ipmon_cmp_data_offset_ptr(data_offset, tmp, alloc_size);
+	return ipmon_cmp(data, tmp, alloc_size);
 }
 
 /*-----------------------------------------------------------------------------
@@ -540,29 +477,15 @@ STATIC INLINE int ipmon_mmsg_layout_cmp_offset_ptr(unsigned long data_offset, co
 -----------------------------------------------------------------------------*/
 
 /* function to check if two pointers are equivalent (<=> both either NULL or not-NULL) */
+
 STATIC INLINE void ipmon_wordcpy_to(struct ipmon_syscall_data* dst, void* src, size_t sz)
 {
 	*(long*)dst->data = *(long*)src;
 }
 
-STATIC INLINE void ipmon_wordcpy_to_offset_ptr(unsigned long dst_offset, void* src, size_t sz)
-{
-	ipmon_copy_to_offset_from_ptr(dst_offset + offsetof(struct ipmon_syscall_data, data), (unsigned long*)src);
-}
-
 STATIC INLINE void ipmon_cpy_to(struct ipmon_syscall_data* dst, void* src, size_t sz)
 {
-	ipmon_memcpy_ptr_ptr(dst->data, src, sz);
-}
-
-STATIC INLINE void ipmon_cpy_to_offset_ptr(unsigned long dst_offset, void* src, size_t sz)
-{
-	ipmon_memcpy_offset_ptr(dst_offset + offsetof(struct ipmon_syscall_data, data), src, sz);
-}
-
-STATIC INLINE void ipmon_cpy_to_ptr_offset(struct ipmon_syscall_data* dst, unsigned long src_offset, size_t sz)
-{
-	ipmon_memcpy_ptr_offset(dst, src_offset + offsetof(struct ipmon_syscall_data, data), sz);
+	memcpy(dst->data, src, sz);
 }
 
 STATIC INLINE void ipmon_wordcpy_from(void* dst, struct ipmon_syscall_data* src, size_t sz)
@@ -570,19 +493,9 @@ STATIC INLINE void ipmon_wordcpy_from(void* dst, struct ipmon_syscall_data* src,
 	*(long*)dst = *(long*)src->data;
 }
 
-STATIC INLINE void ipmon_wordcpy_from_offset_ptr(unsigned long dst_offset, struct ipmon_syscall_data* src, size_t sz)
-{
-	ipmon_copy_to_offset_from_value(dst_offset, *(unsigned long*)src->data);
-}
-
 STATIC INLINE void ipmon_cpy_from(void* dst, struct ipmon_syscall_data* src, size_t sz)
 {
-	ipmon_memcpy_ptr_ptr(dst, src->data, sz);
-}
-
-STATIC INLINE void ipmon_cpy_from_ptr_offset(void* dst, unsigned long src_offset, size_t sz)
-{
-	ipmon_memcpy_ptr_offset(dst, src_offset + offsetof(struct ipmon_syscall_data, data), sz);
+	memcpy(dst, src->data, sz);
 }
 
 /*-----------------------------------------------------------------------------
@@ -590,7 +503,7 @@ STATIC INLINE void ipmon_cpy_from_ptr_offset(void* dst, unsigned long src_offset
 	that allows us to compare them directly
 -----------------------------------------------------------------------------*/
 
-STATIC INLINE void ipmon_iovec_layout_cpy_to_offset_ptr(unsigned long dst_offset, void* src, size_t cnt)
+STATIC INLINE void ipmon_iovec_layout_cpy_to(struct ipmon_syscall_data* dst, void* src, size_t cnt)
 {
 	struct iovec* iov = (struct iovec*)src;
 
@@ -599,10 +512,10 @@ STATIC INLINE void ipmon_iovec_layout_cpy_to_offset_ptr(unsigned long dst_offset
 	void* data = alloca(alloc_size);
 	ipmon_iovec_layout_serialize(data, iov, cnt);
 
-	ipmon_cpy_to_offset_ptr(dst_offset, data, alloc_size);
+	ipmon_cpy_to(dst, data, alloc_size);
 }
 
-STATIC INLINE void ipmon_iovec_cpy_to_offset_ptr(unsigned long dst_offset, void* src, size_t bytes_copied)
+STATIC INLINE void ipmon_iovec_cpy_to(struct ipmon_syscall_data* dst, void* src, size_t bytes_copied)
 {
 	struct iovec* iov = (struct iovec*)src;
 
@@ -611,17 +524,17 @@ STATIC INLINE void ipmon_iovec_cpy_to_offset_ptr(unsigned long dst_offset, void*
 	void* data = alloca(alloc_size);
 	ipmon_iovec_serialize(data, iov, elems, bytes_copied);
 
-	ipmon_cpy_to_offset_ptr(dst_offset, data, alloc_size);
+	ipmon_cpy_to(dst, data, alloc_size);
 }
 
-STATIC INLINE void ipmon_iovec_cpy_from_ptr_src(void* dst, unsigned long src_offset, size_t bytes_copied)
+STATIC INLINE void ipmon_iovec_cpy_from(void* dst, struct ipmon_syscall_data* src, size_t bytes_copied)
 {
 	struct iovec* iov = (struct iovec*)dst;
 
 	int elems = ipmon_iovec_elems(iov, bytes_copied);
-	int alloc_size = syscall_data_len(src_offset);
+	int alloc_size = src->len;
 	void* data = alloca(alloc_size);
-	ipmon_cpy_from_ptr_offset(data, src_offset, alloc_size);
+	ipmon_cpy_from(data, src, alloc_size);
 
 	ipmon_iovec_deserialize(iov, data, elems, bytes_copied);
 }
@@ -630,7 +543,7 @@ STATIC INLINE void ipmon_iovec_cpy_from_ptr_src(void* dst, unsigned long src_off
     IP-MON Message Copying
 -----------------------------------------------------------------------------*/
 
-STATIC INLINE void ipmon_msg_layout_cpy_to_offset_ptr(unsigned long dst_offset, void* src, size_t cnt)
+STATIC INLINE void ipmon_msg_layout_cpy_to(struct ipmon_syscall_data* dst, void* src, size_t cnt)
 {
 	struct msghdr* hdr = (struct msghdr*)src;
 
@@ -639,10 +552,10 @@ STATIC INLINE void ipmon_msg_layout_cpy_to_offset_ptr(unsigned long dst_offset, 
 	void* data = alloca(alloc_size);
 	ipmon_msg_layout_serialize(data, hdr, cnt);
 
-	ipmon_cpy_to_offset_ptr(dst_offset, data, alloc_size);
+	ipmon_cpy_to(dst, data, alloc_size);
 }
 
-STATIC INLINE void ipmon_msg_cpy_to_offset_arg(unsigned long dst_offset, void* src, size_t bytes_copied)
+STATIC INLINE void ipmon_msg_cpy_to(struct ipmon_syscall_data* dst, void* src, size_t bytes_copied)
 {
 	struct msghdr* hdr = (struct msghdr*)src;
 
@@ -651,17 +564,17 @@ STATIC INLINE void ipmon_msg_cpy_to_offset_arg(unsigned long dst_offset, void* s
 	void* data = alloca(alloc_size);
 	ipmon_msg_serialize(data, hdr, elems, bytes_copied);
 
-	ipmon_cpy_to_offset_ptr(dst_offset, data, alloc_size);
+	ipmon_cpy_to(dst, data, alloc_size);
 }
 
-STATIC INLINE void ipmon_msg_cpy_from_ptr_src(void* dst, unsigned long src_offset, size_t bytes_copied)
+STATIC INLINE void ipmon_msg_cpy_from(void* dst, struct ipmon_syscall_data* src, size_t bytes_copied)
 {
 	struct msghdr* hdr = (struct msghdr*)dst;
 
 	int elems = ipmon_iovec_elems(hdr->msg_iov, bytes_copied);
-	int alloc_size = syscall_data_len(src_offset);
+	int alloc_size = src->len;
 	void* data = alloca(alloc_size);
-	ipmon_cpy_from_ptr_offset(data, src_offset, alloc_size);
+	ipmon_cpy_from(data, src, alloc_size);
 
 	ipmon_msg_deserialize(hdr, data, elems, bytes_copied);
 }
@@ -670,20 +583,20 @@ STATIC INLINE void ipmon_msg_cpy_from_ptr_src(void* dst, unsigned long src_offse
     IP-MON Message Vector Copying
 -----------------------------------------------------------------------------*/
 
-STATIC INLINE void ipmon_mmsg_layout_cpy_to_offset_ptr(unsigned long dst_offset, void* src, size_t cnt)
+STATIC INLINE void ipmon_mmsg_layout_cpy_to(struct ipmon_syscall_data* dst, void* src, size_t cnt)
 {
 	struct mmsghdr* hdr = (struct mmsghdr*)src;
 
 	int alloc_size;
 	ipmon_mmsg_layout_get_serialized_size(hdr, &alloc_size, cnt);
 	void* data = alloca(alloc_size);
-	ipmon_memset_ptr(data, 0, alloc_size);
+	memset(data, 0, alloc_size);
 	ipmon_mmsg_layout_serialize(data, hdr, cnt);
 
-	ipmon_cpy_to_offset_ptr(dst_offset, data, alloc_size);
+	ipmon_cpy_to(dst, data, alloc_size);
 }
 
-STATIC INLINE void ipmon_mmsg_cpy_to_offset_ptr(unsigned long dst_offset, void* src, size_t msgs_copied)
+STATIC INLINE void ipmon_mmsg_cpy_to(struct ipmon_syscall_data* dst, void* src, size_t msgs_copied)
 {
 	struct mmsghdr* hdr = (struct mmsghdr*)src;
 
@@ -692,21 +605,21 @@ STATIC INLINE void ipmon_mmsg_cpy_to_offset_ptr(unsigned long dst_offset, void* 
 	void* data = alloca(alloc_size);
 	ipmon_mmsg_serialize(data, hdr, msgs_copied);
 
-	ipmon_cpy_to_offset_ptr(dst_offset, data, alloc_size);
+	ipmon_cpy_to(dst, data, alloc_size);
 }
 
-STATIC INLINE void ipmon_mmsg_cpy_from_ptr_offset(void* dst, unsigned long src_offset, size_t msgs_copied)
+STATIC INLINE void ipmon_mmsg_cpy_from(void* dst, struct ipmon_syscall_data* src, size_t msgs_copied)
 {
 	struct mmsghdr* hdr = (struct mmsghdr*)dst;
 
-	int alloc_size = syscall_data_len(src_offset);
+	int alloc_size = src->len;
 	void* data = alloca(alloc_size);
-	ipmon_cpy_from_ptr_offset(data, src_offset, alloc_size);
+	ipmon_cpy_from(data, src, alloc_size);
 
 	ipmon_mmsg_deserialize(hdr, data, msgs_copied);
 }
 
-STATIC INLINE void ipmon_mmsg_lens_cpy_to_offset_ptr(unsigned long dst_offset, void* src, size_t msgs_copied)
+STATIC INLINE void ipmon_mmsg_lens_cpy_to(struct ipmon_syscall_data* dst, void* src, size_t msgs_copied)
 {
 	struct mmsghdr* hdr = (struct mmsghdr*)src;
 
@@ -718,16 +631,16 @@ STATIC INLINE void ipmon_mmsg_lens_cpy_to_offset_ptr(unsigned long dst_offset, v
 		hdr++;
 	}
 
-	ipmon_cpy_to_offset_ptr(dst_offset, data, alloc_size);
+	ipmon_cpy_to(dst, data, alloc_size);
 }
 
-STATIC INLINE void ipmon_mmsg_lens_cpy_from_ptr_offset(void* dst, unsigned long src_offset, size_t msgs_copied)
+STATIC INLINE void ipmon_mmsg_lens_cpy_from(void* dst, struct ipmon_syscall_data* src, size_t msgs_copied)
 {
 	struct mmsghdr* hdr = (struct mmsghdr*)dst;
 
 	int alloc_size = msgs_copied * sizeof(unsigned int);
 	void* data = alloca(alloc_size);
-	ipmon_cpy_from_ptr_offset(data, src_offset, alloc_size);
+	ipmon_cpy_from(data, src, alloc_size);
 
 	for (int i = 0; i < msgs_copied; ++i)
 	{
@@ -740,76 +653,84 @@ STATIC INLINE void ipmon_mmsg_lens_cpy_from_ptr_offset(void* dst, unsigned long 
     IP-MON generic replication/checking functions
 -----------------------------------------------------------------------------*/
 
+STATIC INLINE struct ipmon_syscall_data* ipmon_get_data_at (struct ipmon_syscall_entry* entry, unsigned int data_offset)
+{
+	return (struct ipmon_syscall_data*)((unsigned long)entry + data_offset);
+}
+
 // Called from the PRECALL handlers
 //
 // The master copies <sz> bytes from <ptr> into the IP-MON buffer
 // as the <num>'th argument for the ipmon_syscall_entry at <entry_offset>
-// Copying is done using the <cpy> function, which copies TO an RB-relative offset FROM a regular pointer
+// Copying is done using the <cpy> function
 //
 // The slaves compare the <num>'th argument of the ipmon_syscall_entry at <entry_offset>
 // with their own argument at <ptr>.
-// The comparison is done using cmpfunc <cmp>, which also compares an RB-relative offset range with a regular pointer range!
-#define ipmon_check(__entry_offset, __num, __ptr, __size_in_buffer, __size_for_cpyfunc, __cpy, __cmp) 			\
-	{																											\
-		unsigned long __arg_offset = sizeof(struct ipmon_syscall_entry); 										\
-																												\
-		/* skip to the argument we're checking. - We start counting at 1 */ 									\
-		for (unsigned char __i = 1; __i < __num; ++__i)															\
-		{																										\
-			__arg_offset += syscall_data_len(__entry_offset + __arg_offset);									\
-		}																										\
-																												\
-		/* The master records the length and then copies the data*/												\
-		if (ipmon_variant_num == 0)																				\
-		{																										\
-			syscall_data_len_set(__entry_offset + __arg_offset, DATASIZE(__size_in_buffer));					\
-			__cpy(__entry_offset + __arg_offset, __ptr, __size_for_cpyfunc);									\
-		}																										\
-		else																									\
-		{																										\
-			int __ret;																							\
-																												\
-			/* check if the size matches */																		\
-			if (DATASIZE(__size_in_buffer) != syscall_data_len(__entry_offset + __arg_offset))					\
-				ipmon_arg_verify_failed((void*)__size_in_buffer);												\
-																												\
-			/* check if the data matches */																		\
-			if ((__ret = __cmp(__entry_offset + __arg_offset, __ptr, __size_for_cpyfunc)))						\
-				ipmon_arg_verify_failed((void*)(long)__ret);													\
-		}																										\
+// The comparison is done using cmpfunc <cmp>
+#define ipmon_check(__entry, __num, __ptr, __size_in_buffer, __size_for_cpyfunc, __cpy, __cmp) \
+	{																	\
+		unsigned long __arg_offset = sizeof(struct ipmon_syscall_entry); \
+		struct ipmon_syscall_data* __arg = ipmon_get_data_at(__entry, __arg_offset); \
+																		\
+		/* skip to the argument we're checking. - We start counting at 1 */ \
+		for (unsigned char __i = 1; __i < __num; ++__i)					\
+		{																\
+			__arg_offset += __arg->len;									\
+			__arg = ipmon_get_data_at(__entry, __arg_offset);			\
+		}																\
+																		\
+		/* The master records the length and then copies the data*/		\
+		if (ipmon_variant_num == 0)										\
+		{																\
+			__arg->len = DATASIZE(__size_in_buffer);					\
+			__cpy(__arg, __ptr, __size_for_cpyfunc);					\
+		}																\
+		else															\
+		{																\
+			int __ret;													\
+																		\
+			/* check if the size matches */								\
+			if (DATASIZE(__size_in_buffer) != __arg->len)				\
+				ipmon_arg_verify_failed(__entry->syscall_no, -__num, __size_in_buffer); \
+																		\
+			/* check if the data matches */								\
+			if ((__ret = __cmp(__arg, __ptr, __size_for_cpyfunc)))		\
+				ipmon_arg_verify_failed(__entry->syscall_no, __num, (unsigned long)__ptr); \
+		}																\
 	}																	
 
 // Called from the POSTCALL handlers
 //
 // The master copies its data to the IP-MON buffer
 // as the <num>'th return value in the ipmon_syscall_entry at offset <entry_offset>
-// Copying is done using the <to_cpy> function, which takes an RB-offset and a regular pointer
+// Copying is done using the <to_cpy> function
 //
 // The slaves copy the data back from the IP-MON buffer
 // to their own return value at <ptr>
-// Copying is done using the <from_cpy> function, which takes a regular pointer and an RB-offset
-#define ipmon_replicate(__entry_offset, __num, __ptr, __size_in_buffer, __size_for_cpyfunc, __to_cpy, __from_cpy) \
-	{																												\
-		/*return data entries directly follow the argument data entries */ 											\
-		unsigned long __ret_offset = syscall_entry_args_size(__entry_offset) + sizeof(struct ipmon_syscall_entry); 	\
-																													\
-		/* skip to the return value we're replicating - Again, we start counting at 1 */ 							\
-		for (unsigned char __i = 1; __i < __num; ++__i)																\
-		{																											\
-			__ret_offset += syscall_data_len(__entry_offset + __ret_offset); 										\
-		}																											\
-																													\
-		if (ipmon_variant_num == 0)																					\
-		{																											\
-			syscall_data_len_set(__entry_offset + __ret_offset, DATASIZE(__size_in_buffer));						\
-			__to_cpy(__entry_offset + __ret_offset, __ptr, __size_for_cpyfunc);										\
-		}																											\
-		else																										\
-		{																											\
-			__from_cpy(__ptr, __entry_offset + __ret_offset, __size_for_cpyfunc);									\
-		}																											\
-																													\
-	}																												\
+// Copying is done using the <from_cpy> function
+#define ipmon_replicate(__entry, __num, __ptr, __size_in_buffer, __size_for_cpyfunc, __to_cpy, __from_cpy) \
+	{																	\
+		/*return data entries directly follow the argument data entries */ \
+		unsigned long __ret_offset = __entry->syscall_args_size + sizeof(struct ipmon_syscall_entry); \
+		struct ipmon_syscall_data* __ret = ipmon_get_data_at(__entry, __ret_offset); \
+																		\
+		/* skip to the return value we're replicating - Again, we start counting at 1 */ \
+		for (unsigned char __i = 1; __i < __num; ++__i)					\
+		{																\
+			__ret_offset += __ret->len;									\
+			__ret = ipmon_get_data_at(__entry, __ret_offset);			\
+		}																\
+																		\
+		if (ipmon_variant_num == 0)										\
+		{																\
+			__ret->len = DATASIZE(__size_in_buffer);					\
+			__to_cpy(__ret, __ptr, __size_for_cpyfunc);					\
+		}																\
+		else															\
+		{																\
+			__from_cpy(__ptr, __ret, __size_for_cpyfunc);				\
+		}																\
+	}																	\
 
 /*-----------------------------------------------------------------------------
     IP-MON Counting Macros
@@ -830,7 +751,7 @@ STATIC INLINE void ipmon_mmsg_lens_cpy_from_ptr_offset(void* dst, unsigned long 
 	if (buf_ptr) *cnt_ptr += DATASIZE(buf_sz)
 
 #define COUNTSTRING(cnt_ptr, str)						\
-	if (str) *cnt_ptr += DATASIZE(ipmon_strlen_ptr((char*)str))
+	if (str) *cnt_ptr += DATASIZE(strlen((char*)str))
 
 #define COUNTIOVEC(cnt_ptr, vec, cnt)									\
 	if (vec && cnt > 0)													\
@@ -882,23 +803,23 @@ STATIC INLINE void ipmon_mmsg_lens_cpy_from_ptr_offset(void* dst, unsigned long 
 #define CHECKREG(arg)													\
 	{																	\
 		int num = ++order;												\
-		ipmon_check(entry_offset, num, &arg, sizeof(unsigned long), sizeof(unsigned long), ipmon_wordcpy_to_offset_ptr, ipmon_wordcmp_offset_ptr); \
+		ipmon_check(entry, num, &arg, sizeof(unsigned long), sizeof(unsigned long), ipmon_wordcpy_to, ipmon_wordcmp); \
 	}
 
 // Checks whether two pointers are either both null or both non-null
 #define CHECKPOINTER(arg)												\
 	{																	\
 		int num = ++order;												\
-		ipmon_check(entry_offset, num, &arg, sizeof(unsigned long), sizeof(unsigned long), ipmon_wordcpy_to_offset_ptr, ipmon_ptrcmp_offset_ptr); \
+		ipmon_check(entry, num, &arg, sizeof(unsigned long), sizeof(unsigned long), ipmon_wordcpy_to, ipmon_ptrcmp); \
 	}
 
 // Compare two strings
 #define CHECKSTRING(arg)												\
 	if (arg)															\
 	{																	\
-		size_t len = ipmon_strlen_ptr((char*) arg);						\
+		size_t len = strlen((char*) arg);								\
 		int num = ++order;												\
-		ipmon_check(entry_offset, num, (void*)arg, len, len, ipmon_cpy_to_offset_ptr, ipmon_cmp_data_offset_ptr); \
+		ipmon_check(entry, num, (void*)arg, len, len, ipmon_cpy_to, ipmon_cmp); \
 	}
 
 // Compare two fixed sized buffers
@@ -906,7 +827,7 @@ STATIC INLINE void ipmon_mmsg_lens_cpy_from_ptr_offset(void* dst, unsigned long 
 	 if (buffer)											            \
 	 {																	\
 		 int num = ++order;												\
-		 ipmon_check(entry_offset, num, (void*)buffer, len, len, ipmon_cpy_to_offset_ptr, ipmon_cmp_data_offset_ptr); \
+		 ipmon_check(entry, num, (void*)buffer, len, len, ipmon_cpy_to, ipmon_cmp); \
 	 }
 
 // Compare two I/O vectors
@@ -915,7 +836,7 @@ STATIC INLINE void ipmon_mmsg_lens_cpy_from_ptr_offset(void* dst, unsigned long 
 	{																	\
 		size_t size_in_buffer = ipmon_iovec_len((struct iovec*)vec, cnt); \
 		int num = ++order;												\
-		ipmon_check(entry_offset, num, (void*)vec, size_in_buffer, cnt, ipmon_iovec_cpy_to_offset_ptr, ipmon_iovec_cmp_offset_ptr); \
+		ipmon_check(entry, num, (void*)vec, size_in_buffer, cnt, ipmon_iovec_cpy_to, ipmon_iovec_cmp); \
 	}
 
 // Compare two I/O vector layouts
@@ -924,7 +845,7 @@ STATIC INLINE void ipmon_mmsg_lens_cpy_from_ptr_offset(void* dst, unsigned long 
 	{																	\
 		size_t size_in_buffer = ipmon_iovec_layout_len((struct iovec*)vec, cnt); \
 		int num = ++order;												\
-		ipmon_check(entry_offset, num, (void*)vec, size_in_buffer, cnt, ipmon_iovec_layout_cpy_to_offset_ptr, ipmon_iovec_layout_cmp_offset_ptr); \
+		ipmon_check(entry, num, (void*)vec, size_in_buffer, cnt, ipmon_iovec_layout_cpy_to, ipmon_iovec_layout_cmp); \
 	}
 
 // Compare two Messages
@@ -935,7 +856,7 @@ STATIC INLINE void ipmon_mmsg_lens_cpy_from_ptr_offset(void* dst, unsigned long 
 		size_t size_in_buffer   = ipmon_msg_len(msg, msg->msg_iovlen);	\
 		size_t size_for_cpyfunc = ipmon_iovec_bytes(msg->msg_iov, msg->msg_iovlen); \
 		int num = ++order;												\
-		ipmon_check(entry_offset, num, (void*)vec, size_in_buffer, size_for_cpyfunc, ipmon_msg_cpy_to_offset_arg, ipmon_msg_cmp_offset_ptr); \
+		ipmon_check(entry, num, (void*)vec, size_in_buffer, size_for_cpyfunc, ipmon_msg_cpy_to, ipmon_msg_cmp); \
 	}
 
 // Compare two Message layouts
@@ -946,7 +867,7 @@ STATIC INLINE void ipmon_mmsg_lens_cpy_from_ptr_offset(void* dst, unsigned long 
 		size_t size_in_buffer   = ipmon_msg_layout_len(msg, msg->msg_iovlen); \
 		size_t size_for_cpyfunc = msg->msg_iovlen;						\
 		int num = ++order;												\
-		ipmon_check(entry_offset, num, (void*)vec, size_in_buffer, size_for_cpyfunc, ipmon_msg_layout_cpy_to_offset_ptr, ipmon_msg_layout_cmp_offset_ptr); \
+		ipmon_check(entry, num, (void*)vec, size_in_buffer, size_for_cpyfunc, ipmon_msg_layout_cpy_to, ipmon_msg_layout_cmp); \
 	}
 
 // Compare two Message Vectors
@@ -956,7 +877,7 @@ STATIC INLINE void ipmon_mmsg_lens_cpy_from_ptr_offset(void* dst, unsigned long 
 		const struct mmsghdr* hdr = (const struct mmsghdr*)vec;			\
 		size_t size_in_buffer = ipmon_mmsg_len(hdr, vlen);				\
 		int num = ++order;												\
-		ipmon_check(entry_offset, num, (void*)vec, size_in_buffer, vlen, ipmon_mmsg_cpy_to_offset_ptr, ipmon_mmsg_cmp_offset_ptr); \
+		ipmon_check(entry, num, (void*)vec, size_in_buffer, vlen, ipmon_mmsg_cpy_to, ipmon_mmsg_cmp); \
 	}
 
 // Compare two Message Vector layouts
@@ -966,7 +887,36 @@ STATIC INLINE void ipmon_mmsg_lens_cpy_from_ptr_offset(void* dst, unsigned long 
 		const struct mmsghdr* hdr = (const struct mmsghdr*)vec;			\
 		size_t size_in_buffer = ipmon_mmsg_layout_len(hdr, vlen);		\
 		int num = ++order;												\
-		ipmon_check(entry_offset, num, (void*)vec, size_in_buffer, vlen, ipmon_mmsg_layout_cpy_to_offset_ptr, ipmon_mmsg_layout_cmp_offset_ptr); \
+		ipmon_check(entry, num, (void*)vec, size_in_buffer, vlen, ipmon_mmsg_layout_cpy_to, ipmon_mmsg_layout_cmp); \
+	}
+
+// Compare two Sockaddrs
+#define CHECKSOCKADDR(_addr, addrlen)									\
+	if (_addr && addrlen > 0)											\
+	{																	\
+		struct sockaddr* addr = (struct sockaddr*)_addr;				\
+		char textaddr[1024];											\
+																		\
+		switch(addr->sa_family)											\
+		{																\
+			case AF_INET:												\
+			case AF_INET6:												\
+			{															\
+				inet_ntop(addr->sa_family, &((struct sockaddr_in*)addr)->sin_addr, textaddr, 1024);	\
+				break;													\
+			}															\
+			case AF_FILE:												\
+			{															\
+				strncpy(textaddr, ((struct sockaddr_un*)addr)->sun_path, 1024);	\
+				break;													\
+			}															\
+			default:													\
+			{															\
+				sprintf(textaddr, "Fam: %d", addr->sa_family);			\
+				break;													\
+			}															\
+		}																\
+		CHECKSTRING(textaddr);											\
 	}
 
 // Replicate a buffer
@@ -974,7 +924,7 @@ STATIC INLINE void ipmon_mmsg_lens_cpy_from_ptr_offset(void* dst, unsigned long 
 	if (success && buffer && len > 0)									\
 	{																	\
 		int num = ++order;												\
-		ipmon_replicate(entry_offset, num, (void*)buffer, len, len, ipmon_cpy_to_offset_ptr, ipmon_cpy_from_ptr_offset);	\
+		ipmon_replicate(entry, num, (void*)buffer, len, len, ipmon_cpy_to, ipmon_cpy_from);	\
 	}
 
 // Replicate an I/O vector
@@ -985,7 +935,7 @@ STATIC INLINE void ipmon_mmsg_lens_cpy_from_ptr_offset(void* dst, unsigned long 
 		int actual_elems_copied = ipmon_iovec_elems(iov, bytes);			\
 		size_t size_in_buffer = ipmon_iovec_len(iov, actual_elems_copied); \
 		int num = ++order;												\
-		ipmon_replicate(entry_offset, num, (void*)vec, actual_elems_copied, bytes, ipmon_iovec_cpy_to_offset_ptr, ipmon_iovec_cpy_from_ptr_src); \
+		ipmon_replicate(entry, num, (void*)vec, actual_elems_copied, bytes, ipmon_iovec_cpy_to, ipmon_iovec_cpy_from); \
 	}
 
 // Replicate a Message 
@@ -996,7 +946,7 @@ STATIC INLINE void ipmon_mmsg_lens_cpy_from_ptr_offset(void* dst, unsigned long 
 		int actual_elems_copied = ipmon_iovec_elems(hdr->msg_iov, bytes); \
 		size_t size_in_buffer = ipmon_msg_len(hdr, actual_elems_copied); \
 		int num = ++order;												\
-		ipmon_replicate(entry_offset, num, (void*)vec, size_in_buffer, bytes, ipmon_msg_cpy_to_offset_arg, ipmon_msg_cpy_from_ptr_src); \
+		ipmon_replicate(entry, num, (void*)vec, size_in_buffer, bytes, ipmon_msg_cpy_to, ipmon_msg_cpy_from); \
 	}
 
 // Replicate a Message Vector
@@ -1006,12 +956,12 @@ STATIC INLINE void ipmon_mmsg_lens_cpy_from_ptr_offset(void* dst, unsigned long 
 		const struct mmsghdr* hdr = (const struct mmsghdr*)vec;			\
 		size_t size_in_buffer = ipmon_mmsg_len(hdr, msgs_sent);			\
 		int num = ++order;												\
-		ipmon_replicate(entry_offset, num, (void*)vec, size_in_buffer, msgs_sent, ipmon_mmsg_cpy_to_offset_ptr, ipmon_mmsg_cpy_from_ptr_offset); \
+		ipmon_replicate(entry, num, (void*)vec, size_in_buffer, msgs_sent, ipmon_mmsg_cpy_to, ipmon_mmsg_cpy_from); \
 	}
 
 #define REPLICATEMMSGLENS(vec, msgs_sent)								\
 	{																	\
 		size_t size_in_buffer = msgs_sent * sizeof(unsigned int);		\
 		int num = ++order;												\
-		ipmon_replicate(entry_offset, num, (void*)vec, size_in_buffer, msgs_sent, ipmon_mmsg_lens_cpy_to_offset_ptr, ipmon_mmsg_lens_cpy_from_ptr_offset); \
+		ipmon_replicate(entry, num, (void*)vec, size_in_buffer, msgs_sent, ipmon_mmsg_lens_cpy_to, ipmon_mmsg_lens_cpy_from); \
 	}

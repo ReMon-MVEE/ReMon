@@ -1,0 +1,16 @@
+#-----------------------------------------------------------------------------
+# Build-type specific configuration.
+#-----------------------------------------------------------------------------
+
+BUILD          = Release-syms
+BUILD_CXX      = clang++
+BUILD_CXXFLAGS = -ffast-math -march=corei7 -std=c++14 -O3 -Werror -fvisibility=hidden -ggdb
+BUILD_LDFLAGS  = -O3
+BUILD_OPT      = yes
+
+#-----------------------------------------------------------------------------
+# Common configuration.
+#-----------------------------------------------------------------------------
+
+include make-common
+

@@ -11,7 +11,7 @@
 /*-----------------------------------------------------------------------------
     Includes
 -----------------------------------------------------------------------------*/
-#include "MVEE_config.h"
+#include "MVEE_build_config.h"
 
 /*-----------------------------------------------------------------------------
   System Call Handling Macros - Important note: All CHECKxxx and REPLICATExxx
@@ -25,38 +25,20 @@
   The CHECKxxx and REPLICATExxx macros therefore only check whether the
   specified argument is non-NULL in the master variant.
 -----------------------------------------------------------------------------*/
-#define STRINGARG(variantnum, numarg) \
-    variants[variantnum].args[numarg].str
-
-#define CSTRINGARG(variantnum, numarg) \
-    variants[variantnum].args[numarg].cstr
-
-#define BUFARG(variantnum, numarg) \
-    variants[variantnum].args[numarg].buf
-
 //
 // Fill an array with the values of a syscall argument in all variants
 //
-#define FILLARGARRAY(numarg, argarray) do {         \
-        for (int i = 0; i < mvee::numvariants; ++i) \
-            argarray[i] = ARG ## numarg(i);         \
+#define FILLARGARRAY(numarg, argarray) do {						\
+        for (int i = 0; i < mvee::numvariants; ++i)				\
+            *(unsigned long*)&argarray[i] = ARG ## numarg(i);	\
 } while (0)
-
-//
-// Change the values of a syscall argument in all variants, given an array
-//
-#define SETARGARRAY(numarg, argarray)  do {         \
-        for (int i = 0; i < mvee::numvariants; ++i) \
-            SETARG ## numarg(i, argarray[i]);       \
-} while (0)
-
 
 //
 // Check whether the arguments are null or valid pointers
 //
 #define CHECKPOINTER(numarg)                                                                 \
     {                                                                                        \
-        std::vector<unsigned long> pointers(mvee::numvariants);                              \
+        std::vector<void*> pointers(mvee::numvariants);					                     \
         FILLARGARRAY(numarg, pointers);                                                      \
         if (call_compare_pointers(pointers) == 1)                                            \
         {                                                                                    \
@@ -83,26 +65,6 @@
             return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;	\
         }                                                                              \
     }
-
-//
-// The shm ids must either all be equal OR they must 
-// be equal to the variant's hidden buffer array id
-//
-#define CHECKSHMID(numarg)												\
-	for (int i = 1; i < mvee::numvariants; ++i)							\
-	{																	\
-		if (ARG ## numarg(i) != ARG ## numarg(i-1)						\
-			&& (int)ARG ## numarg(i) != variants[i].hidden_buffer_array_id) \
-		{																\
-			cache_mismatch_info("argument %d mismatch - syscall: %ld (%s)\n",	\
-						numarg, variants[0].callnum,						\
-						getTextualSyscall(variants[0].callnum));			\
-			cache_mismatch_info("ARG%d(%d) = 0x" PTRSTR " - ARG%d(%d) = 0x" PTRSTR "\n", \
-						numarg, i, ARG ## numarg(i), numarg, i-1, ARG ## numarg(i-1)); \
-			return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;	\
-		}																\
-	}
-
 
 //
 // Compare the values of the specified sockaddr - POINTER ARGUMENT!!!
@@ -153,7 +115,7 @@
 #define CHECKFDSET(numarg, nfds)										\
 	if (ARG ## numarg(0))												\
 	{																	\
-		std::vector<unsigned long> pointers(mvee::numvariants);			\
+		std::vector<fd_set*> pointers(mvee::numvariants);			\
 		FILLARGARRAY(numarg, pointers);									\
 		if (!call_compare_fd_sets(pointers, nfds))						\
 		{																\
@@ -170,7 +132,7 @@
 #define CHECKBUFFER(numarg, len)                                                        \
     if (ARG ## numarg(0) && len > 0)                                                    \
     {                                                                                   \
-        std::vector<unsigned long> argarray(mvee::numvariants);                         \
+        std::vector<const unsigned char*> argarray(mvee::numvariants);                         \
         FILLARGARRAY(numarg, argarray);                                                 \
         if (!call_compare_variant_buffers(argarray, len))				\
         {                                                                               \
@@ -187,7 +149,7 @@
 #define CHECKSTRING(numarg)                                                     \
     if (ARG ## numarg(0))                                                       \
     {                                                                           \
-        std::vector<unsigned long> argarray(mvee::numvariants);                 \
+        std::vector<const char*> argarray(mvee::numvariants);                 \
         FILLARGARRAY(numarg, argarray);                                         \
         if (!call_compare_variant_strings(argarray, 0))                           \
         {                                                                       \
@@ -236,7 +198,7 @@
 #define CHECKVECTOR(numarg, len)                                        \
     if (ARG ## numarg(0) && len > 0)                                    \
     {                                                                   \
-        std::vector<unsigned long> addresses(mvee::numvariants);        \
+        std::vector<struct iovec*> addresses(mvee::numvariants);        \
         FILLARGARRAY(numarg, addresses);                                \
         if (!call_compare_io_vectors(addresses, len))                   \
             return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
@@ -248,7 +210,7 @@
 #define CHECKVECTORLAYOUT(numarg, len)                                  \
     if (ARG ## numarg(0) && len > 0)                                    \
     {                                                                   \
-        std::vector<unsigned long> addresses(mvee::numvariants);        \
+        std::vector<struct iovec*> addresses(mvee::numvariants);        \
         FILLARGARRAY(numarg, addresses);                                \
         if (!call_compare_io_vectors(addresses, len, 1))                \
             return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
@@ -260,7 +222,7 @@
 #define CHECKMSGVECTOR(numarg)                                          \
     if (ARG ## numarg(0))                                               \
     {                                                                   \
-        std::vector<unsigned long> addresses(mvee::numvariants);        \
+        std::vector<struct msghdr*> addresses(mvee::numvariants);        \
         FILLARGARRAY(numarg, addresses);                                \
         if (!call_compare_msgvectors(addresses))                        \
             return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
@@ -272,7 +234,7 @@
 #define CHECKMSGVECTORLAYOUT(numarg)                                    \
     if (ARG ## numarg(0))                                               \
     {                                                                   \
-        std::vector<unsigned long> addresses(mvee::numvariants);        \
+        std::vector<struct msghdr*> addresses(mvee::numvariants);        \
         FILLARGARRAY(numarg, addresses);                                \
         if (!call_compare_msgvectors(addresses, true))                  \
             return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
@@ -284,14 +246,14 @@
 #define CHECKMMSGVECTOR(numarg, len)                                        \
     if (ARG ## numarg(0) && len > 0)                                        \
     {                                                                       \
-        std::vector<unsigned long> addresses(mvee::numvariants);            \
+        std::vector<struct mmsghdr*> addresses(mvee::numvariants);            \
         FILLARGARRAY(numarg, addresses);                                    \
         for (unsigned int i = 0; i < (unsigned int)len; ++i)                \
         {                                                                   \
-            if (!call_compare_msgvectors(addresses))                        \
+            if (!call_compare_mmsgvectors(addresses)) \
                 return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
             for (int j = 0; j < mvee::numvariants; ++j)                     \
-                addresses[j] += sizeof(struct mmsghdr);                     \
+                addresses[j]++;											\
         }                                                                   \
     }
 
@@ -301,14 +263,14 @@
 #define CHECKMMSGVECTORLAYOUT(numarg, len)                                  \
     if (ARG ## numarg(0) && len > 0)                                        \
     {                                                                       \
-        std::vector<unsigned long> addresses(mvee::numvariants);            \
+        std::vector<struct mmsghdr*> addresses(mvee::numvariants);            \
         FILLARGARRAY(numarg, addresses);                                    \
         for (unsigned int i = 0; i < (unsigned int)len; ++i)                \
         {                                                                   \
-            if (!call_compare_msgvectors(addresses, true))                  \
+            if (!call_compare_mmsgvectors(addresses, true))                  \
                 return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
             for (int j = 0; j < mvee::numvariants; ++j)                     \
-                addresses[j] += sizeof(mmsghdr);                            \
+                addresses[j]++;											\
         }                                                                   \
     }
 
@@ -318,7 +280,7 @@
 #define CHECKSIGACTION(numarg, is_old_call)                                               \
     if (ARG ## numarg(0))                                                                 \
     {                                                                                     \
-        std::vector<unsigned long> argarray(mvee::numvariants);                           \
+        std::vector<void*> argarray(mvee::numvariants);                           \
         FILLARGARRAY(numarg, argarray);                                                   \
         struct sigaction master_action = call_get_sigaction(0, argarray[0], is_old_call); \
         for (int i = 1; i < mvee::numvariants; ++i)                                       \
@@ -345,7 +307,7 @@
 #define CHECKSIGSET(numarg, is_old_call)                                           \
     if (ARG ## numarg(0))                                                          \
     {                                                                              \
-        std::vector<unsigned long> argarray(mvee::numvariants);                    \
+        std::vector<void*> argarray(mvee::numvariants);                    \
         FILLARGARRAY(numarg, argarray);                                            \
         sigset_t master_set = call_get_sigset(0, argarray[0], is_old_call);        \
         for (int i = 1; i < mvee::numvariants; ++i)                                \
@@ -367,17 +329,17 @@
 #define CHECKEPOLLEVENT(numarg)                                                                                \
     if (ARG ## numarg(0))                                                                                      \
     {                                                                                                          \
-        std::vector<unsigned long> events(mvee::numvariants);                                                  \
+        std::vector<void*> events(mvee::numvariants);                                                  \
         FILLARGARRAY(numarg, events);                                                                          \
         struct epoll_event master_event, slave_event;                                                          \
-        if (!mvee_rw_read_struct(variants[0].variantpid, events[0], sizeof(struct epoll_event), &master_event))    \
+        if (!rw::read_struct(variants[0].variantpid, events[0], sizeof(struct epoll_event), &master_event))    \
         {                                                                                                      \
             cache_mismatch_info("couldn't read epoll_event\n");                                                        \
             return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;                                        \
         }                                                                                                      \
         for (int i = 1; i < mvee::numvariants; ++i)                                                            \
         {                                                                                                      \
-            if (!mvee_rw_read_struct(variants[i].variantpid, events[i], sizeof(struct epoll_event), &slave_event)) \
+            if (!rw::read_struct(variants[i].variantpid, events[i], sizeof(struct epoll_event), &slave_event)) \
             {                                                                                                  \
                 cache_mismatch_info("couldn't read epoll_event\n");                                                    \
                 return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;                                    \
@@ -402,7 +364,7 @@
             state == STATE_IN_MASTERCALL &&                         \
             ARG ## numarg(0))                                       \
         {                                                           \
-            std::vector<unsigned long> argarray(mvee::numvariants); \
+            std::vector<const unsigned char*> argarray(mvee::numvariants); \
             FILLARGARRAY(numarg, argarray);                         \
             call_replicate_buffer(argarray, len);                   \
         }                                                           \
@@ -419,7 +381,7 @@
             ARG ## numarg(0))                                       \
         {                                                           \
             long len = call_postcall_get_variant_result(0);           \
-            std::vector<unsigned long> argarray(mvee::numvariants); \
+            std::vector<const unsigned char*> argarray(mvee::numvariants); \
             FILLARGARRAY(numarg, argarray);                         \
             call_replicate_buffer(argarray, len);                   \
         }                                                           \
@@ -429,45 +391,31 @@
 // Replicate buffer contents. Use this only for mastercalls that return the
 // length of the buffer in an argument - TWO POINTER ARGUMENTS!!!
 //
-#define REPLICATEBUFFERANDLEN(bufferarg, lenarg, lenarg_size)                                        \
-    {                                                                                                \
-        if (call_succeeded &&                                                                        \
-            state == STATE_IN_MASTERCALL &&                                                          \
-            ARG ## bufferarg(0) &&                                                                   \
-            ARG ## lenarg(0))                                                                        \
-        {                                                                                            \
-            mvee_word master_word, slave_word;                                                       \
-            long      len = 0;                                                                       \
-            master_word._long = mvee_wrap_ptrace(PTRACE_PEEKDATA,                                    \
-                                                 variants[0].variantpid, ARG ## lenarg(0), NULL);        \
-            switch(lenarg_size)                                                                      \
-            {                                                                                        \
-                case 8: len = master_word._long; break;                                              \
-                case 4: len = master_word._int; break;                                               \
-                case 2: len = master_word._short; break;                                             \
-                case 1: len = master_word._char; break;                                              \
-            }                                                                                        \
-            std::vector<unsigned long> argarray(mvee::numvariants);                                  \
-            FILLARGARRAY(bufferarg, argarray);                                                       \
-            call_replicate_buffer(argarray, len);                                                    \
-            for (int j = 1; j < mvee::numvariants; ++j)                                              \
-            {                                                                                        \
-                if (lenarg_size < sizeof(long))                                                      \
-                    slave_word._long = mvee_wrap_ptrace(PTRACE_PEEKDATA,                             \
-                                                        variants[j].variantpid, ARG ## lenarg(j), NULL); \
-                else                                                                                 \
-                    slave_word._long = master_word._long;                                            \
-                                                                                                     \
-                switch(lenarg_size)                                                                  \
-                {                                                                                    \
-                    case 4: slave_word._int   = master_word._int; break;                             \
-                    case 2: slave_word._short = master_word._short; break;                           \
-                    case 1: slave_word._char  = master_word._char; break;                            \
-                }                                                                                    \
-                mvee_wrap_ptrace(PTRACE_POKEDATA,                                                    \
-                                 variants[j].variantpid, ARG ## lenarg(j), (void*)slave_word._long);     \
-            }                                                                                        \
-        }                                                                                            \
+#define REPLICATEBUFFERANDLEN(bufferarg, lenarg, lenarg_type)			\
+    {																	\
+        if (call_succeeded &&											\
+            state == STATE_IN_MASTERCALL &&								\
+            ARG ## bufferarg(0) &&										\
+            ARG ## lenarg(0))											\
+        {																\
+			lenarg_type len = 0;										\
+			if (!rw::read_primitive<lenarg_type>(variants[0].variantpid, (void*) ARG ## lenarg(0), len)) \
+			{															\
+				warnf("%s - couldn't read length\n", call_get_variant_pidstr(0).c_str()); \
+				shutdown(false);										\
+			}															\
+            std::vector<const unsigned char*> argarray(mvee::numvariants); \
+            FILLARGARRAY(bufferarg, argarray);							\
+            call_replicate_buffer(argarray, len);						\
+            for (int j = 1; j < mvee::numvariants; ++j)					\
+            {															\
+				if (!rw::write_primitive<lenarg_type>(variants[j].variantpid, (void*) ARG ## lenarg(j), len)) \
+				{														\
+					warnf("%s - couldn't write length\n", call_get_variant_pidstr(j).c_str()); \
+					shutdown(false);									\
+				}														\
+            }															\
+        }																\
     }
 
 //
@@ -481,7 +429,7 @@
             ARG ## numarg(0))                                       \
         {                                                           \
             long len = call_postcall_get_variant_result(0);           \
-            std::vector<unsigned long> argarray(mvee::numvariants); \
+            std::vector<struct iovec*> argarray(mvee::numvariants); \
             FILLARGARRAY(numarg, argarray);                         \
             call_replicate_io_vector(argarray, len);                \
         }                                                           \
@@ -498,7 +446,7 @@
             ARG ## numarg(0))                                       \
         {                                                           \
             long len = call_postcall_get_variant_result(0);           \
-            std::vector<unsigned long> argarray(mvee::numvariants); \
+            std::vector<struct msghdr*> argarray(mvee::numvariants); \
             FILLARGARRAY(numarg, argarray);                         \
             call_replicate_msgvector(argarray, len);                \
         }                                                           \
@@ -516,7 +464,7 @@
             ARG ## numarg(0))                                       \
         {                                                           \
             long len = call_postcall_get_variant_result(0);           \
-            std::vector<unsigned long> argarray(mvee::numvariants); \
+            std::vector<struct mmsghdr*> argarray(mvee::numvariants); \
             FILLARGARRAY(numarg, argarray);                         \
             call_replicate_mmsgvector(argarray, len);               \
         }                                                           \
@@ -531,25 +479,46 @@
             ARG ## numarg(0))                                        \
         {                                                            \
             long len = call_postcall_get_variant_result(0);            \
-            std::vector<unsigned long> argarray(mvee::numvariants);  \
+            std::vector<struct mmsghdr*> argarray(mvee::numvariants);  \
             FILLARGARRAY(numarg, argarray);                          \
             call_replicate_mmsgvectorlens(argarray, len, attempted); \
         }                                                            \
     }
 
 //
+// Replicate struct ifconf
+//
+#define REPLICATEIFCONF(numarg)										\
+	{																\
+	if (call_succeeded &&											\
+		state == STATE_IN_MASTERCALL &&								\
+		ARG ## numarg(0))											\
+	{																\
+		std::vector<struct ifconf*> argarray(mvee::numvariants);	\
+		FILLARGARRAY(numarg, argarray);								\
+		call_replicate_ifconfs(argarray);							\
+	}																\
+	}
+
+//
 // Get sockaddr from arg sockarg with length from arg lenarg
 // and convert to textual form
 //
-#define GETTEXTADDR(variantnum, text_addr, sockarg, lenarg)                                                              \
-    std::string text_addr;                                                                                             \
-    if (ARG ## sockarg(variantnum) && ARG ## lenarg(variantnum))                                                           \
-    {                                                                                                                  \
-        socklen_t        len  = (socklen_t)mvee_wrap_ptrace(PTRACE_PEEKDATA,                                           \
-                                                            variants[variantnum].variantpid, ARG ## lenarg(variantnum), NULL); \
-        struct sockaddr* addr = call_get_sockaddr(variantnum, ARG ## sockarg(variantnum), len);                            \
-        text_addr = addr ? getTextualSocketAddr(addr) : "";                                                            \
-        SAFEDELETEARRAY(addr);                                                                                         \
+#define GETTEXTADDR(variantnum, text_addr, sockarg, lenarg)				\
+    std::string text_addr;												\
+    if (ARG ## sockarg(variantnum) && ARG ## lenarg(variantnum))		\
+    {																	\
+		socklen_t len = 0;												\
+		if (!rw::read_primitive<socklen_t>(variants[variantnum].variantpid, \
+										   (void*) ARG ## lenarg(variantnum), len)) \
+		{																\
+			warnf("%s - Failed to read socket text address\n",			\
+				  call_get_variant_pidstr(variantnum).c_str());			\
+			shutdown(false);											\
+		}																\
+		struct sockaddr* addr = call_get_sockaddr(variantnum, (struct sockaddr*) ARG ## sockarg(variantnum), len); \
+		text_addr = addr ? getTextualSocketAddr(addr) : "";				\
+		SAFEDELETEARRAY(addr);											\
     }
 
 //
@@ -560,7 +529,7 @@
     std::string text_addr;                                                                  \
     if (ARG ## sockarg(variantnum) && len)                                                    \
     {                                                                                       \
-        struct sockaddr* addr = call_get_sockaddr(variantnum, ARG ## sockarg(variantnum), len); \
+        struct sockaddr* addr = call_get_sockaddr(variantnum, (struct sockaddr*) ARG ## sockarg(variantnum), len); \
         text_addr = addr ? getTextualSocketAddr(addr) : "";                                 \
         SAFEDELETEARRAY(addr);                                                              \
     }
@@ -571,34 +540,29 @@
 //
 // Map master fds onto slave fds - used at the system call site
 //
-#define MAPFDS(numarg)                                                               \
-    if ((unsigned int)ARG ## numarg(0) != (unsigned int)-1)                          \
-    {                                                                                \
-        fd_info* info = set_fd_table->get_fd_info(ARG ## numarg(0));                 \
-        if (info && !info->master_file)                                              \
-        {                                                                            \
-            for (int i = 1; i < mvee::numvariants; ++i)                              \
-            {                                                                        \
-                debugf("> variant %d - mapped to fd %lu\n", i, info->fds[i]);      \
-                SETARG ## numarg(i, info->fds[i]);                                   \
-            }                                                                        \
-        }                                                                            \
-        else if (!info || info->master_file)                                         \
-        {                                                                            \
-            for (int i = 1; i < mvee::numvariants; ++i)                              \
-            {                                                                        \
-                SETARG ## numarg(i, set_fd_table->get_free_fd(i, ARG ## numarg(i))); \
-            }                                                                        \
-        }                                                                            \
-    }
-
-//
-// Maps them back as we're not allowed to clobber argument registers
-//
-#define UNMAPFDS(numarg)                        \
-    for (int i = 1; i < mvee::numvariants; ++i) \
-    {                                           \
-        SETARG ## numarg(i, ARG ## numarg(0));  \
+#define MAPFDS(numarg)													\
+    if ((unsigned int)ARG ## numarg(0) != (unsigned int)-1)				\
+    {																	\
+        fd_info* info = set_fd_table->get_fd_info(ARG ## numarg(0));	\
+        if (info && !info->master_file)									\
+        {																\
+            for (int i = 1; i < mvee::numvariants; ++i)					\
+            {															\
+				if (ARG ## numarg(0) != info->fds[i])					\
+				{														\
+					debugf("%s - mapped fd %lu to fd %lu\n", call_get_variant_pidstr(i).c_str(), ARG ## numarg(0), info->fds[i]); \
+					call_overwrite_arg_value(i, numarg, info->fds[i], true); \
+				}														\
+            }															\
+        }																\
+        else if (!info || info->master_file)							\
+        {																\
+            for (int i = 1; i < mvee::numvariants; ++i)					\
+            {															\
+				unsigned long new_fd = set_fd_table->get_free_fd(i, ARG ## numarg(i)); \
+				call_overwrite_arg_value(i, numarg, new_fd, true);		\
+            }															\
+        }																\
     }
 
 //
@@ -617,29 +581,19 @@
 // that the 0 and -1 values have special meanings and do not need to be mapped and that
 // negative values indicate process group values
 //
-#define MAPPIDS(numarg)                                                                                \
-    if (ARG ## numarg(0) != 0 && ARG ## numarg(0) != 1)                                                \
-    {                                                                                                  \
-        pid_t master_pid = (pid_t) ARG ## numarg(0);                                                   \
-        std::vector<pid_t> mapped_pids(mvee::numvariants);                                             \
-        if (mvee::map_master_to_slave_pids((master_pid < -1) ? -master_pid : master_pid, mapped_pids)) \
-        {                                                                                              \
-            for (int i = 1; i < mvee::numvariants; ++i)                                                \
-                SETARG ## numarg(i, mapped_pids[i]);                                                   \
-        }                                                                                              \
+#define MAPPIDS(numarg)													\
+    if (ARG ## numarg(0) != 0 && ARG ## numarg(0) != 1)					\
+    {																	\
+        pid_t master_pid = (pid_t) ARG ## numarg(0);					\
+			std::vector<pid_t> mapped_pids(mvee::numvariants);			\
+			if (mvee::map_master_to_slave_pids((master_pid < -1) ? -master_pid : master_pid, mapped_pids)) \
+			{															\
+				for (int i = 1; i < mvee::numvariants; ++i)				\
+				{														\
+					if ((pid_t)ARG ## numarg(i) != mapped_pids[i])		\
+						call_overwrite_arg_value(i, numarg, mapped_pids[i], true); \
+				}														\
+			}															\
     }
-
-#define UNMAPPIDS(numarg)                               \
-    if (ARG ## numarg(0) != 0 && ARG ## numarg(0) != 1) \
-    {                                                   \
-        for (int i = 1; i < mvee::numvariants; ++i)     \
-        {                                               \
-            SETARG ## numarg(i, ARG ## numarg(0));      \
-        }                                               \
-    }
-
-
-
-
 
 #endif /* MVEE_SYSCALLS_SUPPORT_H_ */

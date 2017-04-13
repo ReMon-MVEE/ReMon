@@ -22,7 +22,7 @@
 #include <deque>
 #include <vector>
 #include <map>
-#include "MVEE_config.h"
+#include "MVEE_build_config.h"
 
 /*-----------------------------------------------------------------------------
     Enumerations
@@ -205,7 +205,9 @@ public:
 	std::string              real_image;              // real name of the program we started (might differ from image because we use an interpreter binary)
 	std::string              image;                   // original name of the program we wanted to start
 	std::string              serialized_argv;         // serialized program arguments
+	std::string              serialized_envp;         // serialized environment variables
 	std::deque<std::string>  argv;                    // vectorized program arguments
+	std::deque<std::string>  envp;                    // vectorized environment variables
 	std::string              interp;                  // interpreter used to start the original program
 };
 

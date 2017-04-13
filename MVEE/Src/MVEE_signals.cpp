@@ -5,53 +5,52 @@
  * found in GHUMVEELICENSE.txt.
  */
 
-/* ------------------------> SIGNALS FUCKING SUCK!!! <----------------------
-
-   GHUMVEE can deliver signal in one of three ways:
-   1) if the signal is synchronous (i.e. a direct consequence of the control
-   flow), the signal is delivered right away at the "signal-delivery-stop"
-   point (cfr. ptrace man page).
-
-   2) if the signal is asynchronous, GHUMVEE will always deny the delivery of
-   the initial signal at the "signal-delivery-stop" point by using
-   ptrace(PTRACE_SYSCALL, pid, NULL, NULL);
-
-   The kernel will discard the pending signal because we use NULL as the 4th
-   argument here. GHUMVEE does however cache _all_ of the signal's information.
-   It then waits for a rendez-vous point.
-
-   2.1) if the first rendez-vous point is the return site of an interrupted
-   sys_[rt_]sigsuspend call, GHUMVEE will first restart the call and at the NEXT
-   rendez-vous point (i.e. the entry site of the restarted call), GHUMVEE
-   will send the signal using sys_tgkill. The sigsuspend call will then
-   once again be interrupted, but this time we DO want to inject the signal
-   so GHUMVEE will inject the signal using:
-   ptrace(PTRACE_SYSCALL, pid, NULL, sig);
-
-   We do ofcourse have to adjust the sender PID of the signal before the final
-   injection.
-
-   2.2) if the first rendez-vous point is the entry of any other syscall,
-   we make a backup of the variants's contexts, skip the syscall by replacing
-   the syscall no by __NR_getpid an then transfer the control to the infinte
-   loop function in GHUMVEE's eglibc.
-
-   While in the infinite loop, we can let the variants run freely while we
-   send the signal using sys_tgkill and inject it when the variants are in
-   signal-delivery-stop.
-
-Consequently, when we see the sys_[rt_]sigreturn, our course of action depends
-on how the signal was delivered:
-
-   1) If the signal was synchronous, we must not alter the context at all.
-
-   2) If the signal was delivered at the sigsuspend entry site, we must not
-   alter the context but we do have to ensure that we invoke the sigsuspend
-   POSTCALL handler on the first syscall-stop event after the sigreturn dispatch.
-
-   3) If the signal was asynchronous and not delivered at the sigsuspend entry
-   site, we must dispatch the sigreturn call and restore the initial context.
- */
+/*******************************************************************************
+ * GHUMVEE can deliver signal in one of three ways:
+ * 1) if the signal is synchronous (i.e. a direct consequence of the control
+ * flow), the signal is delivered right away at the "signal-delivery-stop"
+ * point (cfr. ptrace man page).
+ *
+ * 2) if the signal is asynchronous, GHUMVEE will always deny the delivery of
+ * the initial signal at the "signal-delivery-stop" point by using
+ * ptrace(PTRACE_SYSCALL, pid, NULL, NULL);
+ *
+ * The kernel will discard the pending signal because we use NULL as the 4th
+ * argument here. GHUMVEE does however cache _all_ of the signal's information.
+ * It then waits for a rendez-vous point.
+ *
+ * 2.1) if the first rendez-vous point is the return site of an interrupted
+ * sys_[rt_]sigsuspend call, GHUMVEE will first restart the call and at the NEXT
+ * rendez-vous point (i.e. the entry site of the restarted call), GHUMVEE
+ * will send the signal using sys_tgkill. The sigsuspend call will then
+ * once again be interrupted, but this time we DO want to inject the signal
+ * so GHUMVEE will inject the signal using:
+ * ptrace(PTRACE_SYSCALL, pid, NULL, sig);
+ *
+ * We do ofcourse have to adjust the sender PID of the signal before the final
+ * injection.
+ *
+ * 2.2) if the first rendez-vous point is the entry of any other syscall,
+ * we make a backup of the variants's contexts, skip the syscall by replacing
+ * the syscall no by __NR_getpid an then transfer the control to the infinte
+ * loop function in GHUMVEE's eglibc.
+ *
+ * While in the infinite loop, we can let the variants run freely while we
+ * send the signal using sys_tgkill and inject it when the variants are in
+ * signal-delivery-stop.
+ *
+ * Consequently, when we see the sys_[rt_]sigreturn, our course of action depends
+ * on how the signal was delivered:
+ *
+ * 1) If the signal was synchronous, we must not alter the context at all.
+ *
+ * 2) If the signal was delivered at the sigsuspend entry site, we must not
+ * alter the context but we do have to ensure that we invoke the sigsuspend
+ * POSTCALL handler on the first syscall-stop event after the sigreturn dispatch.
+ *
+ * 3) If the signal was asynchronous and not delivered at the sigsuspend entry
+ * site, we must dispatch the sigreturn call and restore the initial context.
+ ******************************************************************************/
 
 #include <signal.h>
 #include <string.h>
@@ -142,7 +141,8 @@ bool sighand_table::is_default_ignored_signal (int signo)
     if (signo == SIGCHLD
         || signo == SIGWINCH
         || signo == SIGURG
-        || signo == SIGCLD)
+        || signo == SIGCLD
+		|| signo == SIGCANCEL)
         return true;
     return false;
 }

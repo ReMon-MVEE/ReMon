@@ -31,8 +31,8 @@ enum mvee_shared_buffer_types
     MVEE_OLD_MAX_SHM_TYPES,        /* 14 */
     MVEE_UTCB_BUFFER,              /* 15 - !!!DEPRECATED in favor of MVEE_IPMON_BUFFER!!! */
     MVEE_LIBC_LOCK_BUFFER_PARTIAL, /* 16 */
-	MVEE_LIBC_ATOMIC_BUFFER_HIDDEN,/* 17 */
-	MVEE_LIBC_HIDDEN_BUFFER_ARRAY, /* 18 */
+	MVEE_LIBC_ATOMIC_BUFFER_HIDDEN,/* 17 - !!!DEPRECATED!!! */
+	MVEE_LIBC_HIDDEN_BUFFER_ARRAY, /* 18 - !!!DEPRECATED!!! */
 	MVEE_UTCB_REG_FILE_MAP,        /* 19 - !!!DEPRECATED in favor of MVEE_IPMON_REG_FILE_MAP!!! */
 	MVEE_IPMON_BUFFER,             /* 20 */
 	MVEE_IPMON_REG_FILE_MAP,       /* 21 */
@@ -146,13 +146,11 @@ enum mvee_shared_buffer_types
 #define MVEE_SET_SYNC_PRIMITIVES_PTR   MVEE_FAKE_SYSCALL_BASE + 12
 
 //
-// MVEE_ALL_HEAPS_ALIGNED: Checks wether or not all variants got
-// HEAP_MAX_SIZE aligned heaps from the previous mmap request.
-// If some of them have not, ALL variants have to bail out of the
-// current new_heap (see eglibc/malloc/arena.c) code path and
-// fall back to another heap allocation method. This ensures
-// that the variants stay in sync with respect to future mm
-// requests.
+// MVEE_ALL_HEAPS_ALIGNED: Checks if the variants' newly allocated heaps are
+// aligned to the desired boundary. If any variant has a non-aligned heap, this
+// syscall will return 0.  If all variants have aligned heaps, the call returns
+// 1. If the call returns 0, the variants are expected to unmap the newly mapped
+// heap and fall back to a slower aligned allocation method.
 //
 #define MVEE_ALL_HEAPS_ALIGNED         MVEE_FAKE_SYSCALL_BASE + 13
 
@@ -160,5 +158,12 @@ enum mvee_shared_buffer_types
 // MVEE_INVOKE_LD: transfer control to ld-linux
 //
 #define MVEE_INVOKE_LD                 MVEE_FAKE_SYSCALL_BASE + 16
+
+//
+// MVEE_IPMON_INVOKE: This is an actual syscall we add to the kernel.
+// The only time it is invoked directly is when IP-MON checks if it
+// runs on top of an IP-MON compatible kernel
+//
+#define MVEE_IPMON_INVOKE              511
 
 #endif // MVEE_FAKE_SYSCALL_H_INCLUDED

@@ -25,11 +25,12 @@
     fd_info class
 -----------------------------------------------------------------------------*/
 fd_info::fd_info()
-    : access_flags(0),
-    master_file(0),
-    close_on_exec(0),
-    unsynced_reads(0),
-    original_file_size(0)
+    : access_flags(0)
+    , master_file(false)
+	, close_on_exec(false)
+	, unsynced_reads(false)
+	, unlinked(false)
+	, original_file_size(0)
 {
     fds.resize(mvee::numvariants);
 }
@@ -43,16 +44,18 @@ fd_info::fd_info
     bool                      close_on_exec,
     bool                      master_file,
     bool                      unsynced_reads,
+	bool                      unlinked,
     ssize_t                   original_file_size
 )
-    : fds(fds),
-	  path(path),
-	  access_flags(access_flags),
-	  master_file(master_file),
-	  close_on_exec(close_on_exec),
-	  unsynced_reads(unsynced_reads),
-	  original_file_size(original_file_size),
-	file_type(type)	
+    : fds(fds)
+	, path(path)
+	, access_flags(access_flags)
+	, master_file(master_file)
+	, close_on_exec(close_on_exec)
+	, unsynced_reads(unsynced_reads)
+	, unlinked(unlinked)
+	, original_file_size(original_file_size)
+	, file_type(type)	
 {
 }
 
@@ -68,6 +71,7 @@ void fd_info::print_fd_info ()
     debugf("> cloexec      = %d\n",         close_on_exec);
     debugf("> master file  = %d\n",         master_file);
     debugf("> unsynced     = %d\n",         unsynced_reads);
+	debugf("> unlinked     = %d\n",         unlinked);
 	debugf("> file type    = %s\n",         getTextualFileType(file_type));
 }
 
@@ -91,11 +95,11 @@ fd_table::fd_table()
     // clean table. Just add default fds
     std::vector<unsigned long> fds(mvee::numvariants);
     std::fill(fds.begin(), fds.end(), 0);
-    create_fd_info(FT_SPECIAL, fds, "stdin", O_RDONLY, false, false, false, 0);
+    create_fd_info(FT_SPECIAL, fds, "stdin", O_RDONLY, false, false, false, true, 0);
     std::fill(fds.begin(), fds.end(), 1);
-    create_fd_info(FT_SPECIAL, fds, "stdout", O_WRONLY, false, false, false, 0);
+    create_fd_info(FT_SPECIAL, fds, "stdout", O_WRONLY, false, false, false, true, 0);
     std::fill(fds.begin(), fds.end(), 2);
-    create_fd_info(FT_SPECIAL, fds, "stderr", O_WRONLY, false, false, false, 0);
+    create_fd_info(FT_SPECIAL, fds, "stderr", O_WRONLY, false, false, false, true, 0);
 
     char*                      cwd = getcwd(NULL, 0);
     fd_cwd = std::string(cwd);
@@ -114,6 +118,162 @@ fd_table::~fd_table()
 {
 	if (file_map)
 		delete file_map;
+}
+
+/*-----------------------------------------------------------------------------
+    add_missing_fds - Firefox 51 does something weird that I can't quite figure
+    out right now. At some point, there is a thread B that opens a shared memory
+    backing file, unlinks it from the file system, maps it into the address
+    space as a shared mapping, and closes the fd.
+
+	At a later point, there is a thread A that maps that same file using a file
+	descriptor whose creation we never see... Since GHUMVEE doesn't know the fd,
+	it denies thread A's attempt to create the shared mapping. A and B are in
+	different processes, which makes this even more mysterious.
+
+	Until we find out where this missing fd is created, we use this function
+	which reads missing fd info from /proc/pid/fd
+-----------------------------------------------------------------------------*/
+bool fd_table::add_missing_fds(std::vector<pid_t> variant_pids)
+{
+	std::map<std::string, std::vector<unsigned long>> missing_fds;
+
+	int i = 0;
+	for (auto pid : variant_pids)
+	{
+		debugf("adding missing fds for variant %d (pid %d)\n", i, pid);
+		char cmd   [500];
+		char perms [15];
+		char file  [1024];
+		int fd;
+		int prot;
+
+		sprintf(cmd, "ls -al /proc/%d/fd | grep \"\\->\" | sed 's/\\([lrwx-]*\\).*:...\\([0-9]*\\) -> \\(.*\\)/\\1 \\2 \\3/'", pid);
+		std::string line, fd_list = mvee::log_read_from_proc_pipe(cmd, NULL);
+		std::stringstream ss(fd_list);
+		
+		while(std::getline(ss, line))
+		{
+			if (sscanf(line.c_str(), "%s %d %s", perms, &fd, file) != 3)
+			{
+				warnf("Malformed line in refresh_fd_table: %s\n", line.c_str());
+				continue;
+			}
+
+			if (perms[1] == 'r')
+			{
+				if (perms[2] == 'w')
+					prot = O_RDWR;
+				else
+					prot = O_RDONLY;
+			}
+			else if (perms[2] == 'w')
+			{
+				prot = O_WRONLY;
+			}
+			else
+			{
+				prot = 0;
+			}
+
+			fd_info* info = get_fd_info(fd, i);
+			if (!info)
+			{
+				debugf("variant %d (pid %d) has missing file: %d -> %s (perms: %s)\n",
+				  i, pid, fd, file, perms);
+
+				auto missing = missing_fds.find(std::string(file));
+				if (missing == missing_fds.end())
+				{
+					std::vector<unsigned long> fds(mvee::numvariants);
+					std::fill(fds.begin(), fds.end(), (unsigned long)-1);
+					fds[i] = (unsigned long)fd | ((unsigned long)prot << 32);
+					missing_fds.insert(std::make_pair(std::string(file), fds));
+				}
+				else
+				{					
+					if (missing->second[i] != (unsigned long)-1)
+					{
+						warnf("Found missing file using multiple fds. We can't handle this case :(\n");
+						return false;
+					}
+					else
+					{
+						missing->second[i] = (unsigned long)fd | ((unsigned long)prot << 32);
+					}
+				}
+			}
+		}
+
+		i++;
+	}
+
+	for (auto missing : missing_fds)
+	{
+		bool master_has_file = false;
+		int num_fds = 0;
+//		int prot = 0;
+		i = 0;
+		
+		for (auto fd : missing.second)
+		{
+			if (fd != (unsigned long)-1)
+			{
+			    if (i == 0)
+					master_has_file = true;
+				num_fds++;
+			}
+
+			if (!master_has_file)
+			{
+				warnf("Found missing file that is not mapped by the master: %s - this shouldn't happen!\n", 
+					  missing.first.c_str());
+				return false;
+			}
+
+			if (num_fds != 1 && num_fds != mvee::numvariants)
+			{
+				warnf("Found missing file that is mapped by some, but not all slaves: %s - this shouldn't happen!\n",
+					  missing.first.c_str());
+				return false;
+			}
+
+//			prot = fd >> 32;
+			missing.second[i++] = fd & 0xFFFFFFFF;
+		}
+
+		create_fd_info(FT_UNKNOWN, // TODO: use sys_stat to get extra info?
+					   missing.second,
+					   missing.first,
+					   false,
+					   num_fds == 1,
+					   false,
+					   false, // TODO: Check using stat?
+					   0 // TODO: use sys_stat to get extra info?
+			);
+	}
+
+	return true;
+}
+
+/*-----------------------------------------------------------------------------
+    refresh_fd_table - Try to wipe and repopulate the fd table. We do this if
+	we see an execve in an IP-MON process because GHUMVEE might lose track
+	of which fds are opened in which variants...
+-----------------------------------------------------------------------------*/
+void fd_table::refresh_fd_table(std::vector<pid_t> variant_pids)
+{
+	table.clear();
+	epoll_map.clear();
+	temporary_files.clear();
+	fd_cwd = "";
+
+    // I'm not sure if it's really a good idea to repopulate the table
+    // as we generally can't figure out the mapping between master and slave
+    // fds if we haven't seen the original sys_open(at)
+#if 0
+	add_missing_fds(variant_pids);
+#endif
 }
 
 /*-----------------------------------------------------------------------------
@@ -192,15 +352,17 @@ void fd_table::create_fd_info
     bool                      close_on_exec,
     bool                      master_file,
     bool                      unsynced_reads,
+	bool                      unlinked,
     ssize_t                   original_file_size
 )
 {
-    fd_info info(type, fds, path, access_flags, close_on_exec, master_file, unsynced_reads, original_file_size);
+    fd_info info(type, fds, path, access_flags, close_on_exec, master_file, unsynced_reads, unlinked, original_file_size);
 
     auto it = table.find(fds[0]);
     if (it != table.end())
     {
-        warnf("fd override!!! FIXME\n");
+		if (!(*mvee::config_variant_global)["use_ipmon"].asBool())
+			warnf("fd override!!! FIXME (unless IP-MON is managing fds, in which case you can safely ignore this warning)\n");
         it->second.print_fd_info();
         free_fd_info(it->second.fds[0]);
     }
@@ -218,13 +380,13 @@ void fd_table::create_fd_info
     free_fd_info - We cannot simply erase the file descriptors from the fd table
     since they might also be in the epoll map
 -----------------------------------------------------------------------------*/
-void fd_table::free_fd_info (unsigned long fd)
+std::map<unsigned long, fd_info>::iterator fd_table::free_fd_info (unsigned long fd)
 {
     auto it = table.find(fd);
     if (it != table.end())
     {
         debugf("removed fd: %d (%s)\n", fd, it->second.path.c_str());
-        table.erase(it);
+        it = table.erase(it);
     }
 
     // check if it's an epoll fd
@@ -246,6 +408,7 @@ void fd_table::free_fd_info (unsigned long fd)
     }
 
 	file_map_set(fd, FT_UNKNOWN);
+	return it;
 }
 
 /*-----------------------------------------------------------------------------
@@ -253,7 +416,7 @@ void fd_table::free_fd_info (unsigned long fd)
 -----------------------------------------------------------------------------*/
 void fd_table::free_cloexec_fds ()
 {
-    for (auto it = table.begin(); it != table.end(); it++)
+    for (auto it = table.begin(); it != table.end(); )
     {
         /*
          * POSIX.1-2001 says that if file
@@ -271,9 +434,12 @@ void fd_table::free_cloexec_fds ()
         if (it->second.close_on_exec)
         {
             debugf("removing cloexec fd: %d (%s)\n", it->second.fds[0], it->second.path.c_str());
-            free_fd_info(it->second.fds[0]);
-            it = table.begin();
+            it = free_fd_info(it->second.fds[0]);
         }
+		else
+		{
+			it++;
+		}
     }
 }
 
@@ -381,12 +547,27 @@ bool fd_table::verify_path(std::string& mvee_path, const char* proc_path)
         return true;
 
     if (strstr(proc_path, "socket:") == proc_path
-        && mvee_path.find("sock:") == 0)
+        && (mvee_path.find("sock:") == 0 || mvee_path.find("clientsock:") == 0 || mvee_path.find("srvsock:") == 0))
         return true;
 
     if (strcmp(proc_path, "anon_inode:[eventfd]") == 0
         && mvee_path == "eventfd")
         return true;
+
+    if (strcmp(proc_path, "anon_inode:[eventpoll]") == 0
+        && mvee_path == "epoll_sock")
+        return true;
+
+    if (strcmp(proc_path, "anon_inode:inotify") == 0
+        && mvee_path.find("inotify_init") == 0)
+        return true;
+
+	if (strstr(proc_path, "/proc/") == proc_path && 
+		mvee_path.find("/proc/") == 0)
+		return true;
+
+	if (strstr(proc_path, ".mozilla/firefox/Crash"))
+		return true;
 
     return false;
 }
@@ -420,6 +601,16 @@ void fd_table::verify_fd_table(std::vector<pid_t> pids)
             strcpy(path, it->second.c_str());
 
             fd_info* info = get_fd_info(fd, i);
+
+			if (!info && strstr(path, "socket:") != path)
+			{
+				warnf("FD TABLE VERIFICATION FAILED - A wild FD appeared! - variant: %d (PID: %d)\n",
+					  i, pids[i]);
+				warnf("> fd seen in /proc: %d - %s\n", fd, path);
+				print_fd_table();
+				print_fd_table_proc(pids[i]);
+				return;
+			}
 
             if (info && !verify_path(info->path, path))
             {
@@ -496,18 +687,15 @@ std::string fd_table::get_full_path (int variantnum, pid_t variantpid, unsigned 
     std::stringstream ss;
 
     // fetch the path and check if it's absolute...
-    char* tmp_path = mvee_rw_read_string(variantpid, (unsigned long)path_ptr, 0);
-    if (!tmp_path)
-    {
-        warnf("couldn't get full path\n");
-        return std::string("");
-    }
+	std::string tmp_path = rw::read_string(variantpid, path_ptr, 0);
 
-    if (strstr(tmp_path, "/proc/self/") == tmp_path)
+    if (tmp_path.length() > 0 &&
+		tmp_path.find("/proc/self/") == 0)
     {
-        ss << "/proc/" << variantpid << "/" << (tmp_path + strlen("/proc/self/"));
+        ss << "/proc/" << variantpid << "/" << tmp_path.substr(strlen("/proc/self/"));
     }
-    else if (tmp_path[0] == '/')
+    else if (tmp_path.length() > 0 &&
+			 tmp_path[0] == '/')
     {
         // it's absolute so we can ignore the dirfd...
         ss << tmp_path;
@@ -517,7 +705,20 @@ std::string fd_table::get_full_path (int variantnum, pid_t variantpid, unsigned 
         // relative path... fetch the base path
         if (dirfd == (unsigned long)AT_FDCWD)
         {
-            ss << fd_cwd;
+			if (fd_cwd == "")
+			{
+				char proc_path[100];
+				char cwd_path[2048];
+
+				memset(cwd_path, 0, 2048);
+				sprintf(proc_path, "/proc/%d/cwd", variantpid);
+				if (readlink(proc_path, cwd_path, 2048) != -1)
+					ss << cwd_path;
+			}
+			else
+			{
+				ss << fd_cwd;
+			}
         }
         else
         {
@@ -526,12 +727,14 @@ std::string fd_table::get_full_path (int variantnum, pid_t variantpid, unsigned 
                 ss << fd_info->path;
         }
 
-        if (ss.str()[ss.str().length()-1] != '/')
-            ss << '/';
-        ss << tmp_path;
+		if (tmp_path.length() > 0)
+		{
+			if (ss.str()[ss.str().length()-1] != '/')
+				ss << '/';
+			ss << tmp_path;
+		}
     }
 
-    SAFEDELETEARRAY(tmp_path);
 	return mvee::os_normalize_path_name(ss.str());
 }
 
@@ -558,6 +761,16 @@ void fd_table::full_release_lock()
 {
     while (lock.__data.__owner == syscall(__NR_gettid))
         release_lock();
+}
+
+/*-----------------------------------------------------------------------------
+    have_unlocked
+-----------------------------------------------------------------------------*/
+bool fd_table::have_unlocked()
+{
+	if (lock.__data.__owner == syscall(__NR_gettid))
+		return false;
+	return true;
 }
 
 /*-----------------------------------------------------------------------------
@@ -719,3 +932,46 @@ void fd_table::chdir(const char* path)
 //		return ::chdir(path);
     }
 }
+
+/*-----------------------------------------------------------------------------
+    set_fd_unlinked
+-----------------------------------------------------------------------------*/
+void fd_table::set_fd_unlinked(unsigned long fd, int variantnum)
+{
+    fd_info* fd_info = get_fd_info(fd, variantnum);
+
+    if (fd_info)
+		set_file_unlinked(fd_info->path.c_str());
+}
+
+/*-----------------------------------------------------------------------------
+    set_file_unlinked
+-----------------------------------------------------------------------------*/
+void fd_table::set_file_unlinked(const char* path)
+{
+	char* resolved_path = realpath(path, NULL);
+
+	if (!resolved_path)
+		resolved_path = strdup(path);
+
+	for (auto it = table.begin(); it != table.end(); ++it)
+	{
+		if (!strcmp(it->second.path.c_str(), resolved_path))
+			it->second.unlinked = true;
+	}
+
+	free(resolved_path);
+}
+
+/*-----------------------------------------------------------------------------
+    is_fd_unlinked
+-----------------------------------------------------------------------------*/
+bool fd_table::is_fd_unlinked(unsigned long fd, int variantnum)
+{
+    fd_info* fd_info = get_fd_info(fd, variantnum);
+
+    if (fd_info && (fd_info->unlinked || (fd_info->file_type != FT_REGULAR && fd_info->file_type != FT_UNKNOWN && fd_info->file_type != FT_SPECIAL)))
+		return true;
+	return false;
+}
+

@@ -1,0 +1,111 @@
+#-----------------------------------------------------------------------------
+# Architecture
+#-----------------------------------------------------------------------------
+
+ifndef _ARCH
+  BITS := $(shell getconf LONG_BIT)
+  ifeq ($(BITS),32)
+    _ARCH := i386
+	_ALT_ARCH := i386
+  else
+    _ARCH := amd64
+	_ALT_ARCH := x86_64
+  endif
+  export _ARCH
+  export _ALT_ARCH
+endif
+
+#-----------------------------------------------------------------------------
+# Directories
+#-----------------------------------------------------------------------------
+
+# directories
+MVEE_SRC		= ./MVEE/Src
+MVEE_ARCH_SRC	= ./MVEE/Src/arch/$(_ARCH)
+MVEE_INC		= ./MVEE/Inc
+MVEE_ARCH_INC	= ./MVEE/Inc/arch/$(_ARCH)
+MVEE_OUT		= ./MVEE/bin/$(BUILD)
+MVEE_BUILD		= ./MVEE/$(BUILD)-$(_ARCH)
+
+#-----------------------------------------------------------------------------
+# Source config
+#-----------------------------------------------------------------------------
+
+SRC 	 = $(shell find $(MVEE_SRC) -maxdepth 1 -name *.c* | egrep -v "~|\#")
+ARCH_SRC = $(shell find $(MVEE_ARCH_SRC) -maxdepth 1 -name *.c*  | egrep -v "~|\#")
+SRCS	 = $(SRC) $(ARCH_SRC)
+
+#-----------------------------------------------------------------------------
+# Common build config
+#-----------------------------------------------------------------------------
+
+STD_CXXFLAGS = -D__LINUX_X86__ -Wall -Werror -Wextra -Wpedantic -Wno-unused-parameter -Wno-unused-function -Ideps/jsoncpp/include/
+STD_LDFLAGS  = deps/jsoncpp/build/src/lib_json/libjsoncpp.a -ldl -lrt -lelf -lstdc++ -ldwarf -lpthread -lz 
+
+#-----------------------------------------------------------------------------
+# Targets
+#-----------------------------------------------------------------------------
+
+OBJ := $(SRCS:%.cpp=$(MVEE_BUILD)/%.o)
+PRE_BUILD_TABLES := $(shell ./generate_syscall_tables.rb)
+PRE_BUILD_DEPS := $(shell make -f make.deps)
+
+BIN = $(MVEE_OUT)/MVEE
+
+.PHONY: all clean 
+
+all: target
+
+target: $(BIN)															\
+		patched_binaries/libc/$(_ARCH)/libc.so.6						\
+		patched_binaries/libc/$(_ARCH)/libpthread.so.0					\
+		patched_binaries/libc/$(_ARCH)/libclang_rt.sync-$(_ALT_ARCH).so \
+		MVEE_LD_Loader/MVEE_LD_Loader
+
+patched_binaries/libc/amd64/libc.so.6 : patched_binaries/libc/amd64/libc.so
+	@-echo "Creating symlink to GHUMVEE-ready libc"
+	ln -f -s libc.so patched_binaries/libc/amd64/libc.so.6
+
+patched_binaries/libc/amd64/libpthread.so.0 : patched_binaries/libc/amd64/libpthread.so
+	@-echo "Creating symlink to GHUMVEE-ready libpthread"
+	ln -f -s libpthread.so patched_binaries/libc/amd64/libpthread.so.0
+
+patched_binaries/libc/i386/libc.so.6 : patched_binaries/libc/i386/libc.so
+	@-echo "Creating symlink to GHUMVEE-ready libc"
+	ln -f -s libc.so patched_binaries/libc/i386/libc.so.6
+
+patched_binaries/libc/i386/libpthread.so.0 : patched_binaries/libc/i386/libpthread.so
+	@-echo "Creating symlink to GHUMVEE-ready libpthread"
+	ln -f -s libpthread.so patched_binaries/libc/i386/libpthread.so.0
+
+patched_binaries/libc/amd64/libclang_rt.sync-x86_64.so : libsync/libsync.cpp
+	./compile_syncagent.rb
+
+patched_binaries/libc/i386/libclang_rt.sync-i386.so : libsync/libsync.cpp
+	@-echo "The standalone sync agent is not supported on i386 at the moment."
+
+MVEE_LD_Loader/MVEE_LD_Loader : MVEE_LD_Loader/MVEE_LD_Loader.c MVEE_LD_Loader/$(_ARCH)/MVEE_LD_Loader.h
+	./compile_loader.rb
+
+DEPS := $(OBJ:.o=.d)
+
+-include $(DEPS)
+
+$(MVEE_BUILD)/%.o: %.cpp
+	@-mkdir -p $(MVEE_BUILD)/$(dir $<)
+	$(BUILD_CXX) -I/usr/include -I$(MVEE_INC) -I$(MVEE_ARCH_INC) $(STD_CXXFLAGS) $(BUILD_CXXFLAGS) -MM -MT $@ -MF $(patsubst %.o,%.d,$@) $<
+	$(BUILD_CXX) -I/usr/include -I$(MVEE_INC) -I$(MVEE_ARCH_INC) $(STD_CXXFLAGS) $(BUILD_CXXFLAGS) -c -o $@ $<
+
+$(BIN): $(OBJ)
+	@-mkdir -p $(MVEE_OUT)
+	$(BUILD_CXX) -fuse-ld=bfd -o $@ $^ $(BUILD_LDFLAGS) $(STD_LDFLAGS)
+
+clean: 
+	rm -f $(BIN)
+	find $(MVEE_BUILD) -name *.bc | xargs rm -f
+	find $(MVEE_BUILD) -name *.o | xargs rm -f
+	find $(MVEE_BUILD) -name *.S | xargs rm -f
+	find $(MVEE_BUILD) -name *.d | xargs rm -f
+	rm -f MVEE_LD_Loader/MVEE_LD_Loader
+	rm -f MVEE_LD_Loader/MVEE_LD_Loader_this*
+	rm -f libsync/libclang*

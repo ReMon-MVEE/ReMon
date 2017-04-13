@@ -15,5 +15,5 @@ end
   lib = line.split(" ")[-1]
   next if lib[0] != "/"
   print_header(lib)
-  print("#{`./find_atomics.rb #{lib}`}")
+  print("#{`./find_noninstrumented_atomics.rb #{lib}`}")
 }

@@ -8,18 +8,18 @@
 /*-----------------------------------------------------------------------------
     Global Variables
 -----------------------------------------------------------------------------*/
-#include <sys/wait.h>
 #include <stdarg.h>
 #include <errno.h>
 #include <sstream>
 #include <dwarf.h>
 #include <libdwarf.h>
-#include <sys/ptrace.h>
 #include <sys/time.h>
 #include <string.h>
 #include <iomanip>
 #include <vector>
 #include <algorithm>
+#include <numeric>
+#include <execinfo.h>
 #include "MVEE.h"
 #include "MVEE_monitor.h"
 #include "MVEE_fake_syscall.h"
@@ -30,6 +30,17 @@
 #include "MVEE_private_arch.h"
 #include "MVEE_mman.h"
 #include "MVEE_memory.h"
+#include "MVEE_interaction.h"
+
+/*-----------------------------------------------------------------------------
+    Static Variable Initialization
+-----------------------------------------------------------------------------*/
+FILE*             mvee::logfile              = NULL;
+FILE*             mvee::ptrace_logfile       = NULL;
+FILE*             mvee::datatransfer_logfile = NULL;
+FILE*             mvee::lockstats_logfile    = NULL;
+double            mvee::startup_time         = 0.0;
+pthread_mutex_t   mvee::loglock              = PTHREAD_MUTEX_INITIALIZER;
 
 /*-----------------------------------------------------------------------------
     cache_mismatch_info
@@ -62,14 +73,151 @@ void monitor::flush_mismatch_info()
 }
 
 /*-----------------------------------------------------------------------------
+    get_ipmon_data
+-----------------------------------------------------------------------------*/
+struct ipmon_syscall_data* monitor::get_ipmon_data
+(
+	struct ipmon_syscall_entry* entry, 
+	unsigned long start_offset,
+	unsigned long end_offset,
+	int data_num
+)
+{
+	unsigned long data_offset = start_offset;
+	int num = 0;
+
+	while (data_offset < end_offset)
+	{
+		struct ipmon_syscall_data* data = (struct ipmon_syscall_data*)((unsigned long)entry + data_offset);
+
+		if (num == data_num)
+			return data;
+		if (data->len <= 0)
+			return nullptr;
+
+		num++;
+		data_offset += data->len;
+	}
+
+	return nullptr;
+}
+
+/*-----------------------------------------------------------------------------
+    get_ipmon_arg
+-----------------------------------------------------------------------------*/
+struct ipmon_syscall_data* monitor::get_ipmon_arg(struct ipmon_syscall_entry* entry, int arg_num)
+{
+	return get_ipmon_data(entry, 
+						  sizeof(struct ipmon_syscall_entry), 
+						  sizeof(struct ipmon_syscall_entry) + entry->syscall_args_size, 
+						  arg_num);
+}
+
+/*-----------------------------------------------------------------------------
+    get_ipmon_ret
+-----------------------------------------------------------------------------*/
+struct ipmon_syscall_data* monitor::get_ipmon_ret(struct ipmon_syscall_entry* entry, int ret_num)
+{
+	return get_ipmon_data(entry,
+						  sizeof(struct ipmon_syscall_entry) + entry->syscall_args_size,
+						  entry->syscall_entry_size,
+						  ret_num);
+}
+
+/*-----------------------------------------------------------------------------
+    log_ipmon_entry
+-----------------------------------------------------------------------------*/
+bool monitor::log_ipmon_entry
+(
+	struct ipmon_buffer* buffer,
+	struct ipmon_syscall_entry* entry, 
+	void (*logfunc)(const char* format, ...)
+)
+{
+	logfunc("\tsyscall           : %hu (%s)\n", (unsigned short)entry->syscall_no, getTextualSyscall((unsigned short)entry->syscall_no));
+	logfunc("\tsyscall type (raw): %d\n", entry->syscall_type);
+	logfunc("\tchecked           : %d\n", (entry->syscall_type & IPMON_EXEC_NO_IPMON) ? 1 : 0);
+	logfunc("\tcanceled (signal) : %d\n", (entry->syscall_type & IPMON_WAIT_FOR_SIGNAL_CALL) ? 1 : 0);
+	logfunc("\torder             : %d\n", entry->syscall_order);
+	logfunc("\treplicate master  : %d\n", (entry->syscall_type & IPMON_REPLICATE_MASTER) ? 1 : 0);
+	logfunc("\tblocking call     : %d\n", (entry->syscall_type & IPMON_BLOCKING_CALL) ? 1 : 0);
+	logfunc("\tresults waiters   : %d\n", entry->syscall_results_available.u.s.have_waiters);
+	logfunc("\tresults available : %d\n", entry->syscall_results_available.u.s.signaled);
+	logfunc("\tlockstep waiters  : %d\n", entry->syscall_lockstep_barrier.u.s.count);
+	logfunc("\tlockstep sequence : %d\n", entry->syscall_lockstep_barrier.u.s.seq >> 8);
+	logfunc("\treturn value      : %ld (%lx)\n", entry->syscall_return_value, entry->syscall_return_value);
+	logfunc("\tentrysize         : %d\n", entry->syscall_entry_size);
+
+	if (entry->syscall_entry_size == 0)
+		return false;
+
+	int argnum = 0;
+	while (true)
+	{
+		struct ipmon_syscall_data* arg = get_ipmon_arg(entry, argnum);
+
+		if (!arg)
+			break;
+
+		logfunc("========ARG %02d==================================================================\n", argnum);
+
+		logfunc("\tlen               : %ld\n", arg->len);
+
+		if (arg->len + (unsigned long)entry > 
+			(unsigned long)buffer + 64 * (1 + mvee::numvariants) + buffer->ipmon_usable_size)
+		{
+			logfunc("INVALID LENGTH!\n");
+			return false;
+		}
+
+		if (!arg->len)
+			break;
+
+		std::string hex = mvee::log_do_hex_dump (arg->data, arg->len - sizeof(unsigned long));
+		logfunc("\n%s", hex.c_str());
+		argnum++;
+	}
+
+	int retnum = 0;
+	while (true)
+	{
+		struct ipmon_syscall_data* ret = get_ipmon_ret(entry, retnum);
+
+		if (!ret)
+			break;
+
+		logfunc("========RET %02d==================================================================\n", retnum);
+
+		logfunc("\tlen               : %ld\n", ret->len);
+
+		if (ret->len + (unsigned long)entry > 
+			(unsigned long)buffer + 64 * (1 + mvee::numvariants) + buffer->ipmon_usable_size)
+		{
+			logfunc("INVALID LENGTH!\n");
+			return false;
+		}
+
+		if (!ret->len)
+			break;
+
+		std::string hex = mvee::log_do_hex_dump (ret->data, ret->len - sizeof(unsigned long));
+		logfunc("\n%s", hex.c_str());
+		retnum++;
+	}
+
+	return true;
+}
+
+/*-----------------------------------------------------------------------------
     log_ipmon_state
 -----------------------------------------------------------------------------*/
 void monitor::log_ipmon_state()
 {
 #ifndef MVEE_BENCHMARK
-	debugf("Dumping IPMON buffer " PTRSTR " ...\n", ipmon_buffer);
 	if (! ipmon_buffer)
 		return;
+
+	debugf("Dumping IPMON buffer " PTRSTR " ...\n", ipmon_buffer);
 
 	std::vector<unsigned int> offsets(mvee::numvariants);
 	unsigned int highest = 0;
@@ -80,6 +228,9 @@ void monitor::log_ipmon_state()
 	debugf("\tnumvariants = %d\n", buffer->ipmon_numvariants);
 	debugf("\tusable_size = %d\n", buffer->ipmon_usable_size);
 	debugf("\thave_pending_signals = %ld\n", buffer->ipmon_have_pending_signals);
+	debugf("\tflush_count = %d\n", buffer->flush_count);
+	debugf("\tpre_flush = [0x%04x,0x%04x]\n", buffer->pre_flush_barrier.u.s.seq, buffer->pre_flush_barrier.u.s.count);
+	debugf("\tpost_flush = [0x%04x,0x%04x]\n", buffer->post_flush_barrier.u.s.seq, buffer->post_flush_barrier.u.s.count);
 
 	for (int i = 0; i < mvee::numvariants; i++) 
 	{
@@ -100,6 +251,7 @@ void monitor::log_ipmon_state()
 	while (offset <= highest)
 	{
 		ipmon_syscall_entry* entry = (ipmon_syscall_entry*)((unsigned long)buffer + data_start + offset);
+
 		debugf("================================================================================\n");
 		std::stringstream ss;
 		ss << "\tentry " << entry_num++ << " - offset: " << offset;
@@ -116,60 +268,14 @@ void monitor::log_ipmon_state()
 		}
 		ss << "\n";
 		debugf(ss.str().c_str());
-		debugf("================================================================================\n");
 
-		if (offset + sizeof(struct ipmon_syscall_entry) > buffer->ipmon_usable_size ||
+		if (offset + sizeof(struct ipmon_syscall_entry) > (unsigned long)buffer->ipmon_usable_size ||
 			offsets[0] == offset)
 			break;
 
-		debugf("\tsyscall           : %d (%s)\n", entry->syscall_no, getTextualSyscall(entry->syscall_no));
-		debugf("\tchecked           : %d\n", entry->syscall_checked);
-		debugf("\tmaster            : %d\n", entry->syscall_is_mastercall);
-		debugf("\tblocking          : %d\n", entry->syscall_is_blocking);
-		debugf("\tresults waiters   : %d\n", entry->syscall_results_available.u.s.have_waiters);
-		debugf("\tresults available : %d\n", entry->syscall_results_available.u.s.signaled);
-		debugf("\tlockstep waiters  : %d\n", entry->syscall_lockstep_barrier.u.s.count);
-		debugf("\tlockstep sequence : %d\n", entry->syscall_lockstep_barrier.u.s.seq >> 8);
-		debugf("\treturn value      : %lu\n", entry->syscall_return_value);
-		debugf("\tentrysize         : %d\n", entry->syscall_entry_size);
-
-		if (entry->syscall_entry_size == 0)
+		debugf("================================================================================\n");
+		if (!log_ipmon_entry(buffer, entry, debugf))
 			break;
-
-		unsigned int arg_offset = sizeof(struct ipmon_syscall_entry);
-		int argnum = 0;
-		while (arg_offset < sizeof(struct ipmon_syscall_entry) + entry->syscall_args_size)
-		{
-			struct ipmon_syscall_data* arg = (struct ipmon_syscall_data*)((unsigned long)buffer + data_start + offset + arg_offset);
-			debugf("========ARG %02d==================================================================\n", argnum);
-
-			debugf("\tlen               : %ld\n", arg->len);
-			if (!arg->len)
-				break;
-
-			std::string hex = mvee::log_do_hex_dump (arg->data, arg->len - sizeof(unsigned long));
-			debugf("\n%s", hex.c_str());
-			argnum++;
-			arg_offset += arg->len;
-		}
-
-		unsigned int ret_offset = sizeof(struct ipmon_syscall_entry) + entry->syscall_args_size;
-		int retnum = 0;
-		while (ret_offset < entry->syscall_entry_size)
-		{
-			struct ipmon_syscall_data* ret = (struct ipmon_syscall_data*)((unsigned long)buffer + data_start + offset + ret_offset);
-			debugf("========RET %02d==================================================================\n", retnum);
-
-			debugf("\tlen               : %ld\n", ret->len);
-			if (!ret->len)
-				break;
-
-			std::string hex = mvee::log_do_hex_dump (ret->data, ret->len - sizeof(unsigned long));
-			debugf("\n%s", hex.c_str());
-			retnum++;
-			ret_offset += ret->len;
-		}
-
 
 		offset += entry->syscall_entry_size;
 	}
@@ -331,13 +437,14 @@ void monitor::log_caller_info
 -----------------------------------------------------------------------------*/
 void monitor::log_variant_backtrace(int variantnum, int max_depth, int calculate_file_offsets, int is_segfault)
 {
-    int  i, status;
+	interaction::mvee_wait_status status;
+    int  i;
     void (*logfunc)(const char*, ...) = mvee::logf;
-    bool should_send_sigstop = state != STATE_WAITING_RESUME;
-    bool at_call_entry       = variants[variantnum].callnum != NO_CALL;
-    bool call_returned       = variants[variantnum].callnum == NO_CALL;
-    bool call_dispatched     = variants[variantnum].call_dispatched;
-    bool in_call             =
+    bool should_suspend  = state != STATE_WAITING_RESUME;
+    bool at_call_entry   = variants[variantnum].callnum != NO_CALL;
+    bool call_returned   = variants[variantnum].callnum == NO_CALL;
+    bool call_dispatched = variants[variantnum].call_dispatched;
+    bool in_call         =
         (state == STATE_IN_MASTERCALL
          || state == STATE_IN_SYSCALL
          || state == STATE_IN_FORKCALL
@@ -348,7 +455,16 @@ void monitor::log_variant_backtrace(int variantnum, int max_depth, int calculate
 #endif 
 		variants[variantnum].callnum == __NR_rt_sigsuspend);
 
-//	MutexLock lock(&mvee::global_lock);
+	set_mmap_table->grab_lock();
+
+/*
+	if (set_mmap_table->thread_group_shutting_down)
+	{
+		logfunc("This thread group is shutting down - not backtracing\n");
+		set_mmap_table->release_lock();
+		return;
+	}
+*/
 
 #if defined(MVEE_BENCHMARK) && defined(MVEE_FORCE_ENABLE_BACKTRACING)
     logfunc = mvee::warnf;
@@ -363,99 +479,98 @@ void monitor::log_variant_backtrace(int variantnum, int max_depth, int calculate
         || (variants[variantnum].callnum == MVEE_RDTSC_FAKE_SYSCALL)
         || is_segfault                                     // from a signal-delivery-stop
 		|| in_sigsuspend)
-		should_send_sigstop = false;
+		should_suspend = false;
 
-    logfunc("pid: %d - ==================================\n", variants[variantnum].variantpid);
-    logfunc("pid: %d - generating local backtrace for variant: %d\n",
-            variants[variantnum].variantpid,
-            variants[variantnum].variantpid);
+    logfunc("%s - ==================================\n", 
+			call_get_variant_pidstr(variantnum).c_str());
+    logfunc("%s - generating local backtrace for variant\n",
+			call_get_variant_pidstr(variantnum).c_str());
 
-    if (should_send_sigstop)
+    if (should_suspend)
     {
-        logfunc("pid: %d - > variant is currently running or in a syscall. Waiting for SIGSTOP delivery...\n",
-                variants[variantnum].variantpid);
+        logfunc("%s - > variant is currently running or in a syscall. Trying to suspend.\n",
+				call_get_variant_pidstr(variantnum).c_str());
+		
+		if (!interaction::wait(variants[variantnum].variantpid, status, true, true, true))
+		{
+			logfunc("%s - > error while waiting for variant: %d (%s) - status: %s\n",
+					call_get_variant_pidstr(variantnum).c_str(), 
+					errno, getTextualErrno(errno),
+					getTextualMVEEWaitStatus(status).c_str()
+				);
+			set_mmap_table->release_lock();
+			return;
+		}
 
-        i = waitpid(variants[variantnum].variantpid, &status, __WALL | WUNTRACED | __WNOTHREAD | WNOHANG);
-
-        if (should_send_sigstop && i <= 0)
+        if (should_suspend && 
+			status.reason == STOP_NOTSTOPPED)
         {
-            long tmp = ptrace(PTRACE_PEEKUSER, variants[variantnum].variantpid, 0, NULL);
-
-            if (tmp != -1)
+            if (interaction::is_suspended(variants[variantnum].variantpid))
             {
-                logfunc("pid: %d - > we were about to send SIGSTOP to this variant but it was already in ptrace-stop!\n",
-                        variants[variantnum].variantpid);
+                logfunc("%s - > we were about to send SIGSTOP to this variant but it was already suspended!\n",
+						call_get_variant_pidstr(variantnum).c_str());
                 goto was_interrupted;
             }
 
-            int  err = syscall(__NR_tgkill, variants[variantnum].varianttgid,
-                               variants[variantnum].variantpid, SIGSTOP);
-
-            if (err)
+            if (!interaction::suspend(variants[variantnum].variantpid, variants[variantnum].varianttgid))
             {
-                logfunc("pid: %d - > signal delivery failed... err = %d (%s)\n",
-                        variants[variantnum].variantpid, errno, strerror(errno));
+                logfunc("%s - > signal delivery failed... err = %d (%s)\n",
+						call_get_variant_pidstr(variantnum).c_str(), errno, getTextualErrno(errno));
+				set_mmap_table->release_lock();
                 return;
             }
 
-            i = waitpid(variants[variantnum].variantpid, &status, __WALL | WUNTRACED | __WNOTHREAD);
+			if (interaction::wait(variants[variantnum].variantpid, status))
+			{
+				logfunc("%s - > variant stopped.\n",
+						call_get_variant_pidstr(variantnum).c_str());
+			}
 
-            if (i == -1)
-            {
-                logfunc("pid: %d - > error while waiting for variant: %d (%s)\n",
-                        variants[variantnum].variantpid, errno, strerror(errno));
-                return;
-            }
-            else if (i != 0)
-            {
-                logfunc("pid: %d - > variant stopped.\n",
-                        variants[variantnum].variantpid);
-            }
-
-            if (WIFEXITED(status))
-            {
-                logfunc("pid: %d - >>> Process %d exited. Status = %d\n",
-                        variants[variantnum].variantpid, i, WEXITSTATUS(status));
-                return;
-            }
-            else if (WIFSIGNALED(status))
-            {
-                logfunc("pid: %d - >>> Process %d terminated by signal: %s\n",
-                        variants[variantnum].variantpid, i, getTextualSig(WTERMSIG(status)));
-                if (WTERMSIG(status) != SIGSEGV)
-                    return;
-            }
-            else if (WIFCONTINUED(status))
-            {
-                logfunc("pid: %d - >>> Process %d continued! (this shouldn't happen!)\n",
-                        variants[variantnum].variantpid, i);
-                return;
-            }
-            else if (WIFSTOPPED(status))
-            {
-                logfunc("pid: %d - >>> Process %d stopped by signal: %s\n",
-                        variants[variantnum].variantpid, i, getTextualSig(WSTOPSIG(status)));
-            }
-            else
-            {
-                logfunc(">>> Couldn't poll process status...\n",
-                        variants[variantnum].variantpid);
-                return;
-            }
+			switch (status.reason)
+			{
+				case STOP_EXIT:
+				{
+					logfunc("%s - >>> Process exited. Status = %d\n",
+							call_get_variant_pidstr(variantnum).c_str(), status.data);
+					set_mmap_table->release_lock();
+					return;
+				}
+				case STOP_KILLED:
+				{
+					logfunc("%s - >>> Process terminated by signal: %s\n",
+							call_get_variant_pidstr(variantnum).c_str(), getTextualSig(status.data));
+					if (WTERMSIG(status) != SIGSEGV)
+					{
+						set_mmap_table->release_lock();
+						return;
+					}
+					break;
+				}
+				case STOP_SIGNAL:
+				{
+					logfunc("%s - >>> Process stopped by signal: %s\n",
+							call_get_variant_pidstr(variantnum).c_str(), getTextualSig(status.data));
+					break;
+				}
+				default:
+				{
+					warnf("%s - >>> Unexpected stop reason\n",
+							call_get_variant_pidstr(variantnum).c_str());
+					break;
+				}
+			}
         }
     }
     else
     {
 was_interrupted:
-        logfunc("pid: %d - > variant is currently suspended\n", variants[variantnum].variantpid);
-        //sync();
+        logfunc("%s - > variant is currently suspended\n", call_get_variant_pidstr(variantnum).c_str());
 
-        mvee_syscall_handler handler;
+        mvee_syscall_logger logger;
         if (variants[variantnum].callnum > 0 && variants[variantnum].callnum <= MAX_CALLS)
         {
-            handler = monitor::syscall_logger_table[variants[variantnum].callnum][MVEE_LOG_ARGS];
-            if (handler != MVEE_HANDLER_DONTHAVE && handler != MVEE_HANDLER_DONTNEED)
-                (this->*handler)(variantnum);
+            logger = monitor::syscall_logger_table[variants[variantnum].callnum][MVEE_LOG_ARGS];
+			(this->*logger)(variantnum);
         }
     }
 
@@ -466,22 +581,24 @@ was_interrupted:
     // Stack walk
     unsigned long      prev_ip    = 0;
     mvee_dwarf_context context(variants[variantnum].variantpid);
-    log_caller_info(variantnum, 0, IP(context.regs), 0, logfunc);
+    log_caller_info(variantnum, 0, IP_IN_REGS(context.regs), 0, logfunc);
     while (1)
     {
         if (set_mmap_table->dwarf_step(variantnum, variants[variantnum].variantpid, &context) != 1
-/*            || (unsigned long)SP(context.regs) > stack_base */
-			  || (unsigned long)IP(context.regs) == prev_ip)
+/*            || (unsigned long)SP_IN_REGS(context.regs) > stack_base */
+			|| (unsigned long)IP_IN_REGS(context.regs) == prev_ip)
         {
             logfunc(">>> end of stack\n");
             break;
         }
 
-        log_caller_info(variantnum, i++, IP(context.regs), 0, logfunc);
-        prev_ip = IP(context.regs);
+        log_caller_info(variantnum, i++, IP_IN_REGS(context.regs), 0, logfunc);
+        prev_ip = IP_IN_REGS(context.regs);
     }
 
     log_registers(variantnum, logfunc);
+	log_stack(variantnum);
+	set_mmap_table->release_lock();
 }
 
 /*-----------------------------------------------------------------------------
@@ -500,8 +617,16 @@ void monitor::log_dump_queues(shm_table* shm_table)
 		std::fill(pos.begin(), pos.end(), 0);
 
         for (int i = 0; i < mvee::numvariants; ++i)
+		{
             if (atomic_queue_pos[i] && !variants[i].variant_terminated)
-                pos[i] = mvee_wrap_ptrace(PTRACE_PEEKDATA, variants[i].variantpid, (unsigned long)atomic_queue_pos[i], NULL);
+			{
+                if (!rw::read_primitive<unsigned long>(variants[i].variantpid, (void*) atomic_queue_pos[i], pos[i]))
+				{
+					warnf("%s - Couldn't read atomic buffer pos\n", call_get_variant_pidstr(i).c_str());
+					return;
+				}
+			}
+		}
 
         char                       logname[100];
         sprintf(logname, "%s/Logs/%s_%d.log", mvee::os_get_orig_working_dir().c_str(),
@@ -511,10 +636,10 @@ void monitor::log_dump_queues(shm_table* shm_table)
         if (!logfile)
             return;
 
-        warnf("dumping queue: %s\n", getTextualBufferType(MVEE_LIBC_ATOMIC_BUFFER));
+        debugf("dumping queue: %s\n", getTextualBufferType(MVEE_LIBC_ATOMIC_BUFFER));
 
 //        warnf("dumping queue: %s - FILE: %s (%d - %s)\n",
-//                    getTextualBufferType(MVEE_LIBC_ATOMIC_BUFFER), logname, logfile, strerror(errno));
+//                    getTextualBufferType(MVEE_LIBC_ATOMIC_BUFFER), logname, logfile, getTextualErrno(errno));
 
         for (int i = 0; i < mvee::numvariants; ++i)
             fprintf(logfile, "VARIANT %d - POS: %05ld %s\n", i, pos[i],
@@ -545,8 +670,8 @@ void monitor::log_dump_queues(shm_table* shm_table)
             fprintf(logfile, "\n\n COUNTER DUMP FOR VARIANT: %d (PID: %d)\n",
                     i, variants[i].variantpid);
 
-            struct mvee_counter* counters = (struct mvee_counter*)mvee_rw_read_data(variants[i].variantpid,
-                                                                                    (unsigned long)atomic_counters[i], MVEE_COUNTERS * sizeof(struct mvee_counter), 0);
+            struct mvee_counter* counters = (struct mvee_counter*)rw::read_data(variants[i].variantpid,
+                                                                                    atomic_counters[i], MVEE_COUNTERS * sizeof(struct mvee_counter), 0);
 
             if (counters)
                 for (int j = 0; j < MVEE_COUNTERS; ++j)
@@ -581,7 +706,7 @@ void monitor::log_dump_queues(shm_table* shm_table)
         if (!logfile)
             return;
 
-        warnf("dumping queue: %s - FILE: %s (%d - %s)\n", getTextualBufferType(it.first), logname, logfile, strerror(errno));
+        warnf("dumping queue: %s - FILE: %s (%d - %s)\n", getTextualBufferType(it.first), logname, logfile, getTextualErrno(errno));
 
         fprintf(logfile, "===============================================   \n");
         fprintf(logfile, "> Buffer Type             : %d (%s)               \n", it.first, getTextualBufferType(it.first));
@@ -606,6 +731,7 @@ void monitor::log_dump_queues(shm_table* shm_table)
                 master_pos = tmppos;
             fprintf(logfile, "> * Variant %d                                      \n", j);
             fprintf(logfile, ">   + pid               : %d                    \n",   variants[j].variantpid);
+			fprintf(logfile, ">   + pos               : %d                    \n", tmppos);
 
             if (it.first == MVEE_LIBC_LOCK_BUFFER_PARTIAL)
             {
@@ -750,6 +876,12 @@ void monitor::log_dump_queues(shm_table* shm_table)
                 }
             }
         }
+		
+		warnf("Queue dump finished\n");
+		
+		if (logfile)
+			fclose(logfile);
+
 #ifndef MVEE_ALWAYS_DUMP_QUEUES
     }
     else
@@ -778,8 +910,8 @@ void monitor::log_calculate_clock_spread()
 
 	std::vector<double> cntrs(MVEE_COUNTERS);
 
-	struct mvee_counter* counters = (struct mvee_counter*)mvee_rw_read_data(variants[0].variantpid,
-		(unsigned long)atomic_counters[0], MVEE_COUNTERS * sizeof(struct mvee_counter), 0);
+	struct mvee_counter* counters = (struct mvee_counter*)rw::read_data(variants[0].variantpid,
+		atomic_counters[0], MVEE_COUNTERS * sizeof(struct mvee_counter), 0);
 
 	for (int j = 0; j < MVEE_COUNTERS; ++j)
 	{
@@ -813,7 +945,7 @@ void monitor::log_monitor_state_short(int err)
 {
     warnf("prevcall : %ld (%s)\n", variants[0].prevcallnum, getTextualSyscall(variants[0].prevcallnum));
     warnf("state    : %d (%s)\n",  state,                 getTextualState(state));
-    warnf("errno    : %d (%s)\n",  err,                   strerror(err));
+    warnf("errno    : %d (%s)\n",  err,                   getTextualErrno(err));
 }
 
 /*-----------------------------------------------------------------------------
@@ -851,18 +983,16 @@ void monitor::log_call_mismatch(int index1, int index2)
     warnf("call2    : %ld (%s)\n", variants[index2].callnum, getTextualSyscall(variants[index2].callnum));
     warnf("type2    : %d\n",       variants[index2].call_type);
     warnf("==================================\n");
-    mvee_syscall_handler handler;
+    mvee_syscall_logger logger;
     if (variants[index1].callnum > 0 && variants[index1].callnum <= MAX_CALLS)
     {
-        handler = monitor::syscall_logger_table[variants[index1].callnum][MVEE_LOG_ARGS];
-        if (handler != MVEE_HANDLER_DONTHAVE && handler != MVEE_HANDLER_DONTNEED)
-            (this->*handler)(index1);
+        logger = monitor::syscall_logger_table[variants[index1].callnum][MVEE_LOG_ARGS];
+		(this->*logger)(index1);
     }
     if (variants[index2].callnum > 0 && variants[index2].callnum <= MAX_CALLS)
     {
-        handler = monitor::syscall_logger_table[variants[index2].callnum][MVEE_LOG_ARGS];
-        if (handler != MVEE_HANDLER_DONTHAVE && handler != MVEE_HANDLER_DONTNEED)
-            (this->*handler)(index2);
+        logger = monitor::syscall_logger_table[variants[index2].callnum][MVEE_LOG_ARGS];
+		(this->*logger)(index2);
     }
     log_monitor_state_short(0);
     warnf("==================================\n");
@@ -895,7 +1025,12 @@ void monitor::log_stack(int variantnum)
 	call_check_regs(variantnum);
 	for (int i = -10; i < 10; ++i)
 	{
-		unsigned long stack_word = mvee_wrap_ptrace(PTRACE_PEEKDATA, variants[variantnum].variantpid, variants[variantnum].regs.rsp + i * sizeof(unsigned long), 0);
+		unsigned long stack_word;
+		
+		if (!rw::read_primitive<unsigned long>(variants[variantnum].variantpid, 
+											   (void*) (SP_IN_REGS(variants[variantnum].regs) + i * sizeof(unsigned long)), 
+											   stack_word))
+			return;
 
 		debugf("stack[rsp + %d] = " PTRSTR "\n", i*sizeof(unsigned long), stack_word);
 	}
@@ -907,23 +1042,151 @@ void monitor::log_stack(int variantnum)
 -----------------------------------------------------------------------------*/
 void monitor::log_segfault(int variantnum)
 {
-    siginfo_t siginfo = {0};
-    mvee_wrap_ptrace(PTRACE_GETSIGINFO, variants[variantnum].variantpid, 0, (void*)&siginfo);
-    FETCH_IP(variantnum, eip);
+	siginfo_t siginfo;
+	unsigned long eip = 0;
+	
+	if (!interaction::get_signal_info(variants[variantnum].variantpid, &siginfo))
+	{
+		warnf("%s - Couldn't get signal info\n", 
+			  call_get_variant_pidstr(variantnum).c_str());
+		return;
+	}
+	
+	if (!interaction::fetch_ip(variants[variantnum].variantpid, eip))
+	{
+		warnf("%s - Couldn't read instruction pointer\n", 
+			  call_get_variant_pidstr(variantnum).c_str());
+	}
+	
+#ifdef MVEE_SUPPORTS_IPMON
+	if (ipmon_initialized && siginfo.si_addr == 0)
+	{
+		std::string crash_loc = set_mmap_table->get_caller_info(variantnum,
+																variants[variantnum].variantpid,
+																eip,
+																0);
+
+		// IP-MON crash dumps 
+		if (crash_loc.find("ipmon_arg_verify_failed") != std::string::npos)
+		{
+			warnf("IP-MON verification failed in variant %d (PID: %d)\n", variantnum, variants[variantnum].variantpid);
+
+			// force register refresh
+			variants[variantnum].regs_valid  = false;
+			call_check_regs(variantnum);
+
+			unsigned long master_syscall_no = variants[variantnum].regs.rax;
+			unsigned char arg_no            = master_syscall_no & 0xff;
+			unsigned long slave_arg_val     = variants[variantnum].regs.rbx;
+			ipmon_syscall_entry* entry      = nullptr;			
+			struct ipmon_buffer* buffer     = nullptr;
+			master_syscall_no >>= 8;
+
+			// Get the relevant IP-MON entry
+			if (ipmon_buffer)
+			{
+				buffer = (struct ipmon_buffer*) ipmon_buffer->ptr;
+
+				// find the last valid entry before pos
+				unsigned int offset = 0;
+				unsigned int data_start = 64 * (1 + mvee::numvariants);
+
+				while (offset <= buffer->ipmon_variant_info[variantnum].pos)
+				{
+					entry = (struct ipmon_syscall_entry*)((unsigned long)buffer + data_start + offset);
+					if (offset + sizeof(struct ipmon_syscall_entry) > (unsigned int)buffer->ipmon_usable_size)
+						break;
+					if (entry->syscall_entry_size <= 0)
+						break;
+					offset += entry->syscall_entry_size;
+				}				
+			}
+			
+			if (arg_no == 0)
+			{
+				warnf("> Syscall Number Mismatch (Master: %d - %s, Slave: %d - %s)\n",
+					  master_syscall_no, getTextualSyscall(master_syscall_no),
+					  slave_arg_val, getTextualSyscall(slave_arg_val));
+			}
+			else if (master_syscall_no == (unsigned long)-1)
+			{
+				warnf("> Unknown cause - check log files\n");
+			}
+			else if ((char)arg_no < 0)
+			{
+				warnf("> Argument Length Mismatch (Syscall: %d - %s - Arg: %d - Slave Length: %d)\n",
+					  master_syscall_no, getTextualSyscall(master_syscall_no),
+					  -arg_no-1, slave_arg_val);
+
+				if (entry)
+				{
+					warnf("========BUFFER ENTRY DUMP=======================================================\n");
+					log_ipmon_entry(buffer, entry, warnf);
+					warnf("================================================================================\n");
+				}
+			}
+			else
+			{
+				warnf("> Argument Value Mismatch (Syscall: %d - %s - Arg: %d)\n",
+					  master_syscall_no, getTextualSyscall(master_syscall_no), arg_no-1);
+
+				// dump slave contents
+				// we need to fetch the relevant entry to get the size of the data block
+				if (entry)
+				{
+					struct ipmon_syscall_data* arg = get_ipmon_arg(entry, arg_no - 1);
+				
+					if (arg)
+					{
+						// try to read the slave block from mem
+						unsigned char* slave_arg = rw::read_data(variants[variantnum].variantpid,
+																	 (void*)slave_arg_val,
+																	 arg->len - sizeof(unsigned long),
+																	 0);
+																 
+						if (slave_arg)
+						{
+							std::string hex = mvee::log_do_hex_dump (slave_arg, arg->len - sizeof(unsigned long));
+							warnf("\tSlave Value       :\n%s", hex.c_str());
+							delete[] slave_arg;
+						}
+						else
+						{
+							warnf("> Couldn't read slave value\n");
+						}
+					}
+					else
+					{
+						warnf("> Couldn't read argument from IP-MON buffer\n");
+					}
+
+					warnf("========BUFFER ENTRY DUMP=======================================================\n");
+					log_ipmon_entry(buffer, entry, warnf);
+					warnf("================================================================================\n");
+				}
+			}
+
+			shutdown(false);
+			return;
+		}
+	}
+#endif
+
+
     warnf("Warning: %s in variant %d (PID: %d)\n",
                 getTextualSig(siginfo.si_signo), variantnum,
                 variants[variantnum].variantpid);
     warnf("IP: " PTRSTR ", Address: " PTRSTR ", Code: %s (%d), Errno: %d\n",
                 eip, siginfo.si_addr, getTextualSEGVCode(siginfo.si_code),
                 siginfo.si_code, siginfo.si_errno);
-    log_registers(variantnum, mvee::logf);
+//    log_registers(variantnum, mvee::logf);
 //    set_mmap_table->print_mmap_table(mvee::logf);
 #if !defined(MVEE_ENABLE_VALGRIND_HACKS) && (!defined(MVEE_BENCHMARK) || defined(MVEE_FORCE_ENABLE_BACKTRACING))
     log_variant_backtrace(variantnum, 0, 1, 1);
 #endif
 
 	log_ipmon_state();
-	log_stack(variantnum);
+//	log_stack(variantnum);
 	set_mmap_table->print_mmap_table();
 }
 
@@ -937,19 +1200,30 @@ void monitor::log_hw_bp_event (int variantnum, siginfo_t* sig)
 
     debugf("Hardware Breakpoint hit by variant: %d\n", variants[variantnum].variantpid);
 
-    dr6 = mvee_wrap_ptrace(PTRACE_PEEKUSER, variants[variantnum].variantpid,
-                           offsetof(user, u_debugreg) + 6*sizeof(long), NULL);
+    if (!interaction::read_specific_reg(variants[variantnum].variantpid,
+										offsetof(user, u_debugreg) + 6*sizeof(long), dr6))
+	{
+		warnf("%s - Coulnd't read dr6\n", call_get_variant_pidstr(variantnum).c_str());
+		return;
+	}
 
     for (i = 0; i < 4; ++i)
     {
         if (dr6 & (1 << i))
         {
-            debugf("> this BP at address " PTRSTR " is registered in slot %d and has type %s\n",
-                       variants[variantnum].hw_bps[i], i,
-                       getTextualBreakpointType(variants[variantnum].hw_bps_type[i]));
-            debugf("> current value -> " LONGRESULTSTR " \n",
-                       mvee_wrap_ptrace(PTRACE_PEEKDATA, variants[variantnum].variantpid,
-                                        variants[variantnum].hw_bps[i], NULL));
+			unsigned long ptr;
+			if (!rw::read_primitive<unsigned long>(variants[variantnum].variantpid, (void*) variants[variantnum].hw_bps[i], ptr))
+			{
+				warnf("%s - Coulnd't read value at address 0x" PTRSTR " - This address was set in HW BP register %d\n", 
+					  call_get_variant_pidstr(variantnum).c_str(), variants[variantnum].hw_bps[i], i);
+			}
+			else
+			{
+				debugf("> this BP at address " PTRSTR " is registered in slot %d and has type %s\n",
+					   variants[variantnum].hw_bps[i], i,
+					   getTextualBreakpointType(variants[variantnum].hw_bps_type[i]));
+				debugf("> current value -> " LONGRESULTSTR " \n", ptr);
+			}
             break;
         }
     }
@@ -995,7 +1269,7 @@ void mvee::log_init()
 
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    mvee::initialtime          = tv.tv_sec + tv.tv_usec / 1000000.0;
+    mvee::startup_time          = tv.tv_sec + tv.tv_usec / 1000000.0;
 
 #ifdef MVEE_GENERATE_EXTRA_STATS
     printf("Opening PTRACE Log @ %s\n", PTRACE_LOGNAME);
@@ -1029,9 +1303,9 @@ void mvee::log_fini(bool terminated)
         double currenttime = tv.tv_sec + tv.tv_usec / 1000000.0;
 
 #ifndef MVEE_BENCHMARK
-        printf("Program terminated after: %lf seconds\n", currenttime - mvee::initialtime);
+        printf("Program terminated after: %lf seconds\n", currenttime - mvee::startup_time);
 #else
-        fprintf(stderr, "%lf\n", currenttime - mvee::initialtime);
+        fprintf(stderr, "%lf\n", currenttime - mvee::startup_time);
 #endif
     }
 
@@ -1076,7 +1350,7 @@ void mvee::warnf(const char* format, ...)
     struct timeval tv;
     double curtime;
     gettimeofday(&tv, NULL);
-    curtime = tv.tv_sec + tv.tv_usec / 1000000.0 - mvee::initialtime;
+    curtime = tv.tv_sec + tv.tv_usec / 1000000.0 - mvee::startup_time;
     if (mvee::active_monitor && mvee::active_monitor->monitor_log)
     {
         va_list va;
@@ -1145,7 +1419,7 @@ void mvee::logf(const char* format, ...)
 #endif
 
     gettimeofday(&tv, NULL);
-    curtime = tv.tv_sec + tv.tv_usec / 1000000.0 - mvee::initialtime;
+    curtime = tv.tv_sec + tv.tv_usec / 1000000.0 - mvee::startup_time;
 
     if (mvee::active_monitor && mvee::active_monitor->monitor_log)
     {
@@ -1157,7 +1431,7 @@ void mvee::logf(const char* format, ...)
     }
 
     MutexLock lock(&mvee::loglock);
-    if (mvee::print_to_stdout)
+    if ((*mvee::config_monitor)["log_to_stdout"].asBool())
     {
         va_list va;
         va_start(va, format);
@@ -1175,7 +1449,7 @@ void mvee::logf(const char* format, ...)
     }
 #endif
 #if defined(MVEE_BENCHMARK) && defined(MVEE_FORCE_ENABLE_BACKTRACING)
-    if (mvee::print_to_stdout)
+    if ((*mvee::config_monitor)["log_to_stdout"].asBool())
     {
         va_list va;
         va_start(va, format);
@@ -1394,7 +1668,7 @@ void mvee::log_dwarf_rule (unsigned int reg_num, void* _rule)
     ss << " - reg num: " << rule->dw_regnum << " (";
     ss << getTextualDWARFReg(rule->dw_regnum) << ") - offset: " << STDHEXSTR(sizeof(unsigned long), rule->dw_offset_or_block_len);
 
-    warnf("DWARF: > %s\n", ss.str().c_str());
+    debugf("DWARF: > %s\n", ss.str().c_str());
 }
 
 /*-----------------------------------------------------------------------------
@@ -1419,36 +1693,18 @@ void mvee::log_sigaction(struct sigaction* action)
 }
 
 /*-----------------------------------------------------------------------------
-  mvee_wrap_ptrace - wrapper around ptrace that logs when something went wrong
-  -----------------------------------------------------------------------------*/
-long mvee_wrap_ptrace(unsigned short request, pid_t pid, unsigned long addr, void *data, int allow_even_if_shutting_down)
+  mvee_log_local_backtrace - log a monitor backtrace to stderr
+-----------------------------------------------------------------------------*/
+void mvee_log_local_backtrace() 
 {
-//	debugf("PTRACE(%s, %d, 0x" PTRSTR ", 0x" PTRSTR ")\n",
-//			   getTextualRequest(request), pid, addr, data);
+	void *trace[16];
+	char **messages = (char **)NULL;
+	int i, trace_size = 0;
 
-    long result = ptrace((enum __ptrace_request)request, pid, addr, data);
-
-#ifdef MVEE_GENERATE_EXTRA_STATS
-    if (!mvee::in_logging_handler)
-        mvee::log_ptrace_op(0, request, 0);
-#endif
-
-    if (unlikely(result == -1)
-        && errno != 0
-        && mvee::active_monitor
-        && !mvee::active_monitor->is_group_shutting_down())
-    {
-        int err = errno;
-        warnf("==================================\n");
-        warnf("ERROR: ptrace request failed\n");
-        warnf("request  : %d (%s)\n",      request, getTextualRequest(request));
-        warnf("pid      : %d\n",           pid);
-        warnf("addr     : 0x" PTRSTR "\n", addr);
-        warnf("data     : 0x" PTRSTR "\n", (long)data);
-        mvee::active_monitor->log_monitor_state_short(err);
-        warnf("==================================\n");
-        return -1;
-    }
-
-    return result;
+	trace_size = backtrace(trace, 16);
+	messages = backtrace_symbols(trace, trace_size);
+	warnf("Local Backtrace:\n");
+	for (i=0; i<trace_size; ++i)
+		warnf("[%d] %s\n", i, messages[i]);
+	free(messages);
 }

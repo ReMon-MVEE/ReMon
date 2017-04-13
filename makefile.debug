@@ -1,0 +1,16 @@
+#-----------------------------------------------------------------------------
+# Build-type specific configuration.
+#-----------------------------------------------------------------------------
+
+BUILD          = Debug
+BUILD_CXX      = clang++
+BUILD_CXXFLAGS = -ggdb -std=c++14 -pedantic-errors -fno-omit-frame-pointer
+BUILD_LDFLAGS  = -rdynamic
+BUILD_OPT      = no
+
+#-----------------------------------------------------------------------------
+# Common configuration.
+#-----------------------------------------------------------------------------
+
+include make-common
+

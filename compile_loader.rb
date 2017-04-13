@@ -16,9 +16,9 @@ end
 if not File.exists?("MVEE_LD_Loader/MVEE_LD_Loader")
   Dir.chdir("MVEE_LD_Loader")
   `./#{@comp}`
-end
 
-if not File.exists?("MVEE_LD_Loader")
-  print("ERROR: MVEE LD Loader compilation failed!\n")
-  exit(-1)
+  if not File.exists?("MVEE_LD_Loader")
+    print("ERROR: MVEE LD Loader compilation failed!\n")
+    exit(-1)
+  end
 end

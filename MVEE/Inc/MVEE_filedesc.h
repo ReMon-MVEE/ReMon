@@ -15,7 +15,7 @@
 #include <string>
 #include <map>
 #include <pthread.h>
-#include "MVEE_config.h"
+#include "MVEE_build_config.h"
 #include "MVEE_shm.h"
 
 /*-----------------------------------------------------------------------------
@@ -56,12 +56,13 @@ public:
     bool                       master_file;           // if set to true, this file is only actually opened by the master variant
     bool                       close_on_exec;         // fds are duplicated across forks but if O_CLOEXEC is set, they will be closed if the new fork executes execve
     bool                       unsynced_reads;        // if set to true, sys_read* calls from this fd are dispatched as normal calls rather than mastercalls
+	bool                       unlinked;              // set to true when the file has been unlinked from the file system
     ssize_t                    original_file_size;    // for shared mappings that we changed to private, we need to know the original file size!!!
 	FileType                   file_type;
 
     void print_fd_info();
     fd_info();
-    fd_info(FileType type, std::vector<unsigned long>& fds, std::string path, unsigned long access_flags, bool close_on_exec, bool master_file, bool unsynced_reads = false, ssize_t original_file_size = 0);
+    fd_info(FileType type, std::vector<unsigned long>& fds, std::string path, unsigned long access_flags, bool close_on_exec, bool master_file, bool unsynced_reads = false, bool unlinked = false, ssize_t original_file_size = 0);
 };
 
 //
@@ -92,14 +93,22 @@ public:
     void          grab_lock           ();
     void          release_lock        ();
     void          full_release_lock   ();
+    bool          have_unlocked       ();
 
 	//
     // Creating/Deleting file descriptors. These are the functions we use for
     // synchronized file operations.
 	//
-    void          create_fd_info      (FileType type, std::vector<unsigned long>& fds, std::string path, unsigned long access_flags, bool close_on_exec, bool master_file, bool unsynced_reads=false, ssize_t original_file_size=0);
-    void          free_fd_info        (unsigned long fd);
+    void          create_fd_info      (FileType type, std::vector<unsigned long>& fds, std::string path, unsigned long access_flags, bool close_on_exec, bool master_file, bool unsynced_reads=false, bool unlinked=false, ssize_t original_file_size=0);
+	std::map<unsigned long, fd_info>::iterator
+                  free_fd_info        (unsigned long fd);
     void          free_cloexec_fds    ();
+
+	//
+	// Wipe the fd table and repopulate it using /proc/<pid>/fd
+    //
+    bool          add_missing_fds     (std::vector<pid_t> variant_pids);
+	void          refresh_fd_table    (std::vector<pid_t> variant_pids);
 
 	// Temporary files management. These functions are used for unsynchronized
 	// file operations that happen during fast forwarding
@@ -134,6 +143,13 @@ public:
 	// 
     void          master_fd_set_to_non_master_fd_sets
                                       (fd_set *master_fd_set, int nfds, std::vector<fd_set>& variant_fd_sets);
+
+	//
+	// Unlink support
+	//
+	void          set_fd_unlinked   (unsigned long fd, int variantnum=0);
+	void          set_file_unlinked (const char* path);
+	bool          is_fd_unlinked    (unsigned long fd, int variantnum=0);
 
 	//
     // Debugging goodies

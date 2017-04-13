@@ -17,6 +17,11 @@
 #define MVEE_SUPPORTS_IPMON
 
 /*-----------------------------------------------------------------------------
+  Hardware Breakpoint Support
+-----------------------------------------------------------------------------*/
+#define MVEE_HWBP_X86
+
+/*-----------------------------------------------------------------------------
   SPEC PROFILES
 -----------------------------------------------------------------------------*/
 #define SPECPROFILENOPIE           "build_base_spec2006_MVEE_thereisnopie_amd64-nn.0000"
@@ -47,11 +52,13 @@
 /*-----------------------------------------------------------------------------
   String Constants
 -----------------------------------------------------------------------------*/
-#define STDHEXSTR(w, x) std::setw(w) << std::hex << std::setfill('0') << (unsigned long)(x) << std::setfill(' ') << std::setw(0)
+#define STDHEXSTR(w, x) std::setw(w) << std::hex << std::setfill('0') << (unsigned long)(x) << std::setfill(' ') << std::setw(0) << std::dec
 #define STDPTRSTR(x)    STDHEXSTR(16, x)
 #define LONGPTRSTR                 "%016lx"
 #define PTRSTR                     "%016lx"
 #define LONGRESULTSTR              "%016ld"
+#define OBJDUMP_ARCH               "i386"
+#define OBJDUMP_SUBARCH            "x86-64"
 
 /*-----------------------------------------------------------------------------
   DWARF Constants
@@ -79,44 +86,32 @@
 /*-----------------------------------------------------------------------------
   Register selection
 -----------------------------------------------------------------------------*/
-#define SYSCALL_REG                "rax"
-// platform independent gs_base
-#define _GS_BASE(regs)                          regs.gs_base
-// platform independent fastcall arg
-#define FASTCALL_ARG1(regs)                     regs.rdi
-// platform independent program counter selection
-#define IP(regs)                                regs.rip
-// platform independent stack pointer selection
-#define SP(regs)                                regs.rsp
-// platform independent function arg1 selection
-#define FUNCTION_ARG1(regs)                     regs.rdi
+#define SYSCALL_INS_LEN            2
+
 //
-#define SYSCALL_NO(regs)                        regs.orig_rax
-// platform independent program counter fetch (through ptrace)
-#define FETCH_IP(variantnum, rip)                 long rip     = mvee_wrap_ptrace(PTRACE_PEEKUSER, variants[variantnum].variantpid, 8*RIP, NULL);
-#define FETCH_IP_DIRECT(variantnum, rip)          rip = mvee_wrap_ptrace(PTRACE_PEEKUSER, variants[variantnum].variantpid, 8*RIP, NULL);
-// platform independent program counter write
-#define WRITE_IP(variantnum, eip)                 mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid, 8*RIP, (void*)(long)(eip));
-#define WRITE_IP_PID(pid, eip)                  mvee_wrap_ptrace(PTRACE_POKEUSER, pid, 8*RIP, (void*)(eip));
-// platform independent stack pointer write
-#define WRITE_SP(variantnum, sp)                  mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid, 8*RSP, (void*)(long)(sp));
-// platform independent rdtsc result write
-#define WRITE_RDTSC_RESULT(variantnum, low, high)                                               \
-    mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid, 8*RDX, (void*)(long)(high)); \
-    mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid, 8*RAX, (void*)(long)(low));
-// platform independent orig syscall no fetch
-#define FETCH_SYSCALL_NO(variantnum, callno)      long callno  = mvee_wrap_ptrace(PTRACE_PEEKUSER, variants[variantnum].variantpid, 8*ORIG_RAX, NULL);
-#define FETCH_SYSCALL_NO_PID(pid, callno)       long callno  = mvee_wrap_ptrace(PTRACE_PEEKUSER, pid, 8*ORIG_RAX, NULL);
-// platform independent orig syscall write (e.g. for resuming fake syscalls)
-#define WRITE_SYSCALL_NO(variantnum, callno)      mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid, 8*ORIG_RAX, (void*)(long)(callno));
-// platform independent syscall return fetch
-#define FETCH_SYSCALL_RETURN(variantnum, callret) long callret = mvee_wrap_ptrace(PTRACE_PEEKUSER, variants[variantnum].variantpid, 8*RAX, NULL);
-// platform independent new syscall write (e.g. restoring syscall no after sighandler return)
-#define WRITE_NEW_SYSCALL_NO(variantnum, callno)  mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid, 8*RAX, (void*)(long)(callno));
-#define WRITE_SYSCALL_RETURN(variantnum, callret) WRITE_NEW_SYSCALL_NO(variantnum, callret)
-// platform independent function argument passing
-#define WRITE_FASTCALL_ARG1(variantnum, arg)      mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid, 8*RDI, (void*)(long)(arg));
-#define WRITE_FASTCALL_ARG1_PID(pid, arg)       mvee_wrap_ptrace(PTRACE_POKEUSER, pid, 8*RDI, (void*)(arg));
+// Offsets in user_regs_struct
+//
+#define SYSCALL_NO_REG_OFFSET      (ORIG_RAX * 8)
+#define SYSCALL_RETURN_REG_OFFSET  (RAX * 8)
+#define SYSCALL_NEXT_REG_OFFSET    (RAX * 8)
+#define IP_REG_OFFSET              (RIP * 8)
+#define SP_REG_OFFSET              (RSP * 8)
+#define FASTCALL_ARG1_REG_OFFSET   (RDI * 8)
+#define RDTSC_LOW_REG_OFFSET       (RAX * 8)
+#define RDTSC_HIGH_REG_OFFSET      (RDX * 8)
+
+// platform independent fastcall arg
+#define FASTCALL_ARG1_IN_REGS(regs)                     regs.rdi
+// platform independent program counter selection
+#define IP_IN_REGS(regs)                                regs.rip
+// platform independent stack pointer selection
+#define SP_IN_REGS(regs)                                regs.rsp
+// platform independent function arg1 selection
+#define FUNCTION_ARG1_IN_REGS(regs)                     regs.rdi
+// platform independent syscall no selection
+#define SYSCALL_NO_IN_REGS(regs)                        regs.orig_rax
+// platform independent next syscall no selection
+#define NEXT_SYSCALL_NO_IN_REGS(regs)                   regs.rax
 
 /*-----------------------------------------------------------------------------
   Syscall argument macros
@@ -131,23 +126,19 @@
 #define ARG4(variantnum)                          variants[variantnum].regs.r10
 #define ARG5(variantnum)                          variants[variantnum].regs.r8
 #define ARG6(variantnum)                          variants[variantnum].regs.r9
-
-//
-// Set a variant's CPU register
-//
-#define SET_VARIANT_REGISTER(variantnum, reg, value)                          \
-    mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid, 8 * reg, \
-                     (void*)value)
+#define SYSCALL_NO(variantnum)                    variants[variantnum].regs.orig_rax
+#define NEXT_SYSCALL_NO(variantnum)               variants[variantnum].regs.rax
 
 //
 // Change the syscall argument of a variant
 //
-#define SETARG1(variantnum, value)                SET_VARIANT_REGISTER(variantnum, RDI, (long)(value))
-#define SETARG2(variantnum, value)                SET_VARIANT_REGISTER(variantnum, RSI, (long)(value))
-#define SETARG3(variantnum, value)                SET_VARIANT_REGISTER(variantnum, RDX, (long)(value))
-#define SETARG4(variantnum, value)                SET_VARIANT_REGISTER(variantnum, R10, (long)(value))
-#define SETARG5(variantnum, value)                SET_VARIANT_REGISTER(variantnum, R8, (long)(value))
-#define SETARG6(variantnum, value)                SET_VARIANT_REGISTER(variantnum, R9, (long)(value))
+#define SETARG1(variantnum, value)                interaction::write_specific_reg(variants[variantnum].variantpid, RDI * 8, (long)(value))
+#define SETARG2(variantnum, value)                interaction::write_specific_reg(variants[variantnum].variantpid, RSI * 8, (long)(value))
+#define SETARG3(variantnum, value)                interaction::write_specific_reg(variants[variantnum].variantpid, RDX * 8, (long)(value))
+#define SETARG4(variantnum, value)                interaction::write_specific_reg(variants[variantnum].variantpid, R10 * 8, (long)(value))
+#define SETARG5(variantnum, value)                interaction::write_specific_reg(variants[variantnum].variantpid, R8 * 8, (long)(value))
+#define SETARG6(variantnum, value)                interaction::write_specific_reg(variants[variantnum].variantpid, R9 * 8, (long)(value))
+#define SETSYSCALLNO(variantnum, value)           interaction::write_specific_reg(variants[variantnum].variantpid, ORIG_RAX * 8, (long)(value))
 
 /*-----------------------------------------------------------------------------
   HDE Macros
@@ -160,6 +151,9 @@
 -----------------------------------------------------------------------------*/
 #define PRINT_REG(variantnum, logfunc, reg) \
     mvee::log_register(#reg, (unsigned long*)&variants[variantnum].regs.reg, logfunc);
+
+#define PRINT_REG_DIRECT(regs, logfunc, reg) \
+    mvee::log_register(#reg, (unsigned long*)&regs.reg, logfunc);
 
 #define log_registers(variantnum, logfunc)			\
     {												\
@@ -184,6 +178,29 @@
         PRINT_REG(variantnum, logfunc, r14);		\
         PRINT_REG(variantnum, logfunc, r15);		\
     }												\
+
+#define log_registers_direct(regs, logfunc)			\
+    {												\
+        PRINT_REG_DIRECT(regs, logfunc, rax);		\
+        PRINT_REG_DIRECT(regs, logfunc, rbx);		\
+        PRINT_REG_DIRECT(regs, logfunc, rcx);		\
+        PRINT_REG_DIRECT(regs, logfunc, rdx);		\
+        PRINT_REG_DIRECT(regs, logfunc, rdi);		\
+        PRINT_REG_DIRECT(regs, logfunc, rsi);		\
+        PRINT_REG_DIRECT(regs, logfunc, rip);		\
+        PRINT_REG_DIRECT(regs, logfunc, eflags);	\
+        PRINT_REG_DIRECT(regs, logfunc, rsp);		\
+        PRINT_REG_DIRECT(regs, logfunc, rbp);		\
+        PRINT_REG_DIRECT(regs, logfunc, r8);		\
+        PRINT_REG_DIRECT(regs, logfunc, r9);		\
+        PRINT_REG_DIRECT(regs, logfunc, r10);		\
+        PRINT_REG_DIRECT(regs, logfunc, r11);		\
+        PRINT_REG_DIRECT(regs, logfunc, r12);		\
+        PRINT_REG_DIRECT(regs, logfunc, r13);		\
+        PRINT_REG_DIRECT(regs, logfunc, r14);		\
+        PRINT_REG_DIRECT(regs, logfunc, r15);		\
+    }												\
+
 
 
 #endif /* MVEE_PRIVATE_ARCH_H_ */

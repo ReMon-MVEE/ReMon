@@ -1,28 +1,20 @@
-set -e
-set -u
-
 asm() {
 	gcc -fPIC -E ${1}.S -o ${1}_preprocessed.S
-	as -ggdb -o ${1}.o ${1}_preprocessed.S
+	as -o ${1}.o ${1}_preprocessed.S
+}
+
+preprocess() {
+	gcc -ffixed-r12 -O3  -m64 -fPIC -E -o ${1}.p ${1}.cpp
 }
 
 compile() {
-	gcc -ffixed-r12 -ffixed-r13 -O3  -m64 -fPIC -c -ggdb -S -o ${1}.s ${1}.cpp
-	python diablo.py ${1}.s ${1}_inlined.s --inline ipmon_unchecked_syscall asm/ipmon_unchecked_syscall.S --inline ipmon_checked_syscall asm/ipmon_checked_syscall.S --inject ipmon_enclave_entrypoint asm/ipmon_enclave_prologue.S asm/ipmon_enclave_epilogue.S
-	gcc -c -o ${1}.o ${1}_inlined.s
+	gcc -ffixed-r12 -O3  -m64 -fPIC -c -o ${1}.o ${1}.cpp
 }
 
-# -ffixed-r11 -ffixed-r13
+asm MVEE_ipmon_syscall
 
-echo "--------------------------------------------------------------------------------"
-echo "Please ignore any errors that appear from HERE"
-echo ">>>"
-echo ""
 ./generate_headers.rb
-echo ""
-echo "<<<"
-echo "Until HERE"
-echo "--------------------------------------------------------------------------------"
+preprocess MVEE_ipmon
 compile MVEE_ipmon
 
-/usr/bin/ld -shared -fPIC -lc -ldl -o libipmon.so MVEE_ipmon.o
+gcc -s -shared -O3 -fPIC -lc -ldl -o libipmon.so MVEE_ipmon.o MVEE_ipmon_syscall.o

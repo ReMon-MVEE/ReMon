@@ -13,12 +13,9 @@
 #include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/shm.h>
-#include <sys/wait.h>
-#include <sys/ptrace.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <signal.h>
-#include <libconfig.h>
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -28,6 +25,8 @@
 #include <algorithm>
 #include <libgen.h>
 #include <stdarg.h>
+#include <iostream>
+#include <ctype.h>
 #include "MVEE.h"
 #include "MVEE_monitor.h"
 #include "MVEE_memory.h"
@@ -35,50 +34,24 @@
 #include "MVEE_syscalls.h"
 #include "MVEE_private_arch.h"
 #include "MVEE_macros.h"
+#include "MVEE_interaction.h"
 
 /*-----------------------------------------------------------------------------
     Static Member Initialization
 -----------------------------------------------------------------------------*/
-bool                                   mvee::no_monitoring  = false;
-std::vector<std::string>               mvee::demo_args;
-int                                    mvee::demo_num       = 0;
-#ifdef MVEE_ALLOW_PERF
-bool                                   mvee::use_perf       = false;
-#endif
-int                                    mvee::numvariants    = 0;
-std::string                            mvee::custom_library_path;
-struct mvee_config                     mvee::config         =
-{
-	0,                                      // use_ipmon
-    1,                                      // hide_vdso
-    1,                                      // intercept_tsc
-    0,                                      // use_dcl
-    0,                                      // allow_setaffinity
-    0,                                      // use_system_libc
-    0,                                      // use_system_libgomp
-    0,                                      // use_system_libstdcpp
-    0,                                      // use_system_libgfortran
-    0,                                      // use_system_gnomelibs
-    "",                                     // root_path
-    "/patched_binaries/libc/",              // libc_path
-    "/patched_binaries/libgomp/",           // libgomp_path
-    "/patched_binaries/libstdc++/",         // libstdcpp_path
-    "/patched_binaries/libgfortran/",       // libgfortran_path
-    "/patched_binaries/gnomelibs/",         // gnomelibs_path
-	"/ext/spec2006/",                       // spec2006_path
-	"/ext/parsec-2.1/",                     // parsec2_path
-	"/ext/parsec-3.0/",                     // parsec3_path
-    NULL
-};
-unsigned int                           mvee::demo_schedule_type                  = 0;
-bool                                   mvee::demo_has_many_threads               = false;
+std::vector<
+	std::map<std::string,
+			 std::string>>             mvee::aliases;
+std::vector<
+	std::map<std::string,
+			 std::string>>             mvee::reverse_aliases;
+int                                    mvee::numvariants                         = 0;
+std::vector<std::string>               mvee::variant_ids;
 __thread monitor*                      mvee::active_monitor                      = NULL;
 __thread int                           mvee::active_monitorid                    = 0;
 int                                    mvee::shutdown_signal                     = 0;
 std::map<unsigned long, unsigned char> mvee::syslocks_table;
-#ifdef MVEE_GENERATE_EXTRA_STATS
 __thread bool                          mvee::in_logging_handler                  = false;
-#endif
 pthread_mutex_t                        mvee::global_lock                         = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 pthread_cond_t                         mvee::global_cond                         = PTHREAD_COND_INITIALIZER;
 std::map<std::string, std::weak_ptr<mmap_addr2line_proc> >
@@ -90,7 +63,7 @@ std::vector<monitor*>                  mvee::monitor_gclist;
 std::map<pid_t, std::vector<pid_t> >   mvee::variant_pid_mapping;
 std::map<int, monitor*>                mvee::monitor_id_mapping;
 int                                    mvee::next_monitorid                      = 0;
-std::vector<detachedvariant*>            mvee::detachlist;
+std::vector<detachedvariant*>          mvee::detachlist;
 std::string                            mvee::orig_working_dir;
 std::string                            mvee::mvee_root_dir;
 unsigned int                           mvee::stack_limit                         = 0;
@@ -101,15 +74,14 @@ __thread pid_t                         mvee::thread_pid                         
 std::map<std::string, std::string>     mvee::interp_map;
 std::vector<pid_t>                     mvee::shutdown_kill_list;
 bool                                   mvee::shutdown_should_generate_backtraces = false;
-
-FILE*                                  mvee::logfile                             = NULL;
-FILE*                                  mvee::ptrace_logfile                      = NULL;
-FILE*                                  mvee::datatransfer_logfile                = NULL;
-FILE*                                  mvee::lockstats_logfile                   = NULL;
-double                                 mvee::initialtime                         = 0.0;
-pthread_mutex_t                        mvee::loglock                             = PTHREAD_MUTEX_INITIALIZER;
-bool                                   mvee::print_to_stdout                     = false;
 volatile unsigned long                 mvee::can_run                             = 0;
+std::string                            mvee::config_file_name                    = "MVEE.ini";
+bool                                   mvee::config_show                         = false;
+std::string                            mvee::config_variant_set                  = "default";
+Json::Value                            mvee::config;
+Json::Value*                           mvee::config_monitor                      = NULL;
+Json::Value*                           mvee::config_variant_global               = NULL;
+Json::Value*                           mvee::config_variant_exec                 = NULL;
 
 /*-----------------------------------------------------------------------------
     Prototypes
@@ -136,7 +108,8 @@ std::deque<std::string> mvee::strsplit(const std::string &s, char delim)
 bool mvee::str_ends_with(std::string& search_in_str, const char* suffix)
 {
     std::string search_for_str(suffix);
-    return search_in_str.size() >= search_for_str.size() && search_in_str.rfind(search_for_str) == (search_in_str.size()-search_for_str.size());
+    return search_in_str.size() >= search_for_str.size() && 
+		search_in_str.rfind(search_for_str) == (search_in_str.size()-search_for_str.size());
 }
 
 /*-----------------------------------------------------------------------------
@@ -169,6 +142,16 @@ bool mvee::is_printable_string(char* str, int len)
 }
 
 /*-----------------------------------------------------------------------------
+    upcase
+-----------------------------------------------------------------------------*/
+std::string mvee::upcase(const char* lower_case_string)
+{
+	std::string out(lower_case_string);
+	std::transform(out.begin(), out.end(), out.begin(), ::toupper);
+	return out;
+}
+
+/*-----------------------------------------------------------------------------
     mvee_old_sigset_to_new_sigset
 -----------------------------------------------------------------------------*/
 sigset_t mvee::old_sigset_to_new_sigset(unsigned long old_sigset)
@@ -186,21 +169,86 @@ sigset_t mvee::old_sigset_to_new_sigset(unsigned long old_sigset)
 }
 
 /*-----------------------------------------------------------------------------
-    mvee_mon_prepare_argv - serializes the program arguments
+    get_alias - RAVEN-style aliasing
 -----------------------------------------------------------------------------*/
-std::string mvee::prepare_argv()
+std::string mvee::get_alias(int variantnum, std::string path)
 {
-    assert(mvee::demo_args.size() > 0);
-    std::stringstream ss;
+//	warnf("Looking for alias of %s in variant %d\n", path.c_str(), variantnum);
+	auto alias = aliases[variantnum].find(path);
+	if (alias != aliases[variantnum].end())
+		return alias->second;
 
-    for (unsigned i = 0; i < mvee::demo_args.size(); ++i)
-    {
-        if (i) ss << " ";
-        ss << mvee::demo_args[i];
-    }
+	if (path.find("/dev/shm/") == 0 ||
+		path.find("/run/shm/") == 0)
+	{
+		std::stringstream ss;
+		ss << path << "_variant" << variantnum;
+		return ss.str();
+	}
 
-    return ss.str();
+	return "";
 }
+
+/*-----------------------------------------------------------------------------
+    init_aliases
+-----------------------------------------------------------------------------*/
+void mvee::init_aliases()
+{
+	aliases.resize(mvee::numvariants);
+	reverse_aliases.resize(mvee::numvariants);
+
+	for (int i = 0; i < mvee::numvariants; ++i)
+	{
+		Json::Value& variant_config =
+			mvee::config["variant"]["specs"][mvee::variant_ids[i]]["exec"];
+
+		if (!variant_config["alias"])
+			continue;
+
+		for (auto alias : variant_config["alias"])
+		{
+			auto str = alias.asString();
+			size_t pos = str.find("=");
+			if (pos != std::string::npos)
+			{
+				std::string pattern     = str.substr(0, pos);
+				std::string replacement = str.substr(pos + 1);
+
+				aliases[i].insert(std::make_pair(pattern, replacement));
+				reverse_aliases[i].insert(std::make_pair(pattern, replacement));
+			}	
+		}
+	}
+}
+
+/*-----------------------------------------------------------------------------
+    are_aliases - check if all of these paths are aliases of the same source path
+-----------------------------------------------------------------------------*/
+bool mvee::are_aliases(std::vector<std::string> paths)
+{
+	std::string cmp;
+	
+	for (int i = 0; i < mvee::numvariants; ++i)
+	{
+		auto source = reverse_aliases[i].find(paths[i]);
+		if (source == reverse_aliases[i].end())
+			return false;
+
+		if (cmp == "")
+		{
+			cmp = source->second;
+			continue;
+		}
+		else
+		{
+			if (cmp != source->second)
+				return false;
+		}			 
+	}
+
+	return true;
+}
+
 /*-----------------------------------------------------------------------------
     map_master_to_slave_pids
 -----------------------------------------------------------------------------*/
@@ -223,6 +271,16 @@ bool mvee::map_master_to_slave_pids(pid_t master_pid, std::vector<pid_t>& slave_
     }
 
     return true;
+}
+
+/*-----------------------------------------------------------------------------
+    is_monitored_variant
+-----------------------------------------------------------------------------*/
+bool mvee::is_monitored_variant(pid_t variant_pid)
+{
+	MutexLock lock(&mvee::global_lock);
+	return mvee::variant_pid_mapping.find(variant_pid) !=
+		mvee::variant_pid_mapping.end();
 }
 
 /*-----------------------------------------------------------------------------
@@ -286,12 +344,12 @@ std::string mvee::os_get_orig_working_dir()
 -----------------------------------------------------------------------------*/
 std::string mvee::os_get_mvee_root_dir()
 {
-    if (!mvee::config.mvee_root_path || strlen(mvee::config.mvee_root_path) == 0)
+    if ((*mvee::config_monitor)["root_path"].isNull() ||
+		strlen((*mvee::config_monitor)["root_path"].asCString()) == 0)
     {
-        char        command[500];
-        sprintf(command, "readlink -f /proc/%d/exe | sed 's/\\(.*\\)\\/.*/\\1\\/..\\/..\\/..\\//' | xargs readlink -f | tr -d '\\n'", getpid());
-
-        std::string out = mvee::log_read_from_proc_pipe(command, NULL);
+		char cmd[500];
+		sprintf(cmd, "readlink -f /proc/%d/exe | sed 's/\\(.*\\)\\/.*/\\1\\/..\\/..\\/..\\//' | xargs readlink -f | tr -d '\\n'", getpid());
+        std::string out = mvee::log_read_from_proc_pipe(cmd, NULL);
 
         if (out != "")
         {
@@ -299,16 +357,16 @@ std::string mvee::os_get_mvee_root_dir()
             {
                 warnf("root path does not make sense. the mvee is possibly running under valgrind/gdb\n");
                 warnf("using /home/stijn/MVEE as the root dir instead\n");
-                mvee::config.mvee_root_path = mvee::strdup("/home/stijn/MVEE");
+                (*mvee::config_monitor)["root_path"] = "/home/stijn/MVEE";
             }
             else
             {
-                mvee::config.mvee_root_path = mvee::strdup(out.c_str());
+                (*mvee::config_monitor)["root_path"] = out;
             }
         }
     }
 
-    return std::string(mvee::config.mvee_root_path);
+    return (*mvee::config_monitor)["root_path"].asString();
 }
 
 /*-----------------------------------------------------------------------------
@@ -488,6 +546,33 @@ std::string mvee::os_get_interp()
 }
 
 /*-----------------------------------------------------------------------------
+    os_can_load_indirect - TODO: Add cache here
+-----------------------------------------------------------------------------*/
+bool mvee::os_can_load_indirect(std::string& file)
+{	
+    std::string cmd = "/usr/bin/readelf -d " + file + " 2>&1";
+    std::string dyn = mvee::log_read_from_proc_pipe(cmd.c_str(), NULL);
+
+	// invalid ELF file
+	if (dyn.find("Error") != std::string::npos)
+		return true;
+
+	// dynamic section found => We can use the LD_Loader
+	if (dyn.find("There is no dynamic section in this file.") == std::string::npos)
+		return true;
+
+	cmd = "/usr/bin/readelf -h " + file + " | grep Type 2>&1";
+	std::string header = mvee::log_read_from_proc_pipe(cmd.c_str(), NULL);
+
+	// statically linked, but PIE compiled
+	if (header.find("DYN") != std::string::npos)
+		return true;
+
+	// statically linked and position dependent => can't use LD_Loader
+	return false;
+}
+
+/*-----------------------------------------------------------------------------
     os_get_interp_for_file - if file is a script, return the interpreter for
     that script
 -----------------------------------------------------------------------------*/
@@ -565,7 +650,7 @@ bool mvee::os_add_interp_for_file(std::deque<char*>& add_to_queue, std::string& 
 std::string mvee::os_get_mvee_ld_loader()
 {
     std::stringstream ss;
-    ss << mvee::config.mvee_root_path << MVEE_LD_LOADER_PATH << MVEE_LD_LOADER_NAME;
+    ss << (*mvee::config_monitor)["root_path"].asString() << MVEE_LD_LOADER_PATH << MVEE_LD_LOADER_NAME;
     return ss.str();
 }
 
@@ -635,7 +720,7 @@ bool mvee::os_alloc_sysv_sharedmem(unsigned long alloc_size, int* id_ptr, int* s
 
 		if (*ptr_ptr == (void*)-1)
 		{
-			warnf("Failed to attach to shared memory block! err = %d (%s)\n", errno, strerror(errno));
+			warnf("Failed to attach to shared memory block! err = %d (%s)\n", errno, getTextualErrno(errno));
 			return false;
 		}
 	}
@@ -757,7 +842,7 @@ std::string mvee::os_get_rpath(std::string& binary)
 		}
 
 		char* path = realpath(rpath.c_str(), NULL);
-		mvee::warnf("realpath = %s (errno: %s)\n", path, strerror(errno));
+		mvee::warnf("realpath = %s (errno: %s)\n", path, getTextualErrno(errno));
 		if (path)
 		{
 			rpath = std::string(path);
@@ -821,7 +906,7 @@ char* mvee::open_signal_file()
 
     if (fd == -1)
     {
-        warnf("couldn't open signal file. Error = %d (%s)\n", errno, strerror(errno));
+        warnf("couldn't open signal file. Error = %d (%s)\n", errno, getTextualErrno(errno));
         return NULL;
     }
 
@@ -829,13 +914,13 @@ char* mvee::open_signal_file()
     int         numwritten  = write(fd, init_buf, 3);
     if (numwritten != 3)
     {
-        warnf("couldn't write to signal file. Error = %d (%s)\n", errno, strerror(errno));
+        warnf("couldn't write to signal file. Error = %d (%s)\n", errno, getTextualErrno(errno));
         return NULL;
     }
     signal_file = (char*)mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
     if (signal_file == (char*)-1)
     {
-        warnf("couldn't map signal file. Error = %d (%s)\n", errno, strerror(errno));
+        warnf("couldn't map signal file. Error = %d (%s)\n", errno, getTextualErrno(errno));
         return signal_file;
     }
 
@@ -1136,10 +1221,10 @@ void mvee::register_variants(std::vector<pid_t>& pids)
 -----------------------------------------------------------------------------*/
 void mvee::register_monitor(monitor* mon)
 {
-//    std::vector<pid_t> pids = mon->getpids();
-
-    {   MutexLock lock(&mvee::global_lock);
-        mvee::monitor_id_mapping.insert(std::pair<int, monitor*>(mon->monitorid, mon)); }
+    {
+		MutexLock lock(&mvee::global_lock);
+        mvee::monitor_id_mapping.insert(std::pair<int, monitor*>(mon->monitorid, mon));
+	}
 
     mon->signal_registration();
 }
@@ -1152,7 +1237,8 @@ void mvee::unregister_monitor(monitor* mon)
     std::map<int, monitor*>::iterator it;
     bool                              should_shutdown = false;
 
-    {   MutexLock lock(&mvee::global_lock);
+    {
+		MutexLock lock(&mvee::global_lock);
         it                           = monitor_id_mapping.find(mon->monitorid);
         if (it != monitor_id_mapping.end())
             monitor_id_mapping.erase(it);
@@ -1166,185 +1252,11 @@ void mvee::unregister_monitor(monitor* mon)
         pthread_cond_signal(&mvee::global_cond);
 
         if (mon == mvee::active_monitor)
-            mvee::active_monitor = NULL; }
+            mvee::active_monitor = NULL;
+	}
 
     if (should_shutdown)
         mvee::request_shutdown(false);
-}
-
-/*-----------------------------------------------------------------------------
-    mvee_config_to_config_t - stores the values from our own mvee_config
-    struct into libconfig's config_t struct, which can then be written to a file
------------------------------------------------------------------------------*/
-config_setting_t* mvee::config_setting_lookup_or_create(config_t* config, const char* path, int type)
-{
-    config_setting_t* setting = ::config_lookup(config, path);
-    if (!setting)
-        setting = config_setting_add(config_root_setting(config), path, type);
-    assert(setting);
-    return setting;
-}
-
-void mvee::config_store_uchar (config_t* config, const char* path, unsigned char value)
-{
-    config_setting_set_int(mvee::config_setting_lookup_or_create(config, path, CONFIG_TYPE_INT), value);
-}
-
-void mvee::config_store_string (config_t* config, const char* path, const char* value)
-{
-    config_setting_set_string(mvee::config_setting_lookup_or_create(config, path, CONFIG_TYPE_STRING), value);
-}
-
-void mvee::config_store(unsigned char config_type, config_t* config, const char* path, void* value)
-{
-    switch(config_type)
-    {
-        case CONFIG_TYPE_STRING:
-            mvee::config_store_string(config, path, *(const char**)value);
-            break;
-        case CONFIG_TYPE_NONE:
-            mvee::config_store_uchar(config, path, *(unsigned char*)value);
-            break;
-    }
-}
-
-void mvee::mvee_config_to_config_t (config_t* config)
-{
-    mvee::config_store(CONFIG_TYPE_NONE,   config, "use_ipmon",              &mvee::config.mvee_use_ipmon);
-    mvee::config_store(CONFIG_TYPE_NONE,   config, "hide_vdso",              &mvee::config.mvee_hide_vdso);
-    mvee::config_store(CONFIG_TYPE_NONE,   config, "intercept_tsc",          &mvee::config.mvee_intercept_tsc);
-    mvee::config_store(CONFIG_TYPE_NONE,   config, "use_dcl",                &mvee::config.mvee_use_dcl);
-    mvee::config_store(CONFIG_TYPE_NONE,   config, "allow_setaffinity",      &mvee::config.mvee_allow_setaffinity);
-    mvee::config_store(CONFIG_TYPE_NONE,   config, "use_system_libc",        &mvee::config.mvee_use_system_libc);
-    mvee::config_store(CONFIG_TYPE_NONE,   config, "use_system_libgomp",     &mvee::config.mvee_use_system_libgomp);
-    mvee::config_store(CONFIG_TYPE_NONE,   config, "use_system_libstdcpp",   &mvee::config.mvee_use_system_libstdcpp);
-    mvee::config_store(CONFIG_TYPE_NONE,   config, "use_system_libgfortran", &mvee::config.mvee_use_system_libgfortran);
-    mvee::config_store(CONFIG_TYPE_NONE,   config, "use_system_gnomelibs",   &mvee::config.mvee_use_system_gnomelibs);
-    mvee::config_store(CONFIG_TYPE_STRING, config, "root_path",              &mvee::config.mvee_root_path);
-    mvee::config_store(CONFIG_TYPE_STRING, config, "libc_path",              &mvee::config.mvee_libc_path);
-    mvee::config_store(CONFIG_TYPE_STRING, config, "libgomp_path",           &mvee::config.mvee_libgomp_path);
-    mvee::config_store(CONFIG_TYPE_STRING, config, "libstdcpp_path",         &mvee::config.mvee_libstdcpp_path);
-    mvee::config_store(CONFIG_TYPE_STRING, config, "libgfortran_path",       &mvee::config.mvee_libgfortran_path);
-    mvee::config_store(CONFIG_TYPE_STRING, config, "gnomelibs_path",         &mvee::config.mvee_gnomelibs_path);
-    mvee::config_store(CONFIG_TYPE_STRING, config, "spec2006_path",          &mvee::config.mvee_spec2006_path);
-    mvee::config_store(CONFIG_TYPE_STRING, config, "parsec2_path",           &mvee::config.mvee_parsec2_path);
-    mvee::config_store(CONFIG_TYPE_STRING, config, "parsec3_path",           &mvee::config.mvee_parsec3_path);
-}
-
-/*-----------------------------------------------------------------------------
-    config_t_to_mvee_config - loads the values from libconfig's config_t
-    into our own mvee_config struct
------------------------------------------------------------------------------*/
-void mvee::config_lookup_uchar (config_t* config, const char* path, unsigned char* value)
-{
-    int tmp;
-    if (config_lookup_int(config, path, &tmp) == CONFIG_TRUE)
-        *value = tmp ? 1 : 0;
-}
-
-void mvee::config_lookup (unsigned char config_type, config_t* config, const char* path, void* value)
-{
-    switch(config_type)
-    {
-        case CONFIG_TYPE_STRING:
-            config_lookup_string(config, path, (const char**)value);
-            break;
-        case CONFIG_TYPE_NONE:
-            mvee::config_lookup_uchar(config, path, (unsigned char*)value);
-            break;
-    }
-}
-
-void mvee::config_t_to_mvee_config (config_t* config)
-{
-    mvee::config_lookup(CONFIG_TYPE_NONE,   config, "use_ipmon",              &mvee::config.mvee_use_ipmon);
-    mvee::config_lookup(CONFIG_TYPE_NONE,   config, "hide_vdso",              &mvee::config.mvee_hide_vdso);
-    mvee::config_lookup(CONFIG_TYPE_NONE,   config, "intercept_tsc",          &mvee::config.mvee_intercept_tsc);
-    mvee::config_lookup(CONFIG_TYPE_NONE,   config, "use_dcl",                &mvee::config.mvee_use_dcl);
-    mvee::config_lookup(CONFIG_TYPE_NONE,   config, "allow_setaffinity",      &mvee::config.mvee_allow_setaffinity);
-    mvee::config_lookup(CONFIG_TYPE_NONE,   config, "use_system_libc",        &mvee::config.mvee_use_system_libc);
-    mvee::config_lookup(CONFIG_TYPE_NONE,   config, "use_system_libgomp",     &mvee::config.mvee_use_system_libgomp);
-    mvee::config_lookup(CONFIG_TYPE_NONE,   config, "use_system_libstdcpp",   &mvee::config.mvee_use_system_libstdcpp);
-    mvee::config_lookup(CONFIG_TYPE_NONE,   config, "use_system_libgfortran", &mvee::config.mvee_use_system_libgfortran);
-    mvee::config_lookup(CONFIG_TYPE_NONE,   config, "use_system_gnomelibs",   &mvee::config.mvee_use_system_gnomelibs);
-    mvee::config_lookup(CONFIG_TYPE_STRING, config, "root_path",              &mvee::config.mvee_root_path);
-    mvee::config_lookup(CONFIG_TYPE_STRING, config, "libc_path",              &mvee::config.mvee_libc_path);
-    mvee::config_lookup(CONFIG_TYPE_STRING, config, "libgomp_path",           &mvee::config.mvee_libgomp_path);
-    mvee::config_lookup(CONFIG_TYPE_STRING, config, "libstdcpp_path",         &mvee::config.mvee_libstdcpp_path);
-    mvee::config_lookup(CONFIG_TYPE_STRING, config, "libgfortran_path",       &mvee::config.mvee_libgfortran_path);
-    mvee::config_lookup(CONFIG_TYPE_STRING, config, "gnomelibs_path",         &mvee::config.mvee_gnomelibs_path);
-    mvee::config_lookup(CONFIG_TYPE_STRING, config, "spec2006_path",          &mvee::config.mvee_spec2006_path);
-    mvee::config_lookup(CONFIG_TYPE_STRING, config, "parsec2_path",           &mvee::config.mvee_parsec2_path);
-    mvee::config_lookup(CONFIG_TYPE_STRING, config, "parsec3_path",           &mvee::config.mvee_parsec3_path);
-}
-
-/*-----------------------------------------------------------------------------
-    init_config - reads MVEE.ini or initializes this file with default
-    values if it doesn't exist yet.
------------------------------------------------------------------------------*/
-void mvee::init_config()
-{
-    if (mvee::config.config)
-    {
-        config_destroy(mvee::config.config);
-        delete mvee::config.config;
-    }
-
-    mvee::config.config = new config_t;
-    config_init(mvee::config.config);
-
-    if (config_read_file(mvee::config.config, "MVEE.ini") != CONFIG_TRUE)
-    {
-        fprintf(stderr, "Couldn't read the MVEE config file (MVEE.ini) - we will try to write a new one!\n");
-
-        mvee::mvee_config_to_config_t(mvee::config.config);
-        if (config_write_file(mvee::config.config, "MVEE.ini") != CONFIG_TRUE)
-            fprintf(stderr, "Couldn't write the MVEE config (MVEE.ini)\n");
-        else
-            fprintf(stderr, "Wrote the default MVEE config to MVEE.ini\n");
-        return;
-    }
-
-    mvee::config_t_to_mvee_config(mvee::config.config);
-}
-
-/*-----------------------------------------------------------------------------
-    process_opt
------------------------------------------------------------------------------*/
-void mvee::process_opt(char* opt)
-{
-    if (!strcasecmp(opt, "-s"))
-        mvee::print_to_stdout = true;
-    else if (!strcasecmp(opt, "-n"))
-        mvee::no_monitoring = true;
-#ifdef MVEE_ALLOW_PERF
-    else if (!strcasecmp(opt, "-p"))
-        mvee::use_perf = true;
-#endif
-    // all other arguments are passed to the demo
-    else if (mvee::demo_num != -1)
-        mvee::demo_args.push_back(std::string(opt));
-}
-
-/*-----------------------------------------------------------------------------
-    add_library_path -
------------------------------------------------------------------------------*/
-void mvee::add_library_path(const char* library_path, bool append_arch_suffix, bool prepend_mvee_root)
-{
-    if (mvee::custom_library_path.size() > 0)
-        mvee::custom_library_path += ":";
-
-    if (prepend_mvee_root)
-    {
-        mvee::custom_library_path += mvee::config.mvee_root_path;
-        mvee::custom_library_path += "/";
-    }
-    mvee::custom_library_path += library_path;
-    if (append_arch_suffix)
-    {
-        mvee::custom_library_path += MVEE_ARCH_SUFFIX;
-        mvee::custom_library_path += "/";
-    }
 }
 
 /*-----------------------------------------------------------------------------
@@ -1373,49 +1285,6 @@ void mvee_mon_external_termination_request(int sig)
 }
 
 /*-----------------------------------------------------------------------------
-    start_variant_direct - We use this in MVEE_demos.cpp to start programs
-	directly (i.e. without interpreting the startup command line using a shell
------------------------------------------------------------------------------*/
-void mvee::start_variant_direct(const char* binary, ...)
-{
-	std::deque<const char*> args;
-	va_list va;
-	const char* arg;
-
-	args.push_back(binary);
-	va_start(va, binary);
-	do
-	{
-		arg = va_arg(va, const char*);
-		args.push_back(arg);
-	} while (arg);
-	va_end(va);
-	args.push_back(NULL);
-
-	const char** _args = new const char*[args.size()];
-	int i = 0;
-	for (auto _arg : args)
-		_args[i++] = _arg;
-
-	// this should not return
-	execv(binary, (char* const*)_args);
-
-	printf("ERROR: Failed to start variant directly\n");
-}
-
-/*-----------------------------------------------------------------------------
-    start_variant_indirect - This is called if the MVEE is invoked using:
-	./MVEE <number of variants> -- <cmd>
-
-	We pass the cmd to /bin/bash because it is really clever and knows how
-	to interpret whatever the cmd is.
------------------------------------------------------------------------------*/
-void mvee::start_variant_indirect(const char* cmd)
-{
-	execl("/bin/bash", "bash", "-c", cmd, NULL);
-}
-
-/*-----------------------------------------------------------------------------
     start_unmonitored - Just forks off <mvee::numvariants> variants, starts them
     and immediately stops them with SIGSTOP. The monitor then starts the timer
     and immediately resumes all variants
@@ -1426,7 +1295,6 @@ void mvee::start_unmonitored()
     std::vector<int>   terminated(mvee::numvariants);
     std::vector<pid_t> pids(mvee::numvariants);
     int                i;
-    int                status;
 
     for (i = 0; i < mvee::numvariants; ++i)
     {
@@ -1439,16 +1307,10 @@ void mvee::start_unmonitored()
 
     if (i < mvee::numvariants)
     {
-        mvee::setup_env(mvee::demo_num, true);
-
+        mvee::setup_env(true);
 		// raise SIGSTOP so the monitor process can attach before we exec
         kill(getpid(), SIGSTOP);
-
-		// demo_num will be != 1 if we invoke the MVEE using ./MVEE <demo num> <number of variants>
-        if (mvee::demo_num != -1)
-            mvee::start_demo(mvee::demo_num, i, true);
-        else
-			mvee::start_variant_indirect(mvee::prepare_argv().c_str());
+		start_variant(i);
     }
     else
     {
@@ -1461,22 +1323,30 @@ void mvee::start_unmonitored()
         // Resume all variants
         while (!all_resumed)
         {
-            int tmp = wait4(-1, &status, WUNTRACED, NULL);
-            if (WIFSTOPPED(status) && WSTOPSIG(status) == SIGSTOP)
-            {
-                kill(tmp, SIGCONT);
+			interaction::mvee_wait_status status;
 
-                for (i = 0; i < mvee::numvariants; ++i)
-                    if (tmp == pids[i])
-                        resumed[i] = 1;
+			if (!interaction::wait(-1, status, false, false) ||
+				status.reason != STOP_SIGNAL ||
+				status.data != SIGSTOP)
+			{
+				warnf("Failed to wait for children - error: %s - status: %s\n",
+					  getTextualErrno(errno), getTextualMVEEWaitStatus(status).c_str());
+				exit(-1);
+				return;
+			}
+           
+			kill(status.pid, SIGCONT);
 
-                for (i = 0; i < mvee::numvariants; ++i)
-                    if (!resumed[i])
-                        break;
+			for (i = 0; i < mvee::numvariants; ++i)
+				if (status.pid == pids[i])
+					resumed[i] = 1;
 
-                if (i >= mvee::numvariants)
-                    all_resumed = true;
-            }
+			for (i = 0; i < mvee::numvariants; ++i)
+				if (!resumed[i])
+					break;
+
+			if (i >= mvee::numvariants)
+				all_resumed = true;
         }
 
         for (i = 0; i < mvee::numvariants; ++i)
@@ -1486,11 +1356,23 @@ void mvee::start_unmonitored()
         // Now wait for all variants to terminate...
         while (!all_terminated)
         {
-            int tmp = wait4(-1, &status, WUNTRACED, NULL);
-            if (WIFEXITED(status))
+			interaction::mvee_wait_status status;
+
+			if (!interaction::wait(-1, status, false, false) ||
+				(status.reason != STOP_EXIT && 
+				 status.reason != STOP_SIGNAL))
+			{
+				warnf("Failed to wait for children - error: %s - status: %s\n",
+					  getTextualErrno(errno), 
+					  getTextualMVEEWaitStatus(status).c_str());
+				exit(-1);
+				return;
+			}
+
+            if (status.reason == STOP_EXIT)
             {
                 for (i = 0; i < mvee::numvariants; ++i)
-                    if (tmp == pids[i])
+                    if (status.pid == pids[i])
                         terminated[i] = 1;
 
                 for (i = 0; i < mvee::numvariants; ++i)
@@ -1500,10 +1382,11 @@ void mvee::start_unmonitored()
                 if (i >= mvee::numvariants)
                     all_terminated = true;
             }
-            else if (WIFSTOPPED(status) && WSTOPSIG(status) == SIGSTOP)
+            else if (status.reason == STOP_SIGNAL && 
+					 status.data == SIGSTOP)
             {
                 for (i = 0; i < mvee::numvariants; ++i)
-                    if (tmp == pids[i])
+                    if (status.pid == pids[i])
                         resumed[i] = 1;
 
                 for (i = 0; i < mvee::numvariants; ++i)
@@ -1538,7 +1421,7 @@ void mvee::start_unmonitored()
 -----------------------------------------------------------------------------*/
 void mvee::start_monitored()
 {
-    int                i, res, status;
+    int                i;
     std::vector<pid_t> procs(mvee::numvariants);
     sigset_t           set;
     sigemptyset(&set);
@@ -1567,7 +1450,6 @@ void mvee::start_monitored()
         pthread_sigmask(SIG_UNBLOCK, &set, NULL);
 
         mvee::active_monitor = new monitor(procs);
-        mvee::set_demo_options(mvee::demo_num);
 
         // Install signal handlers for SIGINT and SIGQUIT so we can shut down safely after CTRL+C
         signal(SIGINT,  mvee_mon_external_termination_request);
@@ -1575,10 +1457,19 @@ void mvee::start_monitored()
 
         for (int i = 0; i < mvee::numvariants; ++i)
         {
-            res = wait4(procs[i], &status, 0, NULL);
+			interaction::mvee_wait_status status;
 
-            if (WIFSTOPPED(status) && res > 0)
-                mvee_wrap_ptrace(PTRACE_DETACH, procs[i], 0, NULL);
+			if (!interaction::wait(procs[i], status, false, false, false))
+			{
+				warnf("Failed to wait for children - errno: %s - status: %s\n",
+					  getTextualErrno(errno), getTextualMVEEWaitStatus(status).c_str());
+				exit(-1);
+				return;
+			}
+
+            if (status.reason == STOP_SIGNAL)
+				if (!interaction::detach(procs[i]))
+					warnf("Failed to detach from variant %d\n", i);
         }
 
         mvee::register_monitor(mvee::active_monitor);
@@ -1615,7 +1506,10 @@ void mvee::start_monitored()
             if (mvee::shutdown_signal)
             {
                 if (signal_file && signal_file[0] == '1')
+				{
+					warnf("Shutdown requested by MVEE_backtrace\n");
                     mvee::shutdown_should_generate_backtraces = true;
+				}
                 mvee::unlock();
                 mvee::shutdown(mvee::shutdown_signal,
                                mvee::shutdown_should_generate_backtraces ? 1 : 0);
@@ -1633,11 +1527,11 @@ void mvee::start_monitored()
     // If the process is a variant, prepare it for tracing
     else
     {
-        mvee::setup_env(mvee::demo_num, false);
+        mvee::setup_env(false);
 
         // We can disable the TSC right away
         // the tsc disable flag is inherited across forks, clones and execves...
-        if (mvee::config.mvee_intercept_tsc)
+        if ((*mvee::config_variant_global)["intercept_tsc"].asBool())
             prctl(PR_SET_TSC, PR_TSC_SIGSEGV, 0, 0, 0);
 
 #ifdef MVEE_TASKSWITCH_OVERHEAD_BENCHMARK
@@ -1649,98 +1543,286 @@ void mvee::start_monitored()
 #endif
 
 
-        // Place the new variant under supervision
-        // Not that this does not stop the variant.
-        // We will raise a SIGSTOP so the parent can set ptrace options
-        // and can issue a PTRACE_SYSCALL request
-        mvee_wrap_ptrace(PTRACE_TRACEME, 0, 0, NULL);
+        // Place the new variant under supervision of the main thread of the
+		// monitor process.
+        if (!interaction::accept_tracing())
+			fprintf(stderr, "Couldn't accept tracing\n");
 
-        // stop the process so we can detach from it
+        // Stop the variant so we can detach the main monitor thread.
         raise(SIGSTOP);
 
+		// Wait in a busy loop while we wait for the designated monitor
+		// thread to attach
         while (!mvee::can_run)
             ;
 
-        if (mvee::demo_num != -1)
-            mvee::start_demo(mvee::demo_num, i, false);
-        else
-			mvee::start_variant_indirect(mvee::prepare_argv().c_str());
+		// The monitor thread is now attached. It is now safe to execve
+		start_variant(i);
     }
 }
 
 /*-----------------------------------------------------------------------------
-    Main
+    usage
+-----------------------------------------------------------------------------*/
+static void usage()
+{
+	printf("======================================================\n");
+	printf("   Ghent University Computer Systems Lab MVEE v4.0    \n");
+	printf("                 aka \"GHUMVEE\"                      \n");
+	printf("======================================================\n\n");
+	printf("Legacy Mode Syntax:\n");
+	printf("./MVEE [Builtin Configuration Number (see MVEE_config.cpp)] [MVEE Options]\n\n");
+	printf("RAVEN Mode Syntax:\n");
+	printf("./MVEE -s <variant set> -f <config file> [MVEE Options] -- [Program Args]\n\n");
+	printf("MVEE Options:\n");
+	printf("> -s <variant set> : run the specified variant set. If this option is omitted, GHUMVEE will launch variant set \"default\". NOTE: This option is ignored in legacy mode.\n");
+	printf("> -f <file name>   : use the monitor config in the specified file. If this option is omitted, the config will be read from MVEE.ini. NOTE: If the MVEE is run in legacy mode, then any options in the builtin config take precedence over the settings in the config file.\n");
+	printf("> -N <number of variants> : sets the number of variants. In RAVEN mode, this option can override the number of variants specified in the config file.\n");
+	printf("> -n : no monitoring. Variant processes are executed without supervision. Useful for benchmarking.\n");
+	printf("> -p : use performance counters to track cache and synchronization behavior of the variants.\n");
+	printf("> -o : log everything to stdout, as well as the log files. This flag is ignored if the MVEE is compiled with MVEE_BENCHMARK defined in MVEE_build_config.h\n");
+	printf("> -c : show the contents of the json config file after command line processing.\n");
+	printf("> In legacy mode, all arguments including and following the first non-option are passed as program arguments to the variants\n");
+}
+
+/*-----------------------------------------------------------------------------
+    add_argv
+-----------------------------------------------------------------------------*/
+void mvee::add_argv(const char* arg)
+{
+	if (!(*mvee::config_variant_exec)["argv"])
+		(*mvee::config_variant_exec)["argv"][0] = std::string(arg);
+	else
+		(*mvee::config_variant_exec)["argv"].append(std::string(arg));
+
+	// TODO: consider adding this to variant.specs too
+}
+
+/*-----------------------------------------------------------------------------
+    process_opts
+-----------------------------------------------------------------------------*/
+bool mvee::process_opts(int argc, char** argv, bool add_args)
+{
+	int opt;
+	bool stop = false;
+	while ((opt = getopt(argc, argv, ":s:f:N:npoc")) != -1 && !stop)
+	{
+		switch(opt)
+		{
+			case ':': // missing arg
+				if (!strcmp(argv[optind+1], "--"))
+				{
+					stop = true;
+					break;
+				}
+				else
+				{
+					usage();
+					return false;
+				}
+			case 's':
+				mvee::config_variant_set = std::string(optarg);
+				break;
+			case 'o':
+				(*mvee::config_monitor)["log_to_stdout"] = true;
+				break;
+			case 'N':
+				mvee::numvariants = strtoll(optarg, NULL, 10);
+				break;
+			case 'n':
+				(*mvee::config_variant_global)["disable_syscall_checks"] = true;
+				break;
+			case 'p':
+				(*mvee::config_variant_global)["performance_counting_enabled"] = true;
+				break;
+			case 'f': // we've already parsed the config file name
+				break;
+			case 'c':
+				mvee::config_show = true;
+				break;
+			default:
+				stop = true;
+				break;				
+		}
+	}
+
+	if (add_args)
+	{
+		for (int i = optind; i < argc; ++i)
+			add_argv(argv[i]);
+	}
+
+	return true;
+}
+
+/*-----------------------------------------------------------------------------
+    isnumeric
+-----------------------------------------------------------------------------*/
+static bool isnumeric(const char* str)
+{
+	while(*str)
+	{
+		char c = *str;
+		if (c < '0' || c > '9')
+			return false;
+		str++;
+	}
+	return true;
+}
+
+/*-----------------------------------------------------------------------------
+    Main - parse command line opts and launch monitor/variants
 -----------------------------------------------------------------------------*/
 int main(int argc, char *argv[])
 {
-    mvee::init_config();
-    mvee::os_check_ptrace_scope();
-    mvee::os_check_kernel_cmdline();
-    mvee::os_get_orig_working_dir();
-    mvee::os_get_mvee_root_dir();
-    mvee::os_reset_envp();
-    mvee::init_syslocks();
+	bool legacy_mode = true;
 
-    //
-    // Parse commandline options
-    //
     if (argc <= 2)
     {
-        printf("======================================================\n");
-        printf("   Ghent University Computer Systems Lab MVEE v4.0    \n");
-        printf("                 aka \"GHUMVEE\"                      \n");
-        printf("======================================================\n");
-        printf("> Syntax:\n\n");
-        printf("> ./MVEE [Demonum] [Number of Variants] [MVEE Options]\n");
-        printf("> OR\n");
-        printf("> ./MVEE [Number of Variants] [MVEE Options] -- [Program] [Program Args]\n");
-        printf("\n");
-        printf("> MVEE Options:\n");
-        printf("> -s : log to stdout. All logfile output is also printed to stdout.\n");
-        printf("> -n : no monitoring. Variant processes are executed without supervision. Useful for benchmarking.\n");
-#ifdef MVEE_ALLOW_PERF
-        printf("> -p : use performance counters to track cache and synchronization behavior of the variants.\n");
-#endif
-        return 0;
+		usage();
+		return 0;
     }
     else
     {
-        int i = 1, j;
+		mvee::os_check_ptrace_scope();
+		mvee::os_check_kernel_cmdline();
+		mvee::init_syslocks();
+		
+        int dash_pos, i = 1, builtin = 0;
 
-        mvee::demo_num = atoi(argv[1]);
-
-        for (; i < argc; ++i)
+		// Determine the mode we're launching in
+        for (dash_pos = 0; dash_pos < argc; ++dash_pos)
         {
-            if (!strcmp(argv[i], "--"))
+            if (!strcmp(argv[dash_pos], "--"))
             {
-                mvee::numvariants = mvee::demo_num;
-                mvee::demo_num    = -1;
+				legacy_mode = false;
                 break;
             }
         }
 
-        if (mvee::demo_num == -1)
+		// look for -f first and initialize the config
+		i = legacy_mode ? 3 : 1;
+		for (; i < argc; ++i)
+		{
+			if (!strcmp(argv[i], "-f"))
+			{
+				if (i + 1 < argc)
+					mvee::config_file_name = std::string(argv[i + 1]);
+				else
+					warnf("You must pass a filename after -f! Using MVEE.ini instead.\n");
+				break;
+			}
+		}
+
+		// Initialize the config before processing further cmdline options
+		mvee::init_config();
+		mvee::os_get_orig_working_dir();
+		mvee::os_get_mvee_root_dir();
+		mvee::os_reset_envp();
+
+        if (!legacy_mode)
         {
-            for (j = 2; j < i; ++j)
-                mvee::process_opt(argv[j]);
-            for (i = i + 1; i < argc; ++i)
-                mvee::demo_args.push_back(std::string(argv[i]));
+			// process all options before the --
+			if (!mvee::process_opts(argc, argv, false))
+				return -1;
+			
+			// Process everything after the "--" as program arguments
+            for (i = dash_pos + 1; i < argc; ++i)
+				mvee::add_argv(argv[i]);
         }
         else
         {
-            mvee::numvariants = atoi(argv[2]);
-            for (i = 3; i < argc; ++i)
-                mvee::process_opt(argv[i]);
+			if (!isnumeric(argv[1]))
+			{
+				usage();
+				return -1;
+			}
+
+			// discard any conflicting args we may have read from the config
+			mvee::config["variant"]["sets"].clear();
+			mvee::config["variant"]["specs"].clear();
+			if (!(*mvee::config_variant_exec)["path"].isNull() &&
+				(*mvee::config_variant_exec)["path"].isArray()) // it shouldn't be, but who knows...
+				(*mvee::config_variant_exec)["path"];
+			if (!(*mvee::config_variant_exec)["argv"].isNull() &&
+				(*mvee::config_variant_exec)["argv"].isArray())
+				(*mvee::config_variant_exec)["argv"].clear();
+			if (!(*mvee::config_variant_exec)["env"].isNull() &&
+				(*mvee::config_variant_exec)["env"].isArray())
+				(*mvee::config_variant_exec)["env"].clear();
+			
+			builtin = atoi(argv[1]);
+
+			// Pretend that argv[1] is the new argv[0]
+			if (!mvee::process_opts(argc - 1, &argv[1], true))
+				return -1;
+
+			mvee::set_builtin_config(builtin);
         }
     }
+
+	// select variants
+	if (!legacy_mode)
+	{
+		if (!mvee::config["variant"]["sets"][mvee::config_variant_set])
+		{
+			printf("Couldn't find variant set %s\n", mvee::config_variant_set.c_str());
+			return -1;
+		}
+
+		int limit = mvee::numvariants ? mvee::numvariants : mvee::config["variant"]["sets"][mvee::config_variant_set].size(), i = 0;
+		auto it = mvee::config["variant"]["sets"][mvee::config_variant_set].begin();
+		for (; i < limit; ++i)
+		{
+			if (it == mvee::config["variant"]["sets"][mvee::config_variant_set].end())
+				it = mvee::config["variant"]["sets"][mvee::config_variant_set].begin();
+
+			if (it == mvee::config["variant"]["sets"][mvee::config_variant_set].end())
+				break;
+
+			auto variant = *it;
+
+			// check if a variant.specs config exists for the specified variant
+			if (!mvee::config["variant"]["specs"][variant.asString()])
+			{
+				printf("Couldn't find config for variant %s in set %s\n",
+					   variant.asString().c_str(), mvee::config_variant_set.c_str());
+				return -1;
+			}
+			mvee::variant_ids.push_back(variant.asString());
+
+			it++;
+		}
+
+		mvee::numvariants = mvee::variant_ids.size();
+	}
+	else
+	{
+		// initialize variant ids
+		if (mvee::numvariants != 0)
+		{
+			mvee::variant_ids.resize(mvee::numvariants);
+			std::fill(mvee::variant_ids.begin(), mvee::variant_ids.end(), "null");
+		}
+	}
 
 	if (mvee::numvariants <= 0)
 	{
 		printf("Can't run GHUMVEE with %d variants!\n", mvee::numvariants);
+		usage();
 		return -1;
 	}
 
-    if (mvee::no_monitoring)
+	// Everything is set up so we can initialize the alias maps now
+	mvee::init_aliases();
+	
+	if (mvee::config_show)
+	{
+		Json::StyledWriter writer;
+		std::cout << "Using config: " << writer.write(mvee::config) << "\n";
+	}
+
+    if ((*mvee::config_variant_global)["disable_syscall_checks"].asBool())
         mvee::start_unmonitored();
     else
         mvee::start_monitored();

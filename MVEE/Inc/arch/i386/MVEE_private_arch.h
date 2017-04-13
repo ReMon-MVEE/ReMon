@@ -17,6 +17,11 @@
 //#define MVEE_SUPPORTS_IPMON
 
 /*-----------------------------------------------------------------------------
+  Hardware Breakpoint Support
+-----------------------------------------------------------------------------*/
+#define MVEE_HWBP_X86
+
+/*-----------------------------------------------------------------------------
   SPEC PROFILES
 -----------------------------------------------------------------------------*/
 #define SPECPROFILENOPIE           "build_base_spec2006_MVEE_thereisnopie_i386-nn.0000"
@@ -44,11 +49,13 @@
 /*-----------------------------------------------------------------------------
   String Constants
 -----------------------------------------------------------------------------*/
-#define STDHEXSTR(w, x) std::setw(w) << std::hex << std::setfill('0') << (unsigned long)(x) << std::setfill(' ') << std::setw(0)
+#define STDHEXSTR(w, x) std::setw(w) << std::hex << std::setfill('0') << (unsigned long)(x) << std::setfill(' ') << std::setw(0) << std::dec
 #define STDPTRSTR(x)    STDHEXSTR(8, x)
 #define LONGPTRSTR                 "%08lx"
 #define PTRSTR                     "%08x"
 #define LONGRESULTSTR              "%08d"
+#define OBJDUMP_ARCH               "i386"
+#define OBJDUMP_SUBARCH            "i386"
 
 /*-----------------------------------------------------------------------------
   DWARF Constants
@@ -71,29 +78,25 @@
 /*-----------------------------------------------------------------------------
   Register selection
 -----------------------------------------------------------------------------*/
-#define SYSCALL_REG                "eax"
-#define _GS_BASE(regs)                          regs.gs_base
-#define FASTCALL_ARG1(regs)                     regs.ecx
-#define IP(regs)                                regs.eip
-#define SP(regs)                                regs.esp
-#define FUNCTION_ARG1(regs)                     regs.ecx
-#define SYSCALL_NO(regs)                        regs.orig_eax
-#define FETCH_IP(variantnum, eip)                 int eip      = mvee_wrap_ptrace(PTRACE_PEEKUSER, variants[variantnum].variantpid, 4*EIP, NULL);
-#define FETCH_IP_DIRECT(variantnum, eip)          eip = mvee_wrap_ptrace(PTRACE_PEEKUSER, variants[variantnum].variantpid, 4*EIP, NULL);
-#define WRITE_IP(variantnum, eip)                 mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid, 4*EIP, (void*)(eip));
-#define WRITE_IP_PID(pid, eip)                  mvee_wrap_ptrace(PTRACE_POKEUSER, pid, 4*EIP, (void*)(eip));
-#define WRITE_SP(variantnum, eip)                 mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid, 4*UESP, (void*)(eip));
-#define WRITE_RDTSC_RESULT(variantnum, low, high)                                       \
-    mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid, 4*EDX, (void*)high); \
-    mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid, 4*EAX, (void*)low);
-#define FETCH_SYSCALL_NO(variantnum, callno)      long callno  = mvee_wrap_ptrace(PTRACE_PEEKUSER, variants[variantnum].variantpid, 4*ORIG_EAX, NULL);
-#define FETCH_SYSCALL_NO_PID(pid, callno)       long callno  = mvee_wrap_ptrace(PTRACE_PEEKUSER, pid, 4*ORIG_EAX, NULL);
-#define FETCH_SYSCALL_RETURN(variantnum, callret) long callret = mvee_wrap_ptrace(PTRACE_PEEKUSER, variants[variantnum].variantpid, 4*EAX, NULL);
-#define WRITE_SYSCALL_NO(variantnum, callno)      mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid, 4*ORIG_EAX, (void*)(callno));
-#define WRITE_NEW_SYSCALL_NO(variantnum, callno)  mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid, 4*EAX, (void*)(callno));
-#define WRITE_SYSCALL_RETURN(variantnum, callret) WRITE_NEW_SYSCALL_NO(variantnum, callret)
-#define WRITE_FASTCALL_ARG1(variantnum, arg)      mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid, 4*ECX, (void*)(arg));
-#define WRITE_FASTCALL_ARG1_PID(pid, arg)       mvee_wrap_ptrace(PTRACE_POKEUSER, pid, 4*ECX, (void*)(arg));
+#define SYSCALL_INS_LEN            2
+
+#define SYSCALL_NO_REG_OFFSET      (ORIG_EAX * 4)
+#define SYSCALL_RETURN_REG_OFFSET  (EAX * 4)
+#define SYSCALL_NEXT_REG_OFFSET    (EAX * 4
+#define IP_REG_OFFSET              (EIP * 4)
+#define SP_REG_OFFSET              (UESP * 4)
+#define FASTCALL_ARG1_REG_OFFSET   (ECX * 4)
+#define RDTSC_LOW_REG_OFFSET       (EAX * 4)
+#define RDTSC_HIGH_REG_OFFSET      (EDX * 4)
+
+#define _GS_BASE_IN_REGS(regs)        regs.gs_base
+#define FASTCALL_ARG1_IN_REGS(regs)   regs.ecx
+#define IP_IN_REGS(regs)              regs.eip
+#define SP_IN_REGS(regs)              regs.esp
+#define FUNCTION_ARG1_IN_REGS(regs)   regs.ecx
+#define SYSCALL_NO_IN_REGS(regs)      regs.orig_eax
+#define NEXT_SYSCALL_NO_IN_REGS(regs) regs.eax
+
 
 /*-----------------------------------------------------------------------------
   Syscall argument macros
@@ -108,24 +111,19 @@
 #define ARG4(variantnum)                          variants[variantnum].regs.esi
 #define ARG5(variantnum)                          variants[variantnum].regs.edi
 #define ARG6(variantnum)                          variants[variantnum].regs.ebp
-#define ORIGARG1(variantnum)                      variants[variantnum].orig_arg1
-
-//
-// Set a variant's CPU register
-//
-#define SET_VARIANT_REGISTER(variantnum, reg, value)						\
-    mvee_wrap_ptrace(PTRACE_POKEUSER, variants[variantnum].variantpid, 4 * reg, \
-                     (void*)value)
+#define SYSCALL_NO(variantnum)                    variants[variantnum].regs.orig_eax
+#define NEXT_SYSCALL_NO(variantnum)               variants[variantnum].regs.eax
 
 //
 // Change the syscall argument of a variant
 //
-#define SETARG1(variantnum, value)                SET_VARIANT_REGISTER(variantnum, EBX, (value))
-#define SETARG2(variantnum, value)                SET_VARIANT_REGISTER(variantnum, ECX, (value))
-#define SETARG3(variantnum, value)                SET_VARIANT_REGISTER(variantnum, EDX, (value))
-#define SETARG4(variantnum, value)                SET_VARIANT_REGISTER(variantnum, ESI, (value))
-#define SETARG5(variantnum, value)                SET_VARIANT_REGISTER(variantnum, EDI, (value))
-#define SETARG6(variantnum, value)                SET_VARIANT_REGISTER(variantnum, EBP, (value))
+#define SETARG1(variantnum, value)                interaction::write_specific_reg(variants[variantnum].variantpid, EBX * 4, (value))
+#define SETARG2(variantnum, value)                interaction::write_specific_reg(variants[variantnum].variantpid, ECX * 4, (value))
+#define SETARG3(variantnum, value)                interaction::write_specific_reg(variants[variantnum].variantpid, EDX * 4, (value))
+#define SETARG4(variantnum, value)                interaction::write_specific_reg(variants[variantnum].variantpid, ESI * 4, (value))
+#define SETARG5(variantnum, value)                interaction::write_specific_reg(variants[variantnum].variantpid, EDI * 4, (value))
+#define SETARG6(variantnum, value)                interaction::write_specific_reg(variants[variantnum].variantpid, EBP * 4, (value))
+#define SETSYSCALLNO(variantnum, value)           interaction::write_specific_reg(variants[variantnum].variantpid, ORIG_EAX * 4, (value))
 
 /*-----------------------------------------------------------------------------
   HDE Macros

@@ -12,7 +12,7 @@
     Includes
 -----------------------------------------------------------------------------*/
 #include <signal.h>
-#include "MVEE_config.h"
+#include "MVEE_build_config.h"
 
 /*-----------------------------------------------------------------------------
   SIGSETXID define, see nptl/pthreadP.h

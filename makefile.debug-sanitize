@@ -1,0 +1,16 @@
+#-----------------------------------------------------------------------------
+# Build-type specific configuration.
+#-----------------------------------------------------------------------------
+
+BUILD          = Debug-sanitize
+BUILD_CXX      = clang++
+BUILD_CXXFLAGS = -ggdb -std=c++14 -pedantic-errors -fno-omit-frame-pointer -fsanitize=address
+BUILD_LDFLAGS  = -fsanitize=address # -shared
+BUILD_OPT      = no
+
+#-----------------------------------------------------------------------------
+# Common configuration.
+#-----------------------------------------------------------------------------
+
+include make-common
+

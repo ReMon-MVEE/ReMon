@@ -1,6 +1,6 @@
-diff -r --unified -N glibc-2.19/crypt/crypt_util.c glibc-2.19-woc/crypt/crypt_util.c
+diff -N -r --unified glibc-2.19/crypt/crypt_util.c glibc-2.19-woc/crypt/crypt_util.c
 --- glibc-2.19/crypt/crypt_util.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/crypt/crypt_util.c	2016-03-31 13:07:41.515882650 -0700
++++ glibc-2.19-woc/crypt/crypt_util.c	2017-03-07 18:07:30.709256084 -0800
 @@ -360,10 +360,10 @@
    sb[2] = (long64*)__data->sb2; sb[3] = (long64*)__data->sb3;
  #endif
@@ -23,10 +23,10 @@ diff -r --unified -N glibc-2.19/crypt/crypt_util.c glibc-2.19-woc/crypt/crypt_ut
  #ifdef __GNU_LIBRARY__
  small_tables_done:
      __libc_lock_unlock(_ufc_tables_lock);
-diff -r --unified -N glibc-2.19/csu/libc-start.c glibc-2.19-woc/csu/libc-start.c
+diff -N -r --unified glibc-2.19/csu/libc-start.c glibc-2.19-woc/csu/libc-start.c
 --- glibc-2.19/csu/libc-start.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/csu/libc-start.c	2016-03-31 13:07:41.515882650 -0700
-@@ -104,6 +104,305 @@
++++ glibc-2.19-woc/csu/libc-start.c	2017-03-15 16:47:09.628338771 -0700
+@@ -104,6 +104,298 @@
  # define MAIN_AUXVEC_PARAM
  #endif
  
@@ -66,37 +66,30 @@ diff -r --unified -N glibc-2.19/csu/libc-start.c glibc-2.19-woc/csu/libc-start.c
 +#define unlikely(x)     __builtin_expect((x),0)
 +
 +/* MVEE PATCH:
-+   Checks wether or not all variants got HEAP_MAX_SIZE aligned heaps from
++   Checks wether or not all variants got ALIGNMENT aligned heaps from
 +   the previous mmap request. If some of them have not, ALL variants
 +   have to bail out and fall back to another heap allocation method.
 +   This ensures that the variants stay in sync with respect to future mm
 +   requests.
 +*/
-+#define HEAP_MIN_SIZE (32 * 1024)
-+#ifndef HEAP_MAX_SIZE
-+# ifdef DEFAULT_MMAP_THRESHOLD_MAX
-+#  define HEAP_MAX_SIZE (2 * DEFAULT_MMAP_THRESHOLD_MAX)
-+# else
-+#  define HEAP_MAX_SIZE (1024 * 1024) /* must be a power of two */
-+# endif
-+#endif
++#define ALIGNMENT 0x4000000
 +
 +int
-+mvee_all_heaps_aligned(char* heap)
++mvee_all_heaps_aligned(char* heap, unsigned long alloc_size)
 +{
 +  // if we're not running under MVEE control,
 +  // just check the alignment of the current heap
 +  if (!mvee_thread_local_queue)
-+    {
-+      if ((unsigned long)heap & (HEAP_MAX_SIZE-1))
-+	return 0;
++  {
++      if ((unsigned long)heap & (ALIGNMENT-1))
++		  return 0;
 +      return 1;
-+    }
++  }
 +
 +  // We ARE running under MVEE control
 +  // => ask the MVEE to check the alignments
 +  // of ALL heaps
-+  return syscall(MVEE_ALL_HEAPS_ALIGNED);
++  return syscall(MVEE_ALL_HEAPS_ALIGNED, heap, ALIGNMENT, alloc_size);
 +}
 +
 +/* 
@@ -332,9 +325,9 @@ diff -r --unified -N glibc-2.19/csu/libc-start.c glibc-2.19-woc/csu/libc-start.c
  STATIC int LIBC_START_MAIN (int (*main) (int, char **, char **
  					 MAIN_AUXVEC_DECL),
  			    int argc,
-diff -r --unified -N glibc-2.19/csu/Versions glibc-2.19-woc/csu/Versions
+diff -N -r --unified glibc-2.19/csu/Versions glibc-2.19-woc/csu/Versions
 --- glibc-2.19/csu/Versions	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/csu/Versions	2016-03-31 13:07:41.516882650 -0700
++++ glibc-2.19-woc/csu/Versions	2017-03-07 18:07:30.709256084 -0800
 @@ -4,6 +4,14 @@
    GLIBC_2.0 {
      # helper functions
@@ -350,9 +343,9 @@ diff -r --unified -N glibc-2.19/csu/Versions glibc-2.19-woc/csu/Versions
    }
    GLIBC_2.1 {
      # New special glibc functions.
-diff -r --unified -N glibc-2.19/inet/getnetgrent_r.c glibc-2.19-woc/inet/getnetgrent_r.c
+diff -N -r --unified glibc-2.19/inet/getnetgrent_r.c glibc-2.19-woc/inet/getnetgrent_r.c
 --- glibc-2.19/inet/getnetgrent_r.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/inet/getnetgrent_r.c	2016-03-31 13:07:41.516882650 -0700
++++ glibc-2.19-woc/inet/getnetgrent_r.c	2017-03-07 18:07:30.709256084 -0800
 @@ -50,7 +50,7 @@
    static service_user *startp;
    int no_more;
@@ -371,9 +364,3925 @@ diff -r --unified -N glibc-2.19/inet/getnetgrent_r.c glibc-2.19-woc/inet/getnetg
      }
    else
      {
-diff -r --unified -N glibc-2.19/malloc/arena.c glibc-2.19-woc/malloc/arena.c
+diff -N -r --unified glibc-2.19/intl/Makefile glibc-2.19-woc/intl/Makefile
+--- glibc-2.19/intl/Makefile	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/intl/Makefile	2017-03-15 11:22:03.229022229 -0700
+@@ -41,6 +41,15 @@
+ generated-dirs := domaindir localedir
+ 
+ ifneq (no,$(BISON))
++BISONVERGT2 := $(shell expr `bison -V | grep ^bison | sed 's/^.* //' | cut -f1 -d.` \> 2)
++plural.y: plural2.y plural3.y
++ifeq (0,$(BISONVERGT2))
++	cp plural2.y plural.y
++	cp plural-exp2.h plural-exp.h
++else
++	cp plural3.y plural.y
++	cp plural-exp3.h plural-exp.h
++endif
+ plural.c: plural.y
+ 	$(BISON) $(BISONFLAGS) $@ $^
+ endif
+diff -N -r --unified glibc-2.19/intl/plural2.y glibc-2.19-woc/intl/plural2.y
+--- glibc-2.19/intl/plural2.y	1969-12-31 16:00:00.000000000 -0800
++++ glibc-2.19-woc/intl/plural2.y	2017-03-07 18:07:08.557254589 -0800
+@@ -0,0 +1,409 @@
++%{
++/* Expression parsing for plural form selection.
++   Copyright (C) 2000-2014 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++   Written by Ulrich Drepper <drepper@cygnus.com>, 2000.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <http://www.gnu.org/licenses/>.  */
++
++/* The bison generated parser uses alloca.  AIX 3 forces us to put this
++   declaration at the beginning of the file.  The declaration in bison's
++   skeleton file comes too late.  This must come before <config.h>
++   because <config.h> may include arbitrary system headers.  */
++#if defined _AIX && !defined __GNUC__
++ #pragma alloca
++#endif
++#ifdef HAVE_CONFIG_H
++# include <config.h>
++#endif
++
++#include <stddef.h>
++#include <stdlib.h>
++#include <string.h>
++#include "plural-exp.h"
++
++/* The main function generated by the parser is called __gettextparse,
++   but we want it to be called PLURAL_PARSE.  */
++#ifndef _LIBC
++# define __gettextparse PLURAL_PARSE
++#endif
++
++#define YYLEX_PARAM	&((struct parse_args *) arg)->cp
++#define YYPARSE_PARAM	arg
++%}
++%pure_parser
++%expect 7
++
++%union {
++  unsigned long int num;
++  enum operator op;
++  struct expression *exp;
++}
++
++%{
++/* Prototypes for local functions.  */
++static struct expression *new_exp PARAMS ((int nargs, enum operator op,
++					   struct expression * const *args));
++static inline struct expression *new_exp_0 PARAMS ((enum operator op));
++static inline struct expression *new_exp_1 PARAMS ((enum operator op,
++						   struct expression *right));
++static struct expression *new_exp_2 PARAMS ((enum operator op,
++					     struct expression *left,
++					     struct expression *right));
++static inline struct expression *new_exp_3 PARAMS ((enum operator op,
++						   struct expression *bexp,
++						   struct expression *tbranch,
++						   struct expression *fbranch));
++static int yylex PARAMS ((YYSTYPE *lval, const char **pexp));
++static void yyerror PARAMS ((const char *str));
++
++/* Allocation of expressions.  */
++
++static struct expression *
++new_exp (nargs, op, args)
++     int nargs;
++     enum operator op;
++     struct expression * const *args;
++{
++  int i;
++  struct expression *newp;
++
++  /* If any of the argument could not be malloc'ed, just return NULL.  */
++  for (i = nargs - 1; i >= 0; i--)
++    if (args[i] == NULL)
++      goto fail;
++
++  /* Allocate a new expression.  */
++  newp = (struct expression *) malloc (sizeof (*newp));
++  if (newp != NULL)
++    {
++      newp->nargs = nargs;
++      newp->operation = op;
++      for (i = nargs - 1; i >= 0; i--)
++	newp->val.args[i] = args[i];
++      return newp;
++    }
++
++ fail:
++  for (i = nargs - 1; i >= 0; i--)
++    FREE_EXPRESSION (args[i]);
++
++  return NULL;
++}
++
++static inline struct expression *
++new_exp_0 (op)
++     enum operator op;
++{
++  return new_exp (0, op, NULL);
++}
++
++static inline struct expression *
++new_exp_1 (op, right)
++     enum operator op;
++     struct expression *right;
++{
++  struct expression *args[1];
++
++  args[0] = right;
++  return new_exp (1, op, args);
++}
++
++static struct expression *
++new_exp_2 (op, left, right)
++     enum operator op;
++     struct expression *left;
++     struct expression *right;
++{
++  struct expression *args[2];
++
++  args[0] = left;
++  args[1] = right;
++  return new_exp (2, op, args);
++}
++
++static inline struct expression *
++new_exp_3 (op, bexp, tbranch, fbranch)
++     enum operator op;
++     struct expression *bexp;
++     struct expression *tbranch;
++     struct expression *fbranch;
++{
++  struct expression *args[3];
++
++  args[0] = bexp;
++  args[1] = tbranch;
++  args[2] = fbranch;
++  return new_exp (3, op, args);
++}
++
++%}
++
++/* This declares that all operators have the same associativity and the
++   precedence order as in C.  See [Harbison, Steele: C, A Reference Manual].
++   There is no unary minus and no bitwise operators.
++   Operators with the same syntactic behaviour have been merged into a single
++   token, to save space in the array generated by bison.  */
++%right '?'		/*   ?		*/
++%left '|'		/*   ||		*/
++%left '&'		/*   &&		*/
++%left EQUOP2		/*   == !=	*/
++%left CMPOP2		/*   < > <= >=	*/
++%left ADDOP2		/*   + -	*/
++%left MULOP2		/*   * / %	*/
++%right '!'		/*   !		*/
++
++%token <op> EQUOP2 CMPOP2 ADDOP2 MULOP2
++%token <num> NUMBER
++%type <exp> exp
++
++%%
++
++start:	  exp
++	  {
++	    if ($1 == NULL)
++	      YYABORT;
++	    ((struct parse_args *) arg)->res = $1;
++	  }
++	;
++
++exp:	  exp '?' exp ':' exp
++	  {
++	    $$ = new_exp_3 (qmop, $1, $3, $5);
++	  }
++	| exp '|' exp
++	  {
++	    $$ = new_exp_2 (lor, $1, $3);
++	  }
++	| exp '&' exp
++	  {
++	    $$ = new_exp_2 (land, $1, $3);
++	  }
++	| exp EQUOP2 exp
++	  {
++	    $$ = new_exp_2 ($2, $1, $3);
++	  }
++	| exp CMPOP2 exp
++	  {
++	    $$ = new_exp_2 ($2, $1, $3);
++	  }
++	| exp ADDOP2 exp
++	  {
++	    $$ = new_exp_2 ($2, $1, $3);
++	  }
++	| exp MULOP2 exp
++	  {
++	    $$ = new_exp_2 ($2, $1, $3);
++	  }
++	| '!' exp
++	  {
++	    $$ = new_exp_1 (lnot, $2);
++	  }
++	| 'n'
++	  {
++	    $$ = new_exp_0 (var);
++	  }
++	| NUMBER
++	  {
++	    if (($$ = new_exp_0 (num)) != NULL)
++	      $$->val.num = $1;
++	  }
++	| '(' exp ')'
++	  {
++	    $$ = $2;
++	  }
++	;
++
++%%
++
++void
++internal_function
++FREE_EXPRESSION (exp)
++     struct expression *exp;
++{
++  if (exp == NULL)
++    return;
++
++  /* Handle the recursive case.  */
++  switch (exp->nargs)
++    {
++    case 3:
++      FREE_EXPRESSION (exp->val.args[2]);
++      /* FALLTHROUGH */
++    case 2:
++      FREE_EXPRESSION (exp->val.args[1]);
++      /* FALLTHROUGH */
++    case 1:
++      FREE_EXPRESSION (exp->val.args[0]);
++      /* FALLTHROUGH */
++    default:
++      break;
++    }
++
++  free (exp);
++}
++
++
++static int
++yylex (lval, pexp)
++     YYSTYPE *lval;
++     const char **pexp;
++{
++  const char *exp = *pexp;
++  int result;
++
++  while (1)
++    {
++      if (exp[0] == '\0')
++	{
++	  *pexp = exp;
++	  return YYEOF;
++	}
++
++      if (exp[0] != ' ' && exp[0] != '\t')
++	break;
++
++      ++exp;
++    }
++
++  result = *exp++;
++  switch (result)
++    {
++    case '0': case '1': case '2': case '3': case '4':
++    case '5': case '6': case '7': case '8': case '9':
++      {
++	unsigned long int n = result - '0';
++	while (exp[0] >= '0' && exp[0] <= '9')
++	  {
++	    n *= 10;
++	    n += exp[0] - '0';
++	    ++exp;
++	  }
++	lval->num = n;
++	result = NUMBER;
++      }
++      break;
++
++    case '=':
++      if (exp[0] == '=')
++	{
++	  ++exp;
++	  lval->op = equal;
++	  result = EQUOP2;
++	}
++      else
++	result = YYERRCODE;
++      break;
++
++    case '!':
++      if (exp[0] == '=')
++	{
++	  ++exp;
++	  lval->op = not_equal;
++	  result = EQUOP2;
++	}
++      break;
++
++    case '&':
++    case '|':
++      if (exp[0] == result)
++	++exp;
++      else
++	result = YYERRCODE;
++      break;
++
++    case '<':
++      if (exp[0] == '=')
++	{
++	  ++exp;
++	  lval->op = less_or_equal;
++	}
++      else
++	lval->op = less_than;
++      result = CMPOP2;
++      break;
++
++    case '>':
++      if (exp[0] == '=')
++	{
++	  ++exp;
++	  lval->op = greater_or_equal;
++	}
++      else
++	lval->op = greater_than;
++      result = CMPOP2;
++      break;
++
++    case '*':
++      lval->op = mult;
++      result = MULOP2;
++      break;
++
++    case '/':
++      lval->op = divide;
++      result = MULOP2;
++      break;
++
++    case '%':
++      lval->op = module;
++      result = MULOP2;
++      break;
++
++    case '+':
++      lval->op = plus;
++      result = ADDOP2;
++      break;
++
++    case '-':
++      lval->op = minus;
++      result = ADDOP2;
++      break;
++
++    case 'n':
++    case '?':
++    case ':':
++    case '(':
++    case ')':
++      /* Nothing, just return the character.  */
++      break;
++
++    case ';':
++    case '\n':
++    case '\0':
++      /* Be safe and let the user call this function again.  */
++      --exp;
++      result = YYEOF;
++      break;
++
++    default:
++      result = YYERRCODE;
++#if YYDEBUG != 0
++      --exp;
++#endif
++      break;
++    }
++
++  *pexp = exp;
++
++  return result;
++}
++
++
++static void
++yyerror (str)
++     const char *str;
++{
++  /* Do nothing.  We don't print error messages here.  */
++}
+diff -N -r --unified glibc-2.19/intl/plural3.y glibc-2.19-woc/intl/plural3.y
+--- glibc-2.19/intl/plural3.y	1969-12-31 16:00:00.000000000 -0800
++++ glibc-2.19-woc/intl/plural3.y	2017-03-15 11:22:55.375025749 -0700
+@@ -0,0 +1,409 @@
++%{
++/* Expression parsing for plural form selection.
++   Copyright (C) 2000, 2001 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++   Written by Ulrich Drepper <drepper@cygnus.com>, 2000.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, write to the Free
++   Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
++   02111-1307 USA.  */
++
++/* The bison generated parser uses alloca.  AIX 3 forces us to put this
++   declaration at the beginning of the file.  The declaration in bison's
++   skeleton file comes too late.  This must come before <config.h>
++   because <config.h> may include arbitrary system headers.  */
++#if defined _AIX && !defined __GNUC__
++ #pragma alloca
++#endif
++#ifdef HAVE_CONFIG_H
++# include <config.h>
++#endif
++
++#include <stddef.h>
++#include <stdlib.h>
++#include <string.h>
++#include "plural-exp.h"
++
++/* The main function generated by the parser is called __gettextparse,
++   but we want it to be called PLURAL_PARSE.  */
++#ifndef _LIBC
++# define __gettextparse PLURAL_PARSE
++#endif
++	%}
++%param {struct parse_args *arg}
++%define api.pure full
++%expect 7
++
++%union {
++	unsigned long int num;
++	enum operator op;
++	struct expression *exp;
++}
++
++%{
++/* Prototypes for local functions.  */
++	static struct expression *new_exp PARAMS ((int nargs, enum operator op,
++											   struct expression * const *args));
++	static inline struct expression *new_exp_0 PARAMS ((enum operator op));
++	static inline struct expression *new_exp_1 PARAMS ((enum operator op,
++														struct expression *right));
++	static struct expression *new_exp_2 PARAMS ((enum operator op,
++												 struct expression *left,
++												 struct expression *right));
++	static inline struct expression *new_exp_3 PARAMS ((enum operator op,
++														struct expression *bexp,
++														struct expression *tbranch,
++														struct expression *fbranch));
++	static int yylex PARAMS ((YYSTYPE *lval, struct parse_args *arg));
++	static void yyerror PARAMS ((struct parse_args *arg, const char *str));
++
++/* Allocation of expressions.  */
++
++static struct expression *
++	new_exp (nargs, op, args)
++	int nargs;
++enum operator op;
++struct expression * const *args;
++{
++	int i;
++	struct expression *newp;
++
++	/* If any of the argument could not be malloc'ed, just return NULL.  */
++	for (i = nargs - 1; i >= 0; i--)
++		if (args[i] == NULL)
++			goto fail;
++
++	/* Allocate a new expression.  */
++	newp = (struct expression *) malloc (sizeof (*newp));
++	if (newp != NULL)
++    {
++		newp->nargs = nargs;
++		newp->operation = op;
++		for (i = nargs - 1; i >= 0; i--)
++			newp->val.args[i] = args[i];
++		return newp;
++    }
++
++fail:
++	for (i = nargs - 1; i >= 0; i--)
++		FREE_EXPRESSION (args[i]);
++
++	return NULL;
++}
++
++static inline struct expression *
++	new_exp_0 (op)
++	enum operator op;
++{
++	return new_exp (0, op, NULL);
++}
++
++static inline struct expression *
++	new_exp_1 (op, right)
++	enum operator op;
++struct expression *right;
++{
++	struct expression *args[1];
++
++	args[0] = right;
++	return new_exp (1, op, args);
++}
++
++static struct expression *
++	new_exp_2 (op, left, right)
++	enum operator op;
++struct expression *left;
++struct expression *right;
++{
++	struct expression *args[2];
++
++	args[0] = left;
++	args[1] = right;
++	return new_exp (2, op, args);
++}
++
++static inline struct expression *
++	new_exp_3 (op, bexp, tbranch, fbranch)
++	enum operator op;
++struct expression *bexp;
++struct expression *tbranch;
++struct expression *fbranch;
++{
++	struct expression *args[3];
++
++	args[0] = bexp;
++	args[1] = tbranch;
++	args[2] = fbranch;
++	return new_exp (3, op, args);
++}
++
++%}
++
++/* This declares that all operators have the same associativity and the
++   precedence order as in C.  See [Harbison, Steele: C, A Reference Manual].
++   There is no unary minus and no bitwise operators.
++   Operators with the same syntactic behaviour have been merged into a single
++   token, to save space in the array generated by bison.  */
++%right '?'/*   ?*/
++%left '|'/*   ||*/
++%left '&'/*   &&*/
++%left EQUOP2/*   == !=*/
++%left CMPOP2/*   < > <= >=*/
++%left ADDOP2/*   + -*/
++%left MULOP2/*   * / %*/
++%right '!'/*   !*/
++
++%token <op> EQUOP2 CMPOP2 ADDOP2 MULOP2
++%token <num> NUMBER
++%type <exp> exp
++
++%%
++
++start:  exp
++{
++	if ($1 == NULL)
++		YYABORT;
++	arg->res = $1;
++}
++;
++
++exp:  exp '?' exp ':' exp
++{
++	$$ = new_exp_3 (qmop, $1, $3, $5);
++}
++| exp '|' exp
++{
++	$$ = new_exp_2 (lor, $1, $3);
++}
++| exp '&' exp
++{
++	$$ = new_exp_2 (land, $1, $3);
++}
++| exp EQUOP2 exp
++{
++	$$ = new_exp_2 ($2, $1, $3);
++}
++| exp CMPOP2 exp
++{
++	$$ = new_exp_2 ($2, $1, $3);
++}
++| exp ADDOP2 exp
++{
++	$$ = new_exp_2 ($2, $1, $3);
++}
++| exp MULOP2 exp
++{
++	$$ = new_exp_2 ($2, $1, $3);
++}
++| '!' exp
++{
++	$$ = new_exp_1 (lnot, $2);
++}
++| 'n'
++{
++	$$ = new_exp_0 (var);
++}
++| NUMBER
++{
++	if (($$ = new_exp_0 (num)) != NULL)
++		$$->val.num = $1;
++}
++| '(' exp ')'
++{
++	$$ = $2;
++}
++;
++
++%%
++
++void
++internal_function
++FREE_EXPRESSION (exp)
++struct expression *exp;
++{
++	if (exp == NULL)
++		return;
++
++	/* Handle the recursive case.  */
++	switch (exp->nargs)
++    {
++		case 3:
++			FREE_EXPRESSION (exp->val.args[2]);
++			/* FALLTHROUGH */
++		case 2:
++			FREE_EXPRESSION (exp->val.args[1]);
++			/* FALLTHROUGH */
++		case 1:
++			FREE_EXPRESSION (exp->val.args[0]);
++			/* FALLTHROUGH */
++		default:
++			break;
++    }
++
++	free (exp);
++}
++
++
++static int
++yylex (lval, arg)
++YYSTYPE *lval;
++struct parse_args *arg;
++{
++	const char *exp = arg->cp;
++	int result;
++
++	while (1)
++    {
++		if (exp[0] == '\0')
++		{
++			arg->cp = exp;
++			return YYEOF;
++		}
++
++		if (exp[0] != ' ' && exp[0] != '\t')
++			break;
++
++		++exp;
++    }
++
++	result = *exp++;
++	switch (result)
++    {
++		case '0': case '1': case '2': case '3': case '4':
++		case '5': case '6': case '7': case '8': case '9':
++		{
++			unsigned long int n = result - '0';
++			while (exp[0] >= '0' && exp[0] <= '9')
++			{
++				n *= 10;
++				n += exp[0] - '0';
++				++exp;
++			}
++			lval->num = n;
++			result = NUMBER;
++		}
++		break;
++
++		case '=':
++			if (exp[0] == '=')
++			{
++				++exp;
++				lval->op = equal;
++				result = EQUOP2;
++			}
++			else
++				result = YYERRCODE;
++			break;
++
++		case '!':
++			if (exp[0] == '=')
++			{
++				++exp;
++				lval->op = not_equal;
++				result = EQUOP2;
++			}
++			break;
++
++		case '&':
++		case '|':
++			if (exp[0] == result)
++				++exp;
++			else
++				result = YYERRCODE;
++			break;
++
++		case '<':
++			if (exp[0] == '=')
++			{
++				++exp;
++				lval->op = less_or_equal;
++			}
++			else
++				lval->op = less_than;
++			result = CMPOP2;
++			break;
++
++		case '>':
++			if (exp[0] == '=')
++			{
++				++exp;
++				lval->op = greater_or_equal;
++			}
++			else
++				lval->op = greater_than;
++			result = CMPOP2;
++			break;
++
++		case '*':
++			lval->op = mult;
++			result = MULOP2;
++			break;
++
++		case '/':
++			lval->op = divide;
++			result = MULOP2;
++			break;
++
++		case '%':
++			lval->op = module;
++			result = MULOP2;
++			break;
++
++		case '+':
++			lval->op = plus;
++			result = ADDOP2;
++			break;
++
++		case '-':
++			lval->op = minus;
++			result = ADDOP2;
++			break;
++
++		case 'n':
++		case '?':
++		case ':':
++		case '(':
++		case ')':
++			/* Nothing, just return the character.  */
++			break;
++
++		case ';':
++		case '\n':
++		case '\0':
++			/* Be safe and let the user call this function again.  */
++			--exp;
++			result = YYEOF;
++			break;
++
++		default:
++			result = YYERRCODE;
++#if YYDEBUG != 0
++			--exp;
++#endif
++			break;
++    }
++
++	arg->cp = exp; 
++
++	return result;
++}
++
++
++static void
++yyerror (arg, str)
++struct parse_args *arg;
++const char *str;
++{
++	/* Do nothing.  We don't print error messages here.  */
++}
+diff -N -r --unified glibc-2.19/intl/plural.c glibc-2.19-woc/intl/plural.c
+--- glibc-2.19/intl/plural.c	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/intl/plural.c	2017-03-15 11:23:28.988028017 -0700
+@@ -1,8 +1,8 @@
+-/* A Bison parser, made by GNU Bison 2.7.  */
++/* A Bison parser, made by GNU Bison 3.0.2.  */
+ 
+ /* Bison implementation for Yacc-like parsers in C
+ 
+-      Copyright (C) 1984, 1989-1990, 2000-2012 Free Software Foundation, Inc.
++   Copyright (C) 1984, 1989-1990, 2000-2013 Free Software Foundation, Inc.
+ 
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+@@ -44,13 +44,13 @@
+ #define YYBISON 1
+ 
+ /* Bison version.  */
+-#define YYBISON_VERSION "2.7"
++#define YYBISON_VERSION "3.0.2"
+ 
+ /* Skeleton name.  */
+ #define YYSKELETON_NAME "yacc.c"
+ 
+ /* Pure parsers.  */
+-#define YYPURE 1
++#define YYPURE 2
+ 
+ /* Push parsers.  */
+ #define YYPUSH 0
+@@ -63,17 +63,15 @@
+ #define yyparse         __gettextparse
+ #define yylex           __gettextlex
+ #define yyerror         __gettexterror
+-#define yylval          __gettextlval
+-#define yychar          __gettextchar
+ #define yydebug         __gettextdebug
+ #define yynerrs         __gettextnerrs
+ 
++
+ /* Copy the first part of user declarations.  */
+-/* Line 371 of yacc.c  */
+-#line 1 "plural.y"
++#line 1 "plural.y" /* yacc.c:339  */
+ 
+ /* Expression parsing for plural form selection.
+-   Copyright (C) 2000-2014 Free Software Foundation, Inc.
++   Copyright (C) 2000, 2001 Free Software Foundation, Inc.
+    This file is part of the GNU C Library.
+    Written by Ulrich Drepper <drepper@cygnus.com>, 2000.
+ 
+@@ -88,8 +86,9 @@
+    Lesser General Public License for more details.
+ 
+    You should have received a copy of the GNU Lesser General Public
+-   License along with the GNU C Library; if not, see
+-   <http://www.gnu.org/licenses/>.  */
++   License along with the GNU C Library; if not, write to the Free
++   Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
++   02111-1307 USA.  */
+ 
+ /* The bison generated parser uses alloca.  AIX 3 forces us to put this
+    declaration at the beginning of the file.  The declaration in bison's
+@@ -112,18 +111,15 @@
+ #ifndef _LIBC
+ # define __gettextparse PLURAL_PARSE
+ #endif
++	
+ 
+-#define YYLEX_PARAM	&((struct parse_args *) arg)->cp
+-#define YYPARSE_PARAM	arg
+-
+-/* Line 371 of yacc.c  */
+-#line 121 "plural.c"
++#line 117 "plural.c" /* yacc.c:339  */
+ 
+-# ifndef YY_NULL
++# ifndef YY_NULLPTR
+ #  if defined __cplusplus && 201103L <= __cplusplus
+-#   define YY_NULL nullptr
++#   define YY_NULLPTR nullptr
+ #  else
+-#   define YY_NULL 0
++#   define YY_NULLPTR 0
+ #  endif
+ # endif
+ 
+@@ -136,7 +132,7 @@
+ #endif
+ 
+ 
+-/* Enabling traces.  */
++/* Debug traces.  */
+ #ifndef YYDEBUG
+ # define YYDEBUG 0
+ #endif
+@@ -144,18 +140,17 @@
+ extern int __gettextdebug;
+ #endif
+ 
+-/* Tokens.  */
++/* Token type.  */
+ #ifndef YYTOKENTYPE
+ # define YYTOKENTYPE
+-   /* Put the tokens into the symbol table, so that GDB and other debuggers
+-      know about them.  */
+-   enum yytokentype {
+-     EQUOP2 = 258,
+-     CMPOP2 = 259,
+-     ADDOP2 = 260,
+-     MULOP2 = 261,
+-     NUMBER = 262
+-   };
++  enum yytokentype
++  {
++    EQUOP2 = 258,
++    CMPOP2 = 259,
++    ADDOP2 = 260,
++    MULOP2 = 261,
++    NUMBER = 262
++  };
+ #endif
+ /* Tokens.  */
+ #define EQUOP2 258
+@@ -164,147 +159,130 @@
+ #define MULOP2 261
+ #define NUMBER 262
+ 
+-
+-
++/* Value type.  */
+ #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
+-typedef union YYSTYPE
++typedef union YYSTYPE YYSTYPE;
++union YYSTYPE
+ {
+-/* Line 387 of yacc.c  */
+-#line 49 "plural.y"
++#line 48 "plural.y" /* yacc.c:355  */
+ 
+-  unsigned long int num;
+-  enum operator op;
+-  struct expression *exp;
++	unsigned long int num;
++	enum operator op;
++	struct expression *exp;
+ 
+-
+-/* Line 387 of yacc.c  */
+-#line 182 "plural.c"
+-} YYSTYPE;
++#line 174 "plural.c" /* yacc.c:355  */
++};
+ # define YYSTYPE_IS_TRIVIAL 1
+-# define yystype YYSTYPE /* obsolescent; will be withdrawn */
+ # define YYSTYPE_IS_DECLARED 1
+ #endif
+ 
+ 
+-#ifdef YYPARSE_PARAM
+-#if defined __STDC__ || defined __cplusplus
+-int __gettextparse (void *YYPARSE_PARAM);
+-#else
+-int __gettextparse ();
+-#endif
+-#else /* ! YYPARSE_PARAM */
+-#if defined __STDC__ || defined __cplusplus
+-int __gettextparse (void);
+-#else
+-int __gettextparse ();
+-#endif
+-#endif /* ! YYPARSE_PARAM */
++
++int __gettextparse (struct parse_args *arg);
+ 
+ 
+ 
+ /* Copy the second part of user declarations.  */
+-/* Line 390 of yacc.c  */
+-#line 55 "plural.y"
++#line 54 "plural.y" /* yacc.c:358  */
+ 
+ /* Prototypes for local functions.  */
+-static struct expression *new_exp PARAMS ((int nargs, enum operator op,
+-					   struct expression * const *args));
+-static inline struct expression *new_exp_0 PARAMS ((enum operator op));
+-static inline struct expression *new_exp_1 PARAMS ((enum operator op,
+-						   struct expression *right));
+-static struct expression *new_exp_2 PARAMS ((enum operator op,
+-					     struct expression *left,
+-					     struct expression *right));
+-static inline struct expression *new_exp_3 PARAMS ((enum operator op,
+-						   struct expression *bexp,
+-						   struct expression *tbranch,
+-						   struct expression *fbranch));
+-static int yylex PARAMS ((YYSTYPE *lval, const char **pexp));
+-static void yyerror PARAMS ((const char *str));
++	static struct expression *new_exp PARAMS ((int nargs, enum operator op,
++											   struct expression * const *args));
++	static inline struct expression *new_exp_0 PARAMS ((enum operator op));
++	static inline struct expression *new_exp_1 PARAMS ((enum operator op,
++														struct expression *right));
++	static struct expression *new_exp_2 PARAMS ((enum operator op,
++												 struct expression *left,
++												 struct expression *right));
++	static inline struct expression *new_exp_3 PARAMS ((enum operator op,
++														struct expression *bexp,
++														struct expression *tbranch,
++														struct expression *fbranch));
++	static int yylex PARAMS ((YYSTYPE *lval, struct parse_args *arg));
++	static void yyerror PARAMS ((struct parse_args *arg, const char *str));
+ 
+ /* Allocation of expressions.  */
+ 
+ static struct expression *
+-new_exp (nargs, op, args)
+-     int nargs;
+-     enum operator op;
+-     struct expression * const *args;
+-{
+-  int i;
+-  struct expression *newp;
+-
+-  /* If any of the argument could not be malloc'ed, just return NULL.  */
+-  for (i = nargs - 1; i >= 0; i--)
+-    if (args[i] == NULL)
+-      goto fail;
+-
+-  /* Allocate a new expression.  */
+-  newp = (struct expression *) malloc (sizeof (*newp));
+-  if (newp != NULL)
+-    {
+-      newp->nargs = nargs;
+-      newp->operation = op;
+-      for (i = nargs - 1; i >= 0; i--)
+-	newp->val.args[i] = args[i];
+-      return newp;
+-    }
+-
+- fail:
+-  for (i = nargs - 1; i >= 0; i--)
+-    FREE_EXPRESSION (args[i]);
++	new_exp (nargs, op, args)
++	int nargs;
++enum operator op;
++struct expression * const *args;
++{
++	int i;
++	struct expression *newp;
++
++	/* If any of the argument could not be malloc'ed, just return NULL.  */
++	for (i = nargs - 1; i >= 0; i--)
++		if (args[i] == NULL)
++			goto fail;
++
++	/* Allocate a new expression.  */
++	newp = (struct expression *) malloc (sizeof (*newp));
++	if (newp != NULL)
++    {
++		newp->nargs = nargs;
++		newp->operation = op;
++		for (i = nargs - 1; i >= 0; i--)
++			newp->val.args[i] = args[i];
++		return newp;
++    }
++
++fail:
++	for (i = nargs - 1; i >= 0; i--)
++		FREE_EXPRESSION (args[i]);
+ 
+-  return NULL;
++	return NULL;
+ }
+ 
+ static inline struct expression *
+-new_exp_0 (op)
+-     enum operator op;
++	new_exp_0 (op)
++	enum operator op;
+ {
+-  return new_exp (0, op, NULL);
++	return new_exp (0, op, NULL);
+ }
+ 
+ static inline struct expression *
+-new_exp_1 (op, right)
+-     enum operator op;
+-     struct expression *right;
++	new_exp_1 (op, right)
++	enum operator op;
++struct expression *right;
+ {
+-  struct expression *args[1];
++	struct expression *args[1];
+ 
+-  args[0] = right;
+-  return new_exp (1, op, args);
++	args[0] = right;
++	return new_exp (1, op, args);
+ }
+ 
+ static struct expression *
+-new_exp_2 (op, left, right)
+-     enum operator op;
+-     struct expression *left;
+-     struct expression *right;
+-{
+-  struct expression *args[2];
+-
+-  args[0] = left;
+-  args[1] = right;
+-  return new_exp (2, op, args);
++	new_exp_2 (op, left, right)
++	enum operator op;
++struct expression *left;
++struct expression *right;
++{
++	struct expression *args[2];
++
++	args[0] = left;
++	args[1] = right;
++	return new_exp (2, op, args);
+ }
+ 
+ static inline struct expression *
+-new_exp_3 (op, bexp, tbranch, fbranch)
+-     enum operator op;
+-     struct expression *bexp;
+-     struct expression *tbranch;
+-     struct expression *fbranch;
+-{
+-  struct expression *args[3];
+-
+-  args[0] = bexp;
+-  args[1] = tbranch;
+-  args[2] = fbranch;
+-  return new_exp (3, op, args);
++	new_exp_3 (op, bexp, tbranch, fbranch)
++	enum operator op;
++struct expression *bexp;
++struct expression *tbranch;
++struct expression *fbranch;
++{
++	struct expression *args[3];
++
++	args[0] = bexp;
++	args[1] = tbranch;
++	args[2] = fbranch;
++	return new_exp (3, op, args);
+ }
+ 
+ 
+-/* Line 390 of yacc.c  */
+-#line 308 "plural.c"
++#line 286 "plural.c" /* yacc.c:358  */
+ 
+ #ifdef short
+ # undef short
+@@ -318,11 +296,8 @@
+ 
+ #ifdef YYTYPE_INT8
+ typedef YYTYPE_INT8 yytype_int8;
+-#elif (defined __STDC__ || defined __C99__FUNC__ \
+-     || defined __cplusplus || defined _MSC_VER)
+-typedef signed char yytype_int8;
+ #else
+-typedef short int yytype_int8;
++typedef signed char yytype_int8;
+ #endif
+ 
+ #ifdef YYTYPE_UINT16
+@@ -342,8 +317,7 @@
+ #  define YYSIZE_T __SIZE_TYPE__
+ # elif defined size_t
+ #  define YYSIZE_T size_t
+-# elif ! defined YYSIZE_T && (defined __STDC__ || defined __C99__FUNC__ \
+-     || defined __cplusplus || defined _MSC_VER)
++# elif ! defined YYSIZE_T
+ #  include <stddef.h> /* INFRINGES ON USER NAME SPACE */
+ #  define YYSIZE_T size_t
+ # else
+@@ -365,6 +339,33 @@
+ # endif
+ #endif
+ 
++#ifndef YY_ATTRIBUTE
++# if (defined __GNUC__                                               \
++      && (2 < __GNUC__ || (__GNUC__ == 2 && 96 <= __GNUC_MINOR__)))  \
++     || defined __SUNPRO_C && 0x5110 <= __SUNPRO_C
++#  define YY_ATTRIBUTE(Spec) __attribute__(Spec)
++# else
++#  define YY_ATTRIBUTE(Spec) /* empty */
++# endif
++#endif
++
++#ifndef YY_ATTRIBUTE_PURE
++# define YY_ATTRIBUTE_PURE   YY_ATTRIBUTE ((__pure__))
++#endif
++
++#ifndef YY_ATTRIBUTE_UNUSED
++# define YY_ATTRIBUTE_UNUSED YY_ATTRIBUTE ((__unused__))
++#endif
++
++#if !defined _Noreturn \
++     && (!defined __STDC_VERSION__ || __STDC_VERSION__ < 201112)
++# if defined _MSC_VER && 1200 <= _MSC_VER
++#  define _Noreturn __declspec (noreturn)
++# else
++#  define _Noreturn YY_ATTRIBUTE ((__noreturn__))
++# endif
++#endif
++
+ /* Suppress unused-variable warnings by "using" E.  */
+ #if ! defined lint || defined __GNUC__
+ # define YYUSE(E) ((void) (E))
+@@ -372,23 +373,25 @@
+ # define YYUSE(E) /* empty */
+ #endif
+ 
+-/* Identity function, used to suppress warnings about constant conditions.  */
+-#ifndef lint
+-# define YYID(N) (N)
+-#else
+-#if (defined __STDC__ || defined __C99__FUNC__ \
+-     || defined __cplusplus || defined _MSC_VER)
+-static int
+-YYID (int yyi)
++#if defined __GNUC__ && 407 <= __GNUC__ * 100 + __GNUC_MINOR__
++/* Suppress an incorrect diagnostic about yylval being uninitialized.  */
++# define YY_IGNORE_MAYBE_UNINITIALIZED_BEGIN \
++    _Pragma ("GCC diagnostic push") \
++    _Pragma ("GCC diagnostic ignored \"-Wuninitialized\"")\
++    _Pragma ("GCC diagnostic ignored \"-Wmaybe-uninitialized\"")
++# define YY_IGNORE_MAYBE_UNINITIALIZED_END \
++    _Pragma ("GCC diagnostic pop")
+ #else
+-static int
+-YYID (yyi)
+-    int yyi;
++# define YY_INITIAL_VALUE(Value) Value
+ #endif
+-{
+-  return yyi;
+-}
++#ifndef YY_IGNORE_MAYBE_UNINITIALIZED_BEGIN
++# define YY_IGNORE_MAYBE_UNINITIALIZED_BEGIN
++# define YY_IGNORE_MAYBE_UNINITIALIZED_END
+ #endif
++#ifndef YY_INITIAL_VALUE
++# define YY_INITIAL_VALUE(Value) /* Nothing. */
++#endif
++
+ 
+ #if ! defined yyoverflow || YYERROR_VERBOSE
+ 
+@@ -407,8 +410,7 @@
+ #    define alloca _alloca
+ #   else
+ #    define YYSTACK_ALLOC alloca
+-#    if ! defined _ALLOCA_H && ! defined EXIT_SUCCESS && (defined __STDC__ || defined __C99__FUNC__ \
+-     || defined __cplusplus || defined _MSC_VER)
++#    if ! defined _ALLOCA_H && ! defined EXIT_SUCCESS
+ #     include <stdlib.h> /* INFRINGES ON USER NAME SPACE */
+       /* Use EXIT_SUCCESS as a witness for stdlib.h.  */
+ #     ifndef EXIT_SUCCESS
+@@ -420,8 +422,8 @@
+ # endif
+ 
+ # ifdef YYSTACK_ALLOC
+-   /* Pacify GCC's `empty if-body' warning.  */
+-#  define YYSTACK_FREE(Ptr) do { /* empty */; } while (YYID (0))
++   /* Pacify GCC's 'empty if-body' warning.  */
++#  define YYSTACK_FREE(Ptr) do { /* empty */; } while (0)
+ #  ifndef YYSTACK_ALLOC_MAXIMUM
+     /* The OS might guarantee only one guard page at the bottom of the stack,
+        and a page size can be as small as 4096 bytes.  So we cannot safely
+@@ -437,7 +439,7 @@
+ #  endif
+ #  if (defined __cplusplus && ! defined EXIT_SUCCESS \
+        && ! ((defined YYMALLOC || defined malloc) \
+-	     && (defined YYFREE || defined free)))
++             && (defined YYFREE || defined free)))
+ #   include <stdlib.h> /* INFRINGES ON USER NAME SPACE */
+ #   ifndef EXIT_SUCCESS
+ #    define EXIT_SUCCESS 0
+@@ -445,15 +447,13 @@
+ #  endif
+ #  ifndef YYMALLOC
+ #   define YYMALLOC malloc
+-#   if ! defined malloc && ! defined EXIT_SUCCESS && (defined __STDC__ || defined __C99__FUNC__ \
+-     || defined __cplusplus || defined _MSC_VER)
++#   if ! defined malloc && ! defined EXIT_SUCCESS
+ void *malloc (YYSIZE_T); /* INFRINGES ON USER NAME SPACE */
+ #   endif
+ #  endif
+ #  ifndef YYFREE
+ #   define YYFREE free
+-#   if ! defined free && ! defined EXIT_SUCCESS && (defined __STDC__ || defined __C99__FUNC__ \
+-     || defined __cplusplus || defined _MSC_VER)
++#   if ! defined free && ! defined EXIT_SUCCESS
+ void free (void *); /* INFRINGES ON USER NAME SPACE */
+ #   endif
+ #  endif
+@@ -463,7 +463,7 @@
+ 
+ #if (! defined yyoverflow \
+      && (! defined __cplusplus \
+-	 || (defined YYSTYPE_IS_TRIVIAL && YYSTYPE_IS_TRIVIAL)))
++         || (defined YYSTYPE_IS_TRIVIAL && YYSTYPE_IS_TRIVIAL)))
+ 
+ /* A type that is properly aligned for any stack member.  */
+ union yyalloc
+@@ -488,16 +488,16 @@
+    elements in the stack, and YYPTR gives the new location of the
+    stack.  Advance YYPTR to a properly aligned location for the next
+    stack.  */
+-# define YYSTACK_RELOCATE(Stack_alloc, Stack)				\
+-    do									\
+-      {									\
+-	YYSIZE_T yynewbytes;						\
+-	YYCOPY (&yyptr->Stack_alloc, Stack, yysize);			\
+-	Stack = &yyptr->Stack_alloc;					\
+-	yynewbytes = yystacksize * sizeof (*Stack) + YYSTACK_GAP_MAXIMUM; \
+-	yyptr += yynewbytes / sizeof (*yyptr);				\
+-      }									\
+-    while (YYID (0))
++# define YYSTACK_RELOCATE(Stack_alloc, Stack)                           \
++    do                                                                  \
++      {                                                                 \
++        YYSIZE_T yynewbytes;                                            \
++        YYCOPY (&yyptr->Stack_alloc, Stack, yysize);                    \
++        Stack = &yyptr->Stack_alloc;                                    \
++        yynewbytes = yystacksize * sizeof (*Stack) + YYSTACK_GAP_MAXIMUM; \
++        yyptr += yynewbytes / sizeof (*yyptr);                          \
++      }                                                                 \
++    while (0)
+ 
+ #endif
+ 
+@@ -516,7 +516,7 @@
+           for (yyi = 0; yyi < (Count); yyi++)   \
+             (Dst)[yyi] = (Src)[yyi];            \
+         }                                       \
+-      while (YYID (0))
++      while (0)
+ #  endif
+ # endif
+ #endif /* !YYCOPY_NEEDED */
+@@ -532,17 +532,19 @@
+ #define YYNNTS  3
+ /* YYNRULES -- Number of rules.  */
+ #define YYNRULES  13
+-/* YYNRULES -- Number of states.  */
++/* YYNSTATES -- Number of states.  */
+ #define YYNSTATES  27
+ 
+-/* YYTRANSLATE(YYLEX) -- Bison symbol number corresponding to YYLEX.  */
++/* YYTRANSLATE[YYX] -- Symbol number corresponding to YYX as returned
++   by yylex, with out-of-bounds checking.  */
+ #define YYUNDEFTOK  2
+ #define YYMAXUTOK   262
+ 
+-#define YYTRANSLATE(YYX)						\
++#define YYTRANSLATE(YYX)                                                \
+   ((unsigned int) (YYX) <= YYMAXUTOK ? yytranslate[YYX] : YYUNDEFTOK)
+ 
+-/* YYTRANSLATE[YYLEX] -- Bison symbol number corresponding to YYLEX.  */
++/* YYTRANSLATE[TOKEN-NUM] -- Symbol number corresponding to TOKEN-NUM
++   as returned by yylex, without out-of-bounds checking.  */
+ static const yytype_uint8 yytranslate[] =
+ {
+        0,     2,     2,     2,     2,     2,     2,     2,     2,     2,
+@@ -575,29 +577,11 @@
+ };
+ 
+ #if YYDEBUG
+-/* YYPRHS[YYN] -- Index of the first RHS symbol of rule number YYN in
+-   YYRHS.  */
+-static const yytype_uint8 yyprhs[] =
+-{
+-       0,     0,     3,     5,    11,    15,    19,    23,    27,    31,
+-      35,    38,    40,    42
+-};
+-
+-/* YYRHS -- A `-1'-separated list of the rules' RHS.  */
+-static const yytype_int8 yyrhs[] =
+-{
+-      17,     0,    -1,    18,    -1,    18,     3,    18,    12,    18,
+-      -1,    18,     4,    18,    -1,    18,     5,    18,    -1,    18,
+-       6,    18,    -1,    18,     7,    18,    -1,    18,     8,    18,
+-      -1,    18,     9,    18,    -1,    10,    18,    -1,    13,    -1,
+-      11,    -1,    14,    18,    15,    -1
+-};
+-
+-/* YYRLINE[YYN] -- source line where rule number YYN was defined.  */
++  /* YYRLINE[YYN] -- Source line where rule number YYN was defined.  */
+ static const yytype_uint8 yyrline[] =
+ {
+-       0,   174,   174,   182,   186,   190,   194,   198,   202,   206,
+-     210,   214,   218,   223
++       0,   173,   173,   181,   185,   189,   193,   197,   201,   205,
++     209,   213,   217,   222
+ };
+ #endif
+ 
+@@ -608,13 +592,13 @@
+ {
+   "$end", "error", "$undefined", "'?'", "'|'", "'&'", "EQUOP2", "CMPOP2",
+   "ADDOP2", "MULOP2", "'!'", "NUMBER", "':'", "'n'", "'('", "')'",
+-  "$accept", "start", "exp", YY_NULL
++  "$accept", "start", "exp", YY_NULLPTR
+ };
+ #endif
+ 
+ # ifdef YYPRINT
+-/* YYTOKNUM[YYLEX-NUM] -- Internal token number corresponding to
+-   token YYLEX-NUM.  */
++/* YYTOKNUM[NUM] -- (External) token number corresponding to the
++   (internal) symbol number NUM (which must be that of a token).  */
+ static const yytype_uint16 yytoknum[] =
+ {
+        0,   256,   257,    63,   124,    38,   258,   259,   260,   261,
+@@ -622,23 +606,28 @@
+ };
+ # endif
+ 
+-/* YYR1[YYN] -- Symbol number of symbol that rule YYN derives.  */
+-static const yytype_uint8 yyr1[] =
+-{
+-       0,    16,    17,    18,    18,    18,    18,    18,    18,    18,
+-      18,    18,    18,    18
+-};
++#define YYPACT_NINF -10
+ 
+-/* YYR2[YYN] -- Number of symbols composing right hand side of rule YYN.  */
+-static const yytype_uint8 yyr2[] =
++#define yypact_value_is_default(Yystate) \
++  (!!((Yystate) == (-10)))
++
++#define YYTABLE_NINF -1
++
++#define yytable_value_is_error(Yytable_value) \
++  0
++
++  /* YYPACT[STATE-NUM] -- Index in YYTABLE of the portion describing
++     STATE-NUM.  */
++static const yytype_int8 yypact[] =
+ {
+-       0,     2,     1,     5,     3,     3,     3,     3,     3,     3,
+-       2,     1,     1,     3
++      -9,    -9,   -10,   -10,    -9,     8,    36,   -10,    13,   -10,
++      -9,    -9,    -9,    -9,    -9,    -9,    -9,   -10,    26,    41,
++      45,    18,    -2,    14,   -10,    -9,    36
+ };
+ 
+-/* YYDEFACT[STATE-NAME] -- Default reduction number in state STATE-NUM.
+-   Performed when YYTABLE doesn't specify something else to do.  Zero
+-   means the default is an error.  */
++  /* YYDEFACT[STATE-NUM] -- Default reduction number in state STATE-NUM.
++     Performed when YYTABLE does not specify something else to do.  Zero
++     means the default is an error.  */
+ static const yytype_uint8 yydefact[] =
+ {
+        0,     0,    12,    11,     0,     0,     2,    10,     0,     1,
+@@ -646,32 +635,21 @@
+        5,     6,     7,     8,     9,     0,     3
+ };
+ 
+-/* YYDEFGOTO[NTERM-NUM].  */
+-static const yytype_int8 yydefgoto[] =
+-{
+-      -1,     5,     6
+-};
+-
+-/* YYPACT[STATE-NUM] -- Index in YYTABLE of the portion describing
+-   STATE-NUM.  */
+-#define YYPACT_NINF -10
+-static const yytype_int8 yypact[] =
++  /* YYPGOTO[NTERM-NUM].  */
++static const yytype_int8 yypgoto[] =
+ {
+-      -9,    -9,   -10,   -10,    -9,     8,    36,   -10,    13,   -10,
+-      -9,    -9,    -9,    -9,    -9,    -9,    -9,   -10,    26,    41,
+-      45,    18,    -2,    14,   -10,    -9,    36
++     -10,   -10,    -1
+ };
+ 
+-/* YYPGOTO[NTERM-NUM].  */
+-static const yytype_int8 yypgoto[] =
++  /* YYDEFGOTO[NTERM-NUM].  */
++static const yytype_int8 yydefgoto[] =
+ {
+-     -10,   -10,    -1
++      -1,     5,     6
+ };
+ 
+-/* YYTABLE[YYPACT[STATE-NUM]].  What to do in state STATE-NUM.  If
+-   positive, shift that token.  If negative, reduce the rule which
+-   number is the opposite.  If YYTABLE_NINF, syntax error.  */
+-#define YYTABLE_NINF -1
++  /* YYTABLE[YYPACT[STATE-NUM]] -- What to do in state STATE-NUM.  If
++     positive, shift that token.  If negative, reduce the rule whose
++     number is the opposite.  If YYTABLE_NINF, syntax error.  */
+ static const yytype_uint8 yytable[] =
+ {
+        7,     1,     2,     8,     3,     4,    15,    16,     9,    18,
+@@ -682,12 +660,6 @@
+       16,    13,    14,    15,    16
+ };
+ 
+-#define yypact_value_is_default(Yystate) \
+-  (!!((Yystate) == (-10)))
+-
+-#define yytable_value_is_error(Yytable_value) \
+-  YYID (0)
+-
+ static const yytype_int8 yycheck[] =
+ {
+        1,    10,    11,     4,    13,    14,     8,     9,     0,    10,
+@@ -698,8 +670,8 @@
+        9,     6,     7,     8,     9
+ };
+ 
+-/* YYSTOS[STATE-NUM] -- The (internal number of the) accessing
+-   symbol of state STATE-NUM.  */
++  /* YYSTOS[STATE-NUM] -- The (internal number of the) accessing
++     symbol of state STATE-NUM.  */
+ static const yytype_uint8 yystos[] =
+ {
+        0,    10,    11,    13,    14,    17,    18,    18,    18,     0,
+@@ -707,30 +679,30 @@
+       18,    18,    18,    18,    18,    12,    18
+ };
+ 
+-#define yyerrok		(yyerrstatus = 0)
+-#define yyclearin	(yychar = YYEMPTY)
+-#define YYEMPTY		(-2)
+-#define YYEOF		0
+-
+-#define YYACCEPT	goto yyacceptlab
+-#define YYABORT		goto yyabortlab
+-#define YYERROR		goto yyerrorlab
+-
+-
+-/* Like YYERROR except do call yyerror.  This remains here temporarily
+-   to ease the transition to the new meaning of YYERROR, for GCC.
+-   Once GCC version 2 has supplanted version 1, this can go.  However,
+-   YYFAIL appears to be in use.  Nevertheless, it is formally deprecated
+-   in Bison 2.4.2's NEWS entry, where a plan to phase it out is
+-   discussed.  */
+-
+-#define YYFAIL		goto yyerrlab
+-#if defined YYFAIL
+-  /* This is here to suppress warnings from the GCC cpp's
+-     -Wunused-macros.  Normally we don't worry about that warning, but
+-     some users do, and we want to make it easy for users to remove
+-     YYFAIL uses, which will produce warnings from Bison 2.5.  */
+-#endif
++  /* YYR1[YYN] -- Symbol number of symbol that rule YYN derives.  */
++static const yytype_uint8 yyr1[] =
++{
++       0,    16,    17,    18,    18,    18,    18,    18,    18,    18,
++      18,    18,    18,    18
++};
++
++  /* YYR2[YYN] -- Number of symbols on the right hand side of rule YYN.  */
++static const yytype_uint8 yyr2[] =
++{
++       0,     2,     1,     5,     3,     3,     3,     3,     3,     3,
++       2,     1,     1,     3
++};
++
++
++#define yyerrok         (yyerrstatus = 0)
++#define yyclearin       (yychar = YYEMPTY)
++#define YYEMPTY         (-2)
++#define YYEOF           0
++
++#define YYACCEPT        goto yyacceptlab
++#define YYABORT         goto yyabortlab
++#define YYERROR         goto yyerrorlab
++
+ 
+ #define YYRECOVERING()  (!!yyerrstatus)
+ 
+@@ -746,28 +718,16 @@
+     }                                                           \
+   else                                                          \
+     {                                                           \
+-      yyerror (YY_("syntax error: cannot back up")); \
+-      YYERROR;							\
+-    }								\
+-while (YYID (0))
++      yyerror (arg, YY_("syntax error: cannot back up")); \
++      YYERROR;                                                  \
++    }                                                           \
++while (0)
+ 
+ /* Error token number */
+-#define YYTERROR	1
+-#define YYERRCODE	256
++#define YYTERROR        1
++#define YYERRCODE       256
+ 
+ 
+-/* This macro is provided for backward compatibility. */
+-#ifndef YY_LOCATION_PRINT
+-# define YY_LOCATION_PRINT(File, Loc) ((void) 0)
+-#endif
+-
+-
+-/* YYLEX -- calling `yylex' with the right arguments.  */
+-#ifdef YYLEX_PARAM
+-# define YYLEX yylex (&yylval, YYLEX_PARAM)
+-#else
+-# define YYLEX yylex (&yylval)
+-#endif
+ 
+ /* Enable debugging if requested.  */
+ #if YYDEBUG
+@@ -777,56 +737,47 @@
+ #  define YYFPRINTF fprintf
+ # endif
+ 
+-# define YYDPRINTF(Args)			\
+-do {						\
+-  if (yydebug)					\
+-    YYFPRINTF Args;				\
+-} while (YYID (0))
+-
+-# define YY_SYMBOL_PRINT(Title, Type, Value, Location)			  \
+-do {									  \
+-  if (yydebug)								  \
+-    {									  \
+-      YYFPRINTF (stderr, "%s ", Title);					  \
+-      yy_symbol_print (stderr,						  \
+-		  Type, Value); \
+-      YYFPRINTF (stderr, "\n");						  \
+-    }									  \
+-} while (YYID (0))
++# define YYDPRINTF(Args)                        \
++do {                                            \
++  if (yydebug)                                  \
++    YYFPRINTF Args;                             \
++} while (0)
+ 
++/* This macro is provided for backward compatibility. */
++#ifndef YY_LOCATION_PRINT
++# define YY_LOCATION_PRINT(File, Loc) ((void) 0)
++#endif
+ 
+-/*--------------------------------.
+-| Print this symbol on YYOUTPUT.  |
+-`--------------------------------*/
+ 
+-/*ARGSUSED*/
+-#if (defined __STDC__ || defined __C99__FUNC__ \
+-     || defined __cplusplus || defined _MSC_VER)
+-static void
+-yy_symbol_value_print (FILE *yyoutput, int yytype, YYSTYPE const * const yyvaluep)
+-#else
++# define YY_SYMBOL_PRINT(Title, Type, Value, Location)                    \
++do {                                                                      \
++  if (yydebug)                                                            \
++    {                                                                     \
++      YYFPRINTF (stderr, "%s ", Title);                                   \
++      yy_symbol_print (stderr,                                            \
++                  Type, Value, arg); \
++      YYFPRINTF (stderr, "\n");                                           \
++    }                                                                     \
++} while (0)
++
++
++/*----------------------------------------.
++| Print this symbol's value on YYOUTPUT.  |
++`----------------------------------------*/
++
+ static void
+-yy_symbol_value_print (yyoutput, yytype, yyvaluep)
+-    FILE *yyoutput;
+-    int yytype;
+-    YYSTYPE const * const yyvaluep;
+-#endif
++yy_symbol_value_print (FILE *yyoutput, int yytype, YYSTYPE const * const yyvaluep, struct parse_args *arg)
+ {
+   FILE *yyo = yyoutput;
+   YYUSE (yyo);
++  YYUSE (arg);
+   if (!yyvaluep)
+     return;
+ # ifdef YYPRINT
+   if (yytype < YYNTOKENS)
+     YYPRINT (yyoutput, yytoknum[yytype], *yyvaluep);
+-# else
+-  YYUSE (yyoutput);
+ # endif
+-  switch (yytype)
+-    {
+-      default:
+-        break;
+-    }
++  YYUSE (yytype);
+ }
+ 
+ 
+@@ -834,24 +785,13 @@
+ | Print this symbol on YYOUTPUT.  |
+ `--------------------------------*/
+ 
+-#if (defined __STDC__ || defined __C99__FUNC__ \
+-     || defined __cplusplus || defined _MSC_VER)
+-static void
+-yy_symbol_print (FILE *yyoutput, int yytype, YYSTYPE const * const yyvaluep)
+-#else
+ static void
+-yy_symbol_print (yyoutput, yytype, yyvaluep)
+-    FILE *yyoutput;
+-    int yytype;
+-    YYSTYPE const * const yyvaluep;
+-#endif
++yy_symbol_print (FILE *yyoutput, int yytype, YYSTYPE const * const yyvaluep, struct parse_args *arg)
+ {
+-  if (yytype < YYNTOKENS)
+-    YYFPRINTF (yyoutput, "token %s (", yytname[yytype]);
+-  else
+-    YYFPRINTF (yyoutput, "nterm %s (", yytname[yytype]);
++  YYFPRINTF (yyoutput, "%s %s (",
++             yytype < YYNTOKENS ? "token" : "nterm", yytname[yytype]);
+ 
+-  yy_symbol_value_print (yyoutput, yytype, yyvaluep);
++  yy_symbol_value_print (yyoutput, yytype, yyvaluep, arg);
+   YYFPRINTF (yyoutput, ")");
+ }
+ 
+@@ -860,16 +800,8 @@
+ | TOP (included).                                                   |
+ `------------------------------------------------------------------*/
+ 
+-#if (defined __STDC__ || defined __C99__FUNC__ \
+-     || defined __cplusplus || defined _MSC_VER)
+ static void
+ yy_stack_print (yytype_int16 *yybottom, yytype_int16 *yytop)
+-#else
+-static void
+-yy_stack_print (yybottom, yytop)
+-    yytype_int16 *yybottom;
+-    yytype_int16 *yytop;
+-#endif
+ {
+   YYFPRINTF (stderr, "Stack now");
+   for (; yybottom <= yytop; yybottom++)
+@@ -880,49 +812,42 @@
+   YYFPRINTF (stderr, "\n");
+ }
+ 
+-# define YY_STACK_PRINT(Bottom, Top)				\
+-do {								\
+-  if (yydebug)							\
+-    yy_stack_print ((Bottom), (Top));				\
+-} while (YYID (0))
++# define YY_STACK_PRINT(Bottom, Top)                            \
++do {                                                            \
++  if (yydebug)                                                  \
++    yy_stack_print ((Bottom), (Top));                           \
++} while (0)
+ 
+ 
+ /*------------------------------------------------.
+ | Report that the YYRULE is going to be reduced.  |
+ `------------------------------------------------*/
+ 
+-#if (defined __STDC__ || defined __C99__FUNC__ \
+-     || defined __cplusplus || defined _MSC_VER)
+ static void
+-yy_reduce_print (YYSTYPE *yyvsp, int yyrule)
+-#else
+-static void
+-yy_reduce_print (yyvsp, yyrule)
+-    YYSTYPE *yyvsp;
+-    int yyrule;
+-#endif
++yy_reduce_print (yytype_int16 *yyssp, YYSTYPE *yyvsp, int yyrule, struct parse_args *arg)
+ {
++  unsigned long int yylno = yyrline[yyrule];
+   int yynrhs = yyr2[yyrule];
+   int yyi;
+-  unsigned long int yylno = yyrline[yyrule];
+   YYFPRINTF (stderr, "Reducing stack by rule %d (line %lu):\n",
+-	     yyrule - 1, yylno);
++             yyrule - 1, yylno);
+   /* The symbols being reduced.  */
+   for (yyi = 0; yyi < yynrhs; yyi++)
+     {
+       YYFPRINTF (stderr, "   $%d = ", yyi + 1);
+-      yy_symbol_print (stderr, yyrhs[yyprhs[yyrule] + yyi],
+-		       &(yyvsp[(yyi + 1) - (yynrhs)])
+-				       );
++      yy_symbol_print (stderr,
++                       yystos[yyssp[yyi + 1 - yynrhs]],
++                       &(yyvsp[(yyi + 1) - (yynrhs)])
++                                              , arg);
+       YYFPRINTF (stderr, "\n");
+     }
+ }
+ 
+-# define YY_REDUCE_PRINT(Rule)		\
+-do {					\
+-  if (yydebug)				\
+-    yy_reduce_print (yyvsp, Rule); \
+-} while (YYID (0))
++# define YY_REDUCE_PRINT(Rule)          \
++do {                                    \
++  if (yydebug)                          \
++    yy_reduce_print (yyssp, yyvsp, Rule, arg); \
++} while (0)
+ 
+ /* Nonzero means print parse trace.  It is left uninitialized so that
+    multiple parsers can coexist.  */
+@@ -936,7 +861,7 @@
+ 
+ 
+ /* YYINITDEPTH -- initial size of the parser's stacks.  */
+-#ifndef	YYINITDEPTH
++#ifndef YYINITDEPTH
+ # define YYINITDEPTH 200
+ #endif
+ 
+@@ -959,15 +884,8 @@
+ #   define yystrlen strlen
+ #  else
+ /* Return the length of YYSTR.  */
+-#if (defined __STDC__ || defined __C99__FUNC__ \
+-     || defined __cplusplus || defined _MSC_VER)
+ static YYSIZE_T
+ yystrlen (const char *yystr)
+-#else
+-static YYSIZE_T
+-yystrlen (yystr)
+-    const char *yystr;
+-#endif
+ {
+   YYSIZE_T yylen;
+   for (yylen = 0; yystr[yylen]; yylen++)
+@@ -983,16 +901,8 @@
+ #  else
+ /* Copy YYSRC to YYDEST, returning the address of the terminating '\0' in
+    YYDEST.  */
+-#if (defined __STDC__ || defined __C99__FUNC__ \
+-     || defined __cplusplus || defined _MSC_VER)
+ static char *
+ yystpcpy (char *yydest, const char *yysrc)
+-#else
+-static char *
+-yystpcpy (yydest, yysrc)
+-    char *yydest;
+-    const char *yysrc;
+-#endif
+ {
+   char *yyd = yydest;
+   const char *yys = yysrc;
+@@ -1022,27 +932,27 @@
+       char const *yyp = yystr;
+ 
+       for (;;)
+-	switch (*++yyp)
+-	  {
+-	  case '\'':
+-	  case ',':
+-	    goto do_not_strip_quotes;
+-
+-	  case '\\':
+-	    if (*++yyp != '\\')
+-	      goto do_not_strip_quotes;
+-	    /* Fall through.  */
+-	  default:
+-	    if (yyres)
+-	      yyres[yyn] = *yyp;
+-	    yyn++;
+-	    break;
+-
+-	  case '"':
+-	    if (yyres)
+-	      yyres[yyn] = '\0';
+-	    return yyn;
+-	  }
++        switch (*++yyp)
++          {
++          case '\'':
++          case ',':
++            goto do_not_strip_quotes;
++
++          case '\\':
++            if (*++yyp != '\\')
++              goto do_not_strip_quotes;
++            /* Fall through.  */
++          default:
++            if (yyres)
++              yyres[yyn] = *yyp;
++            yyn++;
++            break;
++
++          case '"':
++            if (yyres)
++              yyres[yyn] = '\0';
++            return yyn;
++          }
+     do_not_strip_quotes: ;
+     }
+ 
+@@ -1065,11 +975,11 @@
+ yysyntax_error (YYSIZE_T *yymsg_alloc, char **yymsg,
+                 yytype_int16 *yyssp, int yytoken)
+ {
+-  YYSIZE_T yysize0 = yytnamerr (YY_NULL, yytname[yytoken]);
++  YYSIZE_T yysize0 = yytnamerr (YY_NULLPTR, yytname[yytoken]);
+   YYSIZE_T yysize = yysize0;
+   enum { YYERROR_VERBOSE_ARGS_MAXIMUM = 5 };
+   /* Internationalized format string. */
+-  const char *yyformat = YY_NULL;
++  const char *yyformat = YY_NULLPTR;
+   /* Arguments of yyformat. */
+   char const *yyarg[YYERROR_VERBOSE_ARGS_MAXIMUM];
+   /* Number of reported tokens (one for the "unexpected", one per
+@@ -1077,10 +987,6 @@
+   int yycount = 0;
+ 
+   /* There are many possibilities here to consider:
+-     - Assume YYFAIL is not used.  It's too flawed to consider.  See
+-       <http://lists.gnu.org/archive/html/bison-patches/2009-12/msg00024.html>
+-       for details.  YYERROR is fine as it does not invoke this
+-       function.
+      - If this state is a consistent state with a default action, then
+        the only way this function was invoked is if the default action
+        is an error action.  In that case, don't check for expected
+@@ -1130,7 +1036,7 @@
+                   }
+                 yyarg[yycount++] = yytname[yyx];
+                 {
+-                  YYSIZE_T yysize1 = yysize + yytnamerr (YY_NULL, yytname[yyx]);
++                  YYSIZE_T yysize1 = yysize + yytnamerr (YY_NULLPTR, yytname[yyx]);
+                   if (! (yysize <= yysize1
+                          && yysize1 <= YYSTACK_ALLOC_MAXIMUM))
+                     return 2;
+@@ -1197,31 +1103,18 @@
+ | Release the memory associated to this symbol.  |
+ `-----------------------------------------------*/
+ 
+-/*ARGSUSED*/
+-#if (defined __STDC__ || defined __C99__FUNC__ \
+-     || defined __cplusplus || defined _MSC_VER)
+-static void
+-yydestruct (const char *yymsg, int yytype, YYSTYPE *yyvaluep)
+-#else
+ static void
+-yydestruct (yymsg, yytype, yyvaluep)
+-    const char *yymsg;
+-    int yytype;
+-    YYSTYPE *yyvaluep;
+-#endif
++yydestruct (const char *yymsg, int yytype, YYSTYPE *yyvaluep, struct parse_args *arg)
+ {
+   YYUSE (yyvaluep);
+-
++  YYUSE (arg);
+   if (!yymsg)
+     yymsg = "Deleting";
+   YY_SYMBOL_PRINT (yymsg, yytype, yyvaluep, yylocationp);
+ 
+-  switch (yytype)
+-    {
+-
+-      default:
+-        break;
+-    }
++  YY_IGNORE_MAYBE_UNINITIALIZED_BEGIN
++  YYUSE (yytype);
++  YY_IGNORE_MAYBE_UNINITIALIZED_END
+ }
+ 
+ 
+@@ -1231,56 +1124,18 @@
+ | yyparse.  |
+ `----------*/
+ 
+-#ifdef YYPARSE_PARAM
+-#if (defined __STDC__ || defined __C99__FUNC__ \
+-     || defined __cplusplus || defined _MSC_VER)
+-int
+-yyparse (void *YYPARSE_PARAM)
+-#else
+-int
+-yyparse (YYPARSE_PARAM)
+-    void *YYPARSE_PARAM;
+-#endif
+-#else /* ! YYPARSE_PARAM */
+-#if (defined __STDC__ || defined __C99__FUNC__ \
+-     || defined __cplusplus || defined _MSC_VER)
+-int
+-yyparse (void)
+-#else
+ int
+-yyparse ()
+-
+-#endif
+-#endif
++yyparse (struct parse_args *arg)
+ {
+ /* The lookahead symbol.  */
+ int yychar;
+ 
+ 
+-#if defined __GNUC__ && 407 <= __GNUC__ * 100 + __GNUC_MINOR__
+-/* Suppress an incorrect diagnostic about yylval being uninitialized.  */
+-# define YY_IGNORE_MAYBE_UNINITIALIZED_BEGIN \
+-    _Pragma ("GCC diagnostic push") \
+-    _Pragma ("GCC diagnostic ignored \"-Wuninitialized\"")\
+-    _Pragma ("GCC diagnostic ignored \"-Wmaybe-uninitialized\"")
+-# define YY_IGNORE_MAYBE_UNINITIALIZED_END \
+-    _Pragma ("GCC diagnostic pop")
+-#else
++/* The semantic value of the lookahead symbol.  */
+ /* Default value used for initialization, for pacifying older GCCs
+    or non-GCC compilers.  */
+-static YYSTYPE yyval_default;
+-# define YY_INITIAL_VALUE(Value) = Value
+-#endif
+-#ifndef YY_IGNORE_MAYBE_UNINITIALIZED_BEGIN
+-# define YY_IGNORE_MAYBE_UNINITIALIZED_BEGIN
+-# define YY_IGNORE_MAYBE_UNINITIALIZED_END
+-#endif
+-#ifndef YY_INITIAL_VALUE
+-# define YY_INITIAL_VALUE(Value) /* Nothing. */
+-#endif
+-
+-/* The semantic value of the lookahead symbol.  */
+-YYSTYPE yylval YY_INITIAL_VALUE(yyval_default);
++YY_INITIAL_VALUE (static YYSTYPE yyval_default;)
++YYSTYPE yylval YY_INITIAL_VALUE (= yyval_default);
+ 
+     /* Number of syntax errors so far.  */
+     int yynerrs;
+@@ -1290,8 +1145,8 @@
+     int yyerrstatus;
+ 
+     /* The stacks and their tools:
+-       `yyss': related to states.
+-       `yyvs': related to semantic values.
++       'yyss': related to states.
++       'yyvs': related to semantic values.
+ 
+        Refer to the stacks through separate pointers, to allow yyoverflow
+        to reallocate them elsewhere.  */
+@@ -1359,23 +1214,23 @@
+ 
+ #ifdef yyoverflow
+       {
+-	/* Give user a chance to reallocate the stack.  Use copies of
+-	   these so that the &'s don't force the real ones into
+-	   memory.  */
+-	YYSTYPE *yyvs1 = yyvs;
+-	yytype_int16 *yyss1 = yyss;
+-
+-	/* Each stack pointer address is followed by the size of the
+-	   data in use in that stack, in bytes.  This used to be a
+-	   conditional around just the two extra args, but that might
+-	   be undefined if yyoverflow is a macro.  */
+-	yyoverflow (YY_("memory exhausted"),
+-		    &yyss1, yysize * sizeof (*yyssp),
+-		    &yyvs1, yysize * sizeof (*yyvsp),
+-		    &yystacksize);
++        /* Give user a chance to reallocate the stack.  Use copies of
++           these so that the &'s don't force the real ones into
++           memory.  */
++        YYSTYPE *yyvs1 = yyvs;
++        yytype_int16 *yyss1 = yyss;
++
++        /* Each stack pointer address is followed by the size of the
++           data in use in that stack, in bytes.  This used to be a
++           conditional around just the two extra args, but that might
++           be undefined if yyoverflow is a macro.  */
++        yyoverflow (YY_("memory exhausted"),
++                    &yyss1, yysize * sizeof (*yyssp),
++                    &yyvs1, yysize * sizeof (*yyvsp),
++                    &yystacksize);
+ 
+-	yyss = yyss1;
+-	yyvs = yyvs1;
++        yyss = yyss1;
++        yyvs = yyvs1;
+       }
+ #else /* no yyoverflow */
+ # ifndef YYSTACK_RELOCATE
+@@ -1383,22 +1238,22 @@
+ # else
+       /* Extend the stack our own way.  */
+       if (YYMAXDEPTH <= yystacksize)
+-	goto yyexhaustedlab;
++        goto yyexhaustedlab;
+       yystacksize *= 2;
+       if (YYMAXDEPTH < yystacksize)
+-	yystacksize = YYMAXDEPTH;
++        yystacksize = YYMAXDEPTH;
+ 
+       {
+-	yytype_int16 *yyss1 = yyss;
+-	union yyalloc *yyptr =
+-	  (union yyalloc *) YYSTACK_ALLOC (YYSTACK_BYTES (yystacksize));
+-	if (! yyptr)
+-	  goto yyexhaustedlab;
+-	YYSTACK_RELOCATE (yyss_alloc, yyss);
+-	YYSTACK_RELOCATE (yyvs_alloc, yyvs);
++        yytype_int16 *yyss1 = yyss;
++        union yyalloc *yyptr =
++          (union yyalloc *) YYSTACK_ALLOC (YYSTACK_BYTES (yystacksize));
++        if (! yyptr)
++          goto yyexhaustedlab;
++        YYSTACK_RELOCATE (yyss_alloc, yyss);
++        YYSTACK_RELOCATE (yyvs_alloc, yyvs);
+ #  undef YYSTACK_RELOCATE
+-	if (yyss1 != yyssa)
+-	  YYSTACK_FREE (yyss1);
++        if (yyss1 != yyssa)
++          YYSTACK_FREE (yyss1);
+       }
+ # endif
+ #endif /* no yyoverflow */
+@@ -1407,10 +1262,10 @@
+       yyvsp = yyvs + yysize - 1;
+ 
+       YYDPRINTF ((stderr, "Stack size increased to %lu\n",
+-		  (unsigned long int) yystacksize));
++                  (unsigned long int) yystacksize));
+ 
+       if (yyss + yystacksize - 1 <= yyssp)
+-	YYABORT;
++        YYABORT;
+     }
+ 
+   YYDPRINTF ((stderr, "Entering state %d\n", yystate));
+@@ -1439,7 +1294,7 @@
+   if (yychar == YYEMPTY)
+     {
+       YYDPRINTF ((stderr, "Reading a token: "));
+-      yychar = YYLEX;
++      yychar = yylex (&yylval, arg);
+     }
+ 
+   if (yychar <= YYEOF)
+@@ -1504,7 +1359,7 @@
+   yylen = yyr2[yyn];
+ 
+   /* If YYLEN is nonzero, implement the default value of the action:
+-     `$$ = $1'.
++     '$$ = $1'.
+ 
+      Otherwise, the following line sets YYVAL to garbage.
+      This behavior is undocumented and Bison
+@@ -1518,107 +1373,106 @@
+   switch (yyn)
+     {
+         case 2:
+-/* Line 1792 of yacc.c  */
+-#line 175 "plural.y"
++#line 174 "plural.y" /* yacc.c:1646  */
+     {
+-	    if ((yyvsp[(1) - (1)].exp) == NULL)
+-	      YYABORT;
+-	    ((struct parse_args *) arg)->res = (yyvsp[(1) - (1)].exp);
+-	  }
++	if ((yyvsp[0].exp) == NULL)
++		YYABORT;
++	arg->res = (yyvsp[0].exp);
++}
++#line 1383 "plural.c" /* yacc.c:1646  */
+     break;
+ 
+   case 3:
+-/* Line 1792 of yacc.c  */
+-#line 183 "plural.y"
++#line 182 "plural.y" /* yacc.c:1646  */
+     {
+-	    (yyval.exp) = new_exp_3 (qmop, (yyvsp[(1) - (5)].exp), (yyvsp[(3) - (5)].exp), (yyvsp[(5) - (5)].exp));
+-	  }
++	(yyval.exp) = new_exp_3 (qmop, (yyvsp[-4].exp), (yyvsp[-2].exp), (yyvsp[0].exp));
++}
++#line 1391 "plural.c" /* yacc.c:1646  */
+     break;
+ 
+   case 4:
+-/* Line 1792 of yacc.c  */
+-#line 187 "plural.y"
++#line 186 "plural.y" /* yacc.c:1646  */
+     {
+-	    (yyval.exp) = new_exp_2 (lor, (yyvsp[(1) - (3)].exp), (yyvsp[(3) - (3)].exp));
+-	  }
++	(yyval.exp) = new_exp_2 (lor, (yyvsp[-2].exp), (yyvsp[0].exp));
++}
++#line 1399 "plural.c" /* yacc.c:1646  */
+     break;
+ 
+   case 5:
+-/* Line 1792 of yacc.c  */
+-#line 191 "plural.y"
++#line 190 "plural.y" /* yacc.c:1646  */
+     {
+-	    (yyval.exp) = new_exp_2 (land, (yyvsp[(1) - (3)].exp), (yyvsp[(3) - (3)].exp));
+-	  }
++	(yyval.exp) = new_exp_2 (land, (yyvsp[-2].exp), (yyvsp[0].exp));
++}
++#line 1407 "plural.c" /* yacc.c:1646  */
+     break;
+ 
+   case 6:
+-/* Line 1792 of yacc.c  */
+-#line 195 "plural.y"
++#line 194 "plural.y" /* yacc.c:1646  */
+     {
+-	    (yyval.exp) = new_exp_2 ((yyvsp[(2) - (3)].op), (yyvsp[(1) - (3)].exp), (yyvsp[(3) - (3)].exp));
+-	  }
++	(yyval.exp) = new_exp_2 ((yyvsp[-1].op), (yyvsp[-2].exp), (yyvsp[0].exp));
++}
++#line 1415 "plural.c" /* yacc.c:1646  */
+     break;
+ 
+   case 7:
+-/* Line 1792 of yacc.c  */
+-#line 199 "plural.y"
++#line 198 "plural.y" /* yacc.c:1646  */
+     {
+-	    (yyval.exp) = new_exp_2 ((yyvsp[(2) - (3)].op), (yyvsp[(1) - (3)].exp), (yyvsp[(3) - (3)].exp));
+-	  }
++	(yyval.exp) = new_exp_2 ((yyvsp[-1].op), (yyvsp[-2].exp), (yyvsp[0].exp));
++}
++#line 1423 "plural.c" /* yacc.c:1646  */
+     break;
+ 
+   case 8:
+-/* Line 1792 of yacc.c  */
+-#line 203 "plural.y"
++#line 202 "plural.y" /* yacc.c:1646  */
+     {
+-	    (yyval.exp) = new_exp_2 ((yyvsp[(2) - (3)].op), (yyvsp[(1) - (3)].exp), (yyvsp[(3) - (3)].exp));
+-	  }
++	(yyval.exp) = new_exp_2 ((yyvsp[-1].op), (yyvsp[-2].exp), (yyvsp[0].exp));
++}
++#line 1431 "plural.c" /* yacc.c:1646  */
+     break;
+ 
+   case 9:
+-/* Line 1792 of yacc.c  */
+-#line 207 "plural.y"
++#line 206 "plural.y" /* yacc.c:1646  */
+     {
+-	    (yyval.exp) = new_exp_2 ((yyvsp[(2) - (3)].op), (yyvsp[(1) - (3)].exp), (yyvsp[(3) - (3)].exp));
+-	  }
++	(yyval.exp) = new_exp_2 ((yyvsp[-1].op), (yyvsp[-2].exp), (yyvsp[0].exp));
++}
++#line 1439 "plural.c" /* yacc.c:1646  */
+     break;
+ 
+   case 10:
+-/* Line 1792 of yacc.c  */
+-#line 211 "plural.y"
++#line 210 "plural.y" /* yacc.c:1646  */
+     {
+-	    (yyval.exp) = new_exp_1 (lnot, (yyvsp[(2) - (2)].exp));
+-	  }
++	(yyval.exp) = new_exp_1 (lnot, (yyvsp[0].exp));
++}
++#line 1447 "plural.c" /* yacc.c:1646  */
+     break;
+ 
+   case 11:
+-/* Line 1792 of yacc.c  */
+-#line 215 "plural.y"
++#line 214 "plural.y" /* yacc.c:1646  */
+     {
+-	    (yyval.exp) = new_exp_0 (var);
+-	  }
++	(yyval.exp) = new_exp_0 (var);
++}
++#line 1455 "plural.c" /* yacc.c:1646  */
+     break;
+ 
+   case 12:
+-/* Line 1792 of yacc.c  */
+-#line 219 "plural.y"
++#line 218 "plural.y" /* yacc.c:1646  */
+     {
+-	    if (((yyval.exp) = new_exp_0 (num)) != NULL)
+-	      (yyval.exp)->val.num = (yyvsp[(1) - (1)].num);
+-	  }
++	if (((yyval.exp) = new_exp_0 (num)) != NULL)
++		(yyval.exp)->val.num = (yyvsp[0].num);
++}
++#line 1464 "plural.c" /* yacc.c:1646  */
+     break;
+ 
+   case 13:
+-/* Line 1792 of yacc.c  */
+-#line 224 "plural.y"
++#line 223 "plural.y" /* yacc.c:1646  */
+     {
+-	    (yyval.exp) = (yyvsp[(2) - (3)].exp);
+-	  }
++	(yyval.exp) = (yyvsp[-1].exp);
++}
++#line 1472 "plural.c" /* yacc.c:1646  */
+     break;
+ 
+ 
+-/* Line 1792 of yacc.c  */
+-#line 1622 "plural.c"
++#line 1476 "plural.c" /* yacc.c:1646  */
+       default: break;
+     }
+   /* User semantic actions sometimes alter yychar, and that requires
+@@ -1640,7 +1494,7 @@
+ 
+   *++yyvsp = yyval;
+ 
+-  /* Now `shift' the result of the reduction.  Determine what state
++  /* Now 'shift' the result of the reduction.  Determine what state
+      that goes to, based on the state we popped back to and the rule
+      number reduced by.  */
+ 
+@@ -1655,9 +1509,9 @@
+   goto yynewstate;
+ 
+ 
+-/*------------------------------------.
+-| yyerrlab -- here on detecting error |
+-`------------------------------------*/
++/*--------------------------------------.
++| yyerrlab -- here on detecting error.  |
++`--------------------------------------*/
+ yyerrlab:
+   /* Make sure we have latest lookahead translation.  See comments at
+      user semantic actions for why this is necessary.  */
+@@ -1668,7 +1522,7 @@
+     {
+       ++yynerrs;
+ #if ! YYERROR_VERBOSE
+-      yyerror (YY_("syntax error"));
++      yyerror (arg, YY_("syntax error"));
+ #else
+ # define YYSYNTAX_ERROR yysyntax_error (&yymsg_alloc, &yymsg, \
+                                         yyssp, yytoken)
+@@ -1695,7 +1549,7 @@
+                 yymsgp = yymsg;
+               }
+           }
+-        yyerror (yymsgp);
++        yyerror (arg, yymsgp);
+         if (yysyntax_error_status == 2)
+           goto yyexhaustedlab;
+       }
+@@ -1708,20 +1562,20 @@
+   if (yyerrstatus == 3)
+     {
+       /* If just tried and failed to reuse lookahead token after an
+-	 error, discard it.  */
++         error, discard it.  */
+ 
+       if (yychar <= YYEOF)
+-	{
+-	  /* Return failure if at end of input.  */
+-	  if (yychar == YYEOF)
+-	    YYABORT;
+-	}
++        {
++          /* Return failure if at end of input.  */
++          if (yychar == YYEOF)
++            YYABORT;
++        }
+       else
+-	{
+-	  yydestruct ("Error: discarding",
+-		      yytoken, &yylval);
+-	  yychar = YYEMPTY;
+-	}
++        {
++          yydestruct ("Error: discarding",
++                      yytoken, &yylval, arg);
++          yychar = YYEMPTY;
++        }
+     }
+ 
+   /* Else will try to reuse lookahead token after shifting the error
+@@ -1740,7 +1594,7 @@
+   if (/*CONSTCOND*/ 0)
+      goto yyerrorlab;
+ 
+-  /* Do not reclaim the symbols of the rule which action triggered
++  /* Do not reclaim the symbols of the rule whose action triggered
+      this YYERROR.  */
+   YYPOPSTACK (yylen);
+   yylen = 0;
+@@ -1753,29 +1607,29 @@
+ | yyerrlab1 -- common code for both syntax error and YYERROR.  |
+ `-------------------------------------------------------------*/
+ yyerrlab1:
+-  yyerrstatus = 3;	/* Each real token shifted decrements this.  */
++  yyerrstatus = 3;      /* Each real token shifted decrements this.  */
+ 
+   for (;;)
+     {
+       yyn = yypact[yystate];
+       if (!yypact_value_is_default (yyn))
+-	{
+-	  yyn += YYTERROR;
+-	  if (0 <= yyn && yyn <= YYLAST && yycheck[yyn] == YYTERROR)
+-	    {
+-	      yyn = yytable[yyn];
+-	      if (0 < yyn)
+-		break;
+-	    }
+-	}
++        {
++          yyn += YYTERROR;
++          if (0 <= yyn && yyn <= YYLAST && yycheck[yyn] == YYTERROR)
++            {
++              yyn = yytable[yyn];
++              if (0 < yyn)
++                break;
++            }
++        }
+ 
+       /* Pop the current state because it cannot handle the error token.  */
+       if (yyssp == yyss)
+-	YYABORT;
++        YYABORT;
+ 
+ 
+       yydestruct ("Error: popping",
+-		  yystos[yystate], yyvsp);
++                  yystos[yystate], yyvsp, arg);
+       YYPOPSTACK (1);
+       yystate = *yyssp;
+       YY_STACK_PRINT (yyss, yyssp);
+@@ -1812,7 +1666,7 @@
+ | yyexhaustedlab -- memory exhaustion comes here.  |
+ `-------------------------------------------------*/
+ yyexhaustedlab:
+-  yyerror (YY_("memory exhausted"));
++  yyerror (arg, YY_("memory exhausted"));
+   yyresult = 2;
+   /* Fall through.  */
+ #endif
+@@ -1824,16 +1678,16 @@
+          user semantic actions for why this is necessary.  */
+       yytoken = YYTRANSLATE (yychar);
+       yydestruct ("Cleanup: discarding lookahead",
+-                  yytoken, &yylval);
++                  yytoken, &yylval, arg);
+     }
+-  /* Do not reclaim the symbols of the rule which action triggered
++  /* Do not reclaim the symbols of the rule whose action triggered
+      this YYABORT or YYACCEPT.  */
+   YYPOPSTACK (yylen);
+   YY_STACK_PRINT (yyss, yyssp);
+   while (yyssp != yyss)
+     {
+       yydestruct ("Cleanup: popping",
+-		  yystos[*yyssp], yyvsp);
++                  yystos[*yyssp], yyvsp, arg);
+       YYPOPSTACK (1);
+     }
+ #ifndef yyoverflow
+@@ -1844,191 +1698,188 @@
+   if (yymsg != yymsgbuf)
+     YYSTACK_FREE (yymsg);
+ #endif
+-  /* Make sure YYID is used.  */
+-  return YYID (yyresult);
++  return yyresult;
+ }
+-
+-
+-/* Line 2055 of yacc.c  */
+-#line 229 "plural.y"
++#line 228 "plural.y" /* yacc.c:1906  */
+ 
+ 
+ void
+ internal_function
+ FREE_EXPRESSION (exp)
+-     struct expression *exp;
++struct expression *exp;
+ {
+-  if (exp == NULL)
+-    return;
++	if (exp == NULL)
++		return;
+ 
+-  /* Handle the recursive case.  */
+-  switch (exp->nargs)
++	/* Handle the recursive case.  */
++	switch (exp->nargs)
+     {
+-    case 3:
+-      FREE_EXPRESSION (exp->val.args[2]);
+-      /* FALLTHROUGH */
+-    case 2:
+-      FREE_EXPRESSION (exp->val.args[1]);
+-      /* FALLTHROUGH */
+-    case 1:
+-      FREE_EXPRESSION (exp->val.args[0]);
+-      /* FALLTHROUGH */
+-    default:
+-      break;
++		case 3:
++			FREE_EXPRESSION (exp->val.args[2]);
++			/* FALLTHROUGH */
++		case 2:
++			FREE_EXPRESSION (exp->val.args[1]);
++			/* FALLTHROUGH */
++		case 1:
++			FREE_EXPRESSION (exp->val.args[0]);
++			/* FALLTHROUGH */
++		default:
++			break;
+     }
+ 
+-  free (exp);
++	free (exp);
+ }
+ 
+ 
+ static int
+-yylex (lval, pexp)
+-     YYSTYPE *lval;
+-     const char **pexp;
+-{
+-  const char *exp = *pexp;
+-  int result;
+-
+-  while (1)
+-    {
+-      if (exp[0] == '\0')
+-	{
+-	  *pexp = exp;
+-	  return YYEOF;
+-	}
+-
+-      if (exp[0] != ' ' && exp[0] != '\t')
+-	break;
+-
+-      ++exp;
+-    }
+-
+-  result = *exp++;
+-  switch (result)
+-    {
+-    case '0': case '1': case '2': case '3': case '4':
+-    case '5': case '6': case '7': case '8': case '9':
+-      {
+-	unsigned long int n = result - '0';
+-	while (exp[0] >= '0' && exp[0] <= '9')
+-	  {
+-	    n *= 10;
+-	    n += exp[0] - '0';
+-	    ++exp;
+-	  }
+-	lval->num = n;
+-	result = NUMBER;
+-      }
+-      break;
+-
+-    case '=':
+-      if (exp[0] == '=')
+-	{
+-	  ++exp;
+-	  lval->op = equal;
+-	  result = EQUOP2;
+-	}
+-      else
+-	result = YYERRCODE;
+-      break;
+-
+-    case '!':
+-      if (exp[0] == '=')
+-	{
+-	  ++exp;
+-	  lval->op = not_equal;
+-	  result = EQUOP2;
+-	}
+-      break;
+-
+-    case '&':
+-    case '|':
+-      if (exp[0] == result)
+-	++exp;
+-      else
+-	result = YYERRCODE;
+-      break;
++yylex (lval, arg)
++YYSTYPE *lval;
++struct parse_args *arg;
++{
++	const char *exp = arg->cp;
++	int result;
++
++	while (1)
++    {
++		if (exp[0] == '\0')
++		{
++			arg->cp = exp;
++			return YYEOF;
++		}
++
++		if (exp[0] != ' ' && exp[0] != '\t')
++			break;
++
++		++exp;
++    }
++
++	result = *exp++;
++	switch (result)
++    {
++		case '0': case '1': case '2': case '3': case '4':
++		case '5': case '6': case '7': case '8': case '9':
++		{
++			unsigned long int n = result - '0';
++			while (exp[0] >= '0' && exp[0] <= '9')
++			{
++				n *= 10;
++				n += exp[0] - '0';
++				++exp;
++			}
++			lval->num = n;
++			result = NUMBER;
++		}
++		break;
+ 
+-    case '<':
+-      if (exp[0] == '=')
+-	{
+-	  ++exp;
+-	  lval->op = less_or_equal;
+-	}
+-      else
+-	lval->op = less_than;
+-      result = CMPOP2;
+-      break;
+-
+-    case '>':
+-      if (exp[0] == '=')
+-	{
+-	  ++exp;
+-	  lval->op = greater_or_equal;
+-	}
+-      else
+-	lval->op = greater_than;
+-      result = CMPOP2;
+-      break;
+-
+-    case '*':
+-      lval->op = mult;
+-      result = MULOP2;
+-      break;
+-
+-    case '/':
+-      lval->op = divide;
+-      result = MULOP2;
+-      break;
+-
+-    case '%':
+-      lval->op = module;
+-      result = MULOP2;
+-      break;
+-
+-    case '+':
+-      lval->op = plus;
+-      result = ADDOP2;
+-      break;
+-
+-    case '-':
+-      lval->op = minus;
+-      result = ADDOP2;
+-      break;
+-
+-    case 'n':
+-    case '?':
+-    case ':':
+-    case '(':
+-    case ')':
+-      /* Nothing, just return the character.  */
+-      break;
+-
+-    case ';':
+-    case '\n':
+-    case '\0':
+-      /* Be safe and let the user call this function again.  */
+-      --exp;
+-      result = YYEOF;
+-      break;
++		case '=':
++			if (exp[0] == '=')
++			{
++				++exp;
++				lval->op = equal;
++				result = EQUOP2;
++			}
++			else
++				result = YYERRCODE;
++			break;
++
++		case '!':
++			if (exp[0] == '=')
++			{
++				++exp;
++				lval->op = not_equal;
++				result = EQUOP2;
++			}
++			break;
++
++		case '&':
++		case '|':
++			if (exp[0] == result)
++				++exp;
++			else
++				result = YYERRCODE;
++			break;
++
++		case '<':
++			if (exp[0] == '=')
++			{
++				++exp;
++				lval->op = less_or_equal;
++			}
++			else
++				lval->op = less_than;
++			result = CMPOP2;
++			break;
++
++		case '>':
++			if (exp[0] == '=')
++			{
++				++exp;
++				lval->op = greater_or_equal;
++			}
++			else
++				lval->op = greater_than;
++			result = CMPOP2;
++			break;
++
++		case '*':
++			lval->op = mult;
++			result = MULOP2;
++			break;
++
++		case '/':
++			lval->op = divide;
++			result = MULOP2;
++			break;
++
++		case '%':
++			lval->op = module;
++			result = MULOP2;
++			break;
++
++		case '+':
++			lval->op = plus;
++			result = ADDOP2;
++			break;
++
++		case '-':
++			lval->op = minus;
++			result = ADDOP2;
++			break;
++
++		case 'n':
++		case '?':
++		case ':':
++		case '(':
++		case ')':
++			/* Nothing, just return the character.  */
++			break;
++
++		case ';':
++		case '\n':
++		case '\0':
++			/* Be safe and let the user call this function again.  */
++			--exp;
++			result = YYEOF;
++			break;
+ 
+-    default:
+-      result = YYERRCODE;
++		default:
++			result = YYERRCODE;
+ #if YYDEBUG != 0
+-      --exp;
++			--exp;
+ #endif
+-      break;
++			break;
+     }
+ 
+-  *pexp = exp;
++	arg->cp = exp; 
+ 
+-  return result;
++	return result;
+ }
+ 
+ 
+ static void
+-yyerror (str)
+-     const char *str;
++yyerror (arg, str)
++struct parse_args *arg;
++const char *str;
+ {
+-  /* Do nothing.  We don't print error messages here.  */
++	/* Do nothing.  We don't print error messages here.  */
+ }
+diff -N -r --unified glibc-2.19/intl/plural-exp2.h glibc-2.19-woc/intl/plural-exp2.h
+--- glibc-2.19/intl/plural-exp2.h	1969-12-31 16:00:00.000000000 -0800
++++ glibc-2.19-woc/intl/plural-exp2.h	2017-03-07 18:07:08.553254589 -0800
+@@ -0,0 +1,125 @@
++/* Expression parsing and evaluation for plural form selection.
++   Copyright (C) 2000-2014 Free Software Foundation, Inc.
++   Written by Ulrich Drepper <drepper@cygnus.com>, 2000.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <http://www.gnu.org/licenses/>.  */
++
++#ifndef _PLURAL_EXP_H
++#define _PLURAL_EXP_H
++
++#ifndef PARAMS
++# if __STDC__ || defined __GNUC__ || defined __SUNPRO_C || defined __cplusplus || __PROTOTYPES
++#  define PARAMS(args) args
++# else
++#  define PARAMS(args) ()
++# endif
++#endif
++
++#ifndef internal_function
++# define internal_function
++#endif
++
++#ifndef attribute_hidden
++# define attribute_hidden
++#endif
++
++
++/* This is the representation of the expressions to determine the
++   plural form.  */
++struct expression
++{
++  int nargs;			/* Number of arguments.  */
++  enum operator
++  {
++    /* Without arguments:  */
++    var,			/* The variable "n".  */
++    num,			/* Decimal number.  */
++    /* Unary operators:  */
++    lnot,			/* Logical NOT.  */
++    /* Binary operators:  */
++    mult,			/* Multiplication.  */
++    divide,			/* Division.  */
++    module,			/* Modulo operation.  */
++    plus,			/* Addition.  */
++    minus,			/* Subtraction.  */
++    less_than,			/* Comparison.  */
++    greater_than,		/* Comparison.  */
++    less_or_equal,		/* Comparison.  */
++    greater_or_equal,		/* Comparison.  */
++    equal,			/* Comparison for equality.  */
++    not_equal,			/* Comparison for inequality.  */
++    land,			/* Logical AND.  */
++    lor,			/* Logical OR.  */
++    /* Ternary operators:  */
++    qmop			/* Question mark operator.  */
++  } operation;
++  union
++  {
++    unsigned long int num;	/* Number value for `num'.  */
++    struct expression *args[3];	/* Up to three arguments.  */
++  } val;
++};
++
++/* This is the data structure to pass information to the parser and get
++   the result in a thread-safe way.  */
++struct parse_args
++{
++  const char *cp;
++  struct expression *res;
++};
++
++
++/* Names for the libintl functions are a problem.  This source code is used
++   1. in the GNU C Library library,
++   2. in the GNU libintl library,
++   3. in the GNU gettext tools.
++   The function names in each situation must be different, to allow for
++   binary incompatible changes in 'struct expression'.  Furthermore,
++   1. in the GNU C Library library, the names have a __ prefix,
++   2.+3. in the GNU libintl library and in the GNU gettext tools, the names
++         must follow ANSI C and not start with __.
++   So we have to distinguish the three cases.  */
++#ifdef _LIBC
++# define FREE_EXPRESSION __gettext_free_exp
++# define PLURAL_PARSE __gettextparse
++# define GERMANIC_PLURAL __gettext_germanic_plural
++# define EXTRACT_PLURAL_EXPRESSION __gettext_extract_plural
++#elif defined (IN_LIBINTL)
++# define FREE_EXPRESSION libintl_gettext_free_exp
++# define PLURAL_PARSE libintl_gettextparse
++# define GERMANIC_PLURAL libintl_gettext_germanic_plural
++# define EXTRACT_PLURAL_EXPRESSION libintl_gettext_extract_plural
++#else
++# define FREE_EXPRESSION free_plural_expression
++# define PLURAL_PARSE parse_plural_expression
++# define GERMANIC_PLURAL germanic_plural
++# define EXTRACT_PLURAL_EXPRESSION extract_plural_expression
++#endif
++
++extern void FREE_EXPRESSION PARAMS ((struct expression *exp))
++     internal_function;
++extern int PLURAL_PARSE PARAMS ((void *arg));
++extern const struct expression GERMANIC_PLURAL attribute_hidden;
++extern void EXTRACT_PLURAL_EXPRESSION PARAMS
++  ((const char *nullentry, const struct expression **pluralp,
++    unsigned long int *npluralsp)) internal_function;
++
++#if !defined (_LIBC) && !defined (IN_LIBINTL)
++extern unsigned long int plural_eval PARAMS ((const struct expression *pexp,
++					      unsigned long int n));
++#endif
++
++#endif /* _PLURAL_EXP_H */
+diff -N -r --unified glibc-2.19/intl/plural-exp3.h glibc-2.19-woc/intl/plural-exp3.h
+--- glibc-2.19/intl/plural-exp3.h	1969-12-31 16:00:00.000000000 -0800
++++ glibc-2.19-woc/intl/plural-exp3.h	2017-03-15 11:22:30.672024081 -0700
+@@ -0,0 +1,126 @@
++/* Expression parsing and evaluation for plural form selection.
++   Copyright (C) 2000, 2001, 2002, 2005, 2007 Free Software Foundation, Inc.
++   Written by Ulrich Drepper <drepper@cygnus.com>, 2000.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, write to the Free
++   Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
++   02111-1307 USA.  */
++
++#ifndef _PLURAL_EXP_H
++#define _PLURAL_EXP_H
++
++#ifndef PARAMS
++# if __STDC__ || defined __GNUC__ || defined __SUNPRO_C || defined __cplusplus || __PROTOTYPES
++#  define PARAMS(args) args
++# else
++#  define PARAMS(args) ()
++# endif
++#endif
++
++#ifndef internal_function
++# define internal_function
++#endif
++
++#ifndef attribute_hidden
++# define attribute_hidden
++#endif
++
++
++/* This is the representation of the expressions to determine the
++   plural form.  */
++struct expression
++{
++	int nargs;/* Number of arguments.  */
++  enum operator
++  {
++	  /* Without arguments:  */
++	  var,/* The variable "n".  */
++	  num,/* Decimal number.  */
++	  /* Unary operators:  */
++	  lnot,/* Logical NOT.  */
++	  /* Binary operators:  */
++	  mult,/* Multiplication.  */
++	  divide,/* Division.  */
++	  module,/* Modulo operation.  */
++	  plus,/* Addition.  */
++	  minus,/* Subtraction.  */
++	  less_than,/* Comparison.  */
++	  greater_than,/* Comparison.  */
++	  less_or_equal,/* Comparison.  */
++	  greater_or_equal,/* Comparison.  */
++	  equal,/* Comparison for equality.  */
++	  not_equal,/* Comparison for inequality.  */
++	  land,/* Logical AND.  */
++	  lor,/* Logical OR.  */
++	  /* Ternary operators:  */
++	  qmop/* Question mark operator.  */
++  } operation;
++  union
++  {
++	  unsigned long int num;/* Number value for `num'.  */
++	  struct expression *args[3];/* Up to three arguments.  */
++  } val;
++};
++
++/* This is the data structure to pass information to the parser and get
++   the result in a thread-safe way.  */
++struct parse_args
++{
++	const char *cp;
++	struct expression *res;
++};
++
++
++/* Names for the libintl functions are a problem.  This source code is used
++   1. in the GNU C Library library,
++   2. in the GNU libintl library,
++   3. in the GNU gettext tools.
++   The function names in each situation must be different, to allow for
++   binary incompatible changes in 'struct expression'.  Furthermore,
++   1. in the GNU C Library library, the names have a __ prefix,
++   2.+3. in the GNU libintl library and in the GNU gettext tools, the names
++         must follow ANSI C and not start with __.
++   So we have to distinguish the three cases.  */
++#ifdef _LIBC
++# define FREE_EXPRESSION __gettext_free_exp
++# define PLURAL_PARSE __gettextparse
++# define GERMANIC_PLURAL __gettext_germanic_plural
++# define EXTRACT_PLURAL_EXPRESSION __gettext_extract_plural
++#elif defined (IN_LIBINTL)
++# define FREE_EXPRESSION libintl_gettext_free_exp
++# define PLURAL_PARSE libintl_gettextparse
++# define GERMANIC_PLURAL libintl_gettext_germanic_plural
++# define EXTRACT_PLURAL_EXPRESSION libintl_gettext_extract_plural
++#else
++# define FREE_EXPRESSION free_plural_expression
++# define PLURAL_PARSE parse_plural_expression
++# define GERMANIC_PLURAL germanic_plural
++# define EXTRACT_PLURAL_EXPRESSION extract_plural_expression
++#endif
++
++extern void FREE_EXPRESSION PARAMS ((struct expression *exp))
++	internal_function;
++extern int PLURAL_PARSE PARAMS ((struct parse_args *arg));
++extern const struct expression GERMANIC_PLURAL attribute_hidden;
++extern void EXTRACT_PLURAL_EXPRESSION PARAMS
++((const char *nullentry, const struct expression **pluralp,
++  unsigned long int *npluralsp)) internal_function;
++
++#if !defined (_LIBC) && !defined (IN_LIBINTL)
++extern unsigned long int plural_eval PARAMS ((const struct expression *pexp,
++											  unsigned long int n));
++#endif
++
++#endif /* _PLURAL_EXP_H */
+diff -N -r --unified glibc-2.19/intl/plural-exp.h glibc-2.19-woc/intl/plural-exp.h
+--- glibc-2.19/intl/plural-exp.h	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/intl/plural-exp.h	2017-03-15 11:23:28.955028015 -0700
+@@ -1,5 +1,5 @@
+ /* Expression parsing and evaluation for plural form selection.
+-   Copyright (C) 2000-2014 Free Software Foundation, Inc.
++   Copyright (C) 2000, 2001, 2002, 2005, 2007 Free Software Foundation, Inc.
+    Written by Ulrich Drepper <drepper@cygnus.com>, 2000.
+    This file is part of the GNU C Library.
+ 
+@@ -14,8 +14,9 @@
+    Lesser General Public License for more details.
+ 
+    You should have received a copy of the GNU Lesser General Public
+-   License along with the GNU C Library; if not, see
+-   <http://www.gnu.org/licenses/>.  */
++   License along with the GNU C Library; if not, write to the Free
++   Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
++   02111-1307 USA.  */
+ 
+ #ifndef _PLURAL_EXP_H
+ #define _PLURAL_EXP_H
+@@ -41,35 +42,35 @@
+    plural form.  */
+ struct expression
+ {
+-  int nargs;			/* Number of arguments.  */
++	int nargs;/* Number of arguments.  */
+   enum operator
+   {
+-    /* Without arguments:  */
+-    var,			/* The variable "n".  */
+-    num,			/* Decimal number.  */
+-    /* Unary operators:  */
+-    lnot,			/* Logical NOT.  */
+-    /* Binary operators:  */
+-    mult,			/* Multiplication.  */
+-    divide,			/* Division.  */
+-    module,			/* Modulo operation.  */
+-    plus,			/* Addition.  */
+-    minus,			/* Subtraction.  */
+-    less_than,			/* Comparison.  */
+-    greater_than,		/* Comparison.  */
+-    less_or_equal,		/* Comparison.  */
+-    greater_or_equal,		/* Comparison.  */
+-    equal,			/* Comparison for equality.  */
+-    not_equal,			/* Comparison for inequality.  */
+-    land,			/* Logical AND.  */
+-    lor,			/* Logical OR.  */
+-    /* Ternary operators:  */
+-    qmop			/* Question mark operator.  */
++	  /* Without arguments:  */
++	  var,/* The variable "n".  */
++	  num,/* Decimal number.  */
++	  /* Unary operators:  */
++	  lnot,/* Logical NOT.  */
++	  /* Binary operators:  */
++	  mult,/* Multiplication.  */
++	  divide,/* Division.  */
++	  module,/* Modulo operation.  */
++	  plus,/* Addition.  */
++	  minus,/* Subtraction.  */
++	  less_than,/* Comparison.  */
++	  greater_than,/* Comparison.  */
++	  less_or_equal,/* Comparison.  */
++	  greater_or_equal,/* Comparison.  */
++	  equal,/* Comparison for equality.  */
++	  not_equal,/* Comparison for inequality.  */
++	  land,/* Logical AND.  */
++	  lor,/* Logical OR.  */
++	  /* Ternary operators:  */
++	  qmop/* Question mark operator.  */
+   } operation;
+   union
+   {
+-    unsigned long int num;	/* Number value for `num'.  */
+-    struct expression *args[3];	/* Up to three arguments.  */
++	  unsigned long int num;/* Number value for `num'.  */
++	  struct expression *args[3];/* Up to three arguments.  */
+   } val;
+ };
+ 
+@@ -77,8 +78,8 @@
+    the result in a thread-safe way.  */
+ struct parse_args
+ {
+-  const char *cp;
+-  struct expression *res;
++	const char *cp;
++	struct expression *res;
+ };
+ 
+ 
+@@ -110,16 +111,16 @@
+ #endif
+ 
+ extern void FREE_EXPRESSION PARAMS ((struct expression *exp))
+-     internal_function;
+-extern int PLURAL_PARSE PARAMS ((void *arg));
++	internal_function;
++extern int PLURAL_PARSE PARAMS ((struct parse_args *arg));
+ extern const struct expression GERMANIC_PLURAL attribute_hidden;
+ extern void EXTRACT_PLURAL_EXPRESSION PARAMS
+-  ((const char *nullentry, const struct expression **pluralp,
+-    unsigned long int *npluralsp)) internal_function;
++((const char *nullentry, const struct expression **pluralp,
++  unsigned long int *npluralsp)) internal_function;
+ 
+ #if !defined (_LIBC) && !defined (IN_LIBINTL)
+ extern unsigned long int plural_eval PARAMS ((const struct expression *pexp,
+-					      unsigned long int n));
++											  unsigned long int n));
+ #endif
+ 
+ #endif /* _PLURAL_EXP_H */
+diff -N -r --unified glibc-2.19/intl/plural.y glibc-2.19-woc/intl/plural.y
+--- glibc-2.19/intl/plural.y	2014-02-07 01:04:38.000000000 -0800
++++ glibc-2.19-woc/intl/plural.y	2017-03-15 11:23:28.951028015 -0700
+@@ -1,6 +1,6 @@
+ %{
+ /* Expression parsing for plural form selection.
+-   Copyright (C) 2000-2014 Free Software Foundation, Inc.
++   Copyright (C) 2000, 2001 Free Software Foundation, Inc.
+    This file is part of the GNU C Library.
+    Written by Ulrich Drepper <drepper@cygnus.com>, 2000.
+ 
+@@ -15,8 +15,9 @@
+    Lesser General Public License for more details.
+ 
+    You should have received a copy of the GNU Lesser General Public
+-   License along with the GNU C Library; if not, see
+-   <http://www.gnu.org/licenses/>.  */
++   License along with the GNU C Library; if not, write to the Free
++   Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
++   02111-1307 USA.  */
+ 
+ /* The bison generated parser uses alloca.  AIX 3 forces us to put this
+    declaration at the beginning of the file.  The declaration in bison's
+@@ -39,114 +40,112 @@
+ #ifndef _LIBC
+ # define __gettextparse PLURAL_PARSE
+ #endif
+-
+-#define YYLEX_PARAM	&((struct parse_args *) arg)->cp
+-#define YYPARSE_PARAM	arg
+-%}
+-%pure_parser
++	%}
++%param {struct parse_args *arg}
++%define api.pure full
+ %expect 7
+ 
+ %union {
+-  unsigned long int num;
+-  enum operator op;
+-  struct expression *exp;
++	unsigned long int num;
++	enum operator op;
++	struct expression *exp;
+ }
+ 
+ %{
+ /* Prototypes for local functions.  */
+-static struct expression *new_exp PARAMS ((int nargs, enum operator op,
+-					   struct expression * const *args));
+-static inline struct expression *new_exp_0 PARAMS ((enum operator op));
+-static inline struct expression *new_exp_1 PARAMS ((enum operator op,
+-						   struct expression *right));
+-static struct expression *new_exp_2 PARAMS ((enum operator op,
+-					     struct expression *left,
+-					     struct expression *right));
+-static inline struct expression *new_exp_3 PARAMS ((enum operator op,
+-						   struct expression *bexp,
+-						   struct expression *tbranch,
+-						   struct expression *fbranch));
+-static int yylex PARAMS ((YYSTYPE *lval, const char **pexp));
+-static void yyerror PARAMS ((const char *str));
++	static struct expression *new_exp PARAMS ((int nargs, enum operator op,
++											   struct expression * const *args));
++	static inline struct expression *new_exp_0 PARAMS ((enum operator op));
++	static inline struct expression *new_exp_1 PARAMS ((enum operator op,
++														struct expression *right));
++	static struct expression *new_exp_2 PARAMS ((enum operator op,
++												 struct expression *left,
++												 struct expression *right));
++	static inline struct expression *new_exp_3 PARAMS ((enum operator op,
++														struct expression *bexp,
++														struct expression *tbranch,
++														struct expression *fbranch));
++	static int yylex PARAMS ((YYSTYPE *lval, struct parse_args *arg));
++	static void yyerror PARAMS ((struct parse_args *arg, const char *str));
+ 
+ /* Allocation of expressions.  */
+ 
+ static struct expression *
+-new_exp (nargs, op, args)
+-     int nargs;
+-     enum operator op;
+-     struct expression * const *args;
+-{
+-  int i;
+-  struct expression *newp;
+-
+-  /* If any of the argument could not be malloc'ed, just return NULL.  */
+-  for (i = nargs - 1; i >= 0; i--)
+-    if (args[i] == NULL)
+-      goto fail;
+-
+-  /* Allocate a new expression.  */
+-  newp = (struct expression *) malloc (sizeof (*newp));
+-  if (newp != NULL)
++	new_exp (nargs, op, args)
++	int nargs;
++enum operator op;
++struct expression * const *args;
++{
++	int i;
++	struct expression *newp;
++
++	/* If any of the argument could not be malloc'ed, just return NULL.  */
++	for (i = nargs - 1; i >= 0; i--)
++		if (args[i] == NULL)
++			goto fail;
++
++	/* Allocate a new expression.  */
++	newp = (struct expression *) malloc (sizeof (*newp));
++	if (newp != NULL)
+     {
+-      newp->nargs = nargs;
+-      newp->operation = op;
+-      for (i = nargs - 1; i >= 0; i--)
+-	newp->val.args[i] = args[i];
+-      return newp;
++		newp->nargs = nargs;
++		newp->operation = op;
++		for (i = nargs - 1; i >= 0; i--)
++			newp->val.args[i] = args[i];
++		return newp;
+     }
+ 
+- fail:
+-  for (i = nargs - 1; i >= 0; i--)
+-    FREE_EXPRESSION (args[i]);
++fail:
++	for (i = nargs - 1; i >= 0; i--)
++		FREE_EXPRESSION (args[i]);
+ 
+-  return NULL;
++	return NULL;
+ }
+ 
+ static inline struct expression *
+-new_exp_0 (op)
+-     enum operator op;
++	new_exp_0 (op)
++	enum operator op;
+ {
+-  return new_exp (0, op, NULL);
++	return new_exp (0, op, NULL);
+ }
+ 
+ static inline struct expression *
+-new_exp_1 (op, right)
+-     enum operator op;
+-     struct expression *right;
++	new_exp_1 (op, right)
++	enum operator op;
++struct expression *right;
+ {
+-  struct expression *args[1];
++	struct expression *args[1];
+ 
+-  args[0] = right;
+-  return new_exp (1, op, args);
++	args[0] = right;
++	return new_exp (1, op, args);
+ }
+ 
+ static struct expression *
+-new_exp_2 (op, left, right)
+-     enum operator op;
+-     struct expression *left;
+-     struct expression *right;
+-{
+-  struct expression *args[2];
+-
+-  args[0] = left;
+-  args[1] = right;
+-  return new_exp (2, op, args);
++	new_exp_2 (op, left, right)
++	enum operator op;
++struct expression *left;
++struct expression *right;
++{
++	struct expression *args[2];
++
++	args[0] = left;
++	args[1] = right;
++	return new_exp (2, op, args);
+ }
+ 
+ static inline struct expression *
+-new_exp_3 (op, bexp, tbranch, fbranch)
+-     enum operator op;
+-     struct expression *bexp;
+-     struct expression *tbranch;
+-     struct expression *fbranch;
+-{
+-  struct expression *args[3];
+-
+-  args[0] = bexp;
+-  args[1] = tbranch;
+-  args[2] = fbranch;
+-  return new_exp (3, op, args);
++	new_exp_3 (op, bexp, tbranch, fbranch)
++	enum operator op;
++struct expression *bexp;
++struct expression *tbranch;
++struct expression *fbranch;
++{
++	struct expression *args[3];
++
++	args[0] = bexp;
++	args[1] = tbranch;
++	args[2] = fbranch;
++	return new_exp (3, op, args);
+ }
+ 
+ %}
+@@ -156,14 +155,14 @@
+    There is no unary minus and no bitwise operators.
+    Operators with the same syntactic behaviour have been merged into a single
+    token, to save space in the array generated by bison.  */
+-%right '?'		/*   ?		*/
+-%left '|'		/*   ||		*/
+-%left '&'		/*   &&		*/
+-%left EQUOP2		/*   == !=	*/
+-%left CMPOP2		/*   < > <= >=	*/
+-%left ADDOP2		/*   + -	*/
+-%left MULOP2		/*   * / %	*/
+-%right '!'		/*   !		*/
++%right '?'/*   ?*/
++%left '|'/*   ||*/
++%left '&'/*   &&*/
++%left EQUOP2/*   == !=*/
++%left CMPOP2/*   < > <= >=*/
++%left ADDOP2/*   + -*/
++%left MULOP2/*   * / %*/
++%right '!'/*   !*/
+ 
+ %token <op> EQUOP2 CMPOP2 ADDOP2 MULOP2
+ %token <num> NUMBER
+@@ -171,239 +170,240 @@
+ 
+ %%
+ 
+-start:	  exp
+-	  {
+-	    if ($1 == NULL)
+-	      YYABORT;
+-	    ((struct parse_args *) arg)->res = $1;
+-	  }
+-	;
+-
+-exp:	  exp '?' exp ':' exp
+-	  {
+-	    $$ = new_exp_3 (qmop, $1, $3, $5);
+-	  }
+-	| exp '|' exp
+-	  {
+-	    $$ = new_exp_2 (lor, $1, $3);
+-	  }
+-	| exp '&' exp
+-	  {
+-	    $$ = new_exp_2 (land, $1, $3);
+-	  }
+-	| exp EQUOP2 exp
+-	  {
+-	    $$ = new_exp_2 ($2, $1, $3);
+-	  }
+-	| exp CMPOP2 exp
+-	  {
+-	    $$ = new_exp_2 ($2, $1, $3);
+-	  }
+-	| exp ADDOP2 exp
+-	  {
+-	    $$ = new_exp_2 ($2, $1, $3);
+-	  }
+-	| exp MULOP2 exp
+-	  {
+-	    $$ = new_exp_2 ($2, $1, $3);
+-	  }
+-	| '!' exp
+-	  {
+-	    $$ = new_exp_1 (lnot, $2);
+-	  }
+-	| 'n'
+-	  {
+-	    $$ = new_exp_0 (var);
+-	  }
+-	| NUMBER
+-	  {
+-	    if (($$ = new_exp_0 (num)) != NULL)
+-	      $$->val.num = $1;
+-	  }
+-	| '(' exp ')'
+-	  {
+-	    $$ = $2;
+-	  }
+-	;
++start:  exp
++{
++	if ($1 == NULL)
++		YYABORT;
++	arg->res = $1;
++}
++;
++
++exp:  exp '?' exp ':' exp
++{
++	$$ = new_exp_3 (qmop, $1, $3, $5);
++}
++| exp '|' exp
++{
++	$$ = new_exp_2 (lor, $1, $3);
++}
++| exp '&' exp
++{
++	$$ = new_exp_2 (land, $1, $3);
++}
++| exp EQUOP2 exp
++{
++	$$ = new_exp_2 ($2, $1, $3);
++}
++| exp CMPOP2 exp
++{
++	$$ = new_exp_2 ($2, $1, $3);
++}
++| exp ADDOP2 exp
++{
++	$$ = new_exp_2 ($2, $1, $3);
++}
++| exp MULOP2 exp
++{
++	$$ = new_exp_2 ($2, $1, $3);
++}
++| '!' exp
++{
++	$$ = new_exp_1 (lnot, $2);
++}
++| 'n'
++{
++	$$ = new_exp_0 (var);
++}
++| NUMBER
++{
++	if (($$ = new_exp_0 (num)) != NULL)
++		$$->val.num = $1;
++}
++| '(' exp ')'
++{
++	$$ = $2;
++}
++;
+ 
+ %%
+ 
+ void
+ internal_function
+ FREE_EXPRESSION (exp)
+-     struct expression *exp;
++struct expression *exp;
+ {
+-  if (exp == NULL)
+-    return;
++	if (exp == NULL)
++		return;
+ 
+-  /* Handle the recursive case.  */
+-  switch (exp->nargs)
++	/* Handle the recursive case.  */
++	switch (exp->nargs)
+     {
+-    case 3:
+-      FREE_EXPRESSION (exp->val.args[2]);
+-      /* FALLTHROUGH */
+-    case 2:
+-      FREE_EXPRESSION (exp->val.args[1]);
+-      /* FALLTHROUGH */
+-    case 1:
+-      FREE_EXPRESSION (exp->val.args[0]);
+-      /* FALLTHROUGH */
+-    default:
+-      break;
++		case 3:
++			FREE_EXPRESSION (exp->val.args[2]);
++			/* FALLTHROUGH */
++		case 2:
++			FREE_EXPRESSION (exp->val.args[1]);
++			/* FALLTHROUGH */
++		case 1:
++			FREE_EXPRESSION (exp->val.args[0]);
++			/* FALLTHROUGH */
++		default:
++			break;
+     }
+ 
+-  free (exp);
++	free (exp);
+ }
+ 
+ 
+ static int
+-yylex (lval, pexp)
+-     YYSTYPE *lval;
+-     const char **pexp;
++yylex (lval, arg)
++YYSTYPE *lval;
++struct parse_args *arg;
+ {
+-  const char *exp = *pexp;
+-  int result;
++	const char *exp = arg->cp;
++	int result;
+ 
+-  while (1)
++	while (1)
+     {
+-      if (exp[0] == '\0')
+-	{
+-	  *pexp = exp;
+-	  return YYEOF;
+-	}
++		if (exp[0] == '\0')
++		{
++			arg->cp = exp;
++			return YYEOF;
++		}
+ 
+-      if (exp[0] != ' ' && exp[0] != '\t')
+-	break;
++		if (exp[0] != ' ' && exp[0] != '\t')
++			break;
+ 
+-      ++exp;
++		++exp;
+     }
+ 
+-  result = *exp++;
+-  switch (result)
++	result = *exp++;
++	switch (result)
+     {
+-    case '0': case '1': case '2': case '3': case '4':
+-    case '5': case '6': case '7': case '8': case '9':
+-      {
+-	unsigned long int n = result - '0';
+-	while (exp[0] >= '0' && exp[0] <= '9')
+-	  {
+-	    n *= 10;
+-	    n += exp[0] - '0';
+-	    ++exp;
+-	  }
+-	lval->num = n;
+-	result = NUMBER;
+-      }
+-      break;
+-
+-    case '=':
+-      if (exp[0] == '=')
+-	{
+-	  ++exp;
+-	  lval->op = equal;
+-	  result = EQUOP2;
+-	}
+-      else
+-	result = YYERRCODE;
+-      break;
+-
+-    case '!':
+-      if (exp[0] == '=')
+-	{
+-	  ++exp;
+-	  lval->op = not_equal;
+-	  result = EQUOP2;
+-	}
+-      break;
+-
+-    case '&':
+-    case '|':
+-      if (exp[0] == result)
+-	++exp;
+-      else
+-	result = YYERRCODE;
+-      break;
+-
+-    case '<':
+-      if (exp[0] == '=')
+-	{
+-	  ++exp;
+-	  lval->op = less_or_equal;
+-	}
+-      else
+-	lval->op = less_than;
+-      result = CMPOP2;
+-      break;
+-
+-    case '>':
+-      if (exp[0] == '=')
+-	{
+-	  ++exp;
+-	  lval->op = greater_or_equal;
+-	}
+-      else
+-	lval->op = greater_than;
+-      result = CMPOP2;
+-      break;
+-
+-    case '*':
+-      lval->op = mult;
+-      result = MULOP2;
+-      break;
+-
+-    case '/':
+-      lval->op = divide;
+-      result = MULOP2;
+-      break;
+-
+-    case '%':
+-      lval->op = module;
+-      result = MULOP2;
+-      break;
+-
+-    case '+':
+-      lval->op = plus;
+-      result = ADDOP2;
+-      break;
+-
+-    case '-':
+-      lval->op = minus;
+-      result = ADDOP2;
+-      break;
+-
+-    case 'n':
+-    case '?':
+-    case ':':
+-    case '(':
+-    case ')':
+-      /* Nothing, just return the character.  */
+-      break;
+-
+-    case ';':
+-    case '\n':
+-    case '\0':
+-      /* Be safe and let the user call this function again.  */
+-      --exp;
+-      result = YYEOF;
+-      break;
++		case '0': case '1': case '2': case '3': case '4':
++		case '5': case '6': case '7': case '8': case '9':
++		{
++			unsigned long int n = result - '0';
++			while (exp[0] >= '0' && exp[0] <= '9')
++			{
++				n *= 10;
++				n += exp[0] - '0';
++				++exp;
++			}
++			lval->num = n;
++			result = NUMBER;
++		}
++		break;
++
++		case '=':
++			if (exp[0] == '=')
++			{
++				++exp;
++				lval->op = equal;
++				result = EQUOP2;
++			}
++			else
++				result = YYERRCODE;
++			break;
++
++		case '!':
++			if (exp[0] == '=')
++			{
++				++exp;
++				lval->op = not_equal;
++				result = EQUOP2;
++			}
++			break;
++
++		case '&':
++		case '|':
++			if (exp[0] == result)
++				++exp;
++			else
++				result = YYERRCODE;
++			break;
++
++		case '<':
++			if (exp[0] == '=')
++			{
++				++exp;
++				lval->op = less_or_equal;
++			}
++			else
++				lval->op = less_than;
++			result = CMPOP2;
++			break;
++
++		case '>':
++			if (exp[0] == '=')
++			{
++				++exp;
++				lval->op = greater_or_equal;
++			}
++			else
++				lval->op = greater_than;
++			result = CMPOP2;
++			break;
++
++		case '*':
++			lval->op = mult;
++			result = MULOP2;
++			break;
++
++		case '/':
++			lval->op = divide;
++			result = MULOP2;
++			break;
++
++		case '%':
++			lval->op = module;
++			result = MULOP2;
++			break;
++
++		case '+':
++			lval->op = plus;
++			result = ADDOP2;
++			break;
++
++		case '-':
++			lval->op = minus;
++			result = ADDOP2;
++			break;
++
++		case 'n':
++		case '?':
++		case ':':
++		case '(':
++		case ')':
++			/* Nothing, just return the character.  */
++			break;
++
++		case ';':
++		case '\n':
++		case '\0':
++			/* Be safe and let the user call this function again.  */
++			--exp;
++			result = YYEOF;
++			break;
+ 
+-    default:
+-      result = YYERRCODE;
++		default:
++			result = YYERRCODE;
+ #if YYDEBUG != 0
+-      --exp;
++			--exp;
+ #endif
+-      break;
++			break;
+     }
+ 
+-  *pexp = exp;
++	arg->cp = exp; 
+ 
+-  return result;
++	return result;
+ }
+ 
+ 
+ static void
+-yyerror (str)
+-     const char *str;
++yyerror (arg, str)
++struct parse_args *arg;
++const char *str;
+ {
+-  /* Do nothing.  We don't print error messages here.  */
++	/* Do nothing.  We don't print error messages here.  */
+ }
+diff -N -r --unified glibc-2.19/malloc/arena.c glibc-2.19-woc/malloc/arena.c
 --- glibc-2.19/malloc/arena.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/malloc/arena.c	2016-03-31 13:07:41.518882650 -0700
++++ glibc-2.19-woc/malloc/arena.c	2017-03-15 16:47:38.767340738 -0700
 @@ -526,7 +526,7 @@
  new_heap (size_t size, size_t top_pad)
  {
@@ -418,11 +4327,11 @@ diff -r --unified -N glibc-2.19/malloc/arena.c glibc-2.19-woc/malloc/arena.c
 +	 heaps are aligned. If not, we unmap all of them, even if some
 +	 WERE aligned!!!
 +       */
-+      if (p2 != MAP_FAILED && !mvee_all_heaps_aligned(p2))
++      if (p2 != MAP_FAILED && !mvee_all_heaps_aligned(p2, HEAP_MAX_SIZE))
          {
            __munmap (p2, HEAP_MAX_SIZE);
            p2 = MAP_FAILED;
-@@ -558,6 +580,16 @@
+@@ -558,6 +580,17 @@
      }
    if (p2 == MAP_FAILED)
      {
@@ -436,10 +4345,11 @@ diff -r --unified -N glibc-2.19/malloc/arena.c glibc-2.19-woc/malloc/arena.c
 +	 sequence is atomic and cannot block (=> we should _NOT_ grab
 +	 ANY locks until after the last munmap)	
 +       */
++	  (void)mvee_all_heaps_aligned(0, HEAP_MAX_SIZE);
        p1 = (char *) MMAP (0, HEAP_MAX_SIZE << 1, PROT_NONE, MAP_NORESERVE);
        if (p1 != MAP_FAILED)
          {
-@@ -566,9 +598,10 @@
+@@ -566,9 +599,10 @@
            ul = p2 - p1;
            if (ul)
              __munmap (p1, ul);
@@ -452,17 +4362,17 @@ diff -r --unified -N glibc-2.19/malloc/arena.c glibc-2.19-woc/malloc/arena.c
          }
        else
          {
-@@ -578,7 +611,8 @@
+@@ -578,7 +612,8 @@
            if (p2 == MAP_FAILED)
              return 0;
  
 -          if ((unsigned long) p2 & (HEAP_MAX_SIZE - 1))
 +	  /* MVEE patch: see comment above */
-+          if (!mvee_all_heaps_aligned(p2))
++          if (!mvee_all_heaps_aligned(p2, HEAP_MAX_SIZE))
              {
                __munmap (p2, HEAP_MAX_SIZE);
                return 0;
-@@ -661,8 +695,8 @@
+@@ -661,8 +696,8 @@
  
  #define delete_heap(heap) \
    do {									      \
@@ -473,7 +4383,7 @@ diff -r --unified -N glibc-2.19/malloc/arena.c glibc-2.19-woc/malloc/arena.c
        __munmap ((char *) (heap), HEAP_MAX_SIZE);			      \
      } while (0)
  
-@@ -786,14 +820,10 @@
+@@ -786,14 +821,10 @@
  static mstate
  get_free_list (void)
  {
@@ -489,7 +4399,7 @@ diff -r --unified -N glibc-2.19/malloc/arena.c glibc-2.19-woc/malloc/arena.c
  
        if (result != NULL)
          {
-@@ -802,7 +832,8 @@
+@@ -802,7 +833,8 @@
            tsd_setspecific (arena_key, (void *) result);
            THREAD_STAT (++(result->stat_lock_loop));
          }
@@ -499,7 +4409,7 @@ diff -r --unified -N glibc-2.19/malloc/arena.c glibc-2.19-woc/malloc/arena.c
  
    return result;
  }
-@@ -858,24 +889,24 @@
+@@ -858,24 +890,24 @@
    if (a == NULL)
      {
        /* Nothing immediately available, so generate a new arena.  */
@@ -530,7 +4440,7 @@ diff -r --unified -N glibc-2.19/malloc/arena.c glibc-2.19-woc/malloc/arena.c
        /* NB: the following depends on the fact that (size_t)0 - 1 is a
           very large number and that the underflow is OK.  If arena_max
           is set the value of arena_test is irrelevant.  If arena_test
-@@ -883,7 +914,7 @@
+@@ -883,7 +915,7 @@
           narenas_limit is 0.  There is no possibility for narenas to
           be too big for the test to always fail since there is not
           enough address space to create that many arenas.  */
@@ -539,9 +4449,9 @@ diff -r --unified -N glibc-2.19/malloc/arena.c glibc-2.19-woc/malloc/arena.c
          {
            if (catomic_compare_and_exchange_bool_acq (&narenas, n + 1, n))
              goto repeat;
-diff -r --unified -N glibc-2.19/malloc/malloc.c glibc-2.19-woc/malloc/malloc.c
+diff -N -r --unified glibc-2.19/malloc/malloc.c glibc-2.19-woc/malloc/malloc.c
 --- glibc-2.19/malloc/malloc.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/malloc/malloc.c	2016-03-31 13:07:41.519882650 -0700
++++ glibc-2.19-woc/malloc/malloc.c	2017-03-07 18:07:30.710256084 -0800
 @@ -1705,6 +1705,9 @@
  
  struct malloc_par
@@ -1217,9 +5127,9 @@ diff -r --unified -N glibc-2.19/malloc/malloc.c glibc-2.19-woc/malloc/malloc.c
        break;
  
      case M_CHECK_ACTION:
-diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-alias.c glibc-2.19-woc/nis/nss_nisplus/nisplus-alias.c
+diff -N -r --unified glibc-2.19/nis/nss_nisplus/nisplus-alias.c glibc-2.19-woc/nis/nss_nisplus/nisplus-alias.c
 --- glibc-2.19/nis/nss_nisplus/nisplus-alias.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nis/nss_nisplus/nisplus-alias.c	2016-03-31 13:07:41.519882650 -0700
++++ glibc-2.19-woc/nis/nss_nisplus/nisplus-alias.c	2017-03-07 18:07:30.710256084 -0800
 @@ -43,7 +43,7 @@
  static enum nss_status
  _nss_create_tablename (int *errnop)
@@ -1256,9 +5166,9 @@ diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-alias.c glibc-2.19-woc/n
      {
        __libc_lock_lock (lock);
  
-diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-ethers.c glibc-2.19-woc/nis/nss_nisplus/nisplus-ethers.c
+diff -N -r --unified glibc-2.19/nis/nss_nisplus/nisplus-ethers.c glibc-2.19-woc/nis/nss_nisplus/nisplus-ethers.c
 --- glibc-2.19/nis/nss_nisplus/nisplus-ethers.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nis/nss_nisplus/nisplus-ethers.c	2016-03-31 13:07:41.520882650 -0700
++++ glibc-2.19-woc/nis/nss_nisplus/nisplus-ethers.c	2017-03-07 18:07:30.710256084 -0800
 @@ -88,7 +88,7 @@
  static enum nss_status
  _nss_create_tablename (int *errnop)
@@ -1304,9 +5214,9 @@ diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-ethers.c glibc-2.19-woc/
      {
        __libc_lock_lock (lock);
  
-diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-grp.c glibc-2.19-woc/nis/nss_nisplus/nisplus-grp.c
+diff -N -r --unified glibc-2.19/nis/nss_nisplus/nisplus-grp.c glibc-2.19-woc/nis/nss_nisplus/nisplus-grp.c
 --- glibc-2.19/nis/nss_nisplus/nisplus-grp.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nis/nss_nisplus/nisplus-grp.c	2016-03-31 13:07:41.520882650 -0700
++++ glibc-2.19-woc/nis/nss_nisplus/nisplus-grp.c	2017-03-07 18:07:30.710256084 -0800
 @@ -50,7 +50,7 @@
  enum nss_status
  _nss_grp_create_tablename (int *errnop)
@@ -1343,9 +5253,9 @@ diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-grp.c glibc-2.19-woc/nis
      {
        enum nss_status status = _nss_grp_create_tablename (errnop);
  
-diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-hosts.c glibc-2.19-woc/nis/nss_nisplus/nisplus-hosts.c
+diff -N -r --unified glibc-2.19/nis/nss_nisplus/nisplus-hosts.c glibc-2.19-woc/nis/nss_nisplus/nisplus-hosts.c
 --- glibc-2.19/nis/nss_nisplus/nisplus-hosts.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nis/nss_nisplus/nisplus-hosts.c	2016-03-31 13:07:41.520882650 -0700
++++ glibc-2.19-woc/nis/nss_nisplus/nisplus-hosts.c	2017-03-07 18:07:30.710256084 -0800
 @@ -191,7 +191,7 @@
  static enum nss_status
  _nss_create_tablename (int *errnop)
@@ -1409,9 +5319,9 @@ diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-hosts.c glibc-2.19-woc/n
      {
        enum nss_status status = get_tablename (herrnop);
        if (status != NSS_STATUS_SUCCESS)
-diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-network.c glibc-2.19-woc/nis/nss_nisplus/nisplus-network.c
+diff -N -r --unified glibc-2.19/nis/nss_nisplus/nisplus-network.c glibc-2.19-woc/nis/nss_nisplus/nisplus-network.c
 --- glibc-2.19/nis/nss_nisplus/nisplus-network.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nis/nss_nisplus/nisplus-network.c	2016-03-31 13:07:41.520882650 -0700
++++ glibc-2.19-woc/nis/nss_nisplus/nisplus-network.c	2017-03-07 18:07:30.711256084 -0800
 @@ -142,7 +142,7 @@
  static enum nss_status
  _nss_create_tablename (int *errnop)
@@ -1475,9 +5385,9 @@ diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-network.c glibc-2.19-woc
      {
        __libc_lock_lock (lock);
  
-diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-proto.c glibc-2.19-woc/nis/nss_nisplus/nisplus-proto.c
+diff -N -r --unified glibc-2.19/nis/nss_nisplus/nisplus-proto.c glibc-2.19-woc/nis/nss_nisplus/nisplus-proto.c
 --- glibc-2.19/nis/nss_nisplus/nisplus-proto.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nis/nss_nisplus/nisplus-proto.c	2016-03-31 13:07:41.521882650 -0700
++++ glibc-2.19-woc/nis/nss_nisplus/nisplus-proto.c	2017-03-07 18:07:30.711256084 -0800
 @@ -137,7 +137,7 @@
  static enum nss_status
  _nss_create_tablename (int *errnop)
@@ -1541,9 +5451,9 @@ diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-proto.c glibc-2.19-woc/n
      {
        __libc_lock_lock (lock);
  
-diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-pwd.c glibc-2.19-woc/nis/nss_nisplus/nisplus-pwd.c
+diff -N -r --unified glibc-2.19/nis/nss_nisplus/nisplus-pwd.c glibc-2.19-woc/nis/nss_nisplus/nisplus-pwd.c
 --- glibc-2.19/nis/nss_nisplus/nisplus-pwd.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nis/nss_nisplus/nisplus-pwd.c	2016-03-31 13:07:41.521882650 -0700
++++ glibc-2.19-woc/nis/nss_nisplus/nisplus-pwd.c	2017-03-07 18:07:30.711256084 -0800
 @@ -49,7 +49,7 @@
  enum nss_status
  _nss_pwd_create_tablename (int *errnop)
@@ -1580,9 +5490,9 @@ diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-pwd.c glibc-2.19-woc/nis
      {
        enum nss_status status = _nss_pwd_create_tablename (errnop);
  
-diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-rpc.c glibc-2.19-woc/nis/nss_nisplus/nisplus-rpc.c
+diff -N -r --unified glibc-2.19/nis/nss_nisplus/nisplus-rpc.c glibc-2.19-woc/nis/nss_nisplus/nisplus-rpc.c
 --- glibc-2.19/nis/nss_nisplus/nisplus-rpc.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nis/nss_nisplus/nisplus-rpc.c	2016-03-31 13:07:41.521882650 -0700
++++ glibc-2.19-woc/nis/nss_nisplus/nisplus-rpc.c	2017-03-07 18:07:30.711256084 -0800
 @@ -138,7 +138,7 @@
  static enum nss_status
  _nss_create_tablename (int *errnop)
@@ -1646,9 +5556,9 @@ diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-rpc.c glibc-2.19-woc/nis
      {
        __libc_lock_lock (lock);
  
-diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-service.c glibc-2.19-woc/nis/nss_nisplus/nisplus-service.c
+diff -N -r --unified glibc-2.19/nis/nss_nisplus/nisplus-service.c glibc-2.19-woc/nis/nss_nisplus/nisplus-service.c
 --- glibc-2.19/nis/nss_nisplus/nisplus-service.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nis/nss_nisplus/nisplus-service.c	2016-03-31 13:07:41.521882650 -0700
++++ glibc-2.19-woc/nis/nss_nisplus/nisplus-service.c	2017-03-07 18:07:30.711256084 -0800
 @@ -145,7 +145,7 @@
  static enum nss_status
  _nss_create_tablename (int *errnop)
@@ -1712,9 +5622,9 @@ diff -r --unified -N glibc-2.19/nis/nss_nisplus/nisplus-service.c glibc-2.19-woc
      {
        __libc_lock_lock (lock);
  
-diff -r --unified -N glibc-2.19/nptl/allocatestack.c glibc-2.19-woc/nptl/allocatestack.c
+diff -N -r --unified glibc-2.19/nptl/allocatestack.c glibc-2.19-woc/nptl/allocatestack.c
 --- glibc-2.19/nptl/allocatestack.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/allocatestack.c	2016-03-31 13:07:41.522882650 -0700
++++ glibc-2.19-woc/nptl/allocatestack.c	2017-03-07 18:07:30.711256084 -0800
 @@ -130,13 +130,13 @@
  
  
@@ -1939,9 +5849,9 @@ diff -r --unified -N glibc-2.19/nptl/allocatestack.c glibc-2.19-woc/nptl/allocat
  
    /* If this failed, it must have had not started yet or else exited.  */
    if (!INTERNAL_SYSCALL_ERROR_P (val, err))
-diff -r --unified -N glibc-2.19/nptl/descr.h glibc-2.19-woc/nptl/descr.h
+diff -N -r --unified glibc-2.19/nptl/descr.h glibc-2.19-woc/nptl/descr.h
 --- glibc-2.19/nptl/descr.h	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/descr.h	2016-03-31 13:07:41.522882650 -0700
++++ glibc-2.19-woc/nptl/descr.h	2017-03-07 18:07:30.711256084 -0800
 @@ -342,7 +342,7 @@
       in normal operation.  */
    struct pthread *joinid;
@@ -1951,9 +5861,9 @@ diff -r --unified -N glibc-2.19/nptl/descr.h glibc-2.19-woc/nptl/descr.h
  
    /* The result of the thread function.  */
    void *result;
-diff -r --unified -N glibc-2.19/nptl/nptl-init.c glibc-2.19-woc/nptl/nptl-init.c
+diff -N -r --unified glibc-2.19/nptl/nptl-init.c glibc-2.19-woc/nptl/nptl-init.c
 --- glibc-2.19/nptl/nptl-init.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/nptl-init.c	2016-03-31 13:07:41.522882650 -0700
++++ glibc-2.19-woc/nptl/nptl-init.c	2017-03-07 18:07:30.711256084 -0800
 @@ -44,7 +44,7 @@
  #ifndef __ASSUME_SET_ROBUST_LIST
  /* Negative if we do not have the system call and we can use it.  */
@@ -1972,9 +5882,9 @@ diff -r --unified -N glibc-2.19/nptl/nptl-init.c glibc-2.19-woc/nptl/nptl-init.c
    lll_futex_wake (&self->setxid_futex, 1, LLL_PRIVATE);
  
    if (atomic_decrement_val (&__xidcmd->cntr) == 0)
-diff -r --unified -N glibc-2.19/nptl/pthread_barrier_wait.c glibc-2.19-woc/nptl/pthread_barrier_wait.c
+diff -N -r --unified glibc-2.19/nptl/pthread_barrier_wait.c glibc-2.19-woc/nptl/pthread_barrier_wait.c
 --- glibc-2.19/nptl/pthread_barrier_wait.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/pthread_barrier_wait.c	2016-03-31 13:07:41.523882650 -0700
++++ glibc-2.19-woc/nptl/pthread_barrier_wait.c	2017-03-07 18:07:30.712256085 -0800
 @@ -41,7 +41,10 @@
      {
        /* Yes. Increment the event counter to avoid invalid wake-ups and
@@ -2012,9 +5922,9 @@ diff -r --unified -N glibc-2.19/nptl/pthread_barrier_wait.c glibc-2.19-woc/nptl/
  
    /* If this was the last woken thread, unlock.  */
    if (atomic_increment_val (&ibarrier->left) == init_count)
-diff -r --unified -N glibc-2.19/nptl/pthread_cancel.c glibc-2.19-woc/nptl/pthread_cancel.c
+diff -N -r --unified glibc-2.19/nptl/pthread_cancel.c glibc-2.19-woc/nptl/pthread_cancel.c
 --- glibc-2.19/nptl/pthread_cancel.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/pthread_cancel.c	2016-03-31 13:07:41.523882650 -0700
++++ glibc-2.19-woc/nptl/pthread_cancel.c	2017-03-07 18:07:30.712256085 -0800
 @@ -44,7 +44,7 @@
    do
      {
@@ -2033,9 +5943,9 @@ diff -r --unified -N glibc-2.19/nptl/pthread_cancel.c glibc-2.19-woc/nptl/pthrea
  				  SIGCANCEL);
  
  	  if (INTERNAL_SYSCALL_ERROR_P (val, err))
-diff -r --unified -N glibc-2.19/nptl/pthread_cond_signal.c glibc-2.19-woc/nptl/pthread_cond_signal.c
+diff -N -r --unified glibc-2.19/nptl/pthread_cond_signal.c glibc-2.19-woc/nptl/pthread_cond_signal.c
 --- glibc-2.19/nptl/pthread_cond_signal.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/pthread_cond_signal.c	2016-03-31 13:07:41.523882650 -0700
++++ glibc-2.19-woc/nptl/pthread_cond_signal.c	2017-03-07 18:07:30.712256085 -0800
 @@ -63,12 +63,18 @@
  	}
        else
@@ -2055,9 +5965,9 @@ diff -r --unified -N glibc-2.19/nptl/pthread_cond_signal.c glibc-2.19-woc/nptl/p
  
        /* Fallback if neither of them work.  */
        lll_futex_wake (&cond->__data.__futex, 1, pshared);
-diff -r --unified -N glibc-2.19/nptl/pthread_create.c glibc-2.19-woc/nptl/pthread_create.c
+diff -N -r --unified glibc-2.19/nptl/pthread_create.c glibc-2.19-woc/nptl/pthread_create.c
 --- glibc-2.19/nptl/pthread_create.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/pthread_create.c	2016-03-31 13:07:41.524882650 -0700
++++ glibc-2.19-woc/nptl/pthread_create.c	2017-03-07 18:07:30.712256085 -0800
 @@ -265,7 +265,7 @@
    /* If the parent was running cancellation handlers while creating
       the thread the new thread inherited the signal mask.  Reset the
@@ -2096,9 +6006,9 @@ diff -r --unified -N glibc-2.19/nptl/pthread_create.c glibc-2.19-woc/nptl/pthrea
      }
  
    /* We cannot call '_exit' here.  '_exit' will terminate the process.
-diff -r --unified -N glibc-2.19/nptl/pthread_detach.c glibc-2.19-woc/nptl/pthread_detach.c
+diff -N -r --unified glibc-2.19/nptl/pthread_detach.c glibc-2.19-woc/nptl/pthread_detach.c
 --- glibc-2.19/nptl/pthread_detach.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/pthread_detach.c	2016-03-31 13:07:41.524882650 -0700
++++ glibc-2.19-woc/nptl/pthread_detach.c	2017-03-07 18:07:30.712256085 -0800
 @@ -47,7 +47,7 @@
    else
      /* Check whether the thread terminated meanwhile.  In this case we
@@ -2108,9 +6018,9 @@ diff -r --unified -N glibc-2.19/nptl/pthread_detach.c glibc-2.19-woc/nptl/pthrea
        /* Note that the code in __free_tcb makes sure each thread
  	 control block is freed only once.  */
        __free_tcb (pd);
-diff -r --unified -N glibc-2.19/nptl/pthread_getattr_np.c glibc-2.19-woc/nptl/pthread_getattr_np.c
+diff -N -r --unified glibc-2.19/nptl/pthread_getattr_np.c glibc-2.19-woc/nptl/pthread_getattr_np.c
 --- glibc-2.19/nptl/pthread_getattr_np.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/pthread_getattr_np.c	2016-03-31 13:07:41.524882650 -0700
++++ glibc-2.19-woc/nptl/pthread_getattr_np.c	2017-03-07 18:07:30.712256085 -0800
 @@ -66,7 +66,7 @@
      {
        /* No stack information available.  This must be for the initial
@@ -2120,9 +6030,9 @@ diff -r --unified -N glibc-2.19/nptl/pthread_getattr_np.c glibc-2.19-woc/nptl/pt
  
        /* Stack size limit.  */
        struct rlimit rl;
-diff -r --unified -N glibc-2.19/nptl/pthread_getcpuclockid.c glibc-2.19-woc/nptl/pthread_getcpuclockid.c
+diff -N -r --unified glibc-2.19/nptl/pthread_getcpuclockid.c glibc-2.19-woc/nptl/pthread_getcpuclockid.c
 --- glibc-2.19/nptl/pthread_getcpuclockid.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/pthread_getcpuclockid.c	2016-03-31 13:07:41.524882650 -0700
++++ glibc-2.19-woc/nptl/pthread_getcpuclockid.c	2017-03-07 18:07:30.712256085 -0800
 @@ -42,11 +42,11 @@
  
       If some day more clock IDs are needed the ID part can be
@@ -2137,9 +6047,9 @@ diff -r --unified -N glibc-2.19/nptl/pthread_getcpuclockid.c glibc-2.19-woc/nptl
  
    return 0;
  #else
-diff -r --unified -N glibc-2.19/nptl/pthread_getschedparam.c glibc-2.19-woc/nptl/pthread_getschedparam.c
+diff -N -r --unified glibc-2.19/nptl/pthread_getschedparam.c glibc-2.19-woc/nptl/pthread_getschedparam.c
 --- glibc-2.19/nptl/pthread_getschedparam.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/pthread_getschedparam.c	2016-03-31 13:07:41.524882650 -0700
++++ glibc-2.19-woc/nptl/pthread_getschedparam.c	2017-03-07 18:07:30.712256085 -0800
 @@ -46,7 +46,7 @@
       not yet been retrieved do it now.  */
    if ((pd->flags & ATTR_FLAG_SCHED_SET) == 0)
@@ -2158,9 +6068,9 @@ diff -r --unified -N glibc-2.19/nptl/pthread_getschedparam.c glibc-2.19-woc/nptl
        if (pd->schedpolicy == -1)
  	result = 1;
        else
-diff -r --unified -N glibc-2.19/nptl/pthread_join.c glibc-2.19-woc/nptl/pthread_join.c
+diff -N -r --unified glibc-2.19/nptl/pthread_join.c glibc-2.19-woc/nptl/pthread_join.c
 --- glibc-2.19/nptl/pthread_join.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/pthread_join.c	2016-03-31 13:07:41.525882651 -0700
++++ glibc-2.19-woc/nptl/pthread_join.c	2017-03-07 18:07:30.712256085 -0800
 @@ -67,11 +67,11 @@
    int oldtype = CANCEL_ASYNC ();
  
@@ -2185,9 +6095,9 @@ diff -r --unified -N glibc-2.19/nptl/pthread_join.c glibc-2.19-woc/nptl/pthread_
  
        /* Store the return value if the caller is interested.  */
        if (thread_return != NULL)
-diff -r --unified -N glibc-2.19/nptl/pthread_key_create.c glibc-2.19-woc/nptl/pthread_key_create.c
+diff -N -r --unified glibc-2.19/nptl/pthread_key_create.c glibc-2.19-woc/nptl/pthread_key_create.c
 --- glibc-2.19/nptl/pthread_key_create.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/pthread_key_create.c	2016-03-31 13:07:41.525882651 -0700
++++ glibc-2.19-woc/nptl/pthread_key_create.c	2017-03-07 18:07:30.712256085 -0800
 @@ -29,7 +29,7 @@
    /* Find a slot in __pthread_kyes which is unused.  */
    for (size_t cnt = 0; cnt < PTHREAD_KEYS_MAX; ++cnt)
@@ -2197,9 +6107,9 @@ diff -r --unified -N glibc-2.19/nptl/pthread_key_create.c glibc-2.19-woc/nptl/pt
  
        if (KEY_UNUSED (seq) && KEY_USABLE (seq)
  	  /* We found an unused slot.  Try to allocate it.  */
-diff -r --unified -N glibc-2.19/nptl/pthread_key_delete.c glibc-2.19-woc/nptl/pthread_key_delete.c
+diff -N -r --unified glibc-2.19/nptl/pthread_key_delete.c glibc-2.19-woc/nptl/pthread_key_delete.c
 --- glibc-2.19/nptl/pthread_key_delete.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/pthread_key_delete.c	2016-03-31 13:07:41.525882651 -0700
++++ glibc-2.19-woc/nptl/pthread_key_delete.c	2017-03-07 18:07:30.712256085 -0800
 @@ -29,7 +29,7 @@
  
    if (__builtin_expect (key < PTHREAD_KEYS_MAX, 1))
@@ -2209,9 +6119,27 @@ diff -r --unified -N glibc-2.19/nptl/pthread_key_delete.c glibc-2.19-woc/nptl/pt
  
        if (__builtin_expect (! KEY_UNUSED (seq), 1)
  	  && ! atomic_compare_and_exchange_bool_acq (&__pthread_keys[key].seq,
-diff -r --unified -N glibc-2.19/nptl/pthread_mutex_lock.c glibc-2.19-woc/nptl/pthread_mutex_lock.c
+diff -N -r --unified glibc-2.19/nptl/pthread_mutex_lock.c glibc-2.19-woc/nptl/pthread_mutex_lock.c
 --- glibc-2.19/nptl/pthread_mutex_lock.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/pthread_mutex_lock.c	2016-03-31 13:07:41.525882651 -0700
++++ glibc-2.19-woc/nptl/pthread_mutex_lock.c	2017-03-14 14:35:53.023975776 -0700
+@@ -126,7 +126,7 @@
+ 	{
+ 	  int cnt = 0;
+ 	  int max_cnt = MIN (MAX_ADAPTIVE_COUNT,
+-			     mutex->__data.__spins * 2 + 10);
++						 atomic_load(mutex->__data.__spins) * 2 + 10);
+ 	  do
+ 	    {
+ 	      if (cnt++ >= max_cnt)
+@@ -141,7 +141,7 @@
+ 	    }
+ 	  while (LLL_MUTEX_TRYLOCK (mutex) != 0);
+ 
+-	  mutex->__data.__spins += (cnt - mutex->__data.__spins) / 8;
++	  atomic_add(&mutex->__data.__spins, (cnt - mutex->__data.__spins) / 8);
+ 	}
+       assert (mutex->__data.__owner == 0);
+     }
 @@ -183,7 +183,7 @@
        THREAD_SETMEM (THREAD_SELF, robust_head.list_op_pending,
  		     &mutex->__data.__list.__next);
@@ -2248,9 +6176,9 @@ diff -r --unified -N glibc-2.19/nptl/pthread_mutex_lock.c glibc-2.19-woc/nptl/pt
  
  	/* Check whether we already hold the mutex.  */
  	if (mutex->__data.__owner == id)
-diff -r --unified -N glibc-2.19/nptl/pthread_mutex_setprioceiling.c glibc-2.19-woc/nptl/pthread_mutex_setprioceiling.c
+diff -N -r --unified glibc-2.19/nptl/pthread_mutex_setprioceiling.c glibc-2.19-woc/nptl/pthread_mutex_setprioceiling.c
 --- glibc-2.19/nptl/pthread_mutex_setprioceiling.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/pthread_mutex_setprioceiling.c	2016-03-31 13:07:41.525882651 -0700
++++ glibc-2.19-woc/nptl/pthread_mutex_setprioceiling.c	2017-03-07 18:07:30.713256085 -0800
 @@ -33,7 +33,7 @@
    if ((mutex->__data.__kind & PTHREAD_MUTEX_PRIO_PROTECT_NP) == 0)
      return EINVAL;
@@ -2282,9 +6210,36 @@ diff -r --unified -N glibc-2.19/nptl/pthread_mutex_setprioceiling.c glibc-2.19-w
    atomic_full_barrier ();
  
    lll_futex_wake (&mutex->__data.__lock, INT_MAX,
-diff -r --unified -N glibc-2.19/nptl/pthread_mutex_timedlock.c glibc-2.19-woc/nptl/pthread_mutex_timedlock.c
+diff -N -r --unified glibc-2.19/nptl/pthread_mutex_timedlock.c glibc-2.19-woc/nptl/pthread_mutex_timedlock.c
 --- glibc-2.19/nptl/pthread_mutex_timedlock.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/pthread_mutex_timedlock.c	2016-03-31 13:07:41.526882651 -0700
++++ glibc-2.19-woc/nptl/pthread_mutex_timedlock.c	2017-03-14 14:35:52.484975739 -0700
+@@ -101,7 +101,7 @@
+     elision: __attribute__((unused))
+       /* Don't record ownership */
+       return lll_timedlock_elision (mutex->__data.__lock,
+-				    mutex->__data.__spins,
++									atomic_load(mutex->__data.__spins),
+ 				    abstime,
+ 				    PTHREAD_MUTEX_PSHARED (mutex));
+ 
+@@ -114,7 +114,7 @@
+ 	{
+ 	  int cnt = 0;
+ 	  int max_cnt = MIN (MAX_ADAPTIVE_COUNT,
+-			     mutex->__data.__spins * 2 + 10);
++						 atomic_load(mutex->__data.__spins) * 2 + 10);
+ 	  do
+ 	    {
+ 	      if (cnt++ >= max_cnt)
+@@ -130,7 +130,7 @@
+ 	    }
+ 	  while (lll_trylock (mutex->__data.__lock) != 0);
+ 
+-	  mutex->__data.__spins += (cnt - mutex->__data.__spins) / 8;
++	  atomic_add(&mutex->__data.__spins, (cnt - mutex->__data.__spins) / 8);
+ 	}
+       break;
+ 
 @@ -141,7 +141,7 @@
        THREAD_SETMEM (THREAD_SELF, robust_head.list_op_pending,
  		     &mutex->__data.__list.__next);
@@ -2321,9 +6276,9 @@ diff -r --unified -N glibc-2.19/nptl/pthread_mutex_timedlock.c glibc-2.19-woc/np
  
  	/* Check whether we already hold the mutex.  */
  	if (mutex->__data.__owner == id)
-diff -r --unified -N glibc-2.19/nptl/pthread_mutex_trylock.c glibc-2.19-woc/nptl/pthread_mutex_trylock.c
+diff -N -r --unified glibc-2.19/nptl/pthread_mutex_trylock.c glibc-2.19-woc/nptl/pthread_mutex_trylock.c
 --- glibc-2.19/nptl/pthread_mutex_trylock.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/pthread_mutex_trylock.c	2016-03-31 13:07:41.526882651 -0700
++++ glibc-2.19-woc/nptl/pthread_mutex_trylock.c	2017-03-07 18:07:30.713256085 -0800
 @@ -98,7 +98,7 @@
        THREAD_SETMEM (THREAD_SELF, robust_head.list_op_pending,
  		     &mutex->__data.__list.__next);
@@ -2360,9 +6315,9 @@ diff -r --unified -N glibc-2.19/nptl/pthread_mutex_trylock.c glibc-2.19-woc/nptl
  
  	/* Check whether we already hold the mutex.  */
  	if (mutex->__data.__owner == id)
-diff -r --unified -N glibc-2.19/nptl/pthread_mutex_unlock.c glibc-2.19-woc/nptl/pthread_mutex_unlock.c
+diff -N -r --unified glibc-2.19/nptl/pthread_mutex_unlock.c glibc-2.19-woc/nptl/pthread_mutex_unlock.c
 --- glibc-2.19/nptl/pthread_mutex_unlock.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/pthread_mutex_unlock.c	2016-03-31 13:07:41.526882651 -0700
++++ glibc-2.19-woc/nptl/pthread_mutex_unlock.c	2017-03-07 18:07:30.713256085 -0800
 @@ -229,7 +229,7 @@
  	--mutex->__data.__nusers;
  
@@ -2381,9 +6336,9 @@ diff -r --unified -N glibc-2.19/nptl/pthread_mutex_unlock.c glibc-2.19-woc/nptl/
  	  newval = oldval & PTHREAD_MUTEX_PRIO_CEILING_MASK;
  	}
        while (atomic_compare_and_exchange_bool_rel (&mutex->__data.__lock,
-diff -r --unified -N glibc-2.19/nptl/pthread_once.c glibc-2.19-woc/nptl/pthread_once.c
+diff -N -r --unified glibc-2.19/nptl/pthread_once.c glibc-2.19-woc/nptl/pthread_once.c
 --- glibc-2.19/nptl/pthread_once.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/pthread_once.c	2016-03-31 13:07:41.526882651 -0700
++++ glibc-2.19-woc/nptl/pthread_once.c	2017-03-07 18:07:30.713256085 -0800
 @@ -1,6 +1,5 @@
 -/* Copyright (C) 2002-2014 Free Software Foundation, Inc.
 +/* Copyright (C) 2004-2014 Free Software Foundation, Inc.
@@ -2496,9 +6451,9 @@ diff -r --unified -N glibc-2.19/nptl/pthread_once.c glibc-2.19-woc/nptl/pthread_
 -strong_alias (__pthread_once, pthread_once)
 +weak_alias (__pthread_once, pthread_once)
  hidden_def (__pthread_once)
-diff -r --unified -N glibc-2.19/nptl/pthread_setschedparam.c glibc-2.19-woc/nptl/pthread_setschedparam.c
+diff -N -r --unified glibc-2.19/nptl/pthread_setschedparam.c glibc-2.19-woc/nptl/pthread_setschedparam.c
 --- glibc-2.19/nptl/pthread_setschedparam.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/pthread_setschedparam.c	2016-03-31 13:07:41.527882651 -0700
++++ glibc-2.19-woc/nptl/pthread_setschedparam.c	2017-03-07 18:07:30.713256085 -0800
 @@ -54,7 +54,7 @@
      }
  
@@ -2508,9 +6463,9 @@ diff -r --unified -N glibc-2.19/nptl/pthread_setschedparam.c glibc-2.19-woc/nptl
  					      param) == -1, 0))
      result = errno;
    else
-diff -r --unified -N glibc-2.19/nptl/pthread_setschedprio.c glibc-2.19-woc/nptl/pthread_setschedprio.c
+diff -N -r --unified glibc-2.19/nptl/pthread_setschedprio.c glibc-2.19-woc/nptl/pthread_setschedprio.c
 --- glibc-2.19/nptl/pthread_setschedprio.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/pthread_setschedprio.c	2016-03-31 13:07:41.527882651 -0700
++++ glibc-2.19-woc/nptl/pthread_setschedprio.c	2017-03-07 18:07:30.713256085 -0800
 @@ -48,7 +48,7 @@
      param.sched_priority = pd->tpp->priomax;
  
@@ -2520,9 +6475,9 @@ diff -r --unified -N glibc-2.19/nptl/pthread_setschedprio.c glibc-2.19-woc/nptl/
      result = errno;
    else
      {
-diff -r --unified -N glibc-2.19/nptl/pthread_spin_lock.c glibc-2.19-woc/nptl/pthread_spin_lock.c
+diff -N -r --unified glibc-2.19/nptl/pthread_spin_lock.c glibc-2.19-woc/nptl/pthread_spin_lock.c
 --- glibc-2.19/nptl/pthread_spin_lock.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/pthread_spin_lock.c	2016-03-31 13:07:41.527882651 -0700
++++ glibc-2.19-woc/nptl/pthread_spin_lock.c	2017-03-07 18:07:30.713256085 -0800
 @@ -54,12 +54,12 @@
  	{
  	  int wait = SPIN_LOCK_READS_BETWEEN_CMPXCHG;
@@ -2538,9 +6493,9 @@ diff -r --unified -N glibc-2.19/nptl/pthread_spin_lock.c glibc-2.19-woc/nptl/pth
  	    ;
  	}
      }
-diff -r --unified -N glibc-2.19/nptl/pthread_spin_unlock.c glibc-2.19-woc/nptl/pthread_spin_unlock.c
+diff -N -r --unified glibc-2.19/nptl/pthread_spin_unlock.c glibc-2.19-woc/nptl/pthread_spin_unlock.c
 --- glibc-2.19/nptl/pthread_spin_unlock.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/pthread_spin_unlock.c	2016-03-31 13:07:41.527882651 -0700
++++ glibc-2.19-woc/nptl/pthread_spin_unlock.c	2017-03-07 18:07:30.713256085 -0800
 @@ -24,6 +24,6 @@
  pthread_spin_unlock (pthread_spinlock_t *lock)
  {
@@ -2549,9 +6504,9 @@ diff -r --unified -N glibc-2.19/nptl/pthread_spin_unlock.c glibc-2.19-woc/nptl/p
 +  atomic_store(*lock, 0);
    return 0;
  }
-diff -r --unified -N glibc-2.19/nptl/pthread_timedjoin.c glibc-2.19-woc/nptl/pthread_timedjoin.c
+diff -N -r --unified glibc-2.19/nptl/pthread_timedjoin.c glibc-2.19-woc/nptl/pthread_timedjoin.c
 --- glibc-2.19/nptl/pthread_timedjoin.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/pthread_timedjoin.c	2016-03-31 13:07:41.527882651 -0700
++++ glibc-2.19-woc/nptl/pthread_timedjoin.c	2017-03-07 18:07:30.713256085 -0800
 @@ -50,7 +50,7 @@
      return EINVAL;
  
@@ -2570,9 +6525,9 @@ diff -r --unified -N glibc-2.19/nptl/pthread_timedjoin.c glibc-2.19-woc/nptl/pth
  
    return result;
  }
-diff -r --unified -N glibc-2.19/nptl/pthread_tryjoin.c glibc-2.19-woc/nptl/pthread_tryjoin.c
+diff -N -r --unified glibc-2.19/nptl/pthread_tryjoin.c glibc-2.19-woc/nptl/pthread_tryjoin.c
 --- glibc-2.19/nptl/pthread_tryjoin.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/pthread_tryjoin.c	2016-03-31 13:07:41.528882651 -0700
++++ glibc-2.19-woc/nptl/pthread_tryjoin.c	2017-03-07 18:07:30.713256085 -0800
 @@ -42,7 +42,7 @@
      return EINVAL;
  
@@ -2591,9 +6546,9 @@ diff -r --unified -N glibc-2.19/nptl/pthread_tryjoin.c glibc-2.19-woc/nptl/pthre
      return EBUSY;
  
    /* Wait for the thread to finish.  If it is already locked something
-diff -r --unified -N glibc-2.19/nptl/sysdeps/pthread/createthread.c glibc-2.19-woc/nptl/sysdeps/pthread/createthread.c
+diff -N -r --unified glibc-2.19/nptl/sysdeps/pthread/createthread.c glibc-2.19-woc/nptl/sysdeps/pthread/createthread.c
 --- glibc-2.19/nptl/sysdeps/pthread/createthread.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/sysdeps/pthread/createthread.c	2016-03-31 13:07:41.528882651 -0700
++++ glibc-2.19-woc/nptl/sysdeps/pthread/createthread.c	2017-03-07 18:07:30.713256085 -0800
 @@ -211,7 +211,7 @@
  
  	      /* Enqueue the descriptor.  */
@@ -2603,9 +6558,9 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/pthread/createthread.c glibc-2.19-w
  	      while (atomic_compare_and_exchange_bool_acq (&__nptl_last_event,
  							   pd, pd->nextevent)
  		     != 0);
-diff -r --unified -N glibc-2.19/nptl/sysdeps/pthread/list.h glibc-2.19-woc/nptl/sysdeps/pthread/list.h
+diff -N -r --unified glibc-2.19/nptl/sysdeps/pthread/list.h glibc-2.19-woc/nptl/sysdeps/pthread/list.h
 --- glibc-2.19/nptl/sysdeps/pthread/list.h	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/sysdeps/pthread/list.h	2016-03-31 13:07:41.528882651 -0700
++++ glibc-2.19-woc/nptl/sysdeps/pthread/list.h	2017-03-07 18:07:30.714256085 -0800
 @@ -57,11 +57,11 @@
  static inline void
  list_add (list_t *newp, list_t *head)
@@ -2675,9 +6630,9 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/pthread/list.h glibc-2.19-woc/nptl/
  
  #endif /* _LIST_H */
  
-diff -r --unified -N glibc-2.19/nptl/sysdeps/pthread/unwind-forcedunwind.c glibc-2.19-woc/nptl/sysdeps/pthread/unwind-forcedunwind.c
+diff -N -r --unified glibc-2.19/nptl/sysdeps/pthread/unwind-forcedunwind.c glibc-2.19-woc/nptl/sysdeps/pthread/unwind-forcedunwind.c
 --- glibc-2.19/nptl/sysdeps/pthread/unwind-forcedunwind.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/sysdeps/pthread/unwind-forcedunwind.c	2016-03-31 13:07:41.528882651 -0700
++++ glibc-2.19-woc/nptl/sysdeps/pthread/unwind-forcedunwind.c	2017-03-07 18:07:30.714256085 -0800
 @@ -42,7 +42,7 @@
    void *getcfa;
    void *handle;
@@ -2744,9 +6699,9 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/pthread/unwind-forcedunwind.c glibc
      pthread_cancel_init ();
    else
      atomic_read_barrier ();
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/fork.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/fork.c
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/fork.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/fork.c
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/fork.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/fork.c	2016-03-31 13:07:41.528882651 -0700
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/fork.c	2017-03-07 18:07:30.714256085 -0800
 @@ -62,12 +62,12 @@
    /* Run all the registered preparation handlers.  In reverse order.
       While doing this we build up a list of all the entries.  */
@@ -2793,9 +6748,9 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/fork.c glibc-2.19-w
  	}
      }
  
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/lowlevellock.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/lowlevellock.c
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/lowlevellock.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/lowlevellock.c
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/lowlevellock.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/lowlevellock.c	2016-03-31 13:07:41.529882651 -0700
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/lowlevellock.c	2017-03-07 18:07:30.714256085 -0800
 @@ -26,7 +26,7 @@
  void
  __lll_lock_wait_private (int *futex)
@@ -2823,9 +6778,9 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/lowlevellock.c glib
      {
        struct timeval tv;
        struct timespec rt;
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/lowlevelrobustlock.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/lowlevelrobustlock.c
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/lowlevelrobustlock.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/lowlevelrobustlock.c
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/lowlevelrobustlock.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/lowlevelrobustlock.c	2016-03-31 13:07:41.529882651 -0700
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/lowlevelrobustlock.c	2017-03-07 18:07:30.714256085 -0800
 @@ -26,7 +26,7 @@
  int
  __lll_robust_lock_wait (int *futex, int private)
@@ -2844,9 +6799,9 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/lowlevelrobustlock.
  
    /* If the futex changed meanwhile try locking again.  */
    if (oldval == 0)
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_getaffinity.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_getaffinity.c
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_getaffinity.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_getaffinity.c
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_getaffinity.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_getaffinity.c	2016-03-31 13:07:41.529882651 -0700
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_getaffinity.c	2017-03-07 18:07:30.714256085 -0800
 @@ -32,7 +32,7 @@
    const struct pthread *pd = (const struct pthread *) th;
  
@@ -2856,9 +6811,9 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_getaffinity
  			      MIN (INT_MAX, cpusetsize), cpuset);
    if (INTERNAL_SYSCALL_ERROR_P (res, err))
      return INTERNAL_SYSCALL_ERRNO (res, err);
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_getcpuclockid.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_getcpuclockid.c
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_getcpuclockid.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_getcpuclockid.c
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_getcpuclockid.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_getcpuclockid.c	2016-03-31 13:07:41.529882651 -0700
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_getcpuclockid.c	2017-03-07 18:07:30.714256085 -0800
 @@ -38,7 +38,7 @@
  
    /* The clockid_t value is a simple computation from the TID.  */
@@ -2868,9 +6823,9 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_getcpuclock
  
    *clockid = tidclock;
    return 0;
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_getname.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_getname.c
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_getname.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_getname.c
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_getname.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_getname.c	2016-03-31 13:07:41.529882651 -0700
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_getname.c	2017-03-07 18:07:30.714256085 -0800
 @@ -46,7 +46,7 @@
  
  #define FMT "/proc/self/task/%u/comm"
@@ -2880,9 +6835,9 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_getname.c g
  
    int fd = open_not_cancel_2 (fname, O_RDONLY);
    if (fd == -1)
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_setaffinity.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_setaffinity.c
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_setaffinity.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_setaffinity.c
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_setaffinity.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_setaffinity.c	2016-03-31 13:07:41.530882651 -0700
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_setaffinity.c	2017-03-07 18:07:30.714256085 -0800
 @@ -63,7 +63,7 @@
  
    if (__builtin_expect (__kernel_cpumask_size == 0, 0))
@@ -2901,9 +6856,9 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_setaffinity
  			  cpuset);
  
  #ifdef RESET_VGETCPU_CACHE
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_setname.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_setname.c
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_setname.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_setname.c
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_setname.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_setname.c	2016-03-31 13:07:41.530882651 -0700
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/pthread_setname.c	2017-03-07 18:07:30.714256085 -0800
 @@ -46,7 +46,7 @@
  
  #define FMT "/proc/self/task/%u/comm"
@@ -2913,9 +6868,9 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/pthread_setname.c g
  
    int fd = open_not_cancel_2 (fname, O_RDWR);
    if (fd == -1)
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/register-atfork.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/register-atfork.c
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/register-atfork.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/register-atfork.c
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/register-atfork.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/register-atfork.c	2016-03-31 13:07:41.530882651 -0700
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/register-atfork.c	2017-03-07 18:07:30.714256085 -0800
 @@ -49,18 +49,18 @@
      {
        /* Search for an empty entry.  */
@@ -2968,9 +6923,9 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/register-atfork.c g
  
    /* Free eventually allocated memory blocks for the object pool.  */
    struct fork_handler_pool *runp = fork_handler_pool.next;
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/sem_post.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/sem_post.c
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/sem_post.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/sem_post.c
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/sem_post.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/sem_post.c	2016-03-31 13:07:41.530882651 -0700
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/sem_post.c	2017-03-07 18:07:30.714256085 -0800
 @@ -34,8 +34,8 @@
    __typeof (isem->value) cur;
    do
@@ -2991,9 +6946,9 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/sem_post.c glibc-2.
      {
        int err = lll_futex_wake (&isem->value, 1,
  				isem->private ^ FUTEX_PRIVATE_FLAG);
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/sem_trywait.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/sem_trywait.c
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/sem_trywait.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/sem_trywait.c
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/sem_trywait.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/sem_trywait.c	2016-03-31 13:07:41.530882651 -0700
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/sem_trywait.c	2017-03-07 18:07:30.715256085 -0800
 @@ -32,7 +32,7 @@
    int *futex = (int *) sem;
    int val;
@@ -3003,9 +6958,9 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/sem_trywait.c glibc
      {
        val = atomic_decrement_if_positive (futex);
        if (val > 0)
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/timer_routines.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/timer_routines.c
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/timer_routines.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/timer_routines.c
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/timer_routines.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/timer_routines.c	2016-03-31 13:07:41.531882651 -0700
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/timer_routines.c	2017-03-07 18:07:30.715256085 -0800
 @@ -182,7 +182,7 @@
    int res = pthread_create (&th, &attr, timer_helper_thread, NULL);
    if (res == 0)
@@ -3015,9 +6970,9 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/timer_routines.c gl
  
    /* Restore the signal mask.  */
    INTERNAL_SYSCALL (rt_sigprocmask, err, 4, SIG_SETMASK, &oss, NULL,
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/unregister-atfork.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/unregister-atfork.c
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/unregister-atfork.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/unregister-atfork.c
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/unregister-atfork.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/unregister-atfork.c	2016-03-31 13:07:41.531882651 -0700
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/unregister-atfork.c	2017-03-07 18:07:30.715256085 -0800
 @@ -33,16 +33,16 @@
       We do not worry about other threads adding entries for this DSO
       right this moment.  If this happens this is a race and we can do
@@ -3089,7 +7044,7 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/unregister-atfork.c
  	lll_futex_wait (&deleted->handler->refcntr, val, LLL_PRIVATE);
  
        deleted = deleted->next;
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/clone.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/clone.S
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/clone.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/clone.S
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/clone.S	2014-02-07 01:04:38.000000000 -0800
 +++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/clone.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,9 +0,0 @@
@@ -3102,7 +7057,7 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/clone.S glib
 -# define RESET_PID
 -# include_next <clone.S>
 -#endif
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S	2014-02-07 01:04:38.000000000 -0800
 +++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,19 +0,0 @@
@@ -3125,9 +7080,9 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/libc-lowleve
 -   <http://www.gnu.org/licenses/>.  */
 -
 -#include "lowlevellock.S"
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h	2016-03-31 13:07:41.532882651 -0700
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h	2017-03-07 18:07:30.715256085 -0800
 @@ -1,6 +1,5 @@
 -/* Copyright (C) 2002-2014 Free Software Foundation, Inc.
 +/* Copyright (C) 2005-2014 Free Software Foundation, Inc.
@@ -3961,7 +7916,7 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock
 +  })
  
  #endif	/* lowlevellock.h */
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S	2014-02-07 01:04:38.000000000 -0800
 +++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,462 +0,0 @@
@@ -4427,7 +8382,7 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevellock
 -	cfi_endproc
 -	.size	__lll_timedwait_tid,.-__lll_timedwait_tid
 -#endif
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevelrobustlock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevelrobustlock.S
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevelrobustlock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevelrobustlock.S
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevelrobustlock.S	2014-02-07 01:04:38.000000000 -0800
 +++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevelrobustlock.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,306 +0,0 @@
@@ -4737,7 +8692,7 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/lowlevelrobu
 -#endif
 -	cfi_endproc
 -	.size	__lll_robust_timedlock_wait,.-__lll_robust_timedlock_wait
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_barrier_wait.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_barrier_wait.S
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_barrier_wait.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_barrier_wait.S
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_barrier_wait.S	2014-02-07 01:04:38.000000000 -0800
 +++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_barrier_wait.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,160 +0,0 @@
@@ -4901,7 +8856,7 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_barr
 -	callq	__lll_unlock_wake
 -	jmp	10b
 -	.size	pthread_barrier_wait,.-pthread_barrier_wait
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_broadcast.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_broadcast.S
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_broadcast.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_broadcast.S
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_broadcast.S	2014-02-07 01:04:38.000000000 -0800
 +++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_broadcast.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,179 +0,0 @@
@@ -5084,7 +9039,7 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond
 -	.size	__pthread_cond_broadcast, .-__pthread_cond_broadcast
 -versioned_symbol (libpthread, __pthread_cond_broadcast, pthread_cond_broadcast,
 -		  GLIBC_2_3_2)
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_signal.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_signal.S
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_signal.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_signal.S
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_signal.S	2014-02-07 01:04:38.000000000 -0800
 +++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_signal.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,164 +0,0 @@
@@ -5252,7 +9207,7 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond
 -	.size	__pthread_cond_signal, .-__pthread_cond_signal
 -versioned_symbol (libpthread, __pthread_cond_signal, pthread_cond_signal,
 -		  GLIBC_2_3_2)
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_timedwait.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_timedwait.S
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_timedwait.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_timedwait.S
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_timedwait.S	2014-02-07 01:04:38.000000000 -0800
 +++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_timedwait.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,840 +0,0 @@
@@ -6096,7 +10051,7 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond
 -DW.ref.__gcc_personality_v0:
 -	ASM_ADDR __gcc_personality_v0
 -#endif
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S	2014-02-07 01:04:38.000000000 -0800
 +++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,555 +0,0 @@
@@ -6655,7 +10610,7 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond
 -DW.ref.__gcc_personality_v0:
 -	ASM_ADDR __gcc_personality_v0
 -#endif
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_once.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_once.S
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_once.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_once.S
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_once.S	2014-02-07 01:04:38.000000000 -0800
 +++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_once.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,193 +0,0 @@
@@ -6852,7 +10807,7 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_once
 -DW.ref.__gcc_personality_v0:
 -	ASM_ADDR __gcc_personality_v0
 -#endif
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_rdlock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_rdlock.S
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_rdlock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_rdlock.S
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_rdlock.S	2014-02-07 01:04:38.000000000 -0800
 +++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_rdlock.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,177 +0,0 @@
@@ -7033,7 +10988,7 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlo
 -
 -strong_alias (__pthread_rwlock_rdlock, pthread_rwlock_rdlock)
 -hidden_def (__pthread_rwlock_rdlock)
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedrdlock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedrdlock.S
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedrdlock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedrdlock.S
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedrdlock.S	2014-02-07 01:04:38.000000000 -0800
 +++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedrdlock.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,274 +0,0 @@
@@ -7311,7 +11266,7 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlo
 -	jmp	9b
 -	cfi_endproc
 -	.size	pthread_rwlock_timedrdlock,.-pthread_rwlock_timedrdlock
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedwrlock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedwrlock.S
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedwrlock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedwrlock.S
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedwrlock.S	2014-02-07 01:04:38.000000000 -0800
 +++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_timedwrlock.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,266 +0,0 @@
@@ -7581,7 +11536,7 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlo
 -	jmp	9b
 -	cfi_endproc
 -	.size	pthread_rwlock_timedwrlock,.-pthread_rwlock_timedwrlock
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_unlock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_unlock.S
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_unlock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_unlock.S
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_unlock.S	2014-02-07 01:04:38.000000000 -0800
 +++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_unlock.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,126 +0,0 @@
@@ -7711,7 +11666,7 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlo
 -
 -strong_alias (__pthread_rwlock_unlock, pthread_rwlock_unlock)
 -hidden_def (__pthread_rwlock_unlock)
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_wrlock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_wrlock.S
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_wrlock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_wrlock.S
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_wrlock.S	2014-02-07 01:04:38.000000000 -0800
 +++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlock_wrlock.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,165 +0,0 @@
@@ -7880,12 +11835,12 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_rwlo
 -
 -strong_alias (__pthread_rwlock_wrlock, pthread_rwlock_wrlock)
 -hidden_def (__pthread_rwlock_wrlock)
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_spin_unlock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_spin_unlock.S
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_spin_unlock.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_spin_unlock.S
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_spin_unlock.S	2014-02-07 01:04:38.000000000 -0800
 +++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/pthread_spin_unlock.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1 +0,0 @@
 -#include <nptl/sysdeps/x86_64/pthread_spin_unlock.S>
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/sem_post.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/sem_post.S
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/sem_post.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/sem_post.S
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/sem_post.S	2014-02-07 01:04:38.000000000 -0800
 +++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/sem_post.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,75 +0,0 @@
@@ -7964,7 +11919,7 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/sem_post.S g
 -	orl	$-1, %eax
 -	retq
 -	.size	sem_post,.-sem_post
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/sem_timedwait.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/sem_timedwait.S
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/sem_timedwait.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/sem_timedwait.S
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/sem_timedwait.S	2014-02-07 01:04:38.000000000 -0800
 +++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/sem_timedwait.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,380 +0,0 @@
@@ -8348,7 +12303,7 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/sem_timedwai
 -DW.ref.__gcc_personality_v0:
 -	ASM_ADDR __gcc_personality_v0
 -#endif
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/sem_trywait.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/sem_trywait.S
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/sem_trywait.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/sem_trywait.S
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/sem_trywait.S	2014-02-07 01:04:38.000000000 -0800
 +++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/sem_trywait.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,47 +0,0 @@
@@ -8399,7 +12354,7 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/sem_trywait.
 -	orl	$-1, %eax
 -	retq
 -	.size	sem_trywait,.-sem_trywait
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/sem_wait.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/sem_wait.S
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/sem_wait.S glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/sem_wait.S
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/sem_wait.S	2014-02-07 01:04:38.000000000 -0800
 +++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/sem_wait.S	1969-12-31 16:00:00.000000000 -0800
 @@ -1,176 +0,0 @@
@@ -8579,9 +12534,9 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/sem_wait.S g
 -DW.ref.__gcc_personality_v0:
 -	ASM_ADDR __gcc_personality_v0
 -#endif
-diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/timer_create.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/timer_create.c
+diff -N -r --unified glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/timer_create.c glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/timer_create.c
 --- glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/timer_create.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/timer_create.c	2016-03-31 13:07:41.536882651 -0700
++++ glibc-2.19-woc/nptl/sysdeps/unix/sysv/linux/x86_64/timer_create.c	2017-03-07 18:07:30.718256085 -0800
 @@ -42,7 +42,7 @@
      {
        int i;
@@ -8591,9 +12546,9 @@ diff -r --unified -N glibc-2.19/nptl/sysdeps/unix/sysv/linux/x86_64/timer_create
  	    && ! atomic_compare_and_exchange_bool_acq (&__compat_timer_list[i],
  						       newp, NULL))
  	  {
-diff -r --unified -N glibc-2.19/nptl/tpp.c glibc-2.19-woc/nptl/tpp.c
+diff -N -r --unified glibc-2.19/nptl/tpp.c glibc-2.19-woc/nptl/tpp.c
 --- glibc-2.19/nptl/tpp.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nptl/tpp.c	2016-03-31 13:07:41.536882651 -0700
++++ glibc-2.19-woc/nptl/tpp.c	2017-03-07 18:07:30.718256085 -0800
 @@ -33,7 +33,7 @@
  {
    __sched_fifo_max_prio = sched_get_priority_max (SCHED_FIFO);
@@ -8657,9 +12612,9 @@ diff -r --unified -N glibc-2.19/nptl/tpp.c glibc-2.19-woc/nptl/tpp.c
        if (self->schedpolicy == -1)
  	result = -1;
        else
-diff -r --unified -N glibc-2.19/nss/getXXbyYY_r.c glibc-2.19-woc/nss/getXXbyYY_r.c
+diff -N -r --unified glibc-2.19/nss/getXXbyYY_r.c glibc-2.19-woc/nss/getXXbyYY_r.c
 --- glibc-2.19/nss/getXXbyYY_r.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/nss/getXXbyYY_r.c	2016-03-31 13:07:41.536882651 -0700
++++ glibc-2.19-woc/nss/getXXbyYY_r.c	2017-03-07 18:07:30.718256085 -0800
 @@ -200,7 +200,7 @@
      }
  #endif
@@ -8678,9 +12633,9 @@ diff -r --unified -N glibc-2.19/nss/getXXbyYY_r.c glibc-2.19-woc/nss/getXXbyYY_r
      }
    else
      {
-diff -r --unified -N glibc-2.19/stdlib/cxa_atexit.c glibc-2.19-woc/stdlib/cxa_atexit.c
+diff -N -r --unified glibc-2.19/stdlib/cxa_atexit.c glibc-2.19-woc/stdlib/cxa_atexit.c
 --- glibc-2.19/stdlib/cxa_atexit.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/stdlib/cxa_atexit.c	2016-03-31 13:07:41.536882651 -0700
++++ glibc-2.19-woc/stdlib/cxa_atexit.c	2017-03-07 18:07:30.718256085 -0800
 @@ -44,7 +44,7 @@
    new->func.cxa.arg = arg;
    new->func.cxa.dso_handle = d;
@@ -8690,9 +12645,9 @@ diff -r --unified -N glibc-2.19/stdlib/cxa_atexit.c glibc-2.19-woc/stdlib/cxa_at
    return 0;
  }
  
-diff -r --unified -N glibc-2.19/stdlib/cxa_finalize.c glibc-2.19-woc/stdlib/cxa_finalize.c
+diff -N -r --unified glibc-2.19/stdlib/cxa_finalize.c glibc-2.19-woc/stdlib/cxa_finalize.c
 --- glibc-2.19/stdlib/cxa_finalize.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/stdlib/cxa_finalize.c	2016-03-31 13:07:41.537882651 -0700
++++ glibc-2.19-woc/stdlib/cxa_finalize.c	2017-03-07 18:07:30.718256085 -0800
 @@ -32,7 +32,7 @@
    struct exit_function_list *funcs;
  
@@ -8733,9 +12688,9 @@ diff -r --unified -N glibc-2.19/stdlib/cxa_finalize.c glibc-2.19-woc/stdlib/cxa_
      }
  
    /* Remove the registered fork handlers.  We do not have to
-diff -r --unified -N glibc-2.19/stdlib/msort.c glibc-2.19-woc/stdlib/msort.c
+diff -N -r --unified glibc-2.19/stdlib/msort.c glibc-2.19-woc/stdlib/msort.c
 --- glibc-2.19/stdlib/msort.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/stdlib/msort.c	2016-03-31 13:07:41.537882651 -0700
++++ glibc-2.19-woc/stdlib/msort.c	2017-03-07 18:07:30.718256085 -0800
 @@ -182,7 +182,7 @@
        static long int phys_pages;
        static int pagesize;
@@ -8754,9 +12709,9 @@ diff -r --unified -N glibc-2.19/stdlib/msort.c glibc-2.19-woc/stdlib/msort.c
  	}
  
        /* Just a comment here.  We cannot compute
-diff -r --unified -N glibc-2.19/stdlib/on_exit.c glibc-2.19-woc/stdlib/on_exit.c
+diff -N -r --unified glibc-2.19/stdlib/on_exit.c glibc-2.19-woc/stdlib/on_exit.c
 --- glibc-2.19/stdlib/on_exit.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/stdlib/on_exit.c	2016-03-31 13:07:41.537882651 -0700
++++ glibc-2.19-woc/stdlib/on_exit.c	2017-03-07 18:07:30.718256085 -0800
 @@ -35,7 +35,7 @@
    new->func.on.fn = func;
    new->func.on.arg = arg;
@@ -8766,9 +12721,9 @@ diff -r --unified -N glibc-2.19/stdlib/on_exit.c glibc-2.19-woc/stdlib/on_exit.c
    return 0;
  }
  weak_alias (__on_exit, on_exit)
-diff -r --unified -N glibc-2.19/sysdeps/unix/sysv/linux/check_pf.c glibc-2.19-woc/sysdeps/unix/sysv/linux/check_pf.c
+diff -N -r --unified glibc-2.19/sysdeps/unix/sysv/linux/check_pf.c glibc-2.19-woc/sysdeps/unix/sysv/linux/check_pf.c
 --- glibc-2.19/sysdeps/unix/sysv/linux/check_pf.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/sysdeps/unix/sysv/linux/check_pf.c	2016-03-31 13:07:41.537882651 -0700
++++ glibc-2.19-woc/sysdeps/unix/sysv/linux/check_pf.c	2017-03-07 18:07:30.718256085 -0800
 @@ -75,7 +75,7 @@
    if (atomic_increment_val (&nl_timestamp) == 0)
      atomic_increment (&nl_timestamp);
@@ -8787,9 +12742,9 @@ diff -r --unified -N glibc-2.19/sysdeps/unix/sysv/linux/check_pf.c glibc-2.19-wo
  	  && atomic_add_zero (&olddata->usecnt, -1))
  	free (olddata);
  
-diff -r --unified -N glibc-2.19/sysdeps/unix/sysv/linux/getsysstats.c glibc-2.19-woc/sysdeps/unix/sysv/linux/getsysstats.c
+diff -N -r --unified glibc-2.19/sysdeps/unix/sysv/linux/getsysstats.c glibc-2.19-woc/sysdeps/unix/sysv/linux/getsysstats.c
 --- glibc-2.19/sysdeps/unix/sysv/linux/getsysstats.c	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/sysdeps/unix/sysv/linux/getsysstats.c	2016-03-31 13:07:41.537882651 -0700
++++ glibc-2.19-woc/sysdeps/unix/sysv/linux/getsysstats.c	2017-03-07 18:07:30.718256085 -0800
 @@ -130,7 +130,7 @@
    static time_t timestamp;
  
@@ -8808,9 +12763,9 @@ diff -r --unified -N glibc-2.19/sysdeps/unix/sysv/linux/getsysstats.c glibc-2.19
  
    return result;
  }
-diff -r --unified -N glibc-2.19/sysdeps/unix/sysv/linux/malloc-sysdep.h glibc-2.19-woc/sysdeps/unix/sysv/linux/malloc-sysdep.h
+diff -N -r --unified glibc-2.19/sysdeps/unix/sysv/linux/malloc-sysdep.h glibc-2.19-woc/sysdeps/unix/sysv/linux/malloc-sysdep.h
 --- glibc-2.19/sysdeps/unix/sysv/linux/malloc-sysdep.h	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/sysdeps/unix/sysv/linux/malloc-sysdep.h	2016-03-31 13:07:41.538882651 -0700
++++ glibc-2.19-woc/sysdeps/unix/sysv/linux/malloc-sysdep.h	2017-03-07 18:07:30.718256085 -0800
 @@ -34,13 +34,14 @@
  check_may_shrink_heap (void)
  {
@@ -8845,9 +12800,9 @@ diff -r --unified -N glibc-2.19/sysdeps/unix/sysv/linux/malloc-sysdep.h glibc-2.
  }
  
  #define HAVE_MREMAP 1
-diff -r --unified -N glibc-2.19/sysdeps/x86_64/bits/atomic.h glibc-2.19-woc/sysdeps/x86_64/bits/atomic.h
+diff -N -r --unified glibc-2.19/sysdeps/x86_64/bits/atomic.h glibc-2.19-woc/sysdeps/x86_64/bits/atomic.h
 --- glibc-2.19/sysdeps/x86_64/bits/atomic.h	2014-02-07 01:04:38.000000000 -0800
-+++ glibc-2.19-woc/sysdeps/x86_64/bits/atomic.h	2016-03-31 13:07:41.538882651 -0700
++++ glibc-2.19-woc/sysdeps/x86_64/bits/atomic.h	2017-03-15 16:47:10.004338797 -0700
 @@ -55,10 +55,71 @@
  # endif
  #endif
@@ -9203,7 +13158,7 @@ diff -r --unified -N glibc-2.19/sysdeps/x86_64/bits/atomic.h glibc-2.19-woc/sysd
 +extern void          mvee_atomic_postop_internal (unsigned char preop_result);
 +extern unsigned char mvee_atomic_preop_internal  (void* word_ptr);
 +extern int           mvee_should_sync_tid        (void);
-+extern int           mvee_all_heaps_aligned      (char* heap); 
++extern int           mvee_all_heaps_aligned      (char* heap, unsigned long alloc_size); 
 +extern void          mvee_invalidate_buffer      (void);
 +
 +#define MVEE_POSTOP()					\

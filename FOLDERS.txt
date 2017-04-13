@@ -11,5 +11,5 @@ patched_binaries		Public			GHUMVEE is configured to look for its patched libc/li
 patches					Public			Source code for the various patches for the kernel, system libs, benchmarks, etc.
 scripts					Public			Various scripts (mostly outdated)
 spec_configs			Public			SPEC2006 configs we used for the "Cloning your Gadgets" paper
-Tests					Private			Various unit tests (mostly outdated)
+Tests					Public			Various unit tests (mostly outdated)
 Utilities				Public			Support libraries + the backtracer

@@ -15,17 +15,21 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <signal.h>
+#include <fcntl.h>
 #include <memory>
 #include <vector>
 #include <deque>
 #include <sstream>
-#include "MVEE_config.h"
+#include "MVEE_build_config.h"
 #include "MVEE_private_arch.h"
+#include "MVEE_interaction.h"
+#include "MVEE_filedesc.h"
 
 /*-----------------------------------------------------------------------------
     Typedefs
 -----------------------------------------------------------------------------*/
 typedef long (monitor:: *mvee_syscall_handler)(int);
+typedef void (monitor:: *mvee_syscall_logger)(int);
 
 /*-----------------------------------------------------------------------------
   Constants
@@ -35,36 +39,43 @@ typedef long (monitor:: *mvee_syscall_handler)(int);
 #define MAP_MVEE_WASSHARED                 0x800000
 #define MVEE_FUTEX_WAIT_TID                30
 #define PR_REGISTER_IPMON                  0xb00b135
+#define ENOIPMON                           256
 
 #define NO_MVEE_SCHEDULING                 0                        // mvee won't pin any threads
 #define MVEE_CLEVER_SCHEDULING             1 
-
-#ifndef PTRACE_GETSIGMASK
- #define PTRACE_GETSIGMASK                 (__ptrace_request)0x420a // new since Linux 3.11
-#endif
-#ifndef PTRACE_SETSIGMASK
- #define PTRACE_SETSIGMASK                 (__ptrace_request)0x420b // new since Linux 3.11
-#endif
 
 /*-----------------------------------------------------------------------------
   Enumerations
 -----------------------------------------------------------------------------*/
 enum MonitorState
 {
-    STATE_WAITING_ATTACH,                                           // Waiting to attach to the newly created variants
-    STATE_WAITING_RESUME,                                           // We use PTRACE_O_TRACE[FORK|VFORK|CLONE] so new variants are started with SIGSTOP
-    STATE_NORMAL,                                                   // Normal operation
-    STATE_IN_SYSCALL,                                               // Waiting for syscall to return
-    STATE_IN_FORKCALL,                                              // Waiting for forkcall to return
-    STATE_IN_MASTERCALL                                             // Waiting for mastercall to return
+    STATE_WAITING_ATTACH, // Waiting to attach to the newly created variants
+    STATE_WAITING_RESUME, // Waiting for variants to be ready for resume
+    STATE_NORMAL,         // Normal operation - variants are running and not executing a syscall
+    STATE_IN_SYSCALL,     // Waiting for syscall to return
+    STATE_IN_FORKCALL,    // Waiting for forkcall to return
+    STATE_IN_MASTERCALL   // Waiting for mastercall to return
 };
 
-enum ArgType
-{
-    ARG_CSTRING,
-    ARG_STRING,
-    ARG_BUFFER,
-};
+/*-----------------------------------------------------------------------------
+  RAVEN Compatibility
+-----------------------------------------------------------------------------*/
+#define ESC_XCHECK          -1
+#define ESC_XCHECK_VALUES_ONLY      -2
+#define ESC_FUTEX_HACK          -10
+#define ESC_ENTER_LOCK          -11
+//#define ESC_LEAVE_UNLOCK        -12
+#define ESC_LEAVE_LOCK          -12
+#define ESC_XCHECKS_OFF         -42
+#define ESC_XCHECKS_ON          -43
+#define ESC_XCHECKS_OFF_LOCAL       -44
+#define ESC_XCHECKS_ON_LOCAL        -45
+#define ESC_VARIANT_INIT_SYNC       -100
+#define ESC_VARIANT_REACTIVATE      -101 // CRIU depends on this one; please don't change it                       
+#define ESC_ENABLE_SYSCALL_CHECKS   -200
+#define ESC_EXECVE_FAILURE      -210
+#define ESC_RINGBUFF_INIT       -300 // Ring Buffer initialization                                                 
+#define ESC_RINGBUFF_DESTROY        -301 // Ring Buffer destruction        
 
 /*-----------------------------------------------------------------------------
   Classes
@@ -85,13 +96,6 @@ class fd_table;
 class sighand_table;
 class writeback_info;
 
-struct hidden_buffer_array_entry
-{
-	void*         hidden_buffer_address;
-	unsigned long hidden_buffer_size;
-	char          padding[64 - sizeof(void*) - sizeof(unsigned long)];
-};
-
 class mvee_pending_signal
 {
 public:
@@ -105,21 +109,18 @@ public:
     siginfo_t      sig_info;
 };
 
-class syscall_arg
+class overwritten_syscall_arg
 {
 public:
-    ArgType     type;
-    void*       buf;
-    char*       cstr;
-    std::string str;
-    bool        valid;
+	int   syscall_arg_num; // 1 to 6
+	long  arg_old_value;   // old value in the register. may be a pointer
+	bool  restore_data;    // true if we also have to restore memory contents
+	void* data_loc;        // location of the data that needs to be restored
+	void* data_content;    // content of the data
+	long  data_len;        //
 
-    syscall_arg();
-    ~syscall_arg();
-    void reset();
-    void set_buf(void* b);
-    void set_cstr(char* c);
-    void set_str(std::string& s);
+	overwritten_syscall_arg();
+	~overwritten_syscall_arg();
 };
 
 // might have to optimize the layout even further for better cache performance
@@ -133,8 +134,7 @@ public:
     int           call_flags;                                       // Result of the call handler
     struct user_regs_struct
                   regs;                                             // Arguments for the syscall are copied into the variantstate just before entering the call
-    syscall_arg   args[7];                                          // Cached syscall arguments (Optional, rarely used)
-    long          return_value;                                     // Return of the current syscall. Retrieved using PTRACE_PEEKUSER
+    long          return_value;                                     // Return of the current syscall. 
     long          extended_value;                                   // Extended value to be returned through the EAX register.
 
     unsigned char call_type;                                        // Type of the current system call, i.e. synced/unsynced/unknown
@@ -150,6 +150,7 @@ public:
     bool          current_signal_ready;
 	bool          fast_forward_to_entry_point;                      // Are we dispatching all syscalls as unsynced calls until we reach the entry point?
 	bool          entry_point_bp_set;                               // Have we set the breakpoint on the program entry point?
+	bool          have_overwritten_args;                            // Do we have any overwritten syscall args that need to be restored?
 
     // ptmalloc2 heap allocation hacks
     //
@@ -178,11 +179,6 @@ public:
 	// IP-MON information
 	mmap_region_info* ipmon_region;
 
-	// Hidden buffer support
-	int           hidden_buffer_array_id;                           // SysV shm id for the hidden buffer array
-	unsigned long hidden_buffer_array_base;                         // base address at which the hidden buffer array is mapped in this variant
-	void*         hidden_buffer_array;                              // pointer to the monitor mapped version of the hidden buffer array
-
     // somehow, the sigset gets corrupted across sigprocmask calls...
     sigset_t      last_sigset;
 
@@ -205,9 +201,11 @@ public:
     int           sync_primitives_bitmask;                          // copied over from the variant's address space using sync_primitives_ptr
     void*         sync_primitives_ptr;                              //
 #endif
-#ifdef MVEE_ALLOW_PERF
-    std::string   perf_out;                                         //
-#endif
+    std::string   perf_out;                                         // Output of the perf program
+	Json::Value*  config;                                           // Variant-specific config
+
+	std::vector<overwritten_syscall_arg>
+       	  	      overwritten_args;
 
     variantstate();
 };
@@ -312,6 +310,8 @@ public:
 	//
     long handle_donthave                     (int variantnum);
     long handle_dontneed                     (int variantnum);
+	void log_donthave                        (int variantnum);
+	void log_dontneed                        (int variantnum);
 
 	//
 	// Include an automatically generated syscall handler table. All of these
@@ -341,12 +341,15 @@ private:
 	// *************************************************************************
     // Main monitor thread function - This runs the main monitoring loop
 	// *************************************************************************
-    static void* thread                              (void* param);
+    static void* thread                                  (void* param);
 
 	// *************************************************************************
     // System call support (these are all in MVEE_syscalls_support.cpp)
     // These functions mostly support the MVEE<->variant datatransfers
 	// *************************************************************************
+
+	// inline templates here
+	#include "MVEE_syscalls_support_templates.h"
 
 	// 
 	// Check if our cached regs variable is still up to date for variant
@@ -385,16 +388,17 @@ private:
 	// accept a pointer to a data structure for each variant. If the data
 	// matches, the comparison function returns true.
 	// 
-    bool             call_compare_variant_strings        (std::vector<unsigned long>& stringptrs, size_t maxlength=0);
-    bool             call_compare_variant_buffers        (std::vector<unsigned long>& bufferptrs, size_t size);
+    bool             call_compare_variant_strings        (std::vector<const char*>& stringptrs, size_t maxlength=0);
+    bool             call_compare_variant_buffers        (std::vector<const unsigned char*>& bufferptrs, size_t size);
     bool             call_compare_wait_pids              (std::vector<pid_t>& pids);
     bool             call_compare_signal_handlers        (std::vector<unsigned long>& handlers);
     bool             call_compare_sigactions             (std::vector<unsigned long>& handlers, std::vector<unsigned long>& sa_flags);
     bool             call_compare_sigsets                (sigset_t* set1, sigset_t* set2);
-    unsigned char    call_compare_pointers               (std::vector<unsigned long>& pointers);
-    bool             call_compare_io_vectors             (std::vector<unsigned long>& addresses, size_t len, bool layout_only=false);
-    bool             call_compare_msgvectors             (std::vector<unsigned long>& addresses, bool layout_only=false);
-	bool             call_compare_fd_sets                (std::vector<unsigned long>& addresses, int nfds);
+    unsigned char    call_compare_pointers               (std::vector<void*>& pointers);
+    bool             call_compare_io_vectors             (std::vector<struct iovec*>& addresses, size_t len, bool layout_only=false);
+    bool             call_compare_msgvectors             (std::vector<struct msghdr*>& addresses, bool layout_only=false);
+	bool             call_compare_mmsgvectors            (std::vector<struct mmsghdr*>& addresses, bool layout_only=false);
+	bool             call_compare_fd_sets                (std::vector<fd_set*>& addresses, int nfds);
 
 	//
 	// Serialization Functions. These are helper functions for the syscall
@@ -402,26 +406,39 @@ private:
 	// 
     std::string      call_serialize_io_vector            (int variantnum, struct iovec* vec, unsigned int vecsz);
     std::string      call_serialize_msgvector            (int variantnum, struct msghdr* msg);
-    std::string      call_serialize_io_buffer            (int variantnum, unsigned long buf, unsigned long buflen);
+    std::string      call_serialize_io_buffer            (int variantnum, const unsigned char* buf, unsigned long buflen);
+
+	// 
+	// Syscall handler logging helpers
+	//
+	std::string      call_get_variant_pidstr             (int variantnum);
 
 	// 
 	// Replication functions. These accept a pointer to a data structure for
 	// each variant. The data structure is deep copied from the address space of
 	// the master variant to the address spaces of the slaves
 	//
-    void             call_replicate_io_vector            (std::vector<unsigned long>& addresses, long bytes_copied);
-    void             call_replicate_msgvector            (std::vector<unsigned long>& addresses, long bytes_sent);
-    void             call_replicate_mmsgvector           (std::vector<unsigned long>& addresses, int vlen);
-    void             call_replicate_mmsgvectorlens       (std::vector<unsigned long>& addresses, int sent, int attempted);
-    void             call_replicate_buffer               (std::vector<unsigned long>& addresses, int size);
+    void             call_replicate_io_vector            (std::vector<struct iovec*>& addresses, long bytes_copied);
+    void             call_replicate_msgvector            (std::vector<struct msghdr*>& addresses, long bytes_sent);
+    void             call_replicate_mmsgvector           (std::vector<struct mmsghdr*>& addresses, int vlen);
+    void             call_replicate_mmsgvectorlens       (std::vector<struct mmsghdr*>& addresses, int sent, int attempted);
+    void             call_replicate_buffer               (std::vector<const unsigned char*>& addresses, int size);
+	void             call_replicate_ifconfs              (std::vector<struct ifconf*>& addresses);
 
 	//
 	// getter functions. These accept pointers to a specific data structure and
 	// do a deep copy to a local data structure.
 	//
-    sigset_t         call_get_sigset                     (int variantnum, unsigned long sigset_ptr, bool is_old_call);
-    struct sigaction call_get_sigaction                  (int variantnum, unsigned long sigaction_ptr, bool is_old_call);
-    struct sockaddr* call_get_sockaddr                   (int variantnum, unsigned long ptr, socklen_t addr_len);
+    sigset_t         call_get_sigset                     (int variantnum, void* sigset_ptr, bool is_old_call);
+    struct sigaction call_get_sigaction                  (int variantnum, void* sigaction_ptr, bool is_old_call);
+    struct sockaddr* call_get_sockaddr                   (int variantnum, struct sockaddr* ptr, __socklen_t addr_len);
+
+	//
+	// Argument overwriting support. Mainly used for aliasing
+	//
+	void             call_overwrite_arg_value            (int variantnum, int argnum, long new_value, bool needs_restore);
+	void             call_overwrite_arg_data             (int variantnum, int argnum, unsigned old_len, void* data, unsigned len, bool needs_restore);
+	void             call_restore_args                   (int variantnum);
 
 	// *************************************************************************
     // Specific Syscall handlers (these are all in MVEE_syscalls_handlers.cpp)
@@ -438,7 +455,7 @@ private:
 	//
 	// Returns true if we should allow open/openat calls to open file @fullpath
 	//
-    long        handle_check_open_call              (const std::string& full_path, int* flags, int mode);
+    long        handle_check_open_call              (const std::string& full_path, int flags, int mode);
 
 	// 
 	// Fetching the arguments for an execve call is complicated and slow.
@@ -468,17 +485,39 @@ private:
 	// 
     unsigned char call_is_known_false_positive        (long* precall_flags);
 
+	//
+	// Resume a single variant
 	// 
-	// Resume all variants (generally using PTRACE_SYSCALL)
+	void          call_resume                         (int variantnum);
+
+	// 
+	// Resume all variants
 	//
     void          call_resume_all                     ();
+
+	// 
+	// Replace the syscall number for a single variant with __NR_getpid and then
+	// resume it. This forces the variant to execute sys_getpid instead of
+	// the call it was about to execute
+	// 
+	void         call_resume_fake_syscall             (int variantnum);
+
 
 	// 
 	// Replace the syscall number for all variants with __NR_getpid and then
 	// resume them. This forces all variants to execute sys_getpid instead of
 	// the call they were about to execute
 	// 
-    void          call_resume_fake_syscall            ();
+    void          call_resume_fake_syscall_all        ();
+
+	//
+	// The syscall that has just returned for this variant was denied in the 
+	// CALL handler. This means that the syscall number was replaced by __NR_getpid
+	// and that GHUMVEE will provide the syscall return value.
+	// This function will write that return value based on the information
+	// provided by the CALL handler
+	//
+	void          call_write_denied_syscall_return    (int variantnum);
 
 	// 
 	// Determines if syscall @callnum should be executed in lockstep for variant
@@ -491,13 +530,16 @@ private:
     unsigned char call_precall_get_call_type          (int variantnum, long callnum);
 
 	//
-	// Runs all of the early precall handling (i.e. comparing the syscall
-	// arguments and possibly logging them to the log file). This function is
-	// not executed if the current syscall is not subject to lockstepping.
-	// 
-	// For standard syscalls, this is a wrapper around the log_args and precall
-	// handler functions for the syscall that is currently being executed by the
-	// variants
+	// Calls the argument logging function for the specified syscall (if any)
+	// A default logging function is called if no specialized logger
+	// exists in MVEE_syscall_handlers.cpp
+	//
+	void          call_precall_log_args               (int variantnum, long callnum);
+
+	//
+	// Calls the PRECALL handler for the current syscall. This is only done
+	// if the syscall is synced (i.e., lockstepped). The PRECALL handler
+	// reads the call arguments and asserts that they are equivalent
 	// 
     long          call_precall                        ();
 
@@ -518,6 +560,13 @@ private:
 	// for the syscall that is currently being executed by the variants
 	// 
     long          call_call_dispatch                  ();
+
+	//
+	// Calls the return logging function for the specified syscall (if any)
+	// A default logging function is called if no specialized logger exists
+	// in MVEE_syscalls_handlers.cpp
+	//
+	void         call_postcall_log_return             (int variantnum);
 
 	//
 	// Runs the postcall handling for syscalls that are not subject to
@@ -575,7 +624,7 @@ private:
 
 	//
 	// Injects a syscall into the variants. This function, which should only be
-	// called when the variants are in ptrace-stopped state, overwrites the
+	// called when the variants are all suspended, overwrites the
 	// syscall number and syscall arguments for all variants. It then resumes
 	// them, and waits for the syscalls to return.
 	// 
@@ -587,10 +636,9 @@ private:
 	// *************************************************************************
 
 	//
-	// Processes a signal delivery to variant @index. The wait4 return status
-	// is given in @status.
+	// Processes a signal delivery to variant @index. 
 	//
-    void handle_signal_event                 (int index, int status);
+    void handle_signal_event                 (int index, interaction::mvee_wait_status& status);
 
 	//
 	// Process a SIGTRAP signal, possibly resulting from the execution of an
@@ -608,7 +656,7 @@ private:
 	// 
 	// Processes the creation of a new task by variant @index
 	//
-    void handle_fork_event                   (int index, int event);
+    void handle_fork_event                   (int index, interaction::mvee_wait_status& status);
 
 	//
 	// Processes the entrance into a syscall by variant @index. This function
@@ -641,23 +689,23 @@ private:
 	// Processes the first SIGSTOP we see from variant @index, which we have not
 	// attached to yet
 	//
-    void handle_attach_event                 (int index, int status);
+    void handle_attach_event                 (int index);
 
 	//
 	// Processes the second SIGSTOP we see from variant @index. This second
-	// SIGSTOP is caused by our PTRACE_ATTACH operation.
+	// SIGSTOP is caused by our attach operation.
 	//
     void handle_resume_event                 (int index);
 
 	//
 	// Handles an event from a variant we are not currently attached to
 	//
-    void handle_detach_event                 (pid_t variantpid, int status);
+    void handle_detach_event                 (int variantpid);
 
 	// 
 	// Entrypoint for all event handling
 	//
-    void handle_event                        (pid_t variantpid, int status);
+    void handle_event                        (interaction::mvee_wait_status& status);
 
 	// *************************************************************************
     // Signal specific event handling
@@ -668,6 +716,16 @@ private:
 	// preventing future delivery of said signal to the variants
 	//
     std::vector<mvee_pending_signal>::iterator discard_pending_signal              (std::vector<mvee_pending_signal>::iterator& it);
+	
+	//
+	// Checks if we have pending signals
+	//
+	bool                                       have_pending_signals                ();
+
+	//
+	// Checks if the variants are in a signal handler
+    //
+	bool                                       in_signal_handler                   ();
 
 	//
 	// Entrypoint for all signal related events. This handles all variant
@@ -716,7 +774,7 @@ private:
 	// Set the have_pending_signals flag, indicating that the sig_prepare_delivery
 	// function might have to initiate a signal delivery
 	//
-	void                                       sig_set_pending_signals             (bool pending_signals);
+	void                                       sig_set_pending_signals             (bool pending_signals, bool signal_handler);
 
 	// 
 	// Returns true if variant @variantnum's instruction pointer points to the
@@ -803,6 +861,13 @@ private:
 	// Visualizes the contents of IP-MON's Replication Buffer
 	//
     void log_ipmon_state                 ();
+	bool log_ipmon_entry                 (struct ipmon_buffer* buffer, struct ipmon_syscall_entry* entry, void (*logfunc)(const char* format, ...));
+	struct ipmon_syscall_data* 
+		get_ipmon_data                   (struct ipmon_syscall_entry* entry, unsigned long start_offset, unsigned long end_offset, int data_num);
+	struct ipmon_syscall_data* 
+		get_ipmon_arg                    (struct ipmon_syscall_entry* entry, int arg_num);
+	struct ipmon_syscall_data* 
+		get_ipmon_ret                    (struct ipmon_syscall_entry* entry, int ret_num);
 
 	//
 	// Calculates statistics for the synchronization operations in the
@@ -836,11 +901,6 @@ private:
 	// *************************************************************************
     // Variant Initialization
 	// *************************************************************************   
-
-	//
-	// Set PTRACE options for a newly attached variant
-	//
-    int         init_ptrace_options             (int variantnum);
 
 	//
 	// Initialize the variantstate struct for variant @variantnum
@@ -911,11 +971,6 @@ private:
     bool is_program_multithreaded        ();
     void check_multithread_state         ();
 
-	// 
-	// Hidden buffer support
-	//
-	void register_hidden_buffer          (int buffer_id, _shm_info* info, std::vector<unsigned long>& addresses);
-
     //
     // Debugging support
     //
@@ -924,8 +979,8 @@ private:
     //
     // Syscall handler tables
     //
-    static const mvee_syscall_handler syscall_handler_table[MAX_CALLS][4];
-    static const mvee_syscall_handler syscall_logger_table[MAX_CALLS][2];
+    static const mvee_syscall_handler syscall_handler_table [MAX_CALLS][4];
+    static const mvee_syscall_logger  syscall_logger_table  [MAX_CALLS][2];
 
     //
     // Variables
@@ -941,8 +996,11 @@ private:
     bool                              in_new_heap_allocation; // are we inside the new_heap function in ptmalloc/arena.c ?
     bool                              monitor_registered;
     bool                              monitor_terminating;
-    bool                              have_pending_signals;
     bool                              ipmon_initialized;
+	bool                              ipmon_mmap_handling;
+	bool                              ipmon_fd_handling;
+    bool                              aliased_open;           // 
+
 
     int                               parentmonitorid;        // monitorid of the monitor that created this monitor...
     MonitorState                      state;                  //
@@ -961,7 +1019,6 @@ private:
     _shm_info*                        atomic_buffer;          // thread-local atomic buffer
     std::vector<void*>                atomic_counters;
     std::vector<void*>                atomic_queue_pos;
-	bool                              atomic_buffer_hidden;   // should we hide the pointer to the atomic buffer in the hidden buffer array?
 
     _shm_info*                        ipmon_buffer;
 
@@ -973,10 +1030,7 @@ private:
                                       pending_signals;
     std::vector<variantstate>
                                       variants;               // State for all variant processes being traced by this monitor
-#ifdef MVEE_ALLOW_PERF
     bool                              perf;                   // is this monitor tracking the perf process
-#endif
-
     pid_t                             monitor_tid;
 
     // set of signals which are currently blocked for this thread set.
@@ -986,6 +1040,9 @@ private:
     // previous set of signals which were blocked. this is used for calls
     // that temporarily replace the signal mask (e.g. sigsuspend)
 	std::vector<sigset_t>             old_blocked_signals;
+
+	unsigned long                     last_mmap_requested_size;
+	unsigned long                     last_mmap_requested_alignment;
 
 	int master_core;
 
@@ -1003,25 +1060,17 @@ public:
                   original_regs;                              // original contents of the registers
     unsigned long transfer_func;                              // pointer to the sys_pause loop
     void*         tid_address[2];                             // set if we should tell the variant what its thread id is (e.g. if the variant was created by clone(CLONE_CHILD_SETTID)
-};
+	unsigned long should_sync_ptr;
 
-// Passed to sys_ptrace through the data field
-struct pt_copymem
-{
-    pid_t         source_pid;                                 // PID of the source process
-    unsigned long source_va;                                  // Virtual Address of the source buffer
-    pid_t         dest_pid;                                   // PID of the destination process
-    unsigned long dest_va;                                    // Virtual Address of the destination buffer
-    unsigned long copy_size;                                  //
-};
-
-// Passed to sys_ptrace through the data field
-struct pt_copystring
-{
-    unsigned long source_va;                                  // Virtual Address of the source string
-    unsigned long dest_buffer_va;                             // Virtual Address of the destination buffer
-    unsigned long dest_buffer_size;                           // Size of the destination buffer - if the source string doesn't fit in here, an error is returned
-    unsigned long out_string_size;                            // The kernel will write the string size here
+	detachedvariant()
+		: variantpid(0)
+		, new_monitor(nullptr)
+		, parentmonitorid(0)
+		, parent_has_detached(0)
+		, transfer_func(0)
+		, should_sync_ptr(0)
+	{
+	}
 };
 
 // If our glibc is compiled with MVEE_DEBUG_MALLOC, slave variants will pass an mvee_malloc_error
@@ -1042,8 +1091,7 @@ struct ipmon_barrier
 		struct
 		{
 			unsigned short seq;
-			unsigned char count;         // nr of variants that have reached the barrier
-			unsigned char padding;
+			unsigned short count;         // nr of variants that have reached the barrier
 		} s;
 		unsigned int hack;
 	} u;
@@ -1071,11 +1119,9 @@ struct ipmon_condvar
 //
 struct ipmon_syscall_entry
 {
-	unsigned int  syscall_no;								// 0	- syscall no, see unistd.h
-    unsigned char syscall_checked;							// 4	- if set to 1, the syscall must be reported to the ptracer and we don't perform user-space arg verification and return replication
-	unsigned char syscall_is_mastercall;					// 5	- if set to 1, only the master may execute the call. The slaves just get the same result
-	unsigned char syscall_is_blocking;                      // 6    - if set to 1, the master is expecting the syscall to block for some time and the slave should use a futex call on the return_valid field to wait for the result
-	unsigned char padding;                                  // 7    - 
+	unsigned short syscall_no;								// 0	- We use this for integrity checking only so we don't mind that this does not capture pseudo-calls correctly
+    unsigned short syscall_type; 							// 2	- bitwise or mask of call types above
+	unsigned int   syscall_order;                           // 4    - Logical clock value for order-sensitive syscalls
 	struct ipmon_condvar
                   syscall_results_available;                // 8    - optimized condition variable. Does not support consecutive wait operations
 	struct ipmon_barrier
@@ -1104,9 +1150,12 @@ struct ipmon_buffer
 {
 	// Cacheline 0
 	int           ipmon_numvariants;                        // 00-04: number of variants we're running with
-	unsigned int  ipmon_usable_size;                        // 04-08: size that is usable for syscall entries
+	int           ipmon_usable_size;                        // 04-08: size that is usable for syscall entries
 	unsigned long ipmon_have_pending_signals;
-	unsigned char ipmon_padding0[64 - sizeof(unsigned long) - sizeof(int)*2];
+	struct ipmon_barrier pre_flush_barrier;
+	struct ipmon_barrier post_flush_barrier;
+	unsigned long flush_count;
+	unsigned char ipmon_padding[64 - 2*sizeof(unsigned long) - sizeof(int)*2 - sizeof(struct ipmon_barrier) * 2];
 
 	// Cachelines 1-n
 	struct ipmon_variant_info ipmon_variant_info[1];
@@ -1115,14 +1164,25 @@ struct ipmon_buffer
 //	struct ipmon_syscall_entry ipmon_syscall_entry[1];
 };
 
+//
+// Who should execute the syscall?
+//
+#define IPMON_EXEC_NO_IPMON  1 // Do not use IP-MON to execute the syscall - Route to CP-MON instead
+#define IPMON_EXEC_NOEXEC    2 // Abort the syscall but possibly use IP-MON for return value replication
+#define IPMON_EXEC_MASTER    4 // The master executes the syscall. The slaves no not.
+#define IPMON_EXEC_ALL       8 // All variants execute the syscall
 
-/*-----------------------------------------------------------------------------
-  Definitions
------------------------------------------------------------------------------*/
 //
-// Signal number for traps caused by syscalls (requires PTRACE_O_TRACESYSGOOD)
+// Possible ways to handle replication
 //
-#define SIGSYSTRAP                  (SIGTRAP | 0x80)
+#define IPMON_REPLICATE_MASTER 16 // The master results are replicated to the slaves
+
+//
+// Extra modifiers
+//
+#define IPMON_UNSYNCED_CALL  32 // No lock-stepping for this call
+#define IPMON_BLOCKING_CALL  64 // The call is expected to block. This is not a distinct call type. It is ORed with one of the above call types.
+#define IPMON_WAIT_FOR_SIGNAL_CALL 512
 
 /*-----------------------------------------------------------------------------
   HW breakpoint types
@@ -1189,18 +1249,5 @@ struct ipmon_buffer
 
 #define likely(x)   __builtin_expect((x), 1)
 #define unlikely(x) __builtin_expect((x), 0)
-
-union mvee_word
-{
-    unsigned long  _ulong;
-    long           _long;
-    unsigned int   _uint;
-    int            _int;
-    unsigned short _ushort;
-    short          _short;
-    unsigned char  _uchar;
-    char           _char;
-    pid_t          _pid;
-};
 
 #endif // MVEE_PRIVATE_H_INCLUDED

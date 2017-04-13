@@ -9,7 +9,6 @@
 // This file implements the high-level syscall handling logic and implements
 // syscall handlers for the "fake" syscalls we use in some of our
 // synchronization agents (cfr. MVEE_fake_syscalls.h).
-//
 // *****************************************************************************
 
 #include <memory>
@@ -19,7 +18,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/wait.h>
-#include <sys/ptrace.h>
 #include <string.h>
 #include <sstream>
 #include "MVEE.h"
@@ -34,6 +32,8 @@
 #include "MVEE_shm.h"
 #include "MVEE_filedesc.h"
 #include "MVEE_signals.h"
+#include "MVEE_interaction.h"
+#include "MVEE_numcalls.h"
 
 /*-----------------------------------------------------------------------------
   handler and logger table
@@ -58,26 +58,140 @@ unsigned char monitor::call_is_known_false_positive(long* precall_flags)
 }
 
 /*-----------------------------------------------------------------------------
+    call_resume - 
+-----------------------------------------------------------------------------*/
+void monitor::call_resume(int variantnum)
+{
+	if (!interaction::resume_until_syscall(variants[variantnum].variantpid))
+	{
+		warnf("%s - failed to resume variant\n",
+			  call_get_variant_pidstr(variantnum).c_str());
+		shutdown(false);
+		return;
+	}
+}
+
+/*-----------------------------------------------------------------------------
     call_resume_all - Resumes all variants attached to the current monitor thread.
 -----------------------------------------------------------------------------*/
 void monitor::call_resume_all()
 {
     for (int i = 0; i < mvee::numvariants; ++i)
-        mvee_wrap_ptrace(PTRACE_SYSCALL, variants[i].variantpid, 0, NULL);
+		call_resume(i);
 }
 
 /*-----------------------------------------------------------------------------
-    call_resume_fake_syscall - Resumes all variants attached to the current monitor
-    thread in case the current syscall is a fake syscall.
+    call_resume_fake_syscall - 
 -----------------------------------------------------------------------------*/
-void monitor::call_resume_fake_syscall()
+void monitor::call_resume_fake_syscall(int variantnum)
+{
+	// let the variants execute a dummy getpid syscall instead
+	if (!interaction::write_syscall_no(variants[variantnum].variantpid, __NR_getpid) ||
+		!interaction::resume_until_syscall(variants[variantnum].variantpid))
+	{
+		warnf("%s - failed to resume fake syscall\n",
+			  call_get_variant_pidstr(variantnum).c_str());
+		shutdown(false);
+		return;
+	}
+}
+
+/*-----------------------------------------------------------------------------
+    call_resume_fake_syscall_all - 
+-----------------------------------------------------------------------------*/
+void monitor::call_resume_fake_syscall_all()
 {
     for (int i = 0; i < mvee::numvariants; ++i)
-    {
-        // let the variants execute a dummy getpid syscall instead
-        WRITE_SYSCALL_NO(i, __NR_getpid);
-        mvee_wrap_ptrace(PTRACE_SYSCALL, variants[i].variantpid, 0, NULL);
-    }
+		call_resume_fake_syscall(i);
+}
+
+/*-----------------------------------------------------------------------------
+  pseudo handlers
+-----------------------------------------------------------------------------*/
+long monitor::handle_donthave(int variantnum) { return 0; }
+long monitor::handle_dontneed(int variantnum) { return 0; }
+
+/*-----------------------------------------------------------------------------
+  log_donthave - This logger gets called if we don't have a specialized logger
+  for the syscall we're executing
+-----------------------------------------------------------------------------*/
+void monitor::log_donthave(int variantnum)
+{
+	bool entry = (variants[variantnum].callnum != NO_CALL);
+
+	if (entry)
+	{
+		debugf("%s - %s(...)\n", 
+			   call_get_variant_pidstr(variantnum).c_str(),
+			   mvee::upcase(getTextualSyscall(variants[variantnum].callnum)).c_str());
+	}
+	else
+	{
+		debugf("%s - %s return: %ld\n", 
+			   call_get_variant_pidstr(variantnum).c_str(),
+			   mvee::upcase(getTextualSyscall(variants[variantnum].prevcallnum)).c_str(),
+			   call_postcall_get_variant_result(variantnum)
+			);
+	}
+}
+
+void monitor::log_dontneed(int variantnum) 
+{
+	log_donthave(variantnum);
+}
+
+/*-----------------------------------------------------------------------------
+    call_write_denied_syscall_return - 
+-----------------------------------------------------------------------------*/
+void monitor::call_write_denied_syscall_return(int variantnum)
+{
+	long err = variants[variantnum].call_flags >> 6;
+	if (variants[variantnum].call_flags & MVEE_CALL_ERROR)
+	{
+		debugf("%s - %s forced return (error): %ld (%s)\n",
+			   call_get_variant_pidstr(variantnum).c_str(),
+			   mvee::upcase(getTextualSyscall(variants[variantnum].prevcallnum)).c_str(),
+			   -err,
+			   getTextualErrno(err));
+
+		if (!interaction::write_syscall_return(variants[variantnum].variantpid, (unsigned long) -err))
+		{
+			warnf("%s - call flags has MVEE_CALL_ERROR, but GHUMVEE couldn't set the syscall return value\n",
+				  call_get_variant_pidstr(variantnum).c_str());
+			shutdown(false);
+			return;
+		}
+	}
+	else if (variants[variantnum].call_flags & MVEE_CALL_RETURN_EXTENDED_VALUE)
+	{
+		debugf("%s - %s forced return (extended value): %ld\n",
+			   call_get_variant_pidstr(variantnum).c_str(),
+			   mvee::upcase(getTextualSyscall(variants[variantnum].prevcallnum)).c_str(),
+			   variants[variantnum].extended_value);
+
+		if (!interaction::write_syscall_return(variants[variantnum].variantpid, variants[variantnum].extended_value))
+		{
+			warnf("%s - call flags has MVEE_CALL_RETURN_EXTENDED_VALUE, but GHUMVEE couldn't set the syscall return value\n",
+				  call_get_variant_pidstr(variantnum).c_str());
+			shutdown(false);
+			return;
+		}
+	}
+	else
+	{
+		debugf("%s - %s forced return (value): %ld\n",
+			   call_get_variant_pidstr(variantnum).c_str(),
+			   mvee::upcase(getTextualSyscall(variants[variantnum].prevcallnum)).c_str(),
+			   err);
+
+		if (!interaction::write_syscall_return(variants[variantnum].variantpid, err))
+		{
+			warnf("%s - call flags has MVEE_CALL_RETURN_VALUE, but GHUMVEE couldn't set the syscall return value\n",
+				  call_get_variant_pidstr(variantnum).c_str());
+			shutdown(false);
+			return;
+		}
+	}
 }
 
 /*-----------------------------------------------------------------------------
@@ -86,10 +200,6 @@ void monitor::call_resume_fake_syscall()
 -----------------------------------------------------------------------------*/
 unsigned char monitor::call_precall_get_call_type (int variantnum, long callnum)
 {
-#ifdef MVEE_MINIMAL_MONITORING
-    return MVEE_CALL_TYPE_UNSYNCED;
-#else
-
     mvee_syscall_handler handler;
     unsigned char        result = MVEE_CALL_TYPE_NORMAL;
 
@@ -116,9 +226,7 @@ unsigned char monitor::call_precall_get_call_type (int variantnum, long callnum)
             case MVEE_GET_MASTERTHREAD_ID:
 			case MVEE_GET_THREAD_NUM:
 			case MVEE_RESOLVE_SYMBOL:
-#ifdef MVEE_CHECK_SYNC_PRIMITIVES
 			case MVEE_SET_SYNC_PRIMITIVES_PTR:
-#endif
 			case MVEE_INVOKE_LD:
 			case MVEE_RUNS_UNDER_MVEE_CONTROL:
             {
@@ -141,6 +249,23 @@ unsigned char monitor::call_precall_get_call_type (int variantnum, long callnum)
 
     call_release_syslocks(variantnum, callnum, MVEE_SYSLOCK_PRECALL | MVEE_SYSLOCK_FULL);
     return result;
+}
+
+/*-----------------------------------------------------------------------------
+    call_precall_log_args
+-----------------------------------------------------------------------------*/
+void monitor::call_precall_log_args (int variantnum, long callnum)
+{
+#ifndef MVEE_BENCHMARK
+	mvee_syscall_logger logger;
+	if (callnum >= 0 && callnum < MAX_CALLS)
+		logger = monitor::syscall_logger_table[callnum][MVEE_LOG_ARGS];
+	else
+		logger = &monitor::log_donthave;
+
+	mvee::in_logging_handler = true;
+	(this->*logger)(variantnum);
+	mvee::in_logging_handler = false;
 #endif
 }
 
@@ -152,11 +277,6 @@ unsigned char monitor::call_precall_get_call_type (int variantnum, long callnum)
 long monitor::call_precall ()
 {
     long                 result = MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
-
-#ifdef MVEE_MINIMAL_MONITORING
-    return result;
-#else
-
     long                 callnum;
     mvee_syscall_handler handler;
 
@@ -166,17 +286,6 @@ long monitor::call_precall ()
 
     if (callnum >= 0 && callnum < MAX_CALLS)
     {
-#ifndef MVEE_BENCHMARK
-    #ifdef MVEE_GENERATE_EXTRA_STATS
-        mvee::in_logging_handler = true;
-    #endif
-        handler                  = monitor::syscall_logger_table[callnum][MVEE_LOG_ARGS];
-        if (handler != MVEE_HANDLER_DONTHAVE && handler != MVEE_HANDLER_DONTNEED)
-            (this->*handler)(-1);
-    #ifdef MVEE_GENERATE_EXTRA_STATS
-        mvee::in_logging_handler = false;
-    #endif
-#endif
         handler                  = monitor::syscall_handler_table[callnum][MVEE_HANDLE_PRECALL];
         if (handler != MVEE_HANDLER_DONTHAVE && handler != MVEE_HANDLER_DONTNEED)
             result = (this->*handler)(-1);
@@ -186,13 +295,28 @@ long monitor::call_precall ()
             shutdown(false);
         }
     }
+	else
+	{
+		if (callnum == MVEE_ALL_HEAPS_ALIGNED)
+		{
+			for (int i = 0; i < mvee::numvariants; ++i)
+			{
+				debugf("%s - SYS_MVEE_ALL_HEAPS_ALIGNED(heap: 0x" PTRSTR ", requested alignment: 0x" PTRSTR ", requested size: 0x" PTRSTR")\n", 
+					   call_get_variant_pidstr(i).c_str(), ARG1(i), ARG2(i), ARG3(i));
+
+				if (i >= 1 &&
+					(ARG2(i) != ARG2(0) ||
+					 ARG3(i) != ARG3(0)))
+				{
+					result = MVEE_PRECALL_CALL_DENY | MVEE_PRECALL_ARGS_MISMATCH(2);
+				}
+			}
+		}
+	}
 
     if (result & MVEE_PRECALL_CALL_DENY)
         call_release_syslocks(-1, callnum, MVEE_SYSLOCK_PRECALL | MVEE_SYSLOCK_FULL);
-
-    return result;
-
-#endif
+	return result;
 }
 
 /*-----------------------------------------------------------------------------
@@ -202,48 +326,16 @@ long monitor::call_precall ()
 -----------------------------------------------------------------------------*/
 long monitor::call_call_dispatch_unsynced (int variantnum)
 {
-#ifdef MVEE_MINIMAL_MONITORING
-    long                 callnum = variants[variantnum].callnum;
-
-    if (callnum == MVEE_RUNS_UNDER_MVEE_CONTROL)
-    {
-        variants[variantnum].should_sync_ptr   = ARG1(variantnum);
-        variants[variantnum].infinite_loop_ptr = ARG2(variantnum);
-    }
-
-    return 0;
-#else
-
     long                 result  = 0;
     mvee_syscall_handler handler;
     long                 callnum = variants[variantnum].callnum;
+	
     call_grab_syslocks(variantnum, callnum, MVEE_SYSLOCK_PRECALL | MVEE_SYSLOCK_FULL);
     if (callnum >= 0 && callnum < MAX_CALLS)
     {
-#ifndef MVEE_BENCHMARK
-    #ifdef MVEE_GENERATE_EXTRA_STATS
-        mvee::in_logging_handler = true;
-    #endif
-        handler                  = monitor::syscall_logger_table[callnum][MVEE_LOG_ARGS];
-        if (handler != MVEE_HANDLER_DONTHAVE && handler != MVEE_HANDLER_DONTNEED)
-            (this->*handler)(variantnum);
-    #ifdef MVEE_GENERATE_EXTRA_STATS
-        mvee::in_logging_handler = false;
-    #endif
-#endif
         handler                  = monitor::syscall_handler_table[callnum][MVEE_HANDLE_CALL];
         if (handler != MVEE_HANDLER_DONTHAVE && handler != MVEE_HANDLER_DONTNEED)
-		{
             result = (this->*handler)(variantnum);
-
-			if ((result & MVEE_CALL_ALLOW) && !(result & MVEE_CALL_HANDLED_UNSYNCED_CALL))
-			{
-				warnf("FIXME - stijn: CALL handler for syscall %d (%s) was not unsync-aware\n",
-					  callnum, getTextualSyscall(callnum));				
-				shutdown(false);				
-			}
-
-		}
 #ifndef MVEE_BENCHMARK
         if (handler == MVEE_HANDLER_DONTHAVE)
             warnf("missing CALL handler for syscall: %d (%s)\n", callnum, getTextualSyscall(callnum));
@@ -273,14 +365,7 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 			//
             case MVEE_GET_THREAD_NUM:
             {
-                //
-                // mvee_num_variants = (ushort)syscall(MVEE_GET_THREAD_NUM,
-                // (ushort*)&mvee_variant_num);
-                //
-				
-				// dirty hack: we need to write an unsigned short-sized value
-				// but ptrace always writes a full word
-				mvee_rw_write_ushort(variants[variantnum].variantpid, ARG1(variantnum), variantnum);
+				rw::write_primitive<unsigned short>(variants[variantnum].variantpid, (void*) ARG1(variantnum), (unsigned short) variantnum);
 				result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(mvee::numvariants);
                 break;
             }
@@ -303,25 +388,23 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
             //
             case MVEE_RESOLVE_SYMBOL:
             {
-                char*         sym      = mvee_rw_read_string(variants[variantnum].variantpid, ARG1(variantnum));
-                if (!sym)
+				std::string sym = rw::read_string(variants[variantnum].variantpid, (void*)ARG1(variantnum));
+                if (sym.length() == 0)
                 {
-                    warnf("couldn't read sym\n");
+                    warnf("%s - couldn't read sym\n", call_get_variant_pidstr(variantnum).c_str());
                     result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
                     break;
                 }
-                char*         lib_name = mvee_rw_read_string(variants[variantnum].variantpid, ARG2(variantnum));
-                if (!lib_name)
+				std::string lib_name = rw::read_string(variants[variantnum].variantpid, (void*)ARG2(variantnum));
+                if (lib_name.length() == 0)
                 {
-                    warnf("couldn't read lib_name\n");
+                    warnf("%s - couldn't read lib_name\n", call_get_variant_pidstr(variantnum).c_str());
                     result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
                     break;
                 }
 
-                unsigned long ptr      = set_mmap_table->resolve_symbol(variantnum, (const char*)sym, (const char*)lib_name);
-
-                SAFEDELETEARRAY(sym);
-                mvee_rw_write_data(variants[variantnum].variantpid, ARG3(variantnum), sizeof(unsigned long), (unsigned char*)&ptr);
+                unsigned long ptr      = set_mmap_table->resolve_symbol(variantnum, (const char*)sym.c_str(), (const char*)lib_name.c_str());
+                rw::write_primitive<unsigned long>(variants[variantnum].variantpid, (void*) ARG3(variantnum), ptr);
                 result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
                 break;
             }
@@ -329,7 +412,7 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
             case MVEE_INVOKE_LD:
             {
 #ifndef MVEE_BENCHMARK
-                debugf("Variant %d requested control transfer to manually mapped program interpreter\n", variantnum);
+                debugf("%s - Variant requested control transfer to manually mapped program interpreter\n", call_get_variant_pidstr(variantnum).c_str());
 #endif
 
                 // force an munmap of the MVEE_LD_loader program - the loader is compiled
@@ -337,12 +420,20 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 				unsigned long loader_base, loader_size;
 				if (set_mmap_table->get_ld_loader_bounds(variantnum, loader_base, loader_size))
 				{
-					WRITE_SYSCALL_NO(variantnum, __NR_munmap);
-					SETARG1(variantnum, loader_base);
-					SETARG2(variantnum, loader_size);
+					if (!SETSYSCALLNO(variantnum, __NR_munmap) || 
+						!SETARG1(variantnum, loader_base) || 
+						!SETARG2(variantnum, loader_size))
+
+					{
+						warnf("%s - Couldn't unmap LD_Loader\n",
+							  call_get_variant_pidstr(variantnum).c_str());
+						shutdown(false);
+						return 0;
+					}
+
 #ifndef MVEE_BENCHMARK
-					debugf("variant %d -> unmapping loader at: 0x" PTRSTR "-0x" PTRSTR "\n",
-						   variantnum,
+					debugf("%s - unmapping loader at: 0x" PTRSTR "-0x" PTRSTR "\n",
+						   call_get_variant_pidstr(variantnum).c_str(),
 						   loader_base,
 						   loader_base + loader_size);
 #endif
@@ -370,13 +461,13 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 				variants[variantnum].infinite_loop_ptr = ARG2(variantnum);
 
 				if (ARG3(variantnum))
-					mvee_rw_write_ushort(variants[variantnum].variantpid, ARG3(variantnum), mvee::numvariants);
+					rw::write_primitive<unsigned short>(variants[variantnum].variantpid, (void*) ARG3(variantnum), (unsigned short) mvee::numvariants);
 
 				if (ARG4(variantnum))
-					mvee_rw_write_ushort(variants[variantnum].variantpid, ARG4(variantnum), variantnum);
+					rw::write_primitive<unsigned short>(variants[variantnum].variantpid, (void*) ARG4(variantnum), (unsigned short) variantnum);
 
 				if (variantnum == 0 && ARG5(variantnum))
-					mvee_rw_write_uchar(variants[variantnum].variantpid, ARG5(variantnum), 1);
+					rw::write_primitive<unsigned char>(variants[variantnum].variantpid, (void*) ARG5(variantnum), 1);
 
 #ifdef MVEE_DISABLE_SYNCHRONIZATION_REPLICATION
                 result = MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(1);
@@ -408,7 +499,6 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
     else
         call_release_syslocks(variantnum, callnum, MVEE_SYSLOCK_PRECALL);
     return result;
-#endif
 }
 
 /*-----------------------------------------------------------------------------
@@ -456,8 +546,7 @@ long monitor::call_call_dispatch ()
 				debugf("MVEE_GET_SHARED_BUFFER call for buffer %d (%s)\n",
 						   buffer_type, getTextualBufferType(buffer_type));
 
-                if (buffer_type == MVEE_LIBC_ATOMIC_BUFFER
-                    || buffer_type == MVEE_LIBC_ATOMIC_BUFFER_HIDDEN)
+                if (buffer_type == MVEE_LIBC_ATOMIC_BUFFER)
                 {
                     is_eip_buffer = 0;
 
@@ -470,37 +559,21 @@ long monitor::call_call_dispatch ()
 
                     if (!atomic_buffer)
                     {
+						bool have_many_threads =
+							!(*mvee::config_variant_global)["have_many_threads"].isNull() &&
+							(*mvee::config_variant_global)["have_many_threads"].asBool();
+						
                         info                = new _shm_info();
                         atomic_buffer       = info;
                         requested_slot_size = sizeof(unsigned long);
-                        alloc_size          = requested_slot_size * SHARED_QUEUE_SLOTS / (mvee::demo_has_many_threads ? 64 : 1);
-						if (buffer_type == MVEE_LIBC_ATOMIC_BUFFER_HIDDEN)
-							atomic_buffer_hidden = true;
+                        alloc_size          = requested_slot_size * SHARED_QUEUE_SLOTS / (have_many_threads ? 64 : 1);
                     }
                     else
                     {
                         info = atomic_buffer;
                     }
+
                 }
-				else if (buffer_type == MVEE_LIBC_HIDDEN_BUFFER_ARRAY)
-				{
-					debugf("Requested Hidden Buffer Array\n");
-
-					if (!variants[0].hidden_buffer_array)
-					{
-						std::vector<unsigned long> addresses(mvee::numvariants);
-						std::fill(addresses.begin(), addresses.end(), NULL);
-						register_hidden_buffer(0, NULL, addresses);						
-					}
-
-					// deny the call and return id of the buffer
-                    for (i = 0; i < mvee::numvariants; ++i)
-                        variants[i].extended_value = (long)variants[i].hidden_buffer_array_id;
-                    result = MVEE_CALL_DENY | MVEE_CALL_RETURN_EXTENDED_VALUE;
-
-					debugf("Variants requested the id for the hidden buffer array\n");
-					break;
-				}
 				else if (buffer_type == MVEE_IPMON_BUFFER)
 				{
 					debugf("Requested IP-MON Replication Buffer\n");
@@ -513,9 +586,17 @@ long monitor::call_call_dispatch ()
 						break;
 					}
 
+					bool have_many_threads =
+						!(*mvee::config_variant_global)["have_many_threads"].isNull() &&
+						(*mvee::config_variant_global)["have_many_threads"].asBool();
+
 					ipmon_buffer = new _shm_info();
 
-					if (!mvee::os_alloc_sysv_sharedmem(MVEE_IPMON_BUFFER_SIZE / (mvee::demo_has_many_threads ? 64 : 1),  &(ipmon_buffer->id), &(ipmon_buffer->sz), &(ipmon_buffer->ptr)))
+					if (!mvee::os_alloc_sysv_sharedmem(MVEE_IPMON_BUFFER_SIZE / 
+													   (have_many_threads ? 64 : 1),
+													   &(ipmon_buffer->id), 
+													   &(ipmon_buffer->sz), 
+													   &(ipmon_buffer->ptr)))
 					{
 						result = MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(1);
 						break;
@@ -593,7 +674,7 @@ long monitor::call_call_dispatch ()
                     // return size of the buffer
                     for (i = 0; i < mvee::numvariants; ++i)
                         if (ARG3(i))
-							mvee_rw_write_uint(variants[i].variantpid, ARG3(i), *size_ptr);
+							rw::write_primitive<unsigned int>(variants[i].variantpid, (void*) ARG3(i), (unsigned int) *size_ptr);
 
                     // deny the call and return id of the buffer
                     for (i = 0; i < mvee::numvariants; ++i)
@@ -616,8 +697,7 @@ long monitor::call_call_dispatch ()
                 _shm_info*                                                     info               = NULL;
                 unsigned char                                                  clear_whole_buffer = 1;
 
-                if (ARG1(0) == MVEE_LIBC_ATOMIC_BUFFER
-                    || ARG1(0) == MVEE_LIBC_ATOMIC_BUFFER_HIDDEN)
+                if (ARG1(0) == MVEE_LIBC_ATOMIC_BUFFER)
                 {
                     info = atomic_buffer;
                 }
@@ -678,16 +758,30 @@ long monitor::call_call_dispatch ()
                 break;
             }
 
+			// 
+			// Called by the variants to check if the heaps have the requested
+			// alignment 
+			//
+            // syntax: syscall(MVEE_ALL_HEAPS_ALIGNED, heap pointer, requested
+			// alignment, requested size);
+			//
+			// If the heaps are not aligned in any of the variants, then this
+			// call should return false, even for variants that DO have an
+			// aligned heap. The variants can then unmap the heap and fall back
+			// to the forced alignment method.
+			//
             case MVEE_ALL_HEAPS_ALIGNED:
             {
-                for (int i = 0; i < mvee::numvariants; ++i)
-                {
-                    if (variants[i].last_mmap_result & (HEAP_MAX_SIZE - 1))
-                    {
-                        result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
-                        break;
-                    }
-                }
+				for (int i = 0; i < mvee::numvariants; ++i)
+				{
+					if (!ARG1(i) || (ARG1(i) & (ARG2(i) - 1)))
+					{
+						last_mmap_requested_alignment = ARG2(i);
+						last_mmap_requested_size      = ARG3(i);
+						result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
+						break;
+					}
+				}
                 if (!result)
                     result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(1);
                 break;
@@ -703,31 +797,51 @@ long monitor::call_call_dispatch ()
 }
 
 /*-----------------------------------------------------------------------------
+    call_postcall_log_return
+-----------------------------------------------------------------------------*/
+void monitor::call_postcall_log_return (int variantnum)
+{
+#ifndef MVEE_BENCHMARK
+	mvee_syscall_logger logger;
+	long callnum = variants[variantnum].prevcallnum;
+	if (callnum >= 0 && callnum < MAX_CALLS)
+		logger = monitor::syscall_logger_table[callnum][MVEE_LOG_RETURN];
+	else
+		logger = &monitor::log_donthave;
+
+
+	mvee::in_logging_handler = true;
+	long result  = call_postcall_get_variant_result(variantnum);
+	bool success = call_check_result(result);
+
+	if (!success)
+	{
+		debugf("%s - %s return: %d (%s)\n",
+			   call_get_variant_pidstr(variantnum).c_str(),
+			   mvee::upcase(getTextualSyscall(callnum)).c_str(),
+			   result,
+			   getTextualErrno(-result));
+	}
+	else
+	{
+		(this->*logger)(variantnum);
+	}
+	mvee::in_logging_handler = false;
+#endif
+}
+
+/*-----------------------------------------------------------------------------
     call_postcall_return_unsynced
 -----------------------------------------------------------------------------*/
 long monitor::call_postcall_return_unsynced (int variantnum)
 {
     long                 result  = 0;
-
-#ifdef MVEE_MINIMAL_MONITORING
-    return result;
-#else
     mvee_syscall_handler handler;
     long                 callnum = variants[variantnum].prevcallnum;
+	
     call_grab_syslocks(variantnum, callnum, MVEE_SYSLOCK_POSTCALL);
     if (callnum >= 0 && callnum < MAX_CALLS)
     {
-#ifndef MVEE_BENCHMARK
-    #ifdef MVEE_GENERATE_EXTRA_STATS
-        mvee::in_logging_handler = true;
-    #endif
-        handler                  = monitor::syscall_logger_table[callnum][MVEE_LOG_RETURN];
-        if (handler != MVEE_HANDLER_DONTHAVE && handler != MVEE_HANDLER_DONTNEED)
-            (this->*handler)(variantnum);		
-    #ifdef MVEE_GENERATE_EXTRA_STATS
-        mvee::in_logging_handler = false;
-    #endif
-#endif
         handler                  = monitor::syscall_handler_table[callnum][MVEE_HANDLE_POSTCALL];
         if (handler != MVEE_HANDLER_DONTHAVE && handler != MVEE_HANDLER_DONTNEED)
 		{
@@ -753,18 +867,23 @@ long monitor::call_postcall_return_unsynced (int variantnum)
 			unsigned long ld_entry      = ARG2(variantnum);
 
 #ifndef MVEE_BENCHMARK
-			debugf("variant %d -> munmap returned. Transfering control to program interpreter - entry point: 0x" PTRSTR " - initial stack pointer: 0x" PTRSTR "\n",
-				   variantnum, ld_entry, initial_stack);
+			debugf("%s - munmap returned. Transfering control to program interpreter - entry point: 0x" PTRSTR " - initial stack pointer: 0x" PTRSTR "\n",
+				   call_get_variant_pidstr(variantnum).c_str(), ld_entry, initial_stack);
 #endif
 
-			WRITE_SP(variantnum, initial_stack);
-			WRITE_IP(variantnum, ld_entry);
+			SP_IN_REGS(variants[variantnum].regs) = initial_stack;
+			IP_IN_REGS(variants[variantnum].regs) = ld_entry;
+			if (!interaction::write_all_regs(variants[variantnum].variantpid, &variants[variantnum].regs))
+			{
+				warnf("%s - couldn't transfer control to program interpreter\n",
+					  call_get_variant_pidstr(variantnum).c_str());
+				shutdown(false);
+			}
 		}
 	}
 
     call_release_syslocks(variantnum, callnum, MVEE_SYSLOCK_POSTCALL | MVEE_SYSLOCK_FULL);
     return result;
-#endif
 }
 
 /*-----------------------------------------------------------------------------
@@ -773,27 +892,12 @@ long monitor::call_postcall_return_unsynced (int variantnum)
 long monitor::call_postcall_return ()
 {
     long                 result  = 0;
-
-#ifdef MVEE_MINIMAL_MONITORING
-    return result;
-#else
     mvee_syscall_handler handler;
-
     long                 callnum = variants[0].prevcallnum;
+	
     call_grab_syslocks(-1, callnum, MVEE_SYSLOCK_POSTCALL);
     if (callnum >= 0 && callnum < MAX_CALLS)
     {
-#ifndef MVEE_BENCHMARK
-    #ifdef MVEE_GENERATE_EXTRA_STATS
-        mvee::in_logging_handler = true;
-    #endif
-        handler                  = monitor::syscall_logger_table[callnum][MVEE_LOG_RETURN];
-        if (handler != MVEE_HANDLER_DONTHAVE && handler != MVEE_HANDLER_DONTNEED)
-            (this->*handler)(-1);
-    #ifdef MVEE_GENERATE_EXTRA_STATS
-        mvee::in_logging_handler = false;
-    #endif
-#endif
         handler                  = monitor::syscall_handler_table[callnum][MVEE_HANDLE_POSTCALL];
         if (handler != MVEE_HANDLER_DONTHAVE && handler != MVEE_HANDLER_DONTNEED)
             result = (this->*handler)(-1);
@@ -805,7 +909,6 @@ long monitor::call_postcall_return ()
 
     call_release_syslocks(-1, callnum, MVEE_SYSLOCK_FULL | MVEE_SYSLOCK_POSTCALL);
     return result;
-#endif
 }
 
 /*-----------------------------------------------------------------------------
@@ -941,8 +1044,7 @@ void monitor::call_release_syslocks(int variantnum, unsigned long callnum, unsig
 -----------------------------------------------------------------------------*/
 void monitor::call_wait_all()
 {
-    pid_t                      variant;
-    int                        status;
+	interaction::mvee_wait_status status;
     std::vector<unsigned char> synced(mvee::numvariants);
     std::fill(synced.begin(), synced.end(), 0);
 
@@ -954,22 +1056,19 @@ void monitor::call_wait_all()
             return;
         }
 
-        variant = wait4(-1, &status, __WALL | WUNTRACED | __WNOTHREAD, NULL);
-
-        if (variant == -1)
-            continue;
-
-        if (!(WIFSTOPPED(status) && WSTOPSIG(status) == SIGSYSTRAP))
-        {
-            warnf("call_wait_all error: expected SIGSYSTRAP stop for variant: %d but got status: 0x%08x\n",
-                        variant, status);
-            shutdown(false);
-            break;
-        }
+		if (!interaction::wait(-1, status) ||
+			status.reason != STOP_SIGNAL || 
+			status.data != SIGSYSTRAP)
+		{
+			warnf("call_wait_all - error: %s - status: %s\n", 
+				  getTextualErrno(errno), getTextualMVEEWaitStatus(status).c_str());
+			shutdown(false);
+			return;
+		}
 
         for (int i = 0; i < mvee::numvariants; ++i)
         {
-            if (variants[i].variantpid == variant)
+            if (variants[i].variantpid == status.pid)
             {
                 synced[i] = 1;
                 break;
@@ -986,15 +1085,25 @@ void monitor::call_wait_all()
 -----------------------------------------------------------------------------*/
 void monitor::call_execute_synced_call(bool at_syscall_exit, unsigned long callnum, std::vector<std::deque<unsigned long> >& call_args)
 {
-    debugf("> injecting synced syscall: %d (%s)\n", callnum, getTextualSyscall(callnum));
+    debugf("Injecting synced syscall: %d (%s)\n", 
+		   callnum, 
+		   getTextualSyscall(callnum));
 
     // If we're at a syscall exit, we should "rewind" the call
     if (at_syscall_exit)
     {
-        debugf("> we're at a syscall exit. Rewinding call...\n");
+        debugf("We're at a syscall exit. Rewinding call...\n");
 
         for (int i = 0; i < mvee::numvariants; ++i)
-            WRITE_IP(i, IP(variants[i].regs) - 2);
+		{
+            if (!interaction::write_ip(variants[i].variantpid, IP_IN_REGS(variants[i].regs) - SYSCALL_INS_LEN))
+			{
+				warnf("%s - failed to rewrite syscall\n",
+					  call_get_variant_pidstr(i).c_str());
+				shutdown(false);
+				return;
+			}
+		}
 
         call_resume_all();
         call_wait_all();
@@ -1005,7 +1114,7 @@ void monitor::call_execute_synced_call(bool at_syscall_exit, unsigned long calln
     // OK, we're now at a syscall entry. Replace the call args
     for (int i = 0; i < mvee::numvariants; ++i)
     {
-        SYSCALL_NO(variants[i].regs) = callnum;
+        SYSCALL_NO(i) = callnum;
 
         switch(call_args[i].size())
         {
@@ -1019,7 +1128,13 @@ void monitor::call_execute_synced_call(bool at_syscall_exit, unsigned long calln
                 break;
         }
 
-        mvee_wrap_ptrace(PTRACE_SETREGS, variants[i].variantpid, 0, &variants[i].regs);
+		if (!interaction::write_all_regs(variants[i].variantpid, &variants[i].regs))
+		{
+			warnf("%s - Couldn't overwrite regs\n",
+				  call_get_variant_pidstr(i).c_str());
+			shutdown(false);
+			return;
+		}
     }
 
     debugf("> injected arguments\n");

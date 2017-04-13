@@ -1,0 +1,8 @@
+.PHONY: all
+
+all: deps/jsoncpp/build
+
+deps/jsoncpp/build:
+	 git clone https://github.com/open-source-parsers/jsoncpp.git deps/jsoncpp
+	 @mkdir -p deps/jsoncpp/build && cd deps/jsoncpp/build && cmake -DCMAKE_BUILD_TYPE=release -DBUILD_STATIC_LIBS=ON -DBUILD_SHARED_LIBS=OFF ..
+	 @make -C deps/jsoncpp/build -j 8
