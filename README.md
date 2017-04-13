@@ -220,24 +220,24 @@ cp <arch>-pc-linux-gnu/libstdc++-v3/src/.libs/libstdc++.so.6.0.<ver> /path/to/Re
 
 Here are some of the publications that build on or use ReMon:
 
-Taming Parallelism in a Multi-Variant Execution Environment
+[Taming Parallelism in a Multi-Variant Execution Environment](http://www.ics.uci.edu/~stijnv/Papers/eurosys17-parallelism.pdf)
 Stijn Volckaert, Bart Coppens, Bjorn De Sutter, Koen De Bosschere, Per Larsen, and Michael Franz.
 In 12th European Conference on Computer Systems (EuroSys'17). ACM, 2017.
 To appear.
 
-[Secure and Efficient Application Monitoring and Replication](http://ics.uci.edu/~stijnv/Papers/atc16-remon.pdf)
+[Secure and Efficient Application Monitoring and Replication](http://www.ics.uci.edu/~stijnv/Papers/atc16-remon.pdf)
 Stijn Volckaert, Bart Coppens, Alexios Voulimeneas, Andrei Homescu, Per Larsen, Bjorn De Sutter, and Michael Franz.
 In 2016 USENIX Annual Technical Conference (ATC'16), pages 167-179. USENIX, 2016.
 
-[Advanced Techniques for Multi-Variant Execution](http://ics.uci.edu/~stijnv/Papers/thesis.pdf)
+[Advanced Techniques for Multi-Variant Execution](http://www.ics.uci.edu/~stijnv/Papers/thesis.pdf)
 Stijn Volckaert.
 PhD dissertation, Ghent University, 2015.
 
-[Cloning your Gadgets: Complete ROP Attack Immunity with Multi-Variant Execution](http://ics.uci.edu/~stijnv/Papers/tdsc15-gadgets.pdf)
+[Cloning your Gadgets: Complete ROP Attack Immunity with Multi-Variant Execution](http://www.ics.uci.edu/~stijnv/Papers/tdsc15-gadgets.pdf)
 Stijn Volckaert, Bart Coppens, and Bjorn De Sutter.
 In IEEE Transactions on Dependable and Secure Computing (TDSC) (Volume 13, Issue 4, July-Aug 2016).
 
-[GHUMVEE: Efficient, effective, and flexible replication](http://ics.uci.edu/~stijnv/Papers/fps12-ghumvee.pdf)
+[GHUMVEE: Efficient, effective, and flexible replication](http://www.ics.uci.edu/~stijnv/Papers/fps12-ghumvee.pdf)
 Stijn Volckaert, Bjorn De Sutter, Tim De Baets, and Koen De Bosschere.
 In 5th International Symposium on Foundations and Practice of Security (FPS'12), pages 261-277. Springer, 2013.
 
@@ -246,7 +246,9 @@ In 5th International Symposium on Foundations and Practice of Security (FPS'12),
 The **IP-MON** component is available under the licensing terms in `IPMONLICENSE.txt`.
 This license applies to the following files:
 - `patches/linux-3.13-ipmon.patch`
-- The entire `IP-MON` folder
+- `patches/linux-3.13-full-ipmon.patch`
+- `patches/linux-4.4.0-full-ipmon.patch`
+- The entire `IP-MON` and `IP-MON-atc` folders
 
 Some of the files in the `exploits/BROP` folder were downloaded from [this website](http://www.scs.stanford.edu/brop/). The licensing terms for these files are unknown.
 
