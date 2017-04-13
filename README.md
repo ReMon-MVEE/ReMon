@@ -233,11 +233,11 @@ In 2016 USENIX Annual Technical Conference (ATC'16), pages 167-179. USENIX, 2016
 Stijn Volckaert.
 PhD dissertation, Ghent University, 2015.
 
-[Cloning your Gadgets: Complete ROP Attack Immunity with Multi-Variant Execution](http://ics.uci.edu/~stijnv/Papers/cloning.pdf)
+[Cloning your Gadgets: Complete ROP Attack Immunity with Multi-Variant Execution](http://ics.uci.edu/~stijnv/Papers/tdsc15-gadgets.pdf)
 Stijn Volckaert, Bart Coppens, and Bjorn De Sutter.
 In IEEE Transactions on Dependable and Secure Computing (TDSC) (Volume 13, Issue 4, July-Aug 2016).
 
-[GHUMVEE: Efficient, effective, and flexible replication](http://ics.uci.edu/~stijnv/Papers/ghumvee.pdf)
+[GHUMVEE: Efficient, effective, and flexible replication](http://ics.uci.edu/~stijnv/Papers/fps12-ghumvee.pdf)
 Stijn Volckaert, Bjorn De Sutter, Tim De Baets, and Koen De Bosschere.
 In 5th International Symposium on Foundations and Practice of Security (FPS'12), pages 261-277. Springer, 2013.
 
@@ -247,5 +247,7 @@ The **IP-MON** component is available under the licensing terms in `IPMONLICENSE
 This license applies to the following files:
 - `patches/linux-3.13-ipmon.patch`
 - The entire `IP-MON` folder
+
+Some of the files in the `exploits/BROP` folder were downloaded from [this website](http://www.scs.stanford.edu/brop/). The licensing terms for these files are unknown.
 
 Unless otherwise specified, all other files in the repository are available under the licensing terms in `GHUMVEELICENSE.txt`.
