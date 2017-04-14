@@ -152,7 +152,7 @@ public:
     static void init_config                 ();
 	static void init_config_set_defaults    ();
 	static bool process_opts                (int argc, char** argv, bool add_args);
-	static void add_argv                    (const char* arg);
+	static void add_argv                    (const char* arg, bool first_extra_arg);
 
 
 	//

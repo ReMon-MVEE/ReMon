@@ -1588,14 +1588,39 @@ static void usage()
 /*-----------------------------------------------------------------------------
     add_argv
 -----------------------------------------------------------------------------*/
-void mvee::add_argv(const char* arg)
+void mvee::add_argv(const char* arg, bool first_extra_arg)
 {
+	bool merge_extra_args = 
+		!(*mvee::config_variant_global)["merge_extra_args"].isNull() &&
+		(*mvee::config_variant_global)["merge_extra_args"].asBool();
+
+	// Add to global exec arguments
 	if (!(*mvee::config_variant_exec)["argv"])
 		(*mvee::config_variant_exec)["argv"][0] = std::string(arg);
-	else
+	else if (!merge_extra_args || first_extra_arg)
 		(*mvee::config_variant_exec)["argv"].append(std::string(arg));
+	else
+	{
+		auto str = (*mvee::config_variant_exec)["argv"][(*mvee::config_variant_exec)["argv"].size() - 1].asCString();
+		std::stringstream ss;
+		ss << str << " " << arg;
+		(*mvee::config_variant_exec)["argv"][(*mvee::config_variant_exec)["argv"].size() - 1] = ss.str();
+	}
 
-	// TODO: consider adding this to variant.specs too
+	for (auto variant_spec : mvee::config["variant"]["specs"])
+	{
+		if (!variant_spec["argv"])
+			variant_spec["argv"][0] = std::string(arg);
+		else if (!merge_extra_args || first_extra_arg)
+			variant_spec["argv"].append(std::string(arg));
+		else
+		{
+			auto str = (variant_spec)["argv"][(variant_spec)["argv"].size() - 1].asCString();
+			std::stringstream ss;
+			ss << str << " " << arg;
+			(variant_spec)["argv"][(variant_spec)["argv"].size() - 1] = ss.str();
+		}
+	}
 }
 
 /*-----------------------------------------------------------------------------
@@ -1648,8 +1673,13 @@ bool mvee::process_opts(int argc, char** argv, bool add_args)
 
 	if (add_args)
 	{
+		bool first_extra_arg = true;
+
 		for (int i = optind; i < argc; ++i)
-			add_argv(argv[i]);
+		{			
+			add_argv(argv[i], first_extra_arg);
+			first_extra_arg = false;
+		}
 	}
 
 	return true;
@@ -1727,8 +1757,12 @@ int main(int argc, char *argv[])
 				return -1;
 			
 			// Process everything after the "--" as program arguments
+			bool first_extra_arg = true;
             for (i = dash_pos + 1; i < argc; ++i)
-				mvee::add_argv(argv[i]);
+			{
+				mvee::add_argv(argv[i], first_extra_arg);
+				first_extra_arg = false;
+			}
         }
         else
         {
