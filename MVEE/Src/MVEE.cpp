@@ -75,7 +75,7 @@ std::map<std::string, std::string>     mvee::interp_map;
 std::vector<pid_t>                     mvee::shutdown_kill_list;
 bool                                   mvee::shutdown_should_generate_backtraces = false;
 volatile unsigned long                 mvee::can_run                             = 0;
-std::string                            mvee::config_file_name                    = "MVEE.ini";
+std::string                            mvee::config_file_name                    = "";
 bool                                   mvee::config_show                         = false;
 std::string                            mvee::config_variant_set                  = "default";
 Json::Value                            mvee::config;
@@ -1743,6 +1743,22 @@ int main(int argc, char *argv[])
 				break;
 			}
 		}
+	   
+		// Use default MVEE.ini if needed
+		if (mvee::config_file_name.size() == 0)
+		{
+			char path[1024];
+			memset(path, 0, 1024);
+
+			if (readlink("/proc/self/exe", path, 1024) > 0)
+			{
+				std::string str(path);
+				if (str.rfind("/") != std::string::npos)
+					mvee::config_file_name = str.substr(0, str.rfind("/") + 1) + "MVEE.ini";
+				else
+					mvee::config_file_name = "MVEE.ini";
+			}
+		}		
 
 		// Initialize the config before processing further cmdline options
 		mvee::init_config();
