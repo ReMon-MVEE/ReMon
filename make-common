@@ -48,7 +48,7 @@ STD_LDFLAGS  = deps/jsoncpp/build/src/lib_json/libjsoncpp.a -ldl -lrt -lelf -lst
 
 OBJ := $(SRCS:%.cpp=$(MVEE_BUILD)/%.o)
 PRE_BUILD_TABLES := $(shell ./generate_syscall_tables.rb)
-PRE_BUILD_DEPS := $(shell make -f make.deps)
+PRE_BUILD_DEPS := $(shell make "BUILD_CXX=$(BUILD_CXX)" "BUILD_CXXFLAGS=$(BUILD_CXXFLAGS)" -f make.deps)
 
 BIN = $(MVEE_OUT)/MVEE
 
