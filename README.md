@@ -19,7 +19,7 @@ You will need:
 - Several development packages (see below)
 
 The following command installs all of the required packages:
-`sudo apt-get install ruby gcc g++ clang libselinux-dev musl-tools libelf-dev libdwarf-dev libgmp-dev libmpfr-dev libmpc-dev libisl-dev libcloog-isl-dev libconfig-dev libcap-dev`
+`sudo apt-get install ruby gcc g++ clang libselinux-dev musl-tools libelf-dev libdwarf-dev libgmp-dev libmpfr-dev libmpc-dev libisl-dev libcloog-isl-dev libconfig-dev libcap-dev cmake`
 
 ## GHUMVEE Instructions
 
