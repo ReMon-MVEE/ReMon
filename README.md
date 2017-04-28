@@ -217,7 +217,6 @@ Here are some of the publications that build on or use ReMon:
 [Taming Parallelism in a Multi-Variant Execution Environment](http://www.ics.uci.edu/~stijnv/Papers/eurosys17-parallelism.pdf)
 Stijn Volckaert, Bart Coppens, Bjorn De Sutter, Koen De Bosschere, Per Larsen, and Michael Franz.
 In 12th European Conference on Computer Systems (EuroSys'17). ACM, 2017.
-To appear.
 
 [Secure and Efficient Application Monitoring and Replication](http://www.ics.uci.edu/~stijnv/Papers/atc16-remon.pdf)
 Stijn Volckaert, Bart Coppens, Alexios Voulimeneas, Andrei Homescu, Per Larsen, Bjorn De Sutter, and Michael Franz.
