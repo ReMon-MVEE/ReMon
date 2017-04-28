@@ -40,7 +40,7 @@ SRCS	 = $(SRC) $(ARCH_SRC)
 #-----------------------------------------------------------------------------
 
 STD_CXXFLAGS = -D__LINUX_X86__ -Wall -Werror -Wextra -Wpedantic -Wno-unused-parameter -Wno-unused-function -Ideps/jsoncpp/include/
-STD_LDFLAGS  = deps/jsoncpp/build/src/lib_json/libjsoncpp.a -ldl -lrt -lelf -lstdc++ -ldwarf -lpthread -lz 
+STD_LDFLAGS  = deps/jsoncpp/build/src/lib_json/libjsoncpp.a deps/libdwarf/libdwarf/libdwarf.a deps/libelf/lib/libelf.a -ldl -lrt -lstdc++ -lpthread -lz 
 
 #-----------------------------------------------------------------------------
 # Targets
@@ -48,8 +48,6 @@ STD_LDFLAGS  = deps/jsoncpp/build/src/lib_json/libjsoncpp.a -ldl -lrt -lelf -lst
 
 OBJ := $(SRCS:%.cpp=$(MVEE_BUILD)/%.o)
 PRE_BUILD_TABLES := $(shell ./generate_syscall_tables.rb)
-PRE_BUILD_DEPS := $(shell make "BUILD_CXX=$(BUILD_CXX)" "BUILD_CXXFLAGS=$(BUILD_CXXFLAGS)" -f make.deps)
-
 BIN = $(MVEE_OUT)/MVEE
 
 .PHONY: all clean 
@@ -98,7 +96,7 @@ $(MVEE_BUILD)/%.o: %.cpp
 
 $(BIN): $(OBJ)
 	@-mkdir -p $(MVEE_OUT)
-	$(BUILD_CXX) -fuse-ld=bfd -o $@ $^ $(BUILD_LDFLAGS) $(STD_LDFLAGS)
+	$(BUILD_CXX) -fuse-ld=${BUILD_LINKER} -o $@ $^ $(BUILD_LDFLAGS) $(STD_LDFLAGS)
 
 clean: 
 	rm -f $(BIN)

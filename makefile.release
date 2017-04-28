@@ -2,11 +2,20 @@
 # Build-type specific configuration.
 #-----------------------------------------------------------------------------
 
-BUILD          = Release
-BUILD_CXX      = clang++
-BUILD_CXXFLAGS = -flto -ffast-math -march=corei7 -std=c++14 -O3 -Werror -fvisibility=hidden -static
-BUILD_LDFLAGS  = -flto -O3 -static -s
-BUILD_OPT      = yes
+BUILD                = Release
+BUILD_CXXFLAGS       = -flto -O3 -ffast-math -march=corei7 -std=c++14 -static -Werror -fvisibility=hidden
+BUILD_LDFLAGS        = -flto -O3 -static -s
+BUILD_OPT            = yes
+
+#-----------------------------------------------------------------------------
+# Tool Chain
+#-----------------------------------------------------------------------------
+
+BUILD_PWD      := $(shell pwd)
+BUILD_CXX       = ${BUILD_PWD}/deps/llvm/build-tree/bin/clang++
+BUILD_LINKER    = ${BUILD_PWD}/deps/binutils/build-tree/gold/ld-new
+BUILD_AR        = ${BUILD_PWD}/deps/binutils/build-tree/binutils/ar
+BUILD_RANLIB    = ${BUILD_PWD}/deps/binutils/build-tree/binutils/ranlib
 
 #-----------------------------------------------------------------------------
 # Common configuration.
