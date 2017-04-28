@@ -95,5 +95,5 @@ end
 
 print("Looking for ad hoc synchronization in file: #{ARGV[0]}\n")
 
-insns=`objdump --disassemble #{ARGV[0]} | egrep "lock |xchg|mvee\_atomic" | grep -v "xchg *%ax,%ax"`
+insns=`objdump --disassemble #{ARGV[0]} | egrep "lock |xchg|mvee\_atomic" | grep -v "xchg *%[a-z0-9]*,%[a-z0-9]*$"`
 process_lines(insns)
