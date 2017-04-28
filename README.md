@@ -13,13 +13,7 @@ The current version of **IP-MON** takes quite a lot of manual effort to set up. 
 You will need:
 - A GNU/Linux distribution based on Debian. I **_strongly_** recommend Ubuntu 14.04 x64.
 - Ruby
-- gcc (version 4.8 or later recommended)
-- LLVM/Clang with C++14 support (version 3.6 or later recommended)
-- The musl C library (get it at git://git.musl-libc.org/musl or install directly using `sudo apt-get install musl-tools`)
-- Several development packages (see below)
-
-The following command installs all of the required packages:
-`sudo apt-get install ruby gcc g++ clang libselinux-dev musl-tools libelf-dev libdwarf-dev libgmp-dev libmpfr-dev libmpc-dev libisl-dev libcloog-isl-dev libconfig-dev libcap-dev`
+- The ReMon toolchain, which can be installed using the `bootstrap.sh` script.
 
 ## GHUMVEE Instructions
 
@@ -223,7 +217,6 @@ Here are some of the publications that build on or use ReMon:
 [Taming Parallelism in a Multi-Variant Execution Environment](http://www.ics.uci.edu/~stijnv/Papers/eurosys17-parallelism.pdf)
 Stijn Volckaert, Bart Coppens, Bjorn De Sutter, Koen De Bosschere, Per Larsen, and Michael Franz.
 In 12th European Conference on Computer Systems (EuroSys'17). ACM, 2017.
-To appear.
 
 [Secure and Efficient Application Monitoring and Replication](http://www.ics.uci.edu/~stijnv/Papers/atc16-remon.pdf)
 Stijn Volckaert, Bart Coppens, Alexios Voulimeneas, Andrei Homescu, Per Larsen, Bjorn De Sutter, and Michael Franz.

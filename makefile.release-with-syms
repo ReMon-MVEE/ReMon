@@ -3,10 +3,19 @@
 #-----------------------------------------------------------------------------
 
 BUILD          = Release-syms
-BUILD_CXX      = clang++
 BUILD_CXXFLAGS = -ffast-math -march=corei7 -std=c++14 -O3 -Werror -fvisibility=hidden -ggdb
 BUILD_LDFLAGS  = -O3
 BUILD_OPT      = yes
+
+#-----------------------------------------------------------------------------
+# Tool Chain
+#-----------------------------------------------------------------------------
+
+BUILD_PWD      := $(shell pwd)
+BUILD_CXX       = ${BUILD_PWD}/deps/llvm/build-tree/bin/clang++
+BUILD_LINKER    = ${BUILD_PWD}/deps/binutils/build-tree/gold/ld-new
+BUILD_AR        = ${BUILD_PWD}/deps/binutils/build-tree/binutils/ar
+BUILD_RANLIB    = ${BUILD_PWD}/deps/binutils/build-tree/binutils/ranlib
 
 #-----------------------------------------------------------------------------
 # Common configuration.

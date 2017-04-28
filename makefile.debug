@@ -3,10 +3,19 @@
 #-----------------------------------------------------------------------------
 
 BUILD          = Debug
-BUILD_CXX      = clang++
 BUILD_CXXFLAGS = -ggdb -std=c++14 -pedantic-errors -fno-omit-frame-pointer
 BUILD_LDFLAGS  = -rdynamic
 BUILD_OPT      = no
+
+#-----------------------------------------------------------------------------
+# Tool Chain
+#-----------------------------------------------------------------------------
+
+BUILD_PWD      := $(shell pwd)
+BUILD_CXX       = ${BUILD_PWD}/deps/llvm/build-tree/bin/clang++
+BUILD_LINKER    = ${BUILD_PWD}/deps/binutils/build-tree/gold/ld-new
+BUILD_AR        = ${BUILD_PWD}/deps/binutils/build-tree/binutils/ar
+BUILD_RANLIB    = ${BUILD_PWD}/deps/binutils/build-tree/binutils/ranlib
 
 #-----------------------------------------------------------------------------
 # Common configuration.
