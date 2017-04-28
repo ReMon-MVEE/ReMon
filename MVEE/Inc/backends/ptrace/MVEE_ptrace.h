@@ -16,6 +16,7 @@
 #include <sys/ptrace.h>
 #include <sys/wait.h>
 #include <asm/unistd.h>
+#include <unistd.h>
 #include "MVEE_build_config.h"
 #include "MVEE_private_arch.h"
 
