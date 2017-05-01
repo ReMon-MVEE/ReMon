@@ -218,6 +218,8 @@ Here are some of the publications that build on or use ReMon:
 Stijn Volckaert, Bart Coppens, Bjorn De Sutter, Koen De Bosschere, Per Larsen, and Michael Franz.
 In 12th European Conference on Computer Systems (EuroSys'17). ACM, 2017.
 
+The compiler extension presented in this paper can be found [here](https://github.com/stijn-volckaert/ReMon-llvm).
+
 [Secure and Efficient Application Monitoring and Replication](http://www.ics.uci.edu/~stijnv/Papers/atc16-remon.pdf)
 Stijn Volckaert, Bart Coppens, Alexios Voulimeneas, Andrei Homescu, Per Larsen, Bjorn De Sutter, and Michael Franz.
 In 2016 USENIX Annual Technical Conference (ATC'16), pages 167-179. USENIX, 2016.

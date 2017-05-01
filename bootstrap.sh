@@ -4,7 +4,7 @@ set -e
 ORIG_PWD=$(pwd)
 
 # Install the necessary ubuntu packages
-sudo apt-get install ruby gcc g++ libselinux-dev musl-tools libelf-dev libdwarf-dev libgmp-dev libmpfr-dev libmpc-dev libisl-dev libcloog-isl-dev libconfig-dev libcap-dev cmake bison flex git texinfo texi2html binutils-dev
+sudo apt-get install ruby gcc g++ libselinux-dev musl-tools libelf-dev libdwarf-dev libgmp-dev libmpfr-dev libmpc-dev libisl-dev libcloog-isl-dev libconfig-dev libcap-dev cmake bison flex git texinfo texi2html linux-headers-generic
 
 # Download & Install binutils
 if [ ! -e deps/binutils ]
@@ -76,6 +76,16 @@ then
 	cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_STATIC_LIBS=ON -DBUILD_SHARED_LIBS=OFF -DCMAKE_CXX_COMPILER=$ORIG_PWD/deps/llvm/build-tree/bin/clang++ -DCMAKE_CXX_FLAGS=-O3 ..
 	make -j `getconf _NPROCESSORS_ONLN`
 	cd ../../../
+fi
+
+# Download & Build musl
+if [ ! -e deps/musl ]
+then
+	git clone git://git.musl-libc.org/musl
+	cd deps/musl
+	./configure
+	make -j `getconf _NPROCESSORS_ONLN`
+	cd ../../
 fi
 
 # All done!
