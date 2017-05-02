@@ -81,10 +81,11 @@ fi
 # Download & Build musl
 if [ ! -e deps/musl ]
 then
-	git clone git://git.musl-libc.org/musl
+	git clone git://git.musl-libc.org/musl deps/musl
 	cd deps/musl
-	./configure
+	./configure --prefix=$ORIG_PWD/deps/musl-install --exec-prefix=$ORIG_PWD/deps/musl-install
 	make -j `getconf _NPROCESSORS_ONLN`
+	make install
 	cd ../../
 fi
 
