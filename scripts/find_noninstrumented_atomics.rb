@@ -2,36 +2,58 @@
 
 require 'pty'
 
+@llvm = true
+@symbolizer = File.dirname(__FILE__) + "/../deps/llvm/build-tree/bin/llvm-symbolizer"
+
 if ARGV.size < 1
   print("syntax: #{$PROGRAM_NAME} file\n")
   exit
 end
 
 def write_addr(fin, addr)
-  fin.printf("#{addr}\n")
+  if not @llvm
+    fin.printf("#{addr}\n")
+  else
+    fin.printf("0x#{addr}\n")
+  end
 end
 
 def read_addr(fout)
   buffer = ""
-  newlines = 0
+  lines = 0
   loop {
-    chr = fout.getbyte
+    chr = fout.gets
+    lines += 1
     break if not chr
-    buffer << chr.chr if newlines == 1 and chr != 10 and chr != 13
-    if chr == 13
-      newlines += 1
-      break if newlines == 2
+    break if chr.chomp('') == ""
+
+    buffer << chr
+    if not @llvm
+      break if lines == 2
     end
   }
+
   out = ""
-  a = buffer.split(" ")
-  out << a[2] << " in " << a[0] if a[2] and a[0]
+  firstline = buffer.split("\n")[1]
+  lastline = buffer.split("\n")[-1]
+  a = lastline.split(" ")
+  out << a[-1] << " in " << a[-3]
+  if lastline.include? "inlined"
+    b = firstline.split(" ")
+    out << " (inlined from" << b[-1] << " in " << b[-3] << ")"
+  end
   out
 end
 
 def dump_lines(arr)
-  resolv_out, resolv_in, resolv_pid = PTY.spawn("addr2line -e #{ARGV[0]} -f -p -C")
-
+  if not @llvm
+    # binutils addr2line doesn't output an empty line after each request.
+    # If we request addr2line info for inlined funcs too, we won't know when the output will stop
+    resolv_out, resolv_in, resolv_pid = PTY.spawn("addr2line -e #{ARGV[0]} -f -p -C")
+  else
+    resolv_out, resolv_in, resolv_pid = PTY.spawn("#{@symbolizer} -inlining -pretty-print -obj=#{ARGV[0]}")
+  end
+  
   instolines = Hash.new
   linestocount = Hash.new
 
@@ -55,6 +77,8 @@ def process_lines(insns)
   type3_lines = []
   saw_preop = false
   saw_insn = false
+
+  @llvm = false if not File.exist? @symbolizer
 
   insns.each_line { |line|
     if line.match(/mvee_atomic_preop/)
