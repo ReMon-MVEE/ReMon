@@ -539,7 +539,7 @@ void monitor::log_variant_backtrace(int variantnum, int max_depth, int calculate
 				{
 					logfunc("%s - >>> Process terminated by signal: %s\n",
 							call_get_variant_pidstr(variantnum).c_str(), getTextualSig(status.data));
-					if (WTERMSIG(status) != SIGSEGV)
+					if (status.data != SIGSEGV)
 					{
 						set_mmap_table->release_lock();
 						return;

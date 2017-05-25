@@ -39,7 +39,7 @@ SRCS	 = $(SRC) $(ARCH_SRC)
 # Common build config
 #-----------------------------------------------------------------------------
 
-STD_CXXFLAGS = -D__LINUX_X86__ -Wall -Werror -Wextra -Wpedantic -Wno-unused-parameter -Wno-unused-function -Ideps/jsoncpp/include/
+STD_CXXFLAGS = -D__LINUX_X86__ -Wall -Werror -Wextra -Wpedantic -Wno-unused-parameter -Wno-unused-function -Ideps/jsoncpp/include/ -Ideps/libdwarf/libdwarf
 STD_LDFLAGS  = deps/jsoncpp/build/src/lib_json/libjsoncpp.a deps/libdwarf/libdwarf/libdwarf.a deps/libelf/lib/libelf.a -ldl -lrt -lstdc++ -lpthread -lz 
 
 #-----------------------------------------------------------------------------
