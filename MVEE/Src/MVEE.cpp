@@ -1731,7 +1731,7 @@ int main(int argc, char *argv[])
         }
 
 		// look for -f first and initialize the config
-		i = legacy_mode ? 3 : 1;
+		i = legacy_mode ? 2 : 1;
 		for (; i < argc; ++i)
 		{
 			if (!strcmp(argv[i], "-f"))
