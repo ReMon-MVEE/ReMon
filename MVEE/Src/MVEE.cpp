@@ -1307,7 +1307,7 @@ void mvee::start_unmonitored()
 
     if (i < mvee::numvariants)
     {
-        mvee::setup_env(true);
+        mvee::setup_env(i);
 		// raise SIGSTOP so the monitor process can attach before we exec
         kill(getpid(), SIGSTOP);
 		start_variant(i);
@@ -1527,7 +1527,7 @@ void mvee::start_monitored()
     // If the process is a variant, prepare it for tracing
     else
     {
-        mvee::setup_env(false);
+        mvee::setup_env(i);
 
         // We can disable the TSC right away
         // the tsc disable flag is inherited across forks, clones and execves...
