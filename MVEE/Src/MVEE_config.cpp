@@ -248,7 +248,9 @@ void mvee::set_builtin_config(int builtin)
 
     if (parsec_bench || splash_bench)
     {
-        assert((*mvee::config_variant_exec)["argv"].size() >= 2);
+		assert(!(*mvee::config_variant_exec)["argv"].isNull());
+		auto arg_tokens = mvee::strsplit((*mvee::config_variant_exec)["argv"][0].asCString(), ' ');
+        assert(arg_tokens.size() >= 2);
 
 		std::stringstream cmd;
 		Json::Value spec_path = (parsec_ver == 2 && !splash_bench) ?
@@ -270,8 +272,8 @@ void mvee::set_builtin_config(int builtin)
 			return;
 		}
 
-		std::string numthreads = (*mvee::config_variant_exec)["argv"][0].asString();
-		std::string input      = (*mvee::config_variant_exec)["argv"][1].asString();
+		std::string numthreads = arg_tokens[0];
+		std::string input      = arg_tokens[1];
 
 		(*config_variant_exec)["path"] = "/bin/bash";
 		(*config_variant_exec)["argv"][0] = cmd.str();
