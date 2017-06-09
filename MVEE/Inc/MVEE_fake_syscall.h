@@ -160,6 +160,20 @@ enum mvee_shared_buffer_types
 #define MVEE_INVOKE_LD                 MVEE_FAKE_SYSCALL_BASE + 16
 
 //
+// MVEE_GET_VIRTUALIZED_ARGV0: Writes the argv[0] value for the master variant
+// into the buffer.
+// Returns 0 if successful
+//
+// Syntax: 
+//    syscall(MVEE_GET_VIRTUALIZED_ARGV0, old_argv0, virtualized_argv0_buf, virtualized_argv0_buf_sz)
+// With:
+//    - old_argv0 is a pointer to the original argv[0] string
+//    - virtualized_argv0_buf is where the mvee should write the virtualized string
+//    - virtualized_argv0_buf_sz is the size of the aforementioned buffer
+//
+#define MVEE_GET_VIRTUALIZED_ARGV0     MVEE_FAKE_SYSCALL_BASE + 17
+
+//
 // MVEE_IPMON_INVOKE: This is an actual syscall we add to the kernel.
 // The only time it is invoked directly is when IP-MON checks if it
 // runs on top of an IP-MON compatible kernel
