@@ -136,6 +136,7 @@ public:
     unsigned int  region_backing_file_flags;  // e.g. O_RDWR
     unsigned int  region_backing_file_offset; // offset of the region within the backing file (in bytes)
     ssize_t       region_backing_file_size;   // (optional) original size of the backing file
+	bool          region_backing_file_unsynced; // (optional) true if access to the backing file is unsynced. This is used for aliasing
 
     //
     // Optional fields used by the backtracer

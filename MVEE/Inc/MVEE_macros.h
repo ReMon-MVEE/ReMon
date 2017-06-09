@@ -11,8 +11,8 @@
 /*-----------------------------------------------------------------------------
   Generic Macros
 -----------------------------------------------------------------------------*/
-#define SERIALIZEVECTOR(vec, str)                              \
-    std::string str;                                           \
+#define SERIALIZEVECTOR(vec, strname)                          \
+    std::string strname;                                       \
     {                                                          \
         std::stringstream ss;                                  \
         ss << "[";                                             \
@@ -23,7 +23,7 @@
             ss << vec[vecidx];                                 \
         }                                                      \
         ss << "]";                                             \
-        str = ss.str();                                        \
+        strname = ss.str();                                    \
     }
 
 #define ROUND_DOWN(x, multiple) ( (((long)(x)))  & (~(multiple-1)) )

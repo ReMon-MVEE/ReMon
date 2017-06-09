@@ -8,6 +8,7 @@
 /*-----------------------------------------------------------------------------
     Includes
 -----------------------------------------------------------------------------*/
+#include <algorithm>
 #include <sys/select.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -28,10 +29,11 @@ fd_info::fd_info()
     : access_flags(0)
     , master_file(false)
 	, close_on_exec(false)
-	, unsynced_reads(false)
+	, unsynced_access(false)
 	, unlinked(false)
 	, original_file_size(0)
 {
+	paths.resize(mvee::numvariants);
     fds.resize(mvee::numvariants);
 }
 
@@ -39,24 +41,35 @@ fd_info::fd_info
 (
 	FileType                  type,
     std::vector<unsigned long>& fds,
-    std::string               path,
+    std::vector<std::string>& paths,
     unsigned long             access_flags,
     bool                      close_on_exec,
     bool                      master_file,
-    bool                      unsynced_reads,
+    bool                      unsynced_access,
 	bool                      unlinked,
     ssize_t                   original_file_size
 )
     : fds(fds)
-	, path(path)
+	, paths(paths)
 	, access_flags(access_flags)
 	, master_file(master_file)
 	, close_on_exec(close_on_exec)
-	, unsynced_reads(unsynced_reads)
+	, unsynced_access(unsynced_access)
 	, unlinked(unlinked)
 	, original_file_size(original_file_size)
 	, file_type(type)	
 {
+#ifndef MVEE_BENCHMARK
+	if (!unsynced_access &&
+		std::adjacent_find(paths.begin(), paths.end(), std::not_equal_to<std::string>()) != paths.end())
+	{
+		warnf("Invalid fd_info creation: paths differ but unsynced_access not requested\n");
+	}
+	else if (unsynced_access && master_file)
+	{
+		warnf("Invalid fd_info creation: unsynced_access requested but file is only open in the master variant\n");
+	}
+#endif
 }
 
 /*-----------------------------------------------------------------------------
@@ -64,15 +77,31 @@ fd_info::fd_info
 -----------------------------------------------------------------------------*/
 void fd_info::print_fd_info ()
 {
-    SERIALIZEVECTOR(fds, str);
-    debugf("> fds          = %s\n",         str.c_str());
-    debugf("> path         = %s\n",         path.c_str());
+    SERIALIZEVECTOR(fds, fd_vector);
+    debugf("> fds          = %s\n",         fd_vector.c_str());
+	debugf("> paths        = %s\n",         get_path_string().c_str());
     debugf("> flags        = 0x%04X, %s\n", access_flags, getTextualFileFlags(access_flags).c_str());
-    debugf("> cloexec      = %d\n",         close_on_exec);
-    debugf("> master file  = %d\n",         master_file);
-    debugf("> unsynced     = %d\n",         unsynced_reads);
-	debugf("> unlinked     = %d\n",         unlinked);
+    debugf("> cloexec      = %s\n",         close_on_exec ? "true" : "false");
+    debugf("> master file  = %s\n",         master_file ? "true" : "false");
+	debugf("> unsynced     = %s\n",         unsynced_access ? "true" : "false");
+	debugf("> unlinked     = %s\n",         unlinked ? "true" : "false");
 	debugf("> file type    = %s\n",         getTextualFileType(file_type));
+}
+
+/*-----------------------------------------------------------------------------
+  get_path_string returns:
+  - "<path 0>" if the file is a master file or does not have the unsynced 
+  access flag set
+  - "[<path 0>, ..., <path N>]" if the file is not a master file and it does 
+  have the unsynced access flag set
+-----------------------------------------------------------------------------*/
+std::string fd_info::get_path_string()
+{
+	if (master_file || !unsynced_access)
+		return paths[0];
+
+	SERIALIZEVECTOR(paths, path_vector);
+	return path_vector;
 }
 
 /*-----------------------------------------------------------------------------
@@ -94,12 +123,19 @@ fd_table::fd_table()
 
     // clean table. Just add default fds
     std::vector<unsigned long> fds(mvee::numvariants);
+	std::vector<std::string> paths(mvee::numvariants);
+
     std::fill(fds.begin(), fds.end(), 0);
-    create_fd_info(FT_SPECIAL, fds, "stdin", O_RDONLY, false, false, false, true, 0);
+	std::fill(paths.begin(), paths.end(), "stdin");
+    create_fd_info(FT_SPECIAL, fds, paths, O_RDONLY, false, false, false, true, 0);
+
     std::fill(fds.begin(), fds.end(), 1);
-    create_fd_info(FT_SPECIAL, fds, "stdout", O_WRONLY, false, false, false, true, 0);
+	std::fill(paths.begin(), paths.end(), "stdout");
+    create_fd_info(FT_SPECIAL, fds, paths, O_WRONLY, false, false, false, true, 0);
+
     std::fill(fds.begin(), fds.end(), 2);
-    create_fd_info(FT_SPECIAL, fds, "stderr", O_WRONLY, false, false, false, true, 0);
+	std::fill(paths.begin(), paths.end(), "stderr");
+    create_fd_info(FT_SPECIAL, fds, paths, O_WRONLY, false, false, false, true, 0);
 
     char*                      cwd = getcwd(NULL, 0);
     fd_cwd = std::string(cwd);
@@ -136,6 +172,7 @@ fd_table::~fd_table()
 -----------------------------------------------------------------------------*/
 bool fd_table::add_missing_fds(std::vector<pid_t> variant_pids)
 {
+#if 0
 	std::map<std::string, std::vector<unsigned long>> missing_fds;
 
 	int i = 0;
@@ -252,7 +289,7 @@ bool fd_table::add_missing_fds(std::vector<pid_t> variant_pids)
 					   0 // TODO: use sys_stat to get extra info?
 			);
 	}
-
+#endif
 	return true;
 }
 
@@ -347,16 +384,16 @@ void fd_table::create_fd_info
 (
 	FileType                  type,
     std::vector<unsigned long>& fds,
-    std::string               path,
+    std::vector<std::string>& paths,
     unsigned long             access_flags,
     bool                      close_on_exec,
     bool                      master_file,
-    bool                      unsynced_reads,
+    bool                      unsynced_access,
 	bool                      unlinked,
     ssize_t                   original_file_size
 )
 {
-    fd_info info(type, fds, path, access_flags, close_on_exec, master_file, unsynced_reads, unlinked, original_file_size);
+    fd_info info(type, fds, paths, access_flags, close_on_exec, master_file, unsynced_access, unlinked, original_file_size);
 
     auto it = table.find(fds[0]);
     if (it != table.end())
@@ -385,7 +422,7 @@ std::map<unsigned long, fd_info>::iterator fd_table::free_fd_info (unsigned long
     auto it = table.find(fd);
     if (it != table.end())
     {
-        debugf("removed fd: %d (%s)\n", fd, it->second.path.c_str());
+        debugf("removed fd: %d (%s)\n", fd, it->second.get_path_string().c_str());
         it = table.erase(it);
     }
 
@@ -433,7 +470,7 @@ void fd_table::free_cloexec_fds ()
          */
         if (it->second.close_on_exec)
         {
-            debugf("removing cloexec fd: %d (%s)\n", it->second.fds[0], it->second.path.c_str());
+            debugf("removing cloexec fd: %d (%s)\n", it->second.fds[0], it->second.get_path_string().c_str());
             it = free_fd_info(it->second.fds[0]);
         }
 		else
@@ -457,10 +494,13 @@ void fd_table::create_temporary_fd_info
 )
 {
 	std::vector<unsigned long> fds(mvee::numvariants);
+	std::vector<std::string> paths(mvee::numvariants);
 	std::fill(fds.begin(), fds.end(), MVEE_UNKNOWN_FD);
+	std::fill(paths.begin(), paths.end(), "<unknown>");
+	paths[variantnum] = path;
 	fds[variantnum] = fd;
 
-    fd_info info(FT_REGULAR, fds, path, access_flags, close_on_exec, false, true, original_file_size);
+    fd_info info(FT_REGULAR, fds, paths, access_flags, close_on_exec, false, true, original_file_size);
 
 	auto it = temporary_files[variantnum].find(fd);
     if (it != temporary_files[variantnum].end())
@@ -486,7 +526,7 @@ void fd_table::free_temporary_fd_info (int variantnum, unsigned long fd)
 	auto it = temporary_files[variantnum].find(fd);
     if (it != temporary_files[variantnum].end())
     {
-        debugf("removed fd: %d (%s)\n", fd, it->second.path.c_str());
+        debugf("removed fd: %d (%s)\n", fd, it->second.get_path_string().c_str());
         temporary_files[variantnum].erase(it);
     }
 }
@@ -612,12 +652,12 @@ void fd_table::verify_fd_table(std::vector<pid_t> pids)
 				return;
 			}
 
-            if (info && !verify_path(info->path, path))
+            if (info && !verify_path(info->paths[i], path))
             {
                 warnf("FD TABLE VERIFICATION FAILED - /PROC => INTERNAL - variant: %d (PID: %d)\n", i,  pids[i]);
                 warnf("> fd read from proc: %d - %s\n",                                           fd, path);
                 warnf("> fd in internal set_fd_table: %d - %s\n",                                 info ? info->fds[i] : 0,
-                            info ? info->path.c_str() : "<not found>");
+                            info ? info->paths[i].c_str() : "<not found>");
                 print_fd_table();
                 print_fd_table_proc(pids[i]);
                 return;
@@ -631,7 +671,7 @@ void fd_table::verify_fd_table(std::vector<pid_t> pids)
             {
                 auto proc = fds.find(it->second.fds[i]);
 
-                if (proc == fds.end() || !verify_path(it->second.path, proc->second.c_str()))
+                if (proc == fds.end() || !verify_path(it->second.paths[i], proc->second.c_str()))
                 {
                     warnf("FD TABLE VERIFICATION FAILED - INTERNAL => /PROC - variant: %d (PID: %d)\n", i, pids[i]);
                     warnf("> fd read from proc: %d - %s\n",
@@ -639,7 +679,7 @@ void fd_table::verify_fd_table(std::vector<pid_t> pids)
                                 proc == fds.end() ? "<not found>" : proc->second.c_str());
                     warnf("> fd in internal set_fd_table: %d - %s\n",
                                 it->second.fds[i],
-                                it->second.path.c_str());
+						  it->second.get_path_string().c_str());
                     print_fd_table();
                     print_fd_table_proc(pids[i]);
                     return;
@@ -724,7 +764,7 @@ std::string fd_table::get_full_path (int variantnum, pid_t variantpid, unsigned 
         {
             fd_info* fd_info = get_fd_info(dirfd, variantnum);
             if (fd_info)
-                ss << fd_info->path;
+                ss << fd_info->paths[variantnum];
         }
 
 		if (tmp_path.length() > 0)
@@ -862,7 +902,7 @@ bool fd_table::is_fd_unsynced(unsigned long fd, int variantnum)
 {
     fd_info* fd_info = get_fd_info(fd, variantnum);
 
-    if (fd_info && fd_info->unsynced_reads)
+    if (fd_info && fd_info->unsynced_access)
         return true;
     return false;
 }
@@ -941,7 +981,11 @@ void fd_table::set_fd_unlinked(unsigned long fd, int variantnum)
     fd_info* fd_info = get_fd_info(fd, variantnum);
 
     if (fd_info)
-		set_file_unlinked(fd_info->path.c_str());
+	{
+		int bound = fd_info->unsynced_access ? mvee::numvariants : 1;
+		for (int i = 0; i < bound; ++i)
+			set_file_unlinked(fd_info->paths[i].c_str());
+	}
 }
 
 /*-----------------------------------------------------------------------------
@@ -956,8 +1000,10 @@ void fd_table::set_file_unlinked(const char* path)
 
 	for (auto it = table.begin(); it != table.end(); ++it)
 	{
-		if (!strcmp(it->second.path.c_str(), resolved_path))
-			it->second.unlinked = true;
+		int bound = it->second.unsynced_access ? mvee::numvariants : 1;
+		for (int i = 0; i < bound; ++i)
+			if (!strcmp(it->second.paths[i].c_str(), resolved_path))
+				it->second.unlinked = true;
 	}
 
 	free(resolved_path);
