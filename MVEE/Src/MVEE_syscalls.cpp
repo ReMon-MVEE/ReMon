@@ -786,6 +786,39 @@ long monitor::call_call_dispatch ()
                     result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(1);
                 break;
             }
+
+            // Syntax: 
+			//
+			// syscall(MVEE_GET_VIRTUALIZED_ARGV0, old_argv0,
+			// virtualized_argv0_buf, virtualized_argv0_buf_sz)
+			//
+            // With: 
+            // - old_argv0 is a pointer to the original argv[0] string
+            // - virtualized_argv0_buf is where the mvee should write the
+            // virtualized string
+            // - virtualized_argv0_buf_sz is the size of the aforementioned
+            // buffer
+			case MVEE_GET_VIRTUALIZED_ARGV0:
+			{
+				std::string master_argv0 = rw::read_string(variants[0].variantpid, (void*)ARG1(0));
+
+				warnf("MASTER ARGV0: %s\n", master_argv0.c_str());
+
+				// We copy the master's arg[0] value into the buffer.
+				for (int i = 0; i < mvee::numvariants; ++i)
+				{
+					if (ARG2(i) && ARG3(i) > master_argv0.length() + 1)
+					{
+						rw::write_data(variants[i].variantpid, (void*) ARG2(i), 
+									   master_argv0.length() + 1, 
+									   (void*) master_argv0.c_str());
+					}
+				}
+
+				if (!result)
+					result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
+				break;
+			}
         }
     }
 
