@@ -874,9 +874,9 @@ void mmap_table::refresh_variant_maps(int variantnum, pid_t variantpid)
         }
         else
         {
-            info.path               = name;
+            info.paths[variantnum]  = name;
             info.access_flags       = 0; // unknown access flags
-            info.fds[variantnum]      = MVEE_UNKNOWN_FD;
+            info.fds[variantnum]    = MVEE_UNKNOWN_FD;
             info.original_file_size = 0;
             region_map_flags        = 0;
 

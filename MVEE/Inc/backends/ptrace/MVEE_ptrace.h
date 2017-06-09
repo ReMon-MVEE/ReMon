@@ -384,7 +384,7 @@ namespace interaction
             mvee::log_ptrace_op(1, PROCESS_VM_READV, nread);
 #endif
 
-        return nread;
+        return nread == data_len;
     }
 
     //
@@ -410,7 +410,7 @@ namespace interaction
             mvee::log_ptrace_op(1, PROCESS_VM_WRITEV, nwritten);
 #endif
 
-        return nwritten;
+        return nwritten == data_len;
     }
 
     //

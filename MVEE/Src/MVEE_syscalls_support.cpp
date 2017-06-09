@@ -1392,3 +1392,77 @@ void monitor::call_restore_args(int variantnum)
 	debugf("Restored syscall args in variant %d\n", variantnum);
 }
 
+/*-----------------------------------------------------------------------------
+    call_resolve_open_paths
+-----------------------------------------------------------------------------*/
+bool monitor::call_resolve_open_paths
+(
+	std::vector<unsigned long>& fds,
+	std::vector<unsigned long>& path_ptrs,
+	std::vector<std::string>& resolved_paths,
+	bool& unsynced_access,
+	unsigned long open_at_fd
+)
+{
+	std::vector<std::string> tmp_path(mvee::numvariants);
+	unsynced_access = aliased_open;
+
+	tmp_path[0] = set_fd_table->get_full_path(0, variants[0].variantpid, open_at_fd, (void*)path_ptrs[0]);
+
+	if (tmp_path[0].find("/proc/") == 0)
+	{
+		char maps[30];
+		sprintf(maps, "/proc/%d/maps", variants[0].variantpid);
+
+		if (tmp_path[0].compare(maps) == 0)
+			unsynced_access = true;
+		else if (tmp_path[0].compare("/proc/self/maps") == 0)
+			unsynced_access = true;
+	}
+	else if (tmp_path[0].compare(set_mmap_table->mmap_startup_info[0].image) == 0)
+	{
+		debugf("Granting unsynced access to main program binary\n");
+		unsynced_access = true;
+	}
+		
+	resolved_paths[0] = mvee::os_normalize_path_name(tmp_path[0]);
+	if (resolved_paths[0].size() == 0)
+		return false;
+
+	if (resolved_paths[0].find("/dev/shm/") == 0 ||
+		resolved_paths[0].find("/run/shm/") == 0)
+		unsynced_access = true;
+
+	// Fetch additional paths if this is an unsynced file
+	// + resolve relative path specifiers and symlinks
+	if (unsynced_access)
+	{
+		for (auto i = 0; i < mvee::numvariants; ++i)
+		{
+			// We already did the fetch for the master
+			if (i > 0)
+				tmp_path[i] = set_fd_table->get_full_path(i, variants[i].variantpid, open_at_fd, (void*)path_ptrs[i]);
+
+			// Substitute actual pid into the self field for /proc/self/ paths
+			if (tmp_path[i].find("/proc/self") == 0)
+			{
+				std::stringstream pathbuilder;
+				pathbuilder << "/proc/" << variants[i].variantpid << tmp_path[i].substr(strlen("/proc/self/"));
+				tmp_path[i] = pathbuilder.str();
+			}
+
+			if (i > 0)
+				resolved_paths[i] = mvee::os_normalize_path_name(tmp_path[i]);
+
+			if (resolved_paths[i].size() == 0)
+				return false;
+		}
+	}
+	else
+	{
+		for (auto i = 1; i < mvee::numvariants; ++i)
+			resolved_paths[i] = resolved_paths[0];
+	}
+
+	return true;
+}

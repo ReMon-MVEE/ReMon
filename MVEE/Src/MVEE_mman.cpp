@@ -49,6 +49,7 @@ mmap_region_info::mmap_region_info
     region_size(size),
     region_prot_flags(prot_flags),
     region_backing_file_offset(backing_file_offset),
+    region_backing_file_unsynced(false),
     region_is_so(false)
 {
     region_map_flags = map_flags & ~(MAP_FIXED);
@@ -56,11 +57,12 @@ mmap_region_info::mmap_region_info
     if (backing_file)
     {
         region_backing_file_fd    = backing_file->fds[variantnum];
-        region_backing_file_path  = backing_file->path;
-        if (backing_file->path.rfind(".so") == backing_file->path.size() - 3)
+        region_backing_file_path  = backing_file->paths[variantnum];
+        if (backing_file->paths[variantnum].rfind(".so") == backing_file->paths[variantnum].size() - 3)
             region_is_so = true;
         region_backing_file_flags = backing_file->access_flags;
         region_backing_file_size  = backing_file->original_file_size;
+		region_backing_file_unsynced = backing_file->unsynced_access;
     }
     else
     {
@@ -505,7 +507,12 @@ bool mmap_table::is_same_region(mmap_region_info* region1, mmap_region_info* reg
     /* different filename = different region unless one region is a stack and the other is an anonymous region */
     if (region1->region_backing_file_path != region2->region_backing_file_path)
     {
-        if (!(region1->region_backing_file_path.find("[stack:") == 0 && region2->region_backing_file_path.find("[stack:") == 0))
+		if (region1->region_backing_file_unsynced &&
+			region2->region_backing_file_unsynced)
+			return true;
+
+        if (!(region1->region_backing_file_path.find("[stack:") == 0 && 
+			  region2->region_backing_file_path.find("[stack:") == 0))
             return false;
     }
 

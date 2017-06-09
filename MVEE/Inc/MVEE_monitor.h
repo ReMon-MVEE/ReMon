@@ -384,6 +384,17 @@ private:
                      call_postcall_get_result_vector     ();
 
 	//
+	// Resolves path names, determines if the syscall opened an unsynced file or not
+	// returns true on success, false on failure
+	// resolved_paths, and unsynced_access are modified by this func
+	//
+	bool             call_resolve_open_paths             (std::vector<unsigned long>& fds,
+														  std::vector<unsigned long>& path_ptrs,
+														  std::vector<std::string>& resolved_paths,
+														  bool& unsynced_access,
+														  unsigned long open_at_fd=AT_FDCWD);											 
+
+	//
 	// Comparison functions. These are pretty self-explanatory.  They generally
 	// accept a pointer to a data structure for each variant. If the data
 	// matches, the comparison function returns true.

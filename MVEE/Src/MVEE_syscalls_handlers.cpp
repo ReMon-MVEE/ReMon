@@ -123,19 +123,27 @@ bool monitor::handle_is_known_false_positive(const char* program_name, long call
     std::vector<char*> data(mvee::numvariants);
 	std::fill(data.begin(), data.end(), (char*) NULL);
 
+	debugf("Mismatch in syscall %ld (%s) - checking for known false positives\n",
+		   callnum, getTextualSyscall(callnum));
+
     if (set_mmap_table->thread_group_shutting_down)
+	{
+		debugf("> Mismatch allowed: Thread group is shutting down\n");
         return true;
+	}
 
     bool               result = false;
 
 	// Mismatches during early initialization are allowed
 	if (!program_name)
+	{
+		debugf("> Mismatch allowed: Early program startup\n");
 		return true;
+	}
 
     // check the program name first
     if (callnum == __NR_write && program_name && strstr(program_name, "416.gamess"))
     {
-		warnf("checking for known false positives\n");
         // 416.gamess uses a broken TIME function to print stuff like "GENERATED AT ...."
         // the broken time function returns a block of non-allocated memory, rather than
         // the actual time (doh!)
@@ -256,6 +264,10 @@ bool monitor::handle_is_known_false_positive(const char* program_name, long call
 out:
     for (int i = 0; i < mvee::numvariants; ++i)
         SAFEDELETEARRAY(data[i]);
+	if (!result)
+		debugf("> Mismatch not allowed\n");
+	else
+		debugf("> Mismatch allowed\n");
     return result;
 }
 
@@ -605,66 +617,44 @@ POSTCALL(open)
 
 	if IS_SYNCED_CALL
 	{
-		unsigned char              unsynced = 0;
-		std::vector<unsigned long> fds      = call_postcall_get_result_vector();
-		char* resolved_path       = NULL;
-		std::string tmp_path      = set_fd_table->get_full_path(0, variants[0].variantpid, AT_FDCWD, (void*)ARG1(0));
+		bool unsynced_access;
+		std::vector<unsigned long> fds = call_postcall_get_result_vector();
+		std::vector<std::string> resolved_paths(mvee::numvariants);
+		std::vector<unsigned long> path_ptrs(mvee::numvariants);
 
-		if (tmp_path.find("/proc/") == 0)
-		{
-			char maps[30];
-			sprintf(maps, "/proc/%d/maps", variants[0].variantpid);
+		FILLARGARRAY(1, path_ptrs);
 
-			if (tmp_path.compare(maps) == 0)
-				unsynced = 1;
-			else if (tmp_path.compare("/proc/self/maps") == 0)
-				unsynced = 1;
-		}
-		else if (tmp_path.compare(set_mmap_table->mmap_startup_info[0].real_image) == 0)
-		{
-			debugf("Granting unsynced access to img: %s\n",
-				   set_mmap_table->mmap_startup_info[0].real_image.c_str());
-			unsynced = 1;
-		}
-
-		if (tmp_path.find("/proc/self") == 0)
-		{
-			std::stringstream pathbuilder;
-			pathbuilder << "/proc/" << variants[0].variantpid << tmp_path.substr(strlen("/proc/self/"));
-			tmp_path = pathbuilder.str();
-		}
-
-		resolved_path = realpath(tmp_path.c_str(), NULL);
-
-		if (!resolved_path)
+		if (!call_resolve_open_paths(fds, path_ptrs, resolved_paths, unsynced_access))
 		{
 			if (ipmon_fd_handling)
 				return 0;
-			warnf("Couldn't resolve path in postcall handler for sys_open - %s - FIXME!\n",
-				  tmp_path.c_str());
+
+			warnf("Could not determine which file is being opened by sys_open\n");
+			shutdown(false);
 			return 0;
 		}
 
-		if (strstr(resolved_path, "/dev/shm/") == resolved_path ||
-			strstr(resolved_path, "/run/shm/") == resolved_path ||
-			aliased_open)
-			unsynced = 1;
-
-		FileType type = (unsynced == 0) ? FT_REGULAR : FT_SPECIAL;
-		set_fd_table->create_fd_info(type, fds, resolved_path, ARG2(0), ARG2(0) & O_CLOEXEC, state == STATE_IN_MASTERCALL, unsynced);
+		set_fd_table->create_fd_info((unsynced_access && !aliased_open) ? FT_SPECIAL : FT_REGULAR, // file type
+									 fds,                                                          // fd vector
+									 resolved_paths,                                               // path vector
+									 ARG2(0),                                                      // access flags
+									 ARG2(0) & O_CLOEXEC,                                          // cloexec file?
+									 state == STATE_IN_MASTERCALL,                                 // opened by master only?
+									 unsynced_access);                                             // unsynced access to the file?
 #ifdef MVEE_FD_DEBUG
 		set_fd_table->verify_fd_table(getpids());
 #endif
-		free(resolved_path);
 		REPLICATEFDRESULT();
+		aliased_open = false;
 	}
 	else
-	{
+	{		
 		std::string path = set_fd_table->get_full_path(variantnum, variants[variantnum].variantpid, AT_FDCWD, (void*)ARG1(variantnum));
-		char* resolved_path = realpath(path.c_str(), NULL);
+		std::string resolved_path = mvee::os_normalize_path_name(path);
 
 		set_fd_table->create_temporary_fd_info(variantnum, call_postcall_get_variant_result(variantnum), resolved_path, ARG2(variantnum), ARG2(variantnum) & O_CLOEXEC);
 
+		aliased_open = false;
 		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 	}
 
@@ -1675,7 +1665,14 @@ PRECALL(creat)
     CHECKARG(2);
 
 	if (call_do_alias<1>())
+	{
+		aliased_open = true;
 		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+	else
+	{
+		aliased_open = false;
+	}
 
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
@@ -1684,13 +1681,35 @@ POSTCALL(creat)
 {
     if (call_succeeded)
     {
+		bool unsynced_access;
         auto fds = call_postcall_get_result_vector();
-        auto str = rw::read_string(variants[0].variantpid, (void*)ARG1(0));
+		std::vector<std::string> resolved_paths(mvee::numvariants);
+		std::vector<unsigned long> path_ptrs(mvee::numvariants);
 
-        set_fd_table->create_fd_info(FT_REGULAR, fds, str.c_str(), O_WRONLY, false, false);
+		FILLARGARRAY(1, path_ptrs);
+
+		if (!call_resolve_open_paths(fds, path_ptrs, resolved_paths, unsynced_access))
+		{
+			if (ipmon_fd_handling)
+				return 0;
+
+			warnf("Could not determine which file is being opened by sys_creat\n");
+			shutdown(false);
+			return 0;
+		}
+
+		set_fd_table->create_fd_info((unsynced_access && !aliased_open) ? FT_SPECIAL : FT_REGULAR, // file type
+									 fds,                                                          // fd vector
+									 resolved_paths,                                               // path vector
+									 O_WRONLY,                                                     // access flags
+									 false,                                                        // cloexec file?
+									 false,                                                        // opened by master only?
+									 unsynced_access);                                             // unsynced access to the file?
+
 #ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
 #endif
+		aliased_open = false;
     }
 
     return 0;
@@ -1743,15 +1762,16 @@ POSTCALL(dup)
         if (!fd_info)
             return 0;
 
-        set_fd_table->create_fd_info(fd_info->file_type, 
-									 fds, 
-									 fd_info->path.c_str(), 
-									 fd_info->access_flags, 
-									 false, 
-									 master_file,
-									 fd_info->unsynced_reads, 
-									 fd_info->unlinked, 
-									 fd_info->original_file_size);
+		set_fd_table->create_fd_info(fd_info->file_type,       // file type
+									 fds,                      // fd vector
+									 fd_info->paths,           // path vector
+									 fd_info->access_flags,    // access flags
+									 false,                    // cloexec file?
+									 master_file,              // opened by master only?
+									 fd_info->unsynced_access, // unsynced access to the file?
+									 fd_info->unlinked,        // file unlinked from the file system?
+                                     fd_info->original_file_size);                                      
+
 #ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
 #endif
@@ -1776,6 +1796,7 @@ POSTCALL(pipe)
         int                        fildes[2];
         std::vector<unsigned long> read_fds(mvee::numvariants);
         std::vector<unsigned long> write_fds(mvee::numvariants);
+		std::vector<std::string> paths(mvee::numvariants);
 
         if (!rw::read_struct(variants[0].variantpid, (void*)ARG1(0), 2 * sizeof(int), fildes))
         {
@@ -1789,8 +1810,26 @@ POSTCALL(pipe)
         REPLICATEBUFFERFIXEDLEN(1, sizeof(int) * 2);
 
         // add new file descriptor mappings for the created pipe
-        set_fd_table->create_fd_info(FT_PIPE_BLOCKING, read_fds,  "pipe:read",  O_RDONLY, false, true);
-        set_fd_table->create_fd_info(FT_PIPE_BLOCKING, write_fds, "pipe:write", O_WRONLY, false, true);
+		std::fill(paths.begin(), paths.end(), "pipe:read");
+		set_fd_table->create_fd_info(FT_PIPE_BLOCKING,         // file type
+									 read_fds,                 // fd vector
+									 paths,                    // path vector
+									 O_RDONLY,                 // access flags
+									 false,                    // cloexec file?
+									 true,                     // opened by master only?
+									 false,                    // unsynced access to the file?
+									 true);                    // file unlinked from the file system?
+
+		std::fill(paths.begin(), paths.end(), "pipe:write");
+		set_fd_table->create_fd_info(FT_PIPE_BLOCKING,         // file type
+									 write_fds,                // fd vector
+									 paths,                    // path vector
+									 O_WRONLY,                 // access flags
+									 false,                    // cloexec file?
+									 true,                     // opened by master only?
+									 false,                    // unsynced access to the file?
+									 true);                    // file unlinked from the file system?
+
 #ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
 #endif
@@ -1867,7 +1906,7 @@ POSTCALL(brk)
 
 				backing_file.fds.resize(mvee::numvariants);
 				backing_file.fds[i]             = MVEE_UNKNOWN_FD;
-				backing_file.path               = "[heap]";
+				backing_file.paths[i]           = "[heap]";
 				backing_file.access_flags       = 0;
 				backing_file.original_file_size = 0;
 
@@ -2257,15 +2296,18 @@ POSTCALL(fcntl)
                 if (!fd_info)
                     return 0;
 
-                set_fd_table->create_fd_info(fd_info->file_type, 
-											 fds, 
-											 fd_info->path.c_str(),
-											 fd_info->access_flags, 
-											 (ARG2(0) == F_DUPFD_CLOEXEC) ? true : fd_info->close_on_exec, 
-											 state == STATE_IN_MASTERCALL, 
-											 fd_info->unsynced_reads, 
-											 fd_info->unlinked,
-											 fd_info->original_file_size);
+				bool cloexec = (ARG2(0) == F_DUPFD_CLOEXEC) ? true : fd_info->close_on_exec;
+				bool master_file = (state == STATE_IN_MASTERCALL);
+				set_fd_table->create_fd_info(fd_info->file_type,       // file type
+											 fds,                      // fd vector
+											 fd_info->paths,           // path vector
+											 fd_info->access_flags,    // access flags
+											 cloexec,                  // cloexec file?
+											 master_file,              // opened by master only?
+											 fd_info->unsynced_access, // unsynced access to the file?
+											 fd_info->unlinked,        // file unlinked from the file system?
+											 fd_info->original_file_size);                                      
+
 #ifdef MVEE_FD_DEBUG
                 set_fd_table->verify_fd_table(getpids());
 #endif
@@ -2397,15 +2439,17 @@ POSTCALL(dup2)
             if (!fd_info)
                 return 0;
 
-            set_fd_table->create_fd_info(fd_info->file_type, 
-										 fds, 
-										 fd_info->path.c_str(), 
-										 fd_info->access_flags, 
-										 false, 
-										 fd_info->master_file, 
-										 fd_info->unsynced_reads, 
-										 fd_info->unlinked,
-										 fd_info->original_file_size);
+			bool master_file = (state == STATE_IN_MASTERCALL);
+			set_fd_table->create_fd_info(fd_info->file_type,       // file type
+										 fds,                      // fd vector
+										 fd_info->paths,           // path vector
+										 fd_info->access_flags,    // access flags
+										 false,                    // cloexec file?
+										 master_file,              // opened by master only?
+										 fd_info->unsynced_access, // unsynced access to the file?
+										 fd_info->unlinked,        // file unlinked from the file system?
+										 fd_info->original_file_size);                                      
+
 #ifdef MVEE_FD_DEBUG
             set_fd_table->verify_fd_table(getpids());
 #endif
@@ -3191,10 +3235,22 @@ POSTCALL(socket)
     if (call_succeeded)
     {
         std::vector<unsigned long> fds(mvee::numvariants);
+		std::vector<std::string> paths(mvee::numvariants);
+
         std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
+		std::fill(paths.begin(), paths.end(), "sock:unnamed");
 		
 		FileType type = (ARG2(0) & SOCK_NONBLOCK) ? FT_SOCKET_NON_BLOCKING : FT_SOCKET_BLOCKING;
-        set_fd_table->create_fd_info(type, fds, "sock:unnamed", 0, (ARG2(0) & SOCK_CLOEXEC) ? true : false, true);
+		bool cloexec = (ARG2(0) & SOCK_CLOEXEC) ? true : false;
+
+		set_fd_table->create_fd_info(type,    // file type
+									 fds,     // fd vector
+									 paths,   // path vector
+									 0,       // access flags
+									 cloexec, // cloexec file?
+									 true,    // opened by master only?
+									 false,   // unsynced access to the file?
+									 true);   // unlinked from the file system?
 #ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
 #endif
@@ -3232,7 +3288,7 @@ POSTCALL(bind)
         GETTEXTADDRDIRECT(0, text_addr, 2, ARG3(0));
         fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0), 0);
         if (fd_info && text_addr != "")
-            fd_info->path = std::string("srvsock:") + text_addr;
+			std::fill(fd_info->paths.begin(), fd_info->paths.end(), std::string("srvsock:") + text_addr);
     }
     return 0;
 }
@@ -3267,7 +3323,7 @@ POSTCALL(connect)
         GETTEXTADDRDIRECT(0, text_addr, 2, ARG3(0));
         fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0), 0);
         if (fd_info && text_addr != "")
-            fd_info->path = std::string("clientsock:") + text_addr;
+			std::fill(fd_info->paths.begin(), fd_info->paths.end(), std::string("clientsock:") + text_addr);
     }
     return 0;
 }
@@ -3388,6 +3444,7 @@ POSTCALL(socketpair)
     {
         std::vector<unsigned long> fds(mvee::numvariants);
         std::vector<unsigned long> fds2(mvee::numvariants);
+		std::vector<std::string> paths(mvee::numvariants);
 
 		int fd1, fd2;
 		if (!rw::read_primitive<int>(variants[0].variantpid, (void*) ARG4(0), fd1) ||
@@ -3399,10 +3456,29 @@ POSTCALL(socketpair)
 
         std::fill(fds.begin(),  fds.end(),  fd1);
         std::fill(fds2.begin(), fds2.end(), fd2);
+		std::fill(paths.begin(), paths.end(), "sock:unnamed");
 
 		FileType type = (ARG2(0) & SOCK_NONBLOCK) ? FT_SOCKET_NON_BLOCKING : FT_SOCKET_BLOCKING;
-        set_fd_table->create_fd_info(type, fds,  "sock:unnamed", 0, (ARG2(0) & SOCK_CLOEXEC) ? true : false, true);
-        set_fd_table->create_fd_info(type, fds2, "sock:unnamed", 0, (ARG2(0) & SOCK_CLOEXEC) ? true : false, true);
+		bool cloexec = (ARG2(0) & SOCK_CLOEXEC) ? true : false;
+
+		set_fd_table->create_fd_info(type,    // file type
+									 fds,     // fd vector
+									 paths,   // path vector
+									 0,       // access flags
+									 cloexec, // cloexec file?
+									 true,    // opened by master only?
+									 false,   // unsynced access to the file?
+									 true);   // unlinked from the file system?
+
+		set_fd_table->create_fd_info(type,    // file type
+									 fds2,     // fd vector
+									 paths,   // path vector
+									 0,       // access flags
+									 cloexec, // cloexec file?
+									 true,    // opened by master only?
+									 false,   // unsynced access to the file?
+									 true);   // unlinked from the file system?
+
 #ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
 #endif
@@ -3753,22 +3829,46 @@ POSTCALL(accept4)
     if (call_succeeded)
     {
         std::vector<unsigned long> fds(mvee::numvariants);
+		std::vector<std::string> paths(mvee::numvariants);
+
         std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
 
         if (ARG2(0) && ARG3(0))
         {
             GETTEXTADDR(0, text_addr, 2, 3);
+			std::fill(paths.begin(), paths.end(), text_addr);
 
 			FileType type = (ARG4(0) & SOCK_NONBLOCK) ? FT_SOCKET_NON_BLOCKING : FT_SOCKET_BLOCKING;
-            set_fd_table->create_fd_info(type, fds, text_addr, 0, (ARG4(0) & SOCK_CLOEXEC) ? true : false, true, 0);
+			bool cloexec = (ARG4(0) & SOCK_CLOEXEC) ? true : false;
+
+			set_fd_table->create_fd_info(type,    // file type
+										 fds,     // fd vector
+										 paths,   // path vector
+										 0,       // access flags
+										 cloexec, // cloexec file?
+										 true,    // opened by master only?
+										 false,   // unsynced access to the file?
+										 true);   // unlinked from the file system?
+
 #ifdef MVEE_FD_DEBUG
             set_fd_table->verify_fd_table(getpids());
 #endif
         }
         else
         {
+			std::fill(paths.begin(), paths.end(), "sock:unknown");
+
 			FileType type = (ARG4(0) & SOCK_NONBLOCK) ? FT_SOCKET_NON_BLOCKING : FT_SOCKET_BLOCKING;
-            set_fd_table->create_fd_info(type, fds, "sock:unknown", 0, (ARG4(0) & SOCK_CLOEXEC) ? true : false, true);
+			bool cloexec = (ARG4(0) & SOCK_CLOEXEC) ? true : false;
+
+			set_fd_table->create_fd_info(type,    // file type
+										 fds,     // fd vector
+										 paths,   // path vector
+										 0,       // access flags
+										 cloexec, // cloexec file?
+										 true,    // opened by master only?
+										 false,   // unsynced access to the file?
+										 true);   // unlinked from the file system?
 #ifdef MVEE_FD_DEBUG
             set_fd_table->verify_fd_table(getpids());
 #endif
@@ -3801,10 +3901,23 @@ POSTCALL(eventfd2)
     if (call_succeeded)
     {
         std::vector<unsigned long> fds(mvee::numvariants);
+		std::vector<std::string> paths(mvee::numvariants);
+
         std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
+		std::fill(paths.begin(), paths.end(), "eventfd");
 
 		FileType type = (ARG2(0) & EFD_NONBLOCK) ? FT_POLL_NON_BLOCKING : FT_POLL_BLOCKING;
-        set_fd_table->create_fd_info(type, fds, "eventfd", 0, (ARG2(0) & EFD_CLOEXEC) ? true : false, true);
+		bool cloexec = (ARG2(0) & EFD_CLOEXEC) ? true : false;
+
+		set_fd_table->create_fd_info(type,    // file type
+									 fds,     // fd vector
+									 paths,   // path vector
+									 0,       // access flags
+									 cloexec, // cloexec file?
+									 true,    // opened by master only?
+									 false,   // unsynced access to the file?
+									 true);   // unlinked from the file system?
+
 #ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
 #endif
@@ -3834,9 +3947,21 @@ POSTCALL(epoll_create1)
     if (call_succeeded)
     {		
         std::vector<unsigned long> fds(mvee::numvariants);
-        std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
+		std::vector<std::string> paths(mvee::numvariants);
 
-        set_fd_table->create_fd_info(FT_POLL_BLOCKING, fds, "epoll_sock", 0, (ARG1(0) & EPOLL_CLOEXEC) ? true : false, true);
+        std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
+		std::fill(paths.begin(), paths.end(), "epoll_sock");
+
+		bool cloexec = (ARG1(0) & EPOLL_CLOEXEC) ? true : false;
+		set_fd_table->create_fd_info(FT_POLL_BLOCKING, // file type
+									 fds,              // fd vector
+									 paths,            // path vector
+									 0,                // access flags
+									 cloexec,          // cloexec file?
+									 true,             // opened by master only?
+									 false,            // unsynced access to the file?
+									 true);            // unlinked from the file system?
+
 #ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
 #endif
@@ -4219,7 +4344,7 @@ POSTCALL(shmat)
 	}
 
 	fd_info info;
-	info.path = region_name;
+	std::fill(info.paths.begin(), info.paths.end(), region_name);
 
 	for (int i = 0; i < mvee::numvariants; ++i)
 		set_mmap_table->map_range(i, addresses[i], region_size, MAP_SHARED | MAP_ANONYMOUS, PROT_READ | PROT_WRITE, &info, 0);
@@ -4641,8 +4766,8 @@ POSTCALL(fchdir)
     if (call_succeeded)
     {
         fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0));
-        if (fd_info && fd_info->path != "")
-            set_fd_table->chdir(fd_info->path.c_str());
+        if (fd_info && fd_info->paths[0] != "")
+            set_fd_table->chdir(fd_info->paths[0].c_str());
     }
 
     return 0;
@@ -5490,7 +5615,7 @@ CALL(mmap)
 			if (!info->unlinked)
 			{
 				warnf("variants are opening a shared memory mapping backed by an O_RDWR file!!!\n");
-				warnf("> file = %s\n",           info->path.c_str());
+				warnf("> file = %s\n",           info->get_path_string().c_str());
 				warnf("> map prot flags = %s\n", getTextualProtectionFlags(ARG3(0)).c_str());
 			}
 
@@ -5622,15 +5747,15 @@ POSTCALL(mmap)
 				 only y bytes will be written back
 				*/
 				struct stat _st;
-				if (stat(info->path.c_str(), &_st))
+				if (stat(info->paths[0].c_str(), &_st))
 				{
-					warnf("couldn't get the original file size for: %s\n", info->path.c_str());
+					warnf("couldn't get the original file size for: %s\n", info->paths[0].c_str());
 					shutdown(false);
 					return 0;
 				}
 
 				info->original_file_size = _st.st_size;
-				warnf("size for: %s - %d bytes\n", info->path.c_str(), _st.st_size);
+				warnf("size for: %s - %d bytes\n", info->paths[0].c_str(), _st.st_size);
 			}
 		}
 
@@ -6710,8 +6835,20 @@ POSTCALL(epoll_create)
     if (call_succeeded)
     {
         std::vector<unsigned long> fds(mvee::numvariants);
+		std::vector<std::string> paths(mvee::numvariants);
+
         std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
-        set_fd_table->create_fd_info(FT_POLL_BLOCKING, fds, "epoll_sock", 0, false, true);
+		std::fill(paths.begin(), paths.end(), "epoll_sock");
+
+		set_fd_table->create_fd_info(FT_POLL_BLOCKING, // file type
+									 fds,              // fd vector
+									 paths,            // path vector
+									 0,                // access flags
+									 false,            // cloexec file?
+									 true,             // opened by master only?
+									 false,            // unsynced access to the file?
+									 true);            // unlinked from the file system?
+
 #ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
 #endif
@@ -7279,8 +7416,20 @@ POSTCALL(inotify_init)
     if (call_succeeded)
     {
         std::vector<unsigned long> fds(mvee::numvariants);
+		std::vector<std::string> paths(mvee::numvariants);
+
         std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
-        set_fd_table->create_fd_info(FT_POLL_BLOCKING, fds, "inotify_init", 0, false, true);
+		std::fill(paths.begin(), paths.end(), "inotify_init");
+
+		set_fd_table->create_fd_info(FT_POLL_BLOCKING, // file type
+									 fds,              // fd vector
+									 paths,            // path vector
+									 0,                // access flags
+									 false,            // cloexec file?
+									 true,             // opened by master only?
+									 false,            // unsynced access to the file?
+									 true);            // unlinked from the file system?
+
 #ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
 #endif
@@ -7416,18 +7565,36 @@ POSTCALL(openat)
 {
     if (call_succeeded)
     {
-        char*                      resolved_path = NULL;
-        std::string                tmp_path      = set_fd_table->get_full_path(0, variants[0].variantpid, (unsigned long)(int)ARG1(0), (void*)ARG2(0));
+		bool unsynced_access;
+		std::vector<unsigned long> fds = call_postcall_get_result_vector();
+		std::vector<std::string> resolved_paths(mvee::numvariants);
+		std::vector<unsigned long> path_ptrs(mvee::numvariants);
 
-        resolved_path = realpath(tmp_path.c_str(), NULL);
+		FILLARGARRAY(2, path_ptrs);
 
-        std::vector<unsigned long> fds           = call_postcall_get_result_vector();
+		if (!call_resolve_open_paths(fds, path_ptrs, resolved_paths, unsynced_access, ARG1(0)))
+		{
+			if (ipmon_fd_handling)
+				return 0;
+
+			warnf("Could not determine which file is being opened by sys_openat\n");
+			shutdown(false);
+			return 0;
+		}
+
+		set_fd_table->create_fd_info((unsynced_access && !aliased_open) ? FT_SPECIAL : FT_REGULAR, // file type
+									 fds,                                                          // fd vector
+									 resolved_paths,                                               // path vector
+									 ARG3(0),                                                      // access flags
+									 ARG3(0) & O_CLOEXEC,                                          // cloexec file?
+									 state == STATE_IN_MASTERCALL,                                 // opened by master only?
+									 unsynced_access);                                             // unsynced access to the file?
+
         REPLICATEFDRESULT();
-        set_fd_table->create_fd_info(FT_REGULAR, fds, resolved_path, ARG3(0), ARG3(0) & O_CLOEXEC, state == STATE_IN_MASTERCALL, aliased_open);
 #ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
 #endif
-        free(resolved_path);
+		aliased_open = false;
     }
 
     return 0;
@@ -8012,14 +8179,24 @@ PRECALL(timerfd_create)
 
 POSTCALL(timerfd_create)
 {
-    std::vector<unsigned long> fds;
-    fds.resize(mvee::numvariants);
-    std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
-
     if (call_succeeded)
     {
-		FileType type = (ARG2(0) & TFD_NONBLOCK) ? FT_POLL_NON_BLOCKING : FT_POLL_BLOCKING;
-        set_fd_table->create_fd_info(type, fds, "timer", O_RDWR, (ARG2(0) & TFD_CLOEXEC) ? true : false, true);
+        std::vector<unsigned long> fds(mvee::numvariants);
+		std::vector<std::string> paths(mvee::numvariants);
+
+        std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
+		std::fill(paths.begin(), paths.end(), "timer");
+
+		bool cloexec = (ARG2(0) & TFD_CLOEXEC) ? true : false;
+		set_fd_table->create_fd_info(FT_POLL_BLOCKING, // file type
+									 fds,              // fd vector
+									 paths,            // path vector
+									 O_RDWR,           // access flags
+									 cloexec,          // cloexec file?
+									 true,             // opened by master only?
+									 false,            // unsynced access to the file?
+									 true);            // unlinked from the file system?
+
 #ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
 #endif
@@ -8160,15 +8337,18 @@ POSTCALL(dup3)
             if (!fd_info)
                 return 0;
 
-            set_fd_table->create_fd_info(fd_info->file_type, 
-										 fds, 
-										 fd_info->path.c_str(), 
-										 fd_info->access_flags, 
-										 (ARG3(0) != 0) ? true : false, 
-										 fd_info->master_file, 
-										 fd_info->unsynced_reads, 
-										 fd_info->unlinked,
-										 fd_info->original_file_size);
+			bool master_file = (state == STATE_IN_MASTERCALL);
+			bool cloexec = (ARG3(0) != 0) ? true : false;
+			set_fd_table->create_fd_info(fd_info->file_type,       // file type
+										 fds,                      // fd vector
+										 fd_info->paths,           // path vector
+										 fd_info->access_flags,    // access flags
+										 cloexec,                  // cloexec file?
+										 master_file,              // opened by master only?
+										 fd_info->unsynced_access, // unsynced access to the file?
+										 fd_info->unlinked,        // file unlinked from the file system?
+										 fd_info->original_file_size);                                      
+
 #ifdef MVEE_FD_DEBUG
             set_fd_table->verify_fd_table(getpids());
 #endif
@@ -8194,6 +8374,7 @@ POSTCALL(pipe2)
         int                        fildes[2];
 		std::vector<unsigned long> read_fds(mvee::numvariants);
 		std::vector<unsigned long> write_fds(mvee::numvariants);
+		std::vector<std::string> paths(mvee::numvariants);
 
         if (!rw::read_struct(variants[0].variantpid, (void*)ARG1(0), 2 * sizeof(int), fildes))
         {
@@ -8208,8 +8389,28 @@ POSTCALL(pipe2)
 
         // add new file descriptor mappings for the created pipe
 		FileType type = (ARG2(0) & O_NONBLOCK) ? FT_PIPE_NON_BLOCKING : FT_PIPE_BLOCKING;
-        set_fd_table->create_fd_info(type, read_fds,  "pipe2:read",  O_RDONLY, ARG2(0) & O_CLOEXEC, true);
-        set_fd_table->create_fd_info(type, write_fds, "pipe2:write", O_WRONLY, ARG2(0) & O_CLOEXEC, true);
+		bool cloexec = (ARG2(0) & O_CLOEXEC) ? true : false;
+
+		std::fill(paths.begin(), paths.end(), "pipe2:read");
+		set_fd_table->create_fd_info(type,      // file type
+									 read_fds,  // fd vector
+									 paths,     // path vector
+									 O_RDONLY,  // access flags
+									 cloexec,   // cloexec file?
+									 true,      // opened by master only?
+									 false,     // unsynced access to the file?
+									 true);     // file unlinked from the file system?
+
+		std::fill(paths.begin(), paths.end(), "pipe2:write");
+		set_fd_table->create_fd_info(type,      // file type
+									 read_fds,  // fd vector
+									 paths,     // path vector
+									 O_WRONLY,  // access flags
+									 cloexec,   // cloexec file?
+									 true,      // opened by master only?
+									 false,     // unsynced access to the file?
+									 true);     // file unlinked from the file system?
+
 #ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
 #endif
@@ -8231,11 +8432,23 @@ POSTCALL(inotify_init1)
 {
     if (call_succeeded)
     {
-		std::vector<unsigned long> fds(mvee::numvariants);
-		std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
+        std::vector<unsigned long> fds(mvee::numvariants);
+		std::vector<std::string> paths(mvee::numvariants);
+
+        std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
+		std::fill(paths.begin(), paths.end(), "inotify_init1");
 
 		FileType type = (ARG1(0) & IN_NONBLOCK) ? FT_POLL_NON_BLOCKING : FT_POLL_BLOCKING;
-        set_fd_table->create_fd_info(type, fds, "inotify_init1", 0, (ARG1(0) & IN_CLOEXEC) ? true : false, false);
+		bool cloexec = (ARG1(0) & IN_CLOEXEC) ? true : false;
+		set_fd_table->create_fd_info(type,    // file type
+									 fds,     // fd vector
+									 paths,   // path vector
+									 0,       // access flags
+									 cloexec, // cloexec file?
+									 true,    // opened by master only?
+									 false,   // unsynced access to the file?
+									 true);   // unlinked from the file system?
+
 #ifdef MVEE_FD_DEBUG
         set_fd_table->verify_fd_table(getpids());
 #endif
@@ -8298,8 +8511,20 @@ POSTCALL(perf_event_open)
             cloexec = true;
 #endif
 		std::vector<unsigned long> fds = call_postcall_get_result_vector();
+		std::vector<std::string> paths(mvee::numvariants);
+
+		std::fill(paths.begin(), paths.end(), "perf_event");
+
+		set_fd_table->create_fd_info(FT_SPECIAL,  // file type
+									 fds,         // fd vector
+									 paths,       // path vector
+									 0,           // access flags
+									 cloexec,     // cloexec file?
+									 false,       // opened by master only?
+									 true,        // unsynced access to the file?
+									 true);       // unlinked from the file system?
+
 		REPLICATEFDRESULT();
-		set_fd_table->create_fd_info(FT_SPECIAL, fds, "perf_event", 0, cloexec, false, true);
 #ifdef MVEE_FD_DEBUG
 		set_fd_table->verify_fd_table(getpids());
 #endif

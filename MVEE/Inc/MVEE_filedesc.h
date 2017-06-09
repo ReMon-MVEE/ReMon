@@ -51,18 +51,34 @@ class fd_info
 {
 public:
     std::vector<unsigned long> fds;                   // file descriptor values in all variants - note: if master_file == true, these fds will be virtual fds for all slave variants
-    std::string                path;                  // For a filesystem file descriptor, the full path to the corresponding file
+	std::vector<std::string>   paths;                 // For a filesystem file descriptor, the full path to the corresponding file
     unsigned long              access_flags;          // e.g. O_RDONLY
     bool                       master_file;           // if set to true, this file is only actually opened by the master variant
     bool                       close_on_exec;         // fds are duplicated across forks but if O_CLOEXEC is set, they will be closed if the new fork executes execve
-    bool                       unsynced_reads;        // if set to true, sys_read* calls from this fd are dispatched as normal calls rather than mastercalls
+    bool                       unsynced_access;       // if set to true, all file ops on this file are dispatched as NORMAL calls instead of mastercalls
 	bool                       unlinked;              // set to true when the file has been unlinked from the file system
     ssize_t                    original_file_size;    // for shared mappings that we changed to private, we need to know the original file size!!!
 	FileType                   file_type;
 
     void print_fd_info();
     fd_info();
-    fd_info(FileType type, std::vector<unsigned long>& fds, std::string path, unsigned long access_flags, bool close_on_exec, bool master_file, bool unsynced_reads = false, bool unlinked = false, ssize_t original_file_size = 0);
+    fd_info(
+		FileType type, 
+		std::vector<unsigned long>& fds, 
+		std::vector<std::string>& path, 
+		unsigned long access_flags, 
+		bool close_on_exec, 
+		bool master_file, 
+		bool unsynced_access = false, 
+		bool unlinked = false, 
+		ssize_t original_file_size = 0);
+
+	// 
+	// get_path_string returns:
+	// * "<path 0>" if the file is a master file or does not have the unsynced access flag set
+	// * "[<path 0>, ..., <path N>]" if the file is not a master file and it does have the unsynced access flag set
+	//
+	std::string get_path_string();
 };
 
 //
@@ -99,7 +115,16 @@ public:
     // Creating/Deleting file descriptors. These are the functions we use for
     // synchronized file operations.
 	//
-    void          create_fd_info      (FileType type, std::vector<unsigned long>& fds, std::string path, unsigned long access_flags, bool close_on_exec, bool master_file, bool unsynced_reads=false, bool unlinked=false, ssize_t original_file_size=0);
+    void          create_fd_info      (
+		FileType type, 
+		std::vector<unsigned long>& fds, 
+		std::vector<std::string>& path, 
+		unsigned long access_flags,
+		bool close_on_exec,
+		bool master_file,
+		bool unsynced_access=false,
+		bool unlinked=false,
+		ssize_t original_file_size=0);
 	std::map<unsigned long, fd_info>::iterator
                   free_fd_info        (unsigned long fd);
     void          free_cloexec_fds    ();
@@ -110,6 +135,7 @@ public:
     bool          add_missing_fds     (std::vector<pid_t> variant_pids);
 	void          refresh_fd_table    (std::vector<pid_t> variant_pids);
 
+    //
 	// Temporary files management. These functions are used for unsynchronized
 	// file operations that happen during fast forwarding
 	// 
