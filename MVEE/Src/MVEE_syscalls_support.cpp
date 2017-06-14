@@ -1425,7 +1425,7 @@ bool monitor::call_resolve_open_paths
 		unsynced_access = true;
 	}
 		
-	resolved_paths[0] = mvee::os_normalize_path_name(tmp_path[0]);
+	resolved_paths[0] = tmp_path[0];
 	if (resolved_paths[0].size() == 0)
 		return false;
 
@@ -1452,7 +1452,7 @@ bool monitor::call_resolve_open_paths
 			}
 
 			if (i > 0)
-				resolved_paths[i] = mvee::os_normalize_path_name(tmp_path[i]);
+				resolved_paths[i] = tmp_path[i];
 
 			if (resolved_paths[i].size() == 0)
 				return false;
@@ -1463,6 +1463,12 @@ bool monitor::call_resolve_open_paths
 		for (auto i = 1; i < mvee::numvariants; ++i)
 			resolved_paths[i] = resolved_paths[0];
 	}
+
+#ifndef MVEE_BENCHMARK
+	for (auto i = 0; i < mvee::numvariants; ++i)
+		debugf("Variant %d: Resolved %s => %s\n",
+			   i, tmp_path[i].c_str(), resolved_paths[i].c_str());
+#endif
 
 	return true;
 }

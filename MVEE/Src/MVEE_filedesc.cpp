@@ -399,7 +399,7 @@ void fd_table::create_fd_info
     if (it != table.end())
     {
 		if (!(*mvee::config_variant_global)["use_ipmon"].asBool())
-			warnf("fd override!!! FIXME (unless IP-MON is managing fds, in which case you can safely ignore this warning)\n");
+			warnf("fd override!!! FIXME!!! Old fd was:\n");
         it->second.print_fd_info();
         free_fd_info(it->second.fds[0]);
     }
@@ -993,20 +993,21 @@ void fd_table::set_fd_unlinked(unsigned long fd, int variantnum)
 -----------------------------------------------------------------------------*/
 void fd_table::set_file_unlinked(const char* path)
 {
-	char* resolved_path = realpath(path, NULL);
-
-	if (!resolved_path)
-		resolved_path = strdup(path);
+	debugf("Unlinking file: %s\n", path);
 
 	for (auto it = table.begin(); it != table.end(); ++it)
 	{
 		int bound = it->second.unsynced_access ? mvee::numvariants : 1;
 		for (int i = 0; i < bound; ++i)
-			if (!strcmp(it->second.paths[i].c_str(), resolved_path))
+		{
+			if (!strcmp(it->second.paths[i].c_str(), path))
+			{
 				it->second.unlinked = true;
+				debugf("Setting unlink flag for file:\n");
+				it->second.print_fd_info();
+			}
+		}
 	}
-
-	free(resolved_path);
 }
 
 /*-----------------------------------------------------------------------------

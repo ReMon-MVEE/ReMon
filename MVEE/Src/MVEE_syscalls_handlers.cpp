@@ -650,9 +650,8 @@ POSTCALL(open)
 	else
 	{		
 		std::string path = set_fd_table->get_full_path(variantnum, variants[variantnum].variantpid, AT_FDCWD, (void*)ARG1(variantnum));
-		std::string resolved_path = mvee::os_normalize_path_name(path);
 
-		set_fd_table->create_temporary_fd_info(variantnum, call_postcall_get_variant_result(variantnum), resolved_path, ARG2(variantnum), ARG2(variantnum) & O_CLOEXEC);
+		set_fd_table->create_temporary_fd_info(variantnum, call_postcall_get_variant_result(variantnum), path, ARG2(variantnum), ARG2(variantnum) & O_CLOEXEC);
 
 		aliased_open = false;
 		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
@@ -800,10 +799,6 @@ PRECALL(unlink)
     CHECKPOINTER(1);
     CHECKSTRING(1);
 	
-	// we do this at the precall site so we can still resolve the file name
-	auto unlink_file = rw::read_string(variants[0].variantpid, (void*)ARG1(0));
-	set_fd_table->set_file_unlinked(unlink_file.c_str());
-
 	if (call_do_alias<1>())
 		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 
@@ -812,6 +807,17 @@ PRECALL(unlink)
 
 POSTCALL(unlink)
 {
+	if IS_SYNCED_CALL
+	{
+		for (auto i = 0;
+			 i < ((state == STATE_IN_MASTERCALL) ? 1 : mvee::numvariants);
+			 ++i)
+		{
+			auto unlink_file = set_fd_table->get_full_path(i, variants[i].variantpid, AT_FDCWD, (void*) ARG1(i));
+			set_fd_table->set_file_unlinked(unlink_file.c_str());
+		}		
+	}
+
 #ifdef MVEE_ENABLE_VALGRIND_HACKS
     if IS_UNSYNCED_CALL
     {
@@ -901,7 +907,7 @@ void monitor::handle_execve_get_args(int variantnum)
 		set_fd_table->refresh_fd_table(getpids());
 
     set_mmap_table->mmap_startup_info[variantnum].image = 
-		mvee::os_normalize_path_name(set_fd_table->get_full_path(variantnum, variants[variantnum].variantpid, AT_FDCWD, (void*) ARG1(variantnum)));
+		set_fd_table->get_full_path(variantnum, variants[variantnum].variantpid, AT_FDCWD, (void*) ARG1(variantnum));
     set_mmap_table->mmap_startup_info[variantnum].serialized_argv = args.str();
 	set_mmap_table->mmap_startup_info[variantnum].serialized_envp = envs.str();
 
@@ -8403,7 +8409,7 @@ POSTCALL(pipe2)
 
 		std::fill(paths.begin(), paths.end(), "pipe2:write");
 		set_fd_table->create_fd_info(type,      // file type
-									 read_fds,  // fd vector
+									 write_fds, // fd vector
 									 paths,     // path vector
 									 O_WRONLY,  // access flags
 									 cloexec,   // cloexec file?
