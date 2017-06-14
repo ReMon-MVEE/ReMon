@@ -567,7 +567,9 @@ was_interrupted:
         logfunc("%s - > variant is currently suspended\n", call_get_variant_pidstr(variantnum).c_str());
 
         mvee_syscall_logger logger;
-        if (variants[variantnum].callnum > 0 && variants[variantnum].callnum <= MAX_CALLS)
+        if (!mvee::in_logging_handler && 
+			variants[variantnum].callnum > 0 && 
+			variants[variantnum].callnum <= MAX_CALLS)
         {
             logger = monitor::syscall_logger_table[variants[variantnum].callnum][MVEE_LOG_ARGS];
 			(this->*logger)(variantnum);
