@@ -865,7 +865,18 @@ std::string mvee::os_normalize_path_name(std::string path)
 	if (!tmp)
 	{
 		if (errno == ENOENT)
+		{
+			auto slash = path.rfind('/');
+			if (slash != std::string::npos)
+			{
+				auto dir_only = path.substr(0, slash);
+				auto file = path.substr(slash);
+				auto normalized_dir = os_normalize_path_name(dir_only);
+				return normalized_dir + file;
+			}
+
 			return path;
+		}
 		else
 			return std::string("");
 	}
