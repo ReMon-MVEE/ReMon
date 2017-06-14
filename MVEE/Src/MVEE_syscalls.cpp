@@ -802,7 +802,8 @@ long monitor::call_call_dispatch ()
 			{
 				std::string master_argv0 = rw::read_string(variants[0].variantpid, (void*)ARG1(0));
 
-				warnf("MASTER ARGV0: %s\n", master_argv0.c_str());
+				debugf("Returning virtualized argv[0]: %s\n",
+					 master_argv0.c_str());
 
 				// We copy the master's arg[0] value into the buffer.
 				for (int i = 0; i < mvee::numvariants; ++i)
