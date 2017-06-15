@@ -552,10 +552,16 @@ void monitor::log_variant_backtrace(int variantnum, int max_depth, int calculate
 							call_get_variant_pidstr(variantnum).c_str(), getTextualSig(status.data));
 					break;
 				}
+				case STOP_SYSCALL:
+				{
+					logfunc("%s - >>> Process stopped because of syscall entry/exit\n",
+							call_get_variant_pidstr(variantnum).c_str());
+					break;
+				}
 				default:
 				{
-					warnf("%s - >>> Unexpected stop reason\n",
-							call_get_variant_pidstr(variantnum).c_str());
+					warnf("%s - >>> Unexpected stop reason: %d\n",
+						  call_get_variant_pidstr(variantnum).c_str(), status.reason);
 					break;
 				}
 			}
