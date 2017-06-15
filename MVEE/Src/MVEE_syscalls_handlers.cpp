@@ -6953,6 +6953,14 @@ POSTCALL(set_tid_address)
 /*-----------------------------------------------------------------------------
   clock_gettime - (clockid_t which_clock, struct timespec __user* tp)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(clock_gettime)
+{
+	debugf("%s - SYS_CLOCK_GETTIME(%s, 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   getTextualTimerType(ARG1(variantnum)), 
+		   ARG2(variantnum));
+}
+
 PRECALL(clock_gettime)
 {
     CHECKPOINTER(2);
