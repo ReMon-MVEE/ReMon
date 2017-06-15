@@ -39,14 +39,21 @@ static void parse_and_setenv(std::string env)
 -----------------------------------------------------------------------------*/
 void mvee::setup_env(int variantnum)
 {
-    if ((*mvee::config_variant_global)["use_ipmon"].asBool() &&
-		!(*mvee::config_variant_global)["disable_syscall_checks"].asBool())
-    {
-        std::string ipmon_path = os_get_mvee_root_dir();
-        ipmon_path += "/IP-MON/libipmon.so";
-        setenv("LD_PRELOAD", mvee::strdup(ipmon_path.c_str()), 1);
-    }
-
+	// Set the library path directly if we're going to run unmonitored variants
+	if ((*mvee::config_variant_global)["disable_syscall_checks"].asBool())
+	{
+		setenv("LD_LIBRARY_PATH", (*mvee::config_variant_exec)["library_path"].asCString(), 1);
+	}
+	else
+	{
+		if ((*mvee::config_variant_global)["use_ipmon"].asBool())
+		{
+			std::string ipmon_path = os_get_mvee_root_dir();
+			ipmon_path += "/IP-MON/libipmon.so";
+			setenv("LD_PRELOAD", mvee::strdup(ipmon_path.c_str()), 1);
+		}
+	}
+   
 	// needed by LD_Loader and SPEC scripts
 	setenv("MVEEROOT", os_get_mvee_root_dir().c_str(), 1);
 
