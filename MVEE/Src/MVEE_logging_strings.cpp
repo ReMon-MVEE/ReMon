@@ -29,6 +29,7 @@
 #include <signal.h>
 #include <linux/perf_event.h>
 #include <linux/hw_breakpoint.h>
+#include <sys/ipc.h>
 #include <sys/shm.h>
 #include "MVEE.h"
 #include "MVEE_monitor.h"
@@ -1878,3 +1879,45 @@ std::string getTextualMVEEWaitStatus (interaction::mvee_wait_status& status)
 	ss << ", sig: " << getTextualSig(status.data) << "]";
 	return ss.str();
 }
+
+/*-----------------------------------------------------------------------------
+    getTextualIpcShmKey
+-----------------------------------------------------------------------------*/
+std::string getTextualIpcShmKey (key_t key)
+{
+	std::stringstream ss;
+
+	if (key == IPC_PRIVATE)
+		ss << "IPC_PRIVATE";
+	else
+		ss << key;
+
+	return ss.str();
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualIpcShmFlags
+-----------------------------------------------------------------------------*/
+std::string getTextualIpcShmFlags (int shmflg)
+{
+	// The 9 least significant bits of the shmflg argument specify a permission
+	// mode similar to the mode argument of sys_open
+    std::string result = getTextualFileMode(shmflg & 0x1FF);
+
+	// In addition to the permission mode, sys_shmget accepts these
+    TEST_FLAG(shmflg, IPC_CREAT     , result);
+    TEST_FLAG(shmflg, IPC_EXCL      , result);
+	TEST_FLAG(shmflg, SHM_HUGETLB   , result);
+	TEST_FLAG(shmflg, SHM_NORESERVE , result);
+#ifdef SHM_HUGE_2MB
+	TEST_FLAG(shmflg, SHM_HUGE_2MB  , result);
+#endif
+#ifdef SHM_HUGE_1GB
+	TEST_FLAG(shmflg, SHM_HUGE_1GB  , result);
+#endif
+
+    return result;
+
+}
+
+

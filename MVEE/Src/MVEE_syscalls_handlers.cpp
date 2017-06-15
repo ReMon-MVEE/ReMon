@@ -6262,6 +6262,15 @@ GET_CALL_TYPE(madvise)
 /*-----------------------------------------------------------------------------
   sys_shmget - (key_t key, size_t size, int shmflg)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(shmget)
+{
+	debugf("%s - SYS_SHMGET(%s, %d, %s)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   getTextualIpcShmKey(ARG1(variantnum)).c_str(), 
+		   ARG2(variantnum),
+		   getTextualIpcShmFlags(ARG3(variantnum)).c_str());
+}
+
 CALL(shmget)
 {
 #ifndef MVEE_ALLOW_SHM
