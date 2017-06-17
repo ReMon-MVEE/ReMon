@@ -376,7 +376,7 @@ namespace interaction
 
         ssize_t nread = process_vm_readv(variantpid, local, 1, remote, 1, 0);
         if (nread != data_len)
-            warnf("interaction::read_memory failed. tried to read %d bytes - actually read %d bytes\n", 
+            warnf("interaction::read_memory failed. tried to read %ld bytes - actually read %ld bytes\n", 
 				  data_len, nread);
 
 #ifdef MVEE_GENERATE_EXTRA_STATS
@@ -402,7 +402,7 @@ namespace interaction
 
         ssize_t nwritten = process_vm_writev(variantpid, local, 1, remote, 1, 0);
         if (nwritten != data_len)
-            warnf("interaction::write_memory failed. tried to write %d bytes - actually wrote %d bytes\n", 
+            warnf("interaction::write_memory failed. tried to write %ld bytes - actually wrote %ld bytes\n", 
 				  data_len, nwritten);
 
 #ifdef MVEE_GENERATE_EXTRA_STATS

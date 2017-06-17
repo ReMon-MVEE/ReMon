@@ -238,7 +238,7 @@ unsigned char monitor::call_precall_get_call_type (int variantnum, long callnum)
 			{
 				if (variants[variantnum].fast_forward_to_entry_point)
 				{
-					warnf("Don't have an unsynced call handler for call: %d (%s)\n",
+					warnf("Don't have an unsynced call handler for call: %lu (%s)\n",
 						  callnum, getTextualSyscall(callnum));
 					shutdown(false);
 					break;
@@ -291,7 +291,7 @@ long monitor::call_precall ()
             result = (this->*handler)(-1);
         else if (handler == MVEE_HANDLER_DONTHAVE)
         {
-            warnf("ERROR: missing PRECALL handler for syscall: %d (%s)\n", callnum, getTextualSyscall(callnum));
+            warnf("ERROR: missing PRECALL handler for syscall: %lu (%s)\n", callnum, getTextualSyscall(callnum));
             shutdown(false);
         }
     }
@@ -302,7 +302,7 @@ long monitor::call_precall ()
 			for (int i = 0; i < mvee::numvariants; ++i)
 			{
 				debugf("%s - SYS_MVEE_ALL_HEAPS_ALIGNED(heap: 0x" PTRSTR ", requested alignment: 0x" PTRSTR ", requested size: 0x" PTRSTR")\n", 
-					   call_get_variant_pidstr(i).c_str(), ARG1(i), ARG2(i), ARG3(i));
+					   call_get_variant_pidstr(i).c_str(), (unsigned long)ARG1(i), (unsigned long)ARG2(i), (unsigned long)ARG3(i));
 
 				if (i >= 1 &&
 					(ARG2(i) != ARG2(0) ||
@@ -338,7 +338,7 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
             result = (this->*handler)(variantnum);
 #ifndef MVEE_BENCHMARK
         if (handler == MVEE_HANDLER_DONTHAVE)
-            warnf("missing CALL handler for syscall: %d (%s)\n", callnum, getTextualSyscall(callnum));
+            warnf("missing CALL handler for syscall: %lu (%s)\n", callnum, getTextualSyscall(callnum));
 #endif
     }
     else
@@ -486,7 +486,7 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 			//
 			default:
 			{
-				warnf("Don't have an unsynced call handler for call: %d (%s)\n",
+				warnf("Don't have an unsynced call handler for call: %lu (%s)\n",
 					  callnum, getTextualSyscall(callnum));
 				result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
 				break;
@@ -519,7 +519,7 @@ long monitor::call_call_dispatch ()
             result = (this->*handler)(-1);
 #ifndef MVEE_BENCHMARK
         if (handler == MVEE_HANDLER_DONTHAVE)
-            warnf("missing CALL handler for syscall: %d (%s)\n", callnum, getTextualSyscall(callnum));
+            warnf("missing CALL handler for syscall: %ld (%s)\n", callnum, getTextualSyscall(callnum));
 #endif
     }
     else
@@ -703,7 +703,7 @@ long monitor::call_call_dispatch ()
                 }
                 else if (ARG1(0) == MVEE_IPMON_BUFFER)
                 {
-                    debugf("flushing ipmon_buffer: " PTRSTR "\n", ipmon_buffer);
+                    debugf("flushing ipmon_buffer: " PTRSTR "\n", (unsigned long)ipmon_buffer);
                     if (ipmon_buffer)
                     {
 #ifdef MVEE_LOG_IPMON_BUFFER_ON_FLUSH
@@ -850,7 +850,7 @@ void monitor::call_postcall_log_return (int variantnum)
 
 	if (!success)
 	{
-		debugf("%s - %s return: %d (%s)\n",
+		debugf("%s - %s return: %ld (%s)\n",
 			   call_get_variant_pidstr(variantnum).c_str(),
 			   mvee::upcase(getTextualSyscall(callnum)).c_str(),
 			   result,
@@ -883,14 +883,14 @@ long monitor::call_postcall_return_unsynced (int variantnum)
 
 			if (!(result & MVEE_POSTCALL_HANDLED_UNSYNCED_CALL))
 			{
-				warnf("FIXME - stijn: POSTCALL handler for syscall %d (%s) was not unsync-aware\n",
+				warnf("FIXME - stijn: POSTCALL handler for syscall %ld (%s) was not unsync-aware\n",
 					  callnum, getTextualSyscall(callnum));				
 				shutdown(false);				
 			}
 		}
 #ifndef MVEE_BENCHMARK
         else if (handler == MVEE_HANDLER_DONTHAVE)
-            warnf("missing POSTCALL handler for syscall: %d (%s)\n", callnum, getTextualSyscall(callnum));
+            warnf("missing POSTCALL handler for syscall: %ld (%s)\n", callnum, getTextualSyscall(callnum));
 #endif
     }
 	else
@@ -937,7 +937,7 @@ long monitor::call_postcall_return ()
             result = (this->*handler)(-1);
 #ifndef MVEE_BENCHMARK
         if (handler == MVEE_HANDLER_DONTHAVE)
-            debugf("WARNING: missing POSTCALL handler for syscall: %d (%s)\n", callnum, getTextualSyscall(callnum));
+            debugf("WARNING: missing POSTCALL handler for syscall: %ld (%s)\n", callnum, getTextualSyscall(callnum));
 #endif
     }
 
@@ -1119,7 +1119,7 @@ void monitor::call_wait_all()
 -----------------------------------------------------------------------------*/
 void monitor::call_execute_synced_call(bool at_syscall_exit, unsigned long callnum, std::vector<std::deque<unsigned long> >& call_args)
 {
-    debugf("Injecting synced syscall: %d (%s)\n", 
+    debugf("Injecting synced syscall: %lu (%s)\n", 
 		   callnum, 
 		   getTextualSyscall(callnum));
 

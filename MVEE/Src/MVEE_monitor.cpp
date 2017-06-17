@@ -2333,7 +2333,7 @@ dont_resolve_segv_origin:
                 {
                     debugf("%s - signal is ready for injection in all variants. Injecting...\n", 
 						   call_get_variant_pidstr(variantnum).c_str());
-                    debugf("%s - releasing syslocks for %d (%s)\n", 
+                    debugf("%s - releasing syslocks for %lu (%s)\n", 
 						   call_get_variant_pidstr(variantnum).c_str(),
 						   variants[0].callnumbackup, 
 						   getTextualSyscall(variants[0].callnumbackup));
@@ -2902,7 +2902,7 @@ void monitor::sig_return_from_sighandler ()
     {
         if (restore_context)
         {
-            debugf("%s - restoring call site for call: %d (%s)\n", 
+            debugf("%s - restoring call site for call: %lu (%s)\n", 
 				   call_get_variant_pidstr(i).c_str(),
 				   variants[i].callnumbackup,
 				   getTextualSyscall(variants[i].callnumbackup));
@@ -2911,7 +2911,7 @@ void monitor::sig_return_from_sighandler ()
 
             // explicitly restore the original call number (sometimes required)
             debugf("%s - restoring instruction pointer: 0x" PTRSTR " - syscall no: 0x" PTRSTR "\n", 
-				   call_get_variant_pidstr(i).c_str(), IP_IN_REGS(variants[i].regsbackup), variants[i].callnumbackup);
+				   call_get_variant_pidstr(i).c_str(), (unsigned long)IP_IN_REGS(variants[i].regsbackup), variants[i].callnumbackup);
 
             // Move the instruction pointer back by 2 bytes to repeat the original syscall
             IP_IN_REGS(variants[i].regsbackup) -= SYSCALL_INS_LEN;
@@ -2944,7 +2944,7 @@ void monitor::sig_restart_syscall(int variantnum)
 {
 	interaction::mvee_wait_status status;
 
-    debugf("%s - Restarting syscall %d (%s) - previous call failed with error: %s\n",
+    debugf("%s - Restarting syscall %lu (%s) - previous call failed with error: %s\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
 		   variants[variantnum].callnum,
 		   getTextualSyscall(variants[variantnum].callnum),
@@ -3216,7 +3216,7 @@ void monitor::schedule_threads()
 	}
 	else
 	{
-		debugf("%s - couldn't pin thread on core\n", 
+		debugf("%s - couldn't pin thread on core %d\n", 
 			   call_get_variant_pidstr(0).c_str(), master_core);
 	}
 

@@ -77,13 +77,13 @@ public:
     // Log a message to the log files. This function is disabled if the
     // MVEE_BENCHMARK preprocessor option is set.
 	// 
-    static void        logf                        (const char* format, ...);
+    static void        logf                        (const char* format, ...) __attribute__((format (printf, 1, 2)));
 
 	// 
 	// Log a message to stdout and to the log files. Even with MVEE_BENCHMARK
 	// enabled, the message is still printed to stdout.
     //
-    static void        warnf                       (const char* format, ...);
+    static void        warnf                       (const char* format, ...) __attribute__((format (printf, 1, 2)));
 
 	//
 	// Log the specified ptrace operation to the ptrace log file.

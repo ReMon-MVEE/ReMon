@@ -408,14 +408,15 @@ bool monitor::call_compare_io_vectors(std::vector<struct iovec*>& addresses, siz
                     if ((!io || !master_io[j])
                         && (io || master_io[j]))
                     {
-                        warnf("couldn't read I/O vector data - iov_base @ 0x" PTRSTR " - len: %d - j: %d\n", slave_vec[j].iov_base, len, j);
+                        warnf("couldn't read I/O vector data - iov_base @ 0x" PTRSTR " - len: %lu - j: %lu\n", 
+							  (unsigned long)slave_vec[j].iov_base, len, j);
                         result = false;
                         goto out;
                     }
 
                     if (memcmp(io, master_io[j], slave_vec[j].iov_len) != 0)
                     {
-                        warnf("I/O vector mismatch - content %d - syscall: %ld (%s)\n",
+                        warnf("I/O vector mismatch - content %lu - syscall: %ld (%s)\n",
                                     j, variants[0].callnum,
                                     getTextualSyscall(variants[0].callnum));
                         SAFEDELETEARRAY(io);
@@ -718,7 +719,7 @@ void monitor::call_replicate_io_vector(std::vector<struct iovec*>& addresses, lo
 
             if (copied != to_copy)
             {
-                warnf("Failed to replicate io vector. tried to replicate %d bytes - actually replicated %d bytes - errno: %s\n", to_copy, copied, getTextualErrno(errno));
+                warnf("Failed to replicate io vector. tried to replicate %ld bytes - actually replicated %ld bytes - errno: %s\n", to_copy, copied, getTextualErrno(errno));
             }
         }
 
@@ -785,7 +786,8 @@ void monitor::call_replicate_msgvector(std::vector<struct msghdr*>& addresses, l
 
         if (!master_control)
         {
-            warnf("couldn't read control from master msgvector - msg_control: 0x" PTRSTR " - msg_controllen: %d\n", hdrs[0].msg_control, variants[0].orig_controllen);
+            warnf("couldn't read control from master msgvector - msg_control: 0x" PTRSTR " - msg_controllen: %lu\n", 
+				  (unsigned long)hdrs[0].msg_control, variants[0].orig_controllen);
         }
 
         // replicate control data
@@ -953,7 +955,7 @@ void monitor::call_replicate_buffer(std::vector<const unsigned char*>& buffers, 
     {
         if ((result = rw::copy_data(variants[0].variantpid, (void*) buffers[0], variants[i].variantpid, (void*) buffers[i], size)) != size)
         {
-            warnf("Failed to replicate buffer. tried to replicate %d bytes - actually replicated %d bytes - errno: %s\n", size, result, getTextualErrno(errno));
+            warnf("Failed to replicate buffer. tried to replicate %d bytes - actually replicated %ld bytes - errno: %s\n", size, result, getTextualErrno(errno));
         }
     }
 }
@@ -1100,14 +1102,14 @@ std::string monitor::call_serialize_msgvector(int variantnum, struct msghdr* msg
         struct iovec* tmp    = new(std::nothrow) struct iovec[msg->msg_iovlen];
         if (!tmp)
         {
-            warnf("msgvector serialization failed - could not allocate memory - iovlen: %d\n", msg->msg_iovlen);
-            return NULL;
+            warnf("msgvector serialization failed - could not allocate memory - iovlen: %lu\n", msg->msg_iovlen);
+            return "";
         }
         if (!rw::read_struct(variants[variantnum].variantpid, msg->msg_iov, sizeof(struct iovec) * msg->msg_iovlen, tmp))
         {
             warnf("failed to read msgvector I/O vector\n");
             SAFEDELETEARRAY(tmp);
-            return NULL;
+            return "";
         }
 
         std::string   result = call_serialize_io_vector(variantnum, tmp, msg->msg_iovlen);

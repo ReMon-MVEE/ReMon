@@ -60,7 +60,7 @@ void monitor::cache_mismatch_info(const char* format, ...)
 -----------------------------------------------------------------------------*/
 void monitor::dump_mismatch_info()
 {
-	warnf(mismatch_info.str().c_str());
+	warnf("%s", mismatch_info.str().c_str());
 	flush_mismatch_info();
 }
 
@@ -217,7 +217,7 @@ void monitor::log_ipmon_state()
 	if (! ipmon_buffer)
 		return;
 
-	debugf("Dumping IPMON buffer " PTRSTR " ...\n", ipmon_buffer);
+	debugf("Dumping IPMON buffer " PTRSTR " ...\n", (unsigned long)ipmon_buffer);
 
 	std::vector<unsigned int> offsets(mvee::numvariants);
 	unsigned int highest = 0;
@@ -228,7 +228,7 @@ void monitor::log_ipmon_state()
 	debugf("\tnumvariants = %d\n", buffer->ipmon_numvariants);
 	debugf("\tusable_size = %d\n", buffer->ipmon_usable_size);
 	debugf("\thave_pending_signals = %ld\n", buffer->ipmon_have_pending_signals);
-	debugf("\tflush_count = %d\n", buffer->flush_count);
+	debugf("\tflush_count = %lu\n", buffer->flush_count);
 	debugf("\tpre_flush = [0x%04x,0x%04x]\n", buffer->pre_flush_barrier.u.s.seq, buffer->pre_flush_barrier.u.s.count);
 	debugf("\tpost_flush = [0x%04x,0x%04x]\n", buffer->post_flush_barrier.u.s.seq, buffer->post_flush_barrier.u.s.count);
 
@@ -267,7 +267,7 @@ void monitor::log_ipmon_state()
 			}
 		}
 		ss << "\n";
-		debugf(ss.str().c_str());
+		debugf("%s", ss.str().c_str());
 
 		if (offset + sizeof(struct ipmon_syscall_entry) > (unsigned long)buffer->ipmon_usable_size ||
 			offsets[0] == offset)
@@ -714,7 +714,7 @@ void monitor::log_dump_queues(shm_table* shm_table)
         if (!logfile)
             return;
 
-        warnf("dumping queue: %s - FILE: %s (%d - %s)\n", getTextualBufferType(it.first), logname, logfile, getTextualErrno(errno));
+        warnf("dumping queue: %s - FILE: %s (%s)\n", getTextualBufferType(it.first), logname, getTextualErrno(errno));
 
         fprintf(logfile, "===============================================   \n");
         fprintf(logfile, "> Buffer Type             : %d (%s)               \n", it.first, getTextualBufferType(it.first));
@@ -942,7 +942,7 @@ void monitor::log_calculate_clock_spread()
 
 	SAFEDELETEARRAY(counters);
 
-	warnf("Clock stats - clocks used: %d - range: [%d, %d] - mean: %le - variance: %le\n",
+	warnf("Clock stats - clocks used: %lu - range: [%d, %d] - mean: %le - variance: %le\n",
 				cntrs.size(), lowest_clock_used, highest_clock_used, mean, variance);
 }
 
@@ -1040,7 +1040,7 @@ void monitor::log_stack(int variantnum)
 											   stack_word))
 			return;
 
-		debugf("stack[rsp + %d] = " PTRSTR "\n", i*sizeof(unsigned long), stack_word);
+		debugf("stack[rsp + %lu] = " PTRSTR "\n", i*sizeof(unsigned long), stack_word);
 	}
 #endif
 }
@@ -1112,7 +1112,7 @@ void monitor::log_segfault(int variantnum)
 			
 			if (arg_no == 0)
 			{
-				warnf("> Syscall Number Mismatch (Master: %d - %s, Slave: %d - %s)\n",
+				warnf("> Syscall Number Mismatch (Master: %lu - %s, Slave: %lu - %s)\n",
 					  master_syscall_no, getTextualSyscall(master_syscall_no),
 					  slave_arg_val, getTextualSyscall(slave_arg_val));
 			}
@@ -1122,7 +1122,7 @@ void monitor::log_segfault(int variantnum)
 			}
 			else if ((char)arg_no < 0)
 			{
-				warnf("> Argument Length Mismatch (Syscall: %d - %s - Arg: %d - Slave Length: %d)\n",
+				warnf("> Argument Length Mismatch (Syscall: %lu - %s - Arg: %d - Slave Length: %lu)\n",
 					  master_syscall_no, getTextualSyscall(master_syscall_no),
 					  -arg_no-1, slave_arg_val);
 
@@ -1135,7 +1135,7 @@ void monitor::log_segfault(int variantnum)
 			}
 			else
 			{
-				warnf("> Argument Value Mismatch (Syscall: %d - %s - Arg: %d)\n",
+				warnf("> Argument Value Mismatch (Syscall: %lu - %s - Arg: %d)\n",
 					  master_syscall_no, getTextualSyscall(master_syscall_no), arg_no-1);
 
 				// dump slave contents
@@ -1185,8 +1185,8 @@ void monitor::log_segfault(int variantnum)
                 getTextualSig(siginfo.si_signo), variantnum,
                 variants[variantnum].variantpid);
     warnf("IP: " PTRSTR ", Address: " PTRSTR ", Code: %s (%d), Errno: %d\n",
-                eip, siginfo.si_addr, getTextualSEGVCode(siginfo.si_code),
-                siginfo.si_code, siginfo.si_errno);
+		  eip, (unsigned long)siginfo.si_addr, getTextualSEGVCode(siginfo.si_code),
+		  siginfo.si_code, siginfo.si_errno);
 //    log_registers(variantnum, mvee::logf);
 //    set_mmap_table->print_mmap_table(mvee::logf);
 #if !defined(MVEE_ENABLE_VALGRIND_HACKS) && (!defined(MVEE_BENCHMARK) || defined(MVEE_FORCE_ENABLE_BACKTRACING))
@@ -1400,13 +1400,13 @@ void mvee::log_ptrace_op(int op_type, int op_subtype, int bytes)
     if (op_type == 0)
     {
         if (mvee::ptrace_logfile)
-            fprintf(mvee::ptrace_logfile, "%d;%s\n", op_subtype, getTextualRequest(op_subtype));
+            fprintf(mvee::ptrace_logfile, "%d;%s\n", op_subtype, getTextualPtraceRequest(op_subtype));
     }
     // datatransfer operation
     else
     {
         if (mvee::datatransfer_logfile)
-            fprintf(mvee::datatransfer_logfile, "%s %d\n", getTextualRequest(op_subtype), bytes);
+            fprintf(mvee::datatransfer_logfile, "%s %d\n", getTextualPtraceRequest(op_subtype), bytes);
     }
 }
 #endif
@@ -1692,9 +1692,9 @@ void mvee::log_sigaction(struct sigaction* action)
     else if (action->sa_handler == SIG_DFL)
         handler = "SIG_DFL";
 
-    debugf("> SIGACTION sa_handler   : 0x" PTRSTR " (= %s)\n", action->sa_handler, handler);
-    debugf("> SIGACTION sa_sigaction : 0x" PTRSTR "\n",        action->sa_sigaction);
-    debugf("> SIGACTION sa_restorer  : 0x" PTRSTR "\n",        action->sa_restorer);
+    debugf("> SIGACTION sa_handler   : 0x" PTRSTR " (= %s)\n", (unsigned long)action->sa_handler, handler);
+    debugf("> SIGACTION sa_sigaction : 0x" PTRSTR "\n",        (unsigned long)action->sa_sigaction);
+    debugf("> SIGACTION sa_restorer  : 0x" PTRSTR "\n",        (unsigned long)action->sa_restorer);
     debugf("> SIGACTION sa_flags     : 0x%08x (= %s)\n",       action->sa_flags,   getTextualSigactionFlags(action->sa_flags).c_str());
     debugf("> SIGACTION sa_mask      : %s\n",                  getTextualSigSet(action->sa_mask).c_str());
 #endif

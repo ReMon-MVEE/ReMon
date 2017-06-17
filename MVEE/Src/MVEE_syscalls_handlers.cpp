@@ -54,6 +54,7 @@
 #include <sys/prctl.h>
 #include <sys/timerfd.h>
 #include <iomanip>
+#include <linux/dqblk_xfs.h>
 #include "MVEE.h"
 #include "MVEE_monitor.h"
 #include "MVEE_macros.h"
@@ -322,11 +323,17 @@ long monitor::handle_check_open_call(const std::string& full_path, int flags, in
 }
 
 /*-----------------------------------------------------------------------------
-  sys_restart_syscall
+  sys_restart_syscall 
 -----------------------------------------------------------------------------*/
 GET_CALL_TYPE(restart_syscall)
 {
     return MVEE_CALL_TYPE_UNSYNCED;
+}
+
+LOG_ARGS(restart_syscall)
+{
+	debugf("%s - SYS_RESTART_SYSCALL() - NOTE: This marks the return from a signal handler. This syscall will not return!\n", 
+		   call_get_variant_pidstr(variantnum).c_str());
 }
 
 /*-----------------------------------------------------------------------------
@@ -334,6 +341,13 @@ GET_CALL_TYPE(restart_syscall)
   different semantics. exit(3) is a wrapper around sys_exit_group, which 
   terminates the entire thread group and not just the calling thread!
 -----------------------------------------------------------------------------*/
+LOG_ARGS(exit)
+{
+	debugf("%s - SYS_EXIT(%d)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (int)ARG1(variantnum));
+}
+
 PRECALL(exit)
 {
     update_sync_primitives();
@@ -346,6 +360,12 @@ PRECALL(exit)
 /*-----------------------------------------------------------------------------
   sys_fork
 -----------------------------------------------------------------------------*/
+LOG_ARGS(fork)
+{
+	debugf("%s - SYS_FORK()\n", 
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 PRECALL(fork)
 {
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_FORK;
@@ -366,6 +386,12 @@ POSTCALL(fork)
   sys_vfork - similar to fork but suspends the calling process until the
   child process terminates
 -----------------------------------------------------------------------------*/
+LOG_ARGS(vfork)
+{
+	debugf("%s - SYS_VFORK()\n", 
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 PRECALL(vfork)
 {
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_FORK;
@@ -387,11 +413,11 @@ POSTCALL(vfork)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(read)
 {
-	debugf("%s - SYS_READ(%d, 0x" PTRSTR ", %d)\n", 
+	debugf("%s - SYS_READ(%d, 0x" PTRSTR ", %ld)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum));
+		   (unsigned int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
+		   (size_t)ARG3(variantnum));
 }
 
 PRECALL(read)
@@ -419,7 +445,7 @@ LOG_RETURN(read)
 	long result  = call_postcall_get_variant_result(variantnum);
 	auto result_str = call_serialize_io_buffer(variantnum, (const unsigned char*) ARG2(variantnum), result);
 	
-	debugf("%s - SYS_READ return: %d => %s\n", 
+	debugf("%s - SYS_READ return: %ld => %s\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   result, 
 		   result_str.c_str());
@@ -451,21 +477,21 @@ LOG_ARGS(write)
 	{
 		debugf("%s - SYS_WRITE(%d (%s), %d, %d)\n",
 			   call_get_variant_pidstr(variantnum).c_str(), 
-			   ARG1(variantnum), 
+			   (int)ARG1(variantnum), 
 			   getTextualRAVENCall((int)ARG1(variantnum)),
-			   ARG2(variantnum), 
-			   ARG3(variantnum));
+			   (int)ARG2(variantnum), 
+			   (int)ARG3(variantnum));
 	}
 	else
 	{
 		auto buf_str = call_serialize_io_buffer(variantnum, (const unsigned char*) ARG2(variantnum), ARG3(variantnum));
 
-		debugf("%s - SYS_WRITE(%d, 0x" PTRSTR " (%s), %d)\n",
+		debugf("%s - SYS_WRITE(%u, 0x" PTRSTR " (%s), %lu)\n",
 			   call_get_variant_pidstr(variantnum).c_str(), 
-			   ARG1(variantnum), 
-			   ARG2(variantnum), 
+			   (unsigned int)ARG1(variantnum), 
+			   (unsigned long)ARG2(variantnum), 
 			   buf_str.c_str(), 
-			   ARG3(variantnum));
+			   (unsigned long)ARG3(variantnum));
 	}
 }
 
@@ -508,8 +534,8 @@ LOG_ARGS(open)
 	debugf("%s - SYS_OPEN(%s, 0x%08X = %s, 0x%08X = %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
 		   str1.c_str(),
-		   ARG2(variantnum), getTextualFileFlags(ARG2(variantnum)).c_str(),
-		   ARG3(variantnum), getTextualFileMode(ARG3(variantnum) & S_FILEMODEMASK).c_str());
+		   (unsigned int)ARG2(variantnum), getTextualFileFlags(ARG2(variantnum)).c_str(),
+		   (unsigned int)ARG3(variantnum), getTextualFileMode(ARG3(variantnum) & S_FILEMODEMASK).c_str());
 }
 
 PRECALL(open)
@@ -668,7 +694,7 @@ LOG_ARGS(close)
 {
 	debugf("%s - SYS_CLOSE(%d)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum));
+		   (int)ARG1(variantnum));
 }
 
 PRECALL(close)
@@ -719,9 +745,9 @@ LOG_ARGS(waitpid)
 {
 	debugf("%s - SYS_WAITPID(%d, 0x" PTRSTR ", %d)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum));
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
+		   (int)ARG3(variantnum));
 }
 
 PRECALL(waitpid)
@@ -1206,6 +1232,13 @@ POSTCALL(chdir)
 /*-----------------------------------------------------------------------------
   sys_time - (time_t __user *tloc)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(time)
+{
+	debugf("%s - SYS_TIME(0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned long)ARG1(variantnum));
+}
+
 PRECALL(time)
 {
     CHECKPOINTER(1);
@@ -1230,7 +1263,7 @@ LOG_ARGS(chmod)
 	debugf("%s - SYS_CHMOD(%s, 0x%08x = %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   str1.c_str(), 
-		   ARG2(variantnum), 
+		   (unsigned int)ARG2(variantnum), 
 		   mode.c_str());
 }
 
@@ -1249,6 +1282,14 @@ PRECALL(chmod)
 /*-----------------------------------------------------------------------------
   sys_fchmod - (unsigned int fd, mode_t mode)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(fchmod)
+{
+	debugf("%s - SYS_FCHMOD(%u, %s)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned int)ARG1(variantnum),
+		   getTextualFileMode(ARG2(variantnum)).c_str());
+}
+
 PRECALL(fchmod)
 {
     CHECKARG(2);
@@ -1268,11 +1309,11 @@ PRECALL(fchmod)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(lseek)
 {
-	debugf("%s - SYS_LSEEK(%d, 0x%08X, %d)\n", 
+	debugf("%s - SYS_LSEEK(%u, %ld, %u)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum));
+		   (unsigned int)ARG1(variantnum), 
+		   (off_t)ARG2(variantnum), 
+		   (unsigned int)ARG3(variantnum));
 }
 
 PRECALL(lseek)
@@ -1293,6 +1334,13 @@ PRECALL(lseek)
 /*-----------------------------------------------------------------------------
   sys_alarm - (unsigned int seconds)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(alarm)
+{
+	debugf("%s - SYS_ALARM(%u s)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned int)ARG1(variantnum));
+}
+
 PRECALL(alarm)
 {
     CHECKARG(1);
@@ -1302,6 +1350,35 @@ PRECALL(alarm)
 /*-----------------------------------------------------------------------------
     sys_setitimer - (int which, const struct itimerval* new_value, struct itimerval* old_value)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(setitimer)
+{
+	struct timeval new_value[2];
+	std::stringstream timestr;
+
+	if (ARG2(variantnum))
+	{
+		if (!rw::read_struct(variants[variantnum].variantpid, (void*) ARG2(variantnum), 2 * sizeof(struct timeval), new_value))
+		{
+			warnf("couldn't read new itimer value\n");
+			return;
+		}
+
+		timestr << "INTERVAL DURATION: " << new_value[1].tv_sec << "." << std::setw(6) << std::setfill('0') << new_value[1].tv_usec << std::setw(0) << " s"
+				<< ", RESET VALUE: " << new_value[0].tv_sec << "." << std::setw(6) << std::setfill('0') << new_value[0].tv_usec << " s";
+	}
+	else
+	{
+		timestr << "<Invalid Interval Timer>";
+	}
+
+
+	debugf("%s - SYS_SETITIMER(%s, %s, 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   getTextualIntervalTimerType(ARG1(variantnum)),
+		   timestr.str().c_str(),
+		   (unsigned long)ARG3(variantnum));
+}
+
 PRECALL(setitimer)
 {
     CHECKARG(1);
@@ -1321,6 +1398,12 @@ POSTCALL(setitimer)
 /*-----------------------------------------------------------------------------
     sys_getpid
 -----------------------------------------------------------------------------*/
+LOG_ARGS(getpid)
+{
+	debugf("%s - SYS_GETPID()\n",
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 POSTCALL(getpid)
 {
 	if IS_UNSYNCED_CALL
@@ -1344,11 +1427,11 @@ POSTCALL(getpid)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(sendfile)
 {
-	debugf("%s - SYS_SENDFILE(OUT: %d, IN: %d, CNT: %d)\n",
+	debugf("%s - SYS_SENDFILE(OUT: %d, IN: %d, CNT: %ld)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG4(variantnum));
+		   (int)ARG1(variantnum), 
+		   (int)ARG2(variantnum), 
+		   (size_t)ARG4(variantnum));
 }
 
 PRECALL(sendfile)
@@ -1370,12 +1453,22 @@ PRECALL(sendfile)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_ptrace
+    sys_ptrace
 -----------------------------------------------------------------------------*/
+LOG_ARGS(ptrace)
+{
+	debugf("%s - SYS_PTRACE(%s, %d, 0x" PTRSTR ", 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   getTextualPtraceRequest(ARG1(variantnum)),
+		   (pid_t)ARG2(variantnum),
+		   (unsigned long)ARG3(variantnum),
+		   (unsigned long)ARG4(variantnum));
+}
+
 CALL(ptrace)
 {
     cache_mismatch_info("The program is trying to use ptrace. This call has been denied.\n");
-    cache_mismatch_info("request: %s\n",        getTextualRequest(ARG1(0)));
+    cache_mismatch_info("request: %s\n",        getTextualPtraceRequest(ARG1(0)));
     cache_mismatch_info("pid: %d\n",            ARG2(0));
     cache_mismatch_info("addr: 0x" PTRSTR "\n", ARG3(0));
     cache_mismatch_info("data: 0x" PTRSTR "\n", ARG4(0));
@@ -1386,6 +1479,12 @@ CALL(ptrace)
 /*-----------------------------------------------------------------------------
   sys_pause
 -----------------------------------------------------------------------------*/
+LOG_ARGS(pause)
+{
+	debugf("%s - SYS_PAUSE()\n", 
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 GET_CALL_TYPE(pause)
 {
 	// There is a slight chance that we will see the return site of
@@ -1508,12 +1607,12 @@ LOG_ARGS(mknod)
 	auto str1 = rw::read_string(variants[variantnum].variantpid, (void*)ARG1(variantnum));
 	auto mode = getTextualFileMode(ARG2(variantnum));
 	
-	debugf("%s - SYS_MKNOD(%s, %08x - %s, %d)\n", 
+	debugf("%s - SYS_MKNOD(%s, %08x - %s, %lu)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   str1.c_str(), 
-		   ARG2(variantnum), 
+		   (mode_t)ARG2(variantnum), 
 		   mode.c_str(), 
-		   ARG3(variantnum));
+		   (dev_t)ARG3(variantnum));
 }
 
 PRECALL(mknod)
@@ -1539,7 +1638,7 @@ LOG_ARGS(access)
 	debugf("%s - SYS_ACCESS(%s, 0x%08X = %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
 		   str1.c_str(), 
-		   ARG2(variantnum), 
+		   (unsigned int)ARG2(variantnum), 
 		   getTextualAccessMode(ARG2(variantnum)).c_str());
 }
 
@@ -1562,7 +1661,7 @@ LOG_ARGS(kill)
 {
 	debugf("%s - SYS_KILL(%d, %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   getTextualSig(ARG2(variantnum)));
 }
 
@@ -1613,7 +1712,7 @@ LOG_ARGS(mkdir)
 	debugf("%s - SYS_MKDIR(%s, %d)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
 		   str.c_str(), 
-		   ARG2(variantnum));
+		   (int)ARG2(variantnum));
 }
 
 PRECALL(mkdir)
@@ -1661,7 +1760,7 @@ LOG_ARGS(creat)
 	debugf("%s - SYS_CREAT(%s, %d)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   str.c_str(),
-		   ARG2(variantnum));
+		   (mode_t)ARG2(variantnum));
 }
 
 PRECALL(creat)
@@ -1726,9 +1825,9 @@ POSTCALL(creat)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(dup)
 {
-	debugf("%s - SYS_DUP(%d)\n", 
+	debugf("%s - SYS_DUP(%u)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum));
+		   (unsigned int)ARG1(variantnum));
 }
 
 PRECALL(dup)
@@ -1789,6 +1888,13 @@ POSTCALL(dup)
 /*-----------------------------------------------------------------------------
   sys_pipe - (int __user * fildes)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(pipe)
+{
+	debugf("%s - SYS_PIPE(0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned long)ARG1(variantnum));
+}
+
 PRECALL(pipe)
 {
     CHECKPOINTER(1);
@@ -1847,6 +1953,13 @@ POSTCALL(pipe)
 /*-----------------------------------------------------------------------------
   sys_times - (struct tms  *  tbuf)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(times)
+{
+	debugf("%s - SYS_TIMES(0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned long)ARG1(variantnum));
+}
+
 PRECALL(times)
 {
     CHECKPOINTER(1);
@@ -1862,11 +1975,18 @@ POSTCALL(times)
 /*-----------------------------------------------------------------------------
   sys_brk - (void* addr)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(brk)
+{
+	debugf("%s - SYS_BRK(0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned long)ARG1(variantnum));
+}
+
 LOG_RETURN(brk)
 {
-	debugf("%s - SYS_BRK(0x" LONGPTRSTR ") return = 0x" LONGPTRSTR "\n",
+	debugf("%s - SYS_BRK(0x" PTRSTR ") return = 0x" PTRSTR "\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (unsigned long)ARG1(variantnum), 
 		   call_postcall_get_variant_result(variantnum));
 }
 
@@ -1879,8 +1999,6 @@ POSTCALL(brk)
 			long              result      = call_postcall_get_variant_result(i);
 			mmap_region_info* heap_region = set_mmap_table->get_heap_region(i);
 			fd_info           backing_file;
-
-//			log_variant_backtrace(i);
 
 			// BRK only returns the current end of the heap, not the start.
 			// consequently, if we do not have the heap region in our maps yet, we have no choice
@@ -1941,12 +2059,18 @@ POSTCALL(brk)
 /*-----------------------------------------------------------------------------
   sys_getgid - (void)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(getgid)
+{
+	debugf("%s - SYS_GETGID()\n", 
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 LOG_RETURN(getgid)
 {
 	long result DEBUGVAR =  call_postcall_get_variant_result(variantnum);
-	debugf("%s - SYS_GETGID return: %d (%s)\n", 
+	debugf("%s - SYS_GETGID return: %ld (%s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   result, 
+		   (long)result, 
 		   getTextualGroupId(result).c_str());
 }
 
@@ -1958,8 +2082,8 @@ LOG_ARGS(syslog)
 	debugf("%s - SYS_SYSLOG(%s, 0x" PTRSTR ", %d)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
 		   getTextualSyslogAction(ARG1(variantnum)),
-		   ARG2(variantnum),
-		   ARG3(variantnum));
+		   (unsigned long)ARG2(variantnum),
+		   (int)ARG3(variantnum));
 }
 
 PRECALL(syslog)
@@ -1986,8 +2110,9 @@ LOG_RETURN(syslog)
 	}
 	else
 	{
-		debugf("%s - SYS_SYSLOG return: %d\n", 
-			   call_get_variant_pidstr(variantnum).c_str(), result);
+		debugf("%s - SYS_SYSLOG return: %ld\n", 
+			   call_get_variant_pidstr(variantnum).c_str(), 
+			   (long)result);
 	}
 }
 
@@ -2010,7 +2135,7 @@ LOG_ARGS(setuid)
 {
 	debugf("%s - SYS_SETUID(%d = %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
+		   (uid_t)ARG1(variantnum), 
 		   getTextualGroupId(ARG1(variantnum)).c_str());
 }
 
@@ -2027,7 +2152,7 @@ LOG_ARGS(setgid)
 {
 	debugf("%s - SYS_SETGID(%d = %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
+		   (gid_t)ARG1(variantnum), 
 		   getTextualGroupId(ARG1(variantnum)).c_str());
 }
 
@@ -2040,6 +2165,14 @@ PRECALL(setgid)
 /*-----------------------------------------------------------------------------
   sys_signal - (int sig, __sighandler_t handler)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(signal)
+{
+	debugf("%s - SYS_SIGNAL(%s, 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   getTextualSig(ARG1(variantnum)),
+		   (unsigned long)ARG2(variantnum));
+}
+
 PRECALL(signal)
 {
     CHECKARG(1);
@@ -2066,11 +2199,11 @@ POSTCALL(signal)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(ioctl)
 {
-	debugf("%s - SYS_IOCTL(%d, %d, 0x" PTRSTR ")\n", 
+	debugf("%s - SYS_IOCTL(%u, %u, 0x" PTRSTR ")\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum));
+		   (unsigned int)ARG1(variantnum), 
+		   (unsigned int)ARG2(variantnum), 
+		   (unsigned long)ARG3(variantnum));
 }
 
 // there are many many ioctls we don't know yet
@@ -2168,7 +2301,9 @@ PRECALL(ioctl)
 			// fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0));
 			// if (fd_info->path.find("nvidia") != std::string::npos)
 			//	break;
-            warnf("unknown ioctl: %d (0x%08x)\n", ARG2(0), ARG2(0));
+            warnf("unknown ioctl: %u (0x%08x)\n", 
+				  (unsigned int)ARG2(0), 
+				  (unsigned int)ARG2(0));
             shutdown(false);
             break;
 		}
@@ -2235,11 +2370,11 @@ POSTCALL(ioctl)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(fcntl)
 {
-	debugf("%s - SYS_FCNTL(%d, %s, 0x" PTRSTR ")\n", 
+	debugf("%s - SYS_FCNTL(%u, %s, 0x" PTRSTR ")\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (unsigned int)ARG1(variantnum), 
 		   getTextualFcntlCmd(ARG2(variantnum)), 
-		   ARG3(variantnum));
+		   (unsigned long)ARG3(variantnum));
 }
 
 PRECALL(fcntl)
@@ -2338,8 +2473,8 @@ LOG_ARGS(flock)
 {
 	debugf("%s - SYS_FLOCK(%u, %u (%s))\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
+		   (unsigned int)ARG1(variantnum), 
+		   (unsigned int)ARG2(variantnum), 
 		   getTextualFlockType(ARG2(variantnum)));
 }
 
@@ -2364,7 +2499,7 @@ LOG_ARGS(umask)
 {
 	debugf("%s - SYS_UMASK(%d = %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   getTextualFileMode(ARG1(variantnum)).c_str());
 }
 
@@ -2385,10 +2520,10 @@ POSTCALL(umask)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(dup2)
 {
-	debugf("%s - SYS_DUP2(%d, %d)\n", 
+	debugf("%s - SYS_DUP2(%u, %u)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum));
+		   (unsigned int)ARG1(variantnum), 
+		   (unsigned int)ARG2(variantnum));
 }
 
 PRECALL(dup2)
@@ -2468,6 +2603,14 @@ POSTCALL(dup2)
 /*-----------------------------------------------------------------------------
   sys_setpgid - (pid_t pid, pid_t pgid)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(setpgid)
+{
+	debugf("%s - SYS_SETPGID(%d, %d)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (pid_t)ARG1(variantnum),
+		   (pid_t)ARG2(variantnum));
+}
+
 PRECALL(setpgid)
 {
     CHECKARG(1);
@@ -2477,6 +2620,12 @@ PRECALL(setpgid)
 /*-----------------------------------------------------------------------------
   sys_getppid - (void)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(getppid)
+{
+	debugf("%s - SYS_GETPPID()\n", 
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 PRECALL(getppid)
 {
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
@@ -2485,6 +2634,12 @@ PRECALL(getppid)
 /*-----------------------------------------------------------------------------
   sys_getpgrp - (void)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(getpgrp)
+{
+	debugf("%s - SYS_GETPGRP()\n", 
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 PRECALL(getpgrp)
 {
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
@@ -2493,6 +2648,12 @@ PRECALL(getpgrp)
 /*-----------------------------------------------------------------------------
   sys_setsid - (void)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(setsid)
+{
+	debugf("%s - SYS_SETSID()\n", 
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 PRECALL(setsid)
 {
     warnf("Process is creating a new session (i.e. it's becoming a daemon!)\n");
@@ -2508,6 +2669,14 @@ PRECALL(setsid)
 /*-----------------------------------------------------------------------------
   sys_getgroups - (int gidsetsize, gid_t __user* grouplist)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(getgroups)
+{
+	debugf("%s - SYS_GETGROUPS(%d, 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (int)ARG1(variantnum),
+		   (unsigned long)ARG2(variantnum));
+}
+
 PRECALL(getgroups)
 {
     CHECKARG(1);
@@ -2536,9 +2705,9 @@ LOG_RETURN(getgroups)
 	}
 	else
 	{
-		debugf("%s - SYS_GETGROUPS return: %d\n", 
+		debugf("%s - SYS_GETGROUPS return: %ld\n", 
 			   call_get_variant_pidstr(variantnum).c_str(),
-			   result);
+			   (long)result);
 	}
 }
 
@@ -2587,9 +2756,9 @@ LOG_ARGS(setresuid)
 {
 	debugf("%s - SYS_SETRESUID (%d (= %s), %d (= %s), %d (= %s))\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), getTextualUserId(ARG1(variantnum)).c_str(),
-		   ARG2(variantnum), getTextualUserId(ARG2(variantnum)).c_str(),
-		   ARG3(variantnum), getTextualUserId(ARG3(variantnum)).c_str());
+		   (uid_t)ARG1(variantnum), getTextualUserId(ARG1(variantnum)).c_str(),
+		   (uid_t)ARG2(variantnum), getTextualUserId(ARG2(variantnum)).c_str(),
+		   (uid_t)ARG3(variantnum), getTextualUserId(ARG3(variantnum)).c_str());
 }
 
 PRECALL(setresuid)
@@ -2607,9 +2776,9 @@ LOG_ARGS(setresgid)
 {
 	debugf("%s - SYS_SETRESGID (%d (= %s), %d (= %s), %d (= %s))\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), getTextualGroupId(ARG1(variantnum)).c_str(),
-		   ARG2(variantnum), getTextualGroupId(ARG2(variantnum)).c_str(),
-		   ARG3(variantnum), getTextualGroupId(ARG3(variantnum)).c_str());
+		   (gid_t)ARG1(variantnum), getTextualGroupId(ARG1(variantnum)).c_str(),
+		   (gid_t)ARG2(variantnum), getTextualGroupId(ARG2(variantnum)).c_str(),
+		   (gid_t)ARG3(variantnum), getTextualGroupId(ARG3(variantnum)).c_str());
 }
 
 PRECALL(setresgid)
@@ -2630,7 +2799,7 @@ LOG_ARGS(rt_sigaction)
 
 	debugf("%s - SYS_RT_SIGACTION(%d - %s - %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   getTextualSig(ARG1(variantnum)),
 		   (action.sa_handler == SIG_DFL) ? "SIG_DFL" :
 		   (action.sa_handler == SIG_IGN) ? "SIG_IGN" :
@@ -2669,6 +2838,14 @@ POSTCALL(rt_sigaction)
 
 	This is used to get/set the FS/GS base on x86
 -----------------------------------------------------------------------------*/
+LOG_ARGS(arch_prctl)
+{
+	debugf("%s - SYS_ARCH_PRCTL(%s, 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   getTextualArchPrctl(ARG1(variantnum)),
+		   (unsigned long)ARG2(variantnum));
+}
+
 PRECALL(arch_prctl)
 {
     CHECKARG(1);
@@ -2678,6 +2855,12 @@ PRECALL(arch_prctl)
 /*-----------------------------------------------------------------------------
     sys_sync - (void)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(sync)
+{
+	debugf("%s - SYS_SYNC()\n", 
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 PRECALL(sync)
 {
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
@@ -2695,7 +2878,7 @@ LOG_ARGS(setrlimit)
 		return;
 	}
 	
-	debugf("%s - SYS_SETRLIMIT(%s, CUR: %d, MAX: %d)\n", 
+	debugf("%s - SYS_SETRLIMIT(%s, CUR: %lu, MAX: %lu)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
 		   getTextualRlimitType(ARG1(variantnum)), 
 		   rlim.rlim_cur, 
@@ -2712,6 +2895,14 @@ PRECALL(setrlimit)
 /*-----------------------------------------------------------------------------
   sys_getrusage - (int who, struct rusage *usage)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(getrusage)
+{
+	debugf("%s - SYS_GETRUSAGE(%s, 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   getTextualRusageWho(ARG1(variantnum)),
+		   (unsigned long)ARG2(variantnum));
+}
+
 PRECALL(getrusage)
 {
     CHECKARG(1);
@@ -2729,6 +2920,13 @@ POSTCALL(getrusage)
 /*-----------------------------------------------------------------------------
   sys_sysinfo - (struct sysinfo *info)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(sysinfo)
+{
+	debugf("%s - SYS_SYSINFO(0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned long)ARG1(variantnum));
+}
+
 PRECALL(sysinfo)
 {
     CHECKPOINTER(1);
@@ -2744,6 +2942,14 @@ POSTCALL(sysinfo)
 /*-----------------------------------------------------------------------------
   sys_gettimeofday - (struct timeval *tv, struct timezone *tz)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(gettimeofday)
+{
+	debugf("%s - SYS_GETTIMEOFDAY(0x" PTRSTR ", 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned long)ARG1(variantnum),
+		   (unsigned long)ARG2(variantnum));
+}
+
 PRECALL(gettimeofday)
 {
     CHECKPOINTER(2);
@@ -2761,6 +2967,14 @@ POSTCALL(gettimeofday)
 /*-----------------------------------------------------------------------------
   sys_getrlimit (unsigned int resource, struct rlimit __user* limit)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(getrlimit)
+{
+	debugf("%s - SYS_GETRLIMIT(%s, 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   getTextualRlimitType(ARG1(variantnum)),
+		   (unsigned long)ARG2(variantnum));
+}
+
 PRECALL(getrlimit)
 {
     CHECKARG(1);
@@ -2807,8 +3021,8 @@ LOG_ARGS(readlink)
 	debugf("%s - SYS_READLINK(%s, 0x" PTRSTR ", %d)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   str1.c_str(),
-		   ARG2(variantnum), 
-		   ARG3(variantnum));
+		   (unsigned long)ARG2(variantnum), 
+		   (int)ARG3(variantnum));
 }
 
 PRECALL(readlink)
@@ -2884,10 +3098,10 @@ GET_CALL_TYPE(munmap)
 
 LOG_ARGS(munmap)
 {
-	debugf("%s - SYS_MUNMAP(0x" PTRSTR ", %d)\n", 
+	debugf("%s - SYS_MUNMAP(0x" PTRSTR ", %ld)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum));
+		   (unsigned long)ARG1(variantnum), 
+		   (size_t)ARG2(variantnum));
 }
 
 bool monitor::handle_munmap_precall_callback(mmap_table* table, std::vector<mmap_region_info*>& infos, void* mon)
@@ -2908,9 +3122,9 @@ bool monitor::handle_munmap_precall_callback(mmap_table* table, std::vector<mmap
 			unsigned long           actual_offset  = actual_base - infos[0]->region_base_address + infos[0]->region_backing_file_offset;
 			int                     writeback_size = MIN(infos[0]->region_backing_file_size - actual_offset, actual_size - actual_offset);
 
-			debugf("actual size of munmap: %d\n",                                      actual_size);
-			debugf("writeback_size: %d (actual offset: %d - backing_file_size: %d)\n", writeback_size, actual_offset, infos[0]->region_backing_file_size);
-			debugf("writeback region - we will write back %d bytes at offset: %08x in file: %s\n",
+			debugf("actual size of munmap: %lu\n",                                      actual_size);
+			debugf("writeback_size: %d (actual offset: %lu - backing_file_size: %lu)\n", writeback_size, actual_offset, infos[0]->region_backing_file_size);
+			debugf("writeback region - we will write back %d bytes at offset: " PTRSTR " in file: %s\n",
                    writeback_size, actual_offset, infos[0]->region_backing_file_path.c_str());
 
 			writeback_info          info;
@@ -3069,7 +3283,7 @@ LOG_ARGS(truncate)
 	debugf("%s - SYS_TRUNCATE(%s, %ld)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   str1.c_str(), 
-		   ARG2(variantnum));
+		   (long)ARG2(variantnum));
 }
 
 PRECALL(truncate)
@@ -3089,10 +3303,10 @@ PRECALL(truncate)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(ftruncate)
 {
-	debugf("%s - SYS_FTRUNCATE(%d, %ld)\n", 
+	debugf("%s - SYS_FTRUNCATE(%d, %lu)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   (unsigned int)ARG1(variantnum), 
-		   ARG2(variantnum));
+		   (unsigned long)ARG2(variantnum));
 }
 
 PRECALL(ftruncate)
@@ -3112,6 +3326,15 @@ PRECALL(ftruncate)
 /*-----------------------------------------------------------------------------
   sys_ioperm - (unsigned long from, unsigned long num, int turn_on)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(ioperm)
+{
+	debugf("%s - SYS_IOPERM(0x" PTRSTR ", %lu, %d)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned long)ARG1(variantnum),
+		   (unsigned long)ARG2(variantnum),
+		   (int)ARG3(variantnum));
+}
+
 CALL(ioperm)
 {
     cache_mismatch_info("The program is trying to access I/O ports. This call has been denied.\n");
@@ -3121,6 +3344,91 @@ CALL(ioperm)
 /*-----------------------------------------------------------------------------
   sys_quotactl - (unsigned int cmd, const char* special, qid_t id, void* addr)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(quotactl)
+{
+	unsigned int type   = (ARG1(variantnum) &  SUBCMDMASK);
+	unsigned int subcmd = (ARG1(variantnum) >> SUBCMDSHIFT);
+	
+	std::string device = "(null)";
+	if (ARG2(variantnum))
+		device = rw::read_string(variants[variantnum].variantpid, (void*) ARG2(variantnum));
+
+	std::string group_or_user = (type == USRQUOTA) 
+		? getTextualUserId(ARG3(variantnum)) 
+		: getTextualGroupId(ARG3(variantnum));
+
+	switch(subcmd)
+	{
+		/* id is a quota format - addr ignored */
+		case Q_QUOTAON:
+		{
+			debugf("%s - SYS_QUOTACTL(%s, %s, %s, %s)\n", 
+				   call_get_variant_pidstr(variantnum).c_str(),
+				   getTextualQuotactlType(type),
+				   getTextualQuotactlCmd(subcmd),
+				   device.c_str(),
+				   getTextualQuotactlFmt(ARG3(variantnum)));
+			break;
+		}
+		/* id and addr ignored */
+		case Q_QUOTAOFF:
+		case Q_SYNC:
+		case Q_XQUOTARM:
+		{
+			debugf("%s - SYS_QUOTACTL(%s, %s, %s)\n", 
+				   call_get_variant_pidstr(variantnum).c_str(),
+				   getTextualQuotactlType(type),
+				   getTextualQuotactlCmd(subcmd),
+				   device.c_str());
+			break;
+		}
+		/* id is a group or user */
+		case Q_GETQUOTA:
+		case Q_SETQUOTA:
+		case Q_XQUOTAON:
+		case Q_XQUOTAOFF:
+		case Q_XGETQUOTA:
+		case Q_XSETQLIM:
+		case Q_XGETQSTAT:
+		{
+			debugf("%s - SYS_QUOTACTL(%s, %s, %s, %d = %s, 0x" PTRSTR ")\n", 
+				   call_get_variant_pidstr(variantnum).c_str(),
+				   getTextualQuotactlType(type),
+				   getTextualQuotactlCmd(subcmd),
+				   device.c_str(),
+				   (int)ARG3(variantnum),
+				   group_or_user.c_str(),
+				   (unsigned long)ARG4(variantnum));
+			break;
+		}
+		/* id ignored */
+		case Q_GETINFO:
+		case Q_SETINFO:
+		case Q_GETFMT:
+		{
+			debugf("%s - SYS_QUOTACTL(%s, %s, %s, 0x" PTRSTR ")\n", 
+				   call_get_variant_pidstr(variantnum).c_str(),
+				   getTextualQuotactlType(type),
+				   getTextualQuotactlCmd(subcmd),
+				   device.c_str(),
+				   (unsigned long)ARG4(variantnum));
+			break;
+		}
+		/* special and id ignored */
+#ifdef Q_GETSTATS
+		case Q_GETSTATS:
+		{
+			debugf("%s - SYS_QUOTACTL(%s, %s, 0x" PTRSTR ")\n", 
+				   call_get_variant_pidstr(variantnum).c_str(),
+				   getTextualQuotactlType(type),
+				   getTextualQuotactlCmd(subcmd),
+				   (unsigned long)ARG4(variantnum));
+			break;
+		}
+#endif
+	}
+}
+
 PRECALL(quotactl)
 {
     CHECKARG(1);
@@ -3177,12 +3485,38 @@ PRECALL(quotactl)
         /* The addr and id arguments are ignored. */
         case Q_SYNC:
         case Q_QUOTAOFF:
+		case Q_XQUOTARM:
         {
             break;
         }
+		/* addr is a pointer to an unsigned int */
+		case Q_XQUOTAON:
+		case Q_XQUOTAOFF:
+		{
+			CHECKARG(3);
+			CHECKPOINTER(4);
+			CHECKBUFFER(4, sizeof(unsigned int));
+			break;
+		}
+		/* addr is a pointer to an fs_disk_quota structure */
+		case Q_XGETQUOTA:
+		case Q_XGETQSTAT:
+		{
+			CHECKARG(3);
+			CHECKPOINTER(4);
+			break;
+		}
+		/* addr is a pointer to an fs_disk_quota structure */
+		case Q_XSETQLIM:
+		{
+			CHECKARG(3);
+			CHECKPOINTER(4);
+			CHECKBUFFER(4, sizeof(struct fs_disk_quota));
+			break;
+		}
         default:
         {
-            cache_mismatch_info("unknown sys_quotactl subcommand: %d - FIXME!\n", subcmd);
+            cache_mismatch_info("unknown sys_quotactl subcommand: %u - FIXME!\n", subcmd);
             return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
         }
     }
@@ -3223,9 +3557,9 @@ LOG_ARGS(socket)
 {
 	debugf("%s - SYS_SOCKET(%d = %s, %d = %s, %d = %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), getTextualSocketFamily(ARG1(variantnum)),
-		   ARG2(variantnum), getTextualSocketType(ARG2(variantnum)).c_str(),
-		   ARG3(variantnum), getTextualSocketProtocol(ARG3(variantnum)));
+		   (int)ARG1(variantnum), getTextualSocketFamily(ARG1(variantnum)),
+		   (int)ARG2(variantnum), getTextualSocketType(ARG2(variantnum)).c_str(),
+		   (int)ARG3(variantnum), getTextualSocketProtocol(ARG3(variantnum)));
 }
 
 PRECALL(socket)
@@ -3273,9 +3607,9 @@ LOG_ARGS(bind)
 
 	debugf("%s - SYS_BIND(%d, %s, %d)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   text_addr.c_str(), 
-		   ARG3(variantnum));
+		   (int)ARG3(variantnum));
 }
 
 PRECALL(bind)
@@ -3308,9 +3642,9 @@ LOG_ARGS(connect)
 
 	debugf("%s - SYS_CONNECT(%d, %s, %d)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   text_addr.c_str(), 
-		   ARG3(variantnum));
+		   (int)ARG3(variantnum));
 }
 
 PRECALL(connect)
@@ -3341,8 +3675,8 @@ LOG_ARGS(listen)
 {
 	debugf("%s - SYS_LISTEN(%d, %d)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum));
+		   (int)ARG1(variantnum), 
+		   (int)ARG2(variantnum));
 }
 
 PRECALL(listen)
@@ -3360,8 +3694,8 @@ LOG_ARGS(getsockname)
 {
 	debugf("%s - SYS_GETSOCKNAME(%d, 0x" PTRSTR ")\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum));
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum));
 }
 
 PRECALL(getsockname)
@@ -3387,8 +3721,8 @@ LOG_ARGS(getpeername)
 {
 	debugf("%s - SYS_GETPEERNAME(%d, 0x" PTRSTR ")\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum));
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum));
 }
 
 PRECALL(getpeername)
@@ -3414,9 +3748,9 @@ LOG_ARGS(socketpair)
 {
 	debugf("%s - SYS_SOCKETPAIR(%d = %s, %d = %s, %d = %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), getTextualSocketFamily(ARG1(variantnum)),
-		   ARG2(variantnum), getTextualSocketType(ARG2(variantnum)).c_str(),
-		   ARG3(variantnum), getTextualSocketProtocol(ARG3(variantnum)));
+		   (int)ARG1(variantnum), getTextualSocketFamily(ARG1(variantnum)),
+		   (int)ARG2(variantnum), getTextualSocketType(ARG2(variantnum)).c_str(),
+		   (int)ARG3(variantnum), getTextualSocketProtocol(ARG3(variantnum)));
 }
 
 PRECALL(socketpair)
@@ -3512,13 +3846,14 @@ LOG_ARGS(sendto)
 	GETTEXTADDRDIRECT(variantnum, text_addr, 5, ARG6(variantnum));
 	auto buf_str = call_serialize_io_buffer(variantnum, (const unsigned char*) ARG2(variantnum), ARG3(variantnum));
 
-	debugf("%s - SYS_SENDTO(%d, " PTRSTR " (%s), %d, %d = %s, 0x" PTRSTR " (%s), %d)\n",
+	debugf("%s - SYS_SENDTO(%d, " PTRSTR " (%s), %ld, %u = %s, 0x" PTRSTR " (%s), %d)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), ARG2(variantnum), buf_str.c_str(),
-		   ARG3(variantnum),
-		   ARG4(variantnum), getTextualSocketMsgFlags(ARG4(variantnum)).c_str(),
-		   ARG5(variantnum), text_addr.c_str(),
-		   ARG6(variantnum));
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), buf_str.c_str(),
+		   (size_t)ARG3(variantnum),
+		   (unsigned int)ARG4(variantnum), getTextualSocketMsgFlags(ARG4(variantnum)).c_str(),
+		   (unsigned long)ARG5(variantnum), text_addr.c_str(),
+		   (int)ARG6(variantnum));
 }
  
 PRECALL(sendto)
@@ -3566,13 +3901,22 @@ PRECALL(send)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(recvfrom)
 {
-	debugf("%s - SYS_RECVFROM(%d, " PTRSTR ", %d, %d = %s, 0x" PTRSTR ", %d)\n",
+	int len; 
+	
+	if (!rw::read_primitive(variants[variantnum].variantpid, (void*) ARG6(variantnum), len))
+	{
+		warnf("Couldn't read recvfrom len\n");
+		return;
+	}
+
+	debugf("%s - SYS_RECVFROM(%d, " PTRSTR ", %ld, %u = %s, 0x" PTRSTR ", %d)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), ARG2(variantnum),
-		   ARG3(variantnum),
-		   ARG4(variantnum), getTextualSocketMsgFlags(ARG4(variantnum)).c_str(),
-		   ARG5(variantnum),
-		   ARG6(variantnum));
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum),
+		   (size_t)ARG3(variantnum),
+		   (unsigned int)ARG4(variantnum), getTextualSocketMsgFlags(ARG4(variantnum)).c_str(),
+		   (unsigned long)ARG5(variantnum),
+		   len);
 }
 
 PRECALL(recvfrom)
@@ -3600,8 +3944,8 @@ LOG_ARGS(shutdown)
 {
 	debugf("%s - SYS_SHUTDOWN(%d, %d = %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
+		   (int)ARG1(variantnum), 
+		   (int)ARG2(variantnum), 
 		   getTextualSocketShutdownHow(ARG2(variantnum)));
 }
 
@@ -3622,11 +3966,11 @@ LOG_ARGS(setsockopt)
 
 	debugf("%s - SYS_SETSOCKOPT(%d, %d, %d, %s, %d)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum),
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
+		   (int)ARG1(variantnum),
+		   (int)ARG2(variantnum), 
+		   (int)ARG3(variantnum), 
 		   str.c_str(), 
-		   ARG5(variantnum));
+		   (int)ARG5(variantnum));
 }
 
 PRECALL(setsockopt)
@@ -3648,11 +3992,11 @@ LOG_ARGS(getsockopt)
 {
 	debugf("%s - SYS_GETSOCKOPT(%d, %d, %d, 0x" PTRSTR ", 0x" PTRSTR ")\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum), 
-		   ARG5(variantnum));
+		   (int)ARG1(variantnum), 
+		   (int)ARG2(variantnum), 
+		   (int)ARG3(variantnum), 
+		   (unsigned long)ARG4(variantnum), 
+		   (unsigned long)ARG5(variantnum));
 }
 
 PRECALL(getsockopt)
@@ -3686,12 +4030,12 @@ LOG_ARGS(sendmsg)
 
 	auto msg_str = call_serialize_msgvector(variantnum, &msg);
 
-	debugf("%s - SYS_SENDMSG(%d, 0x" PTRSTR " (%s), %d = %s)\n",
+	debugf("%s - SYS_SENDMSG(%d, 0x" PTRSTR " (%s), %u = %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
 		   msg_str.c_str(),
-		   ARG3(variantnum), 
+		   (unsigned int)ARG3(variantnum), 
 		   getTextualSocketMsgFlags(ARG3(variantnum)).c_str());
 }
 
@@ -3710,12 +4054,12 @@ PRECALL(sendmsg)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(sendmmsg)
 {
-	debugf("%s - SYS_SENDMMSG(%d, 0x" PTRSTR ", %d, %d = %s)\n",
+	debugf("%s - SYS_SENDMMSG(%d, 0x" PTRSTR ", %u, %u = %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum),
-		   ARG4(variantnum), 
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum),  // TODO: Serialize and dump vector contents?
+		   (unsigned int)ARG3(variantnum),
+		   (unsigned int)ARG4(variantnum), 
 		   getTextualSocketMsgFlags(ARG4(variantnum)).c_str());
 }
 
@@ -3742,11 +4086,11 @@ POSTCALL(sendmmsg)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(recvmsg)
 {
-	debugf("%s - SYS_RECVMSG(%d, 0x" PTRSTR ", %d = %s)\n",
+	debugf("%s - SYS_RECVMSG(%d, 0x" PTRSTR ", %u = %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
+		   (unsigned int)ARG3(variantnum), 
 		   getTextualSocketMsgFlags(ARG3(variantnum)).c_str());
 }
 
@@ -3769,7 +4113,7 @@ LOG_RETURN(recvmsg)
 	}
 
 	auto _msg = call_serialize_msgvector(variantnum, &msg);
-	debugf("%s - SYS_RECVMSG return: %d - %s\n", 
+	debugf("%s - SYS_RECVMSG return: %ld - %s\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   call_postcall_get_variant_result(variantnum), 
 		   _msg.c_str());
@@ -3786,6 +4130,37 @@ POSTCALL(recvmsg)
   unsigned int vlen, unsigned int flags,
   struct timespec __user * timeout)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(recvmmsg)
+{
+	struct timespec timeout;
+	std::stringstream timestr;
+
+	if (ARG5(variantnum))
+	{
+		if (!rw::read_struct(variants[variantnum].variantpid, (void*) ARG5(variantnum), sizeof(struct timespec), &timeout))
+		{
+			warnf("%s - couldn't read timeout\n",
+				  call_get_variant_pidstr(variantnum).c_str());
+			return;
+		}
+
+		timestr << "TIMEOUT: " << timeout.tv_sec << std::setw(9) << std::setfill('0') << timeout.tv_nsec << std::setw(0) << " s";
+	}
+	else
+	{
+		timestr << "TIMEOUT: none";
+	}
+
+	debugf("%s - SYS_RECVMMSG(%d, 0x" PTRSTR ", %u, %u = %s, %s)\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum),  // TODO: Serialize and dump vector contents?
+		   (unsigned int)ARG3(variantnum),
+		   (unsigned int)ARG4(variantnum), 
+		   getTextualSocketMsgFlags(ARG4(variantnum)).c_str(),
+		   timestr.str().c_str());
+}
+
 PRECALL(recvmmsg)
 {
     CHECKFD(1);
@@ -3812,10 +4187,10 @@ LOG_ARGS(accept4)
 {
 	debugf("%s - SYS_ACCEPT4(%d, 0x" PTRSTR ", 0x" PTRSTR ", %d = %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum), 
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
+		   (unsigned long)ARG3(variantnum), 
+		   (int)ARG4(variantnum), 
 		   getTextualSocketType(ARG4(variantnum)).c_str());
 }
 
@@ -3888,9 +4263,9 @@ POSTCALL(accept4)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(eventfd2)
 {
-	debugf("%s - SYS_EVENTFD2(%d, %d = %s)\n",
+	debugf("%s - SYS_EVENTFD2(%u, %d = %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (unsigned int)ARG1(variantnum), 
 		   (int)ARG2(variantnum), 
 		   getTextualEventFdFlags((int)ARG2(variantnum)));
 }
@@ -4158,10 +4533,10 @@ LOG_ARGS(wait4)
 {
 	debugf("%s - SYS_WAIT4(%d, 0x" PTRSTR ", %d, 0x" PTRSTR ")\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum));
+		   (pid_t)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
+		   (int)ARG3(variantnum), 
+		   (unsigned long)ARG4(variantnum));
 }
 
 PRECALL(wait4)
@@ -4211,9 +4586,9 @@ LOG_ARGS(shmat)
 {
 	debugf("%s - SYS_SHMAT(%d, 0x" PTRSTR ", %d (= %s))\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
+		   (int)ARG3(variantnum), 
 		   getTextualShmFlags(ARG3(variantnum)).c_str());
 }
 
@@ -4412,6 +4787,13 @@ LOG_RETURN(ipc)
 /*-----------------------------------------------------------------------------
   sys_fsync - (unsigned int fd)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(fsync)
+{
+	debugf("%s - SYS_FSYNC(%u)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (unsigned int)ARG1(variantnum));
+}
+
 PRECALL(fsync)
 {
     CHECKFD(1);
@@ -4426,8 +4808,14 @@ PRECALL(fsync)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_sigreturn -
+  sys_sigreturn - (unsigned long unused)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(rt_sigreturn)
+{
+	debugf("%s - SYS_RT_SIGRETURN()\n", 
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 CALL(rt_sigreturn)
 {
     if (variants[0].callnumbackup == __NR_rt_sigsuspend
@@ -4530,11 +4918,11 @@ TODO: Verify/Further documentation
 -----------------------------------------------------------------------------*/
 LOG_ARGS(mprotect)
 {
-	debugf("%s - SYS_MPROTECT(0x" PTRSTR ", 0x" PTRSTR ", 0x%08X = %s)\n",
+	debugf("%s - SYS_MPROTECT(0x" PTRSTR ", %ld, " PTRSTR " = %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
+		   (unsigned long)ARG1(variantnum), 
+		   (size_t)ARG2(variantnum), 
+		   (unsigned long)ARG3(variantnum), 
 		   getTextualProtectionFlags(ARG3(variantnum)).c_str());
 }
 
@@ -4548,7 +4936,7 @@ PRECALL(mprotect)
 
 LOG_RETURN(mprotect)
 {
-	debugf("%s - SYS_MPROTECT return: %d\n", 
+	debugf("%s - SYS_MPROTECT return: %ld\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   call_postcall_get_variant_result(variantnum));
 }
@@ -4733,6 +5121,12 @@ POSTCALL(mprotect)
 /*-----------------------------------------------------------------------------
   sys_getpgid
 -----------------------------------------------------------------------------*/
+LOG_ARGS(getpgid)
+{
+	debugf("%s - SYS_GETPGID()\n",
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 PRECALL(getpgid)
 {
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
@@ -4741,6 +5135,14 @@ PRECALL(getpgid)
 /*-----------------------------------------------------------------------------
   sys_capget - (cap_user_header_t header, cap_user_data_t dataptr)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(capget)
+{
+	debugf("%s - SYS_CAPGET(0x" PTRSTR ", 0x" PTRSTR ")\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned long)ARG1(variantnum),
+		   (unsigned long)ARG2(variantnum));
+}
+
 PRECALL(capget)
 {
     CHECKPOINTER(1);
@@ -4760,6 +5162,13 @@ POSTCALL(capget)
 /*-----------------------------------------------------------------------------
   sys_fchdir - (unsigned int fd)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(fchdir)
+{
+	debugf("%s - SYS_FCHDIR(%u)\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned int)ARG1(variantnum));
+}
+
 PRECALL(fchdir)
 {
     CHECKFD(1);
@@ -4786,13 +5195,13 @@ POSTCALL(fchdir)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(_llseek)
 {
-	debugf("%s - SYS_LLSEEK(%d, %ld, %ld, 0x" PTRSTR ", %d)\n", 
+	debugf("%s - SYS_LLSEEK(%u, %lu, %lu, 0x" PTRSTR ", %u)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum), 
-		   ARG5(variantnum));
+		   (unsigned int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
+		   (unsigned long)ARG3(variantnum), 
+		   (unsigned long)ARG4(variantnum), 
+		   (unsigned int)ARG5(variantnum));
 }
 
 PRECALL(_llseek)
@@ -4822,6 +5231,15 @@ POSTCALL(_llseek)
   sys_getdents - (unsigned int fd,
   struct linux_dirent __user * dirent, unsigned int count)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(getdents)
+{
+	debugf("%s - SYS_GETDENTS(%u, 0x" PTRSTR ", %u)\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned int)ARG1(variantnum),
+		   (unsigned long)ARG2(variantnum),
+		   (unsigned int)ARG3(variantnum));
+}
+
 PRECALL(getdents)
 {
     CHECKPOINTER(2);
@@ -4851,11 +5269,11 @@ LOG_ARGS(select)
 {
 	debugf("%s - SYS_SELECT(%d, 0x" PTRSTR ", 0x" PTRSTR ", 0x" PTRSTR ", 0x" PTRSTR ")\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum), 
-		   ARG5(variantnum));
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
+		   (unsigned long)ARG3(variantnum), 
+		   (unsigned long)ARG4(variantnum), 
+		   (unsigned long)ARG5(variantnum));
 }
 
 PRECALL(select)
@@ -4893,10 +5311,10 @@ POSTCALL(select)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(msync)
 {
-	debugf("%s - SYS_MSYNC(0x" PTRSTR ", %d, %s)\n", 
+	debugf("%s - SYS_MSYNC(0x" PTRSTR ", %ld, %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
+		   (unsigned long)ARG1(variantnum), 
+		   (long)ARG2(variantnum), 
 		   getTextualMSyncFlags(ARG3(variantnum)).c_str());
 }
 
@@ -4947,6 +5365,15 @@ PRECALL(msync)
   sys_readv - (unsigned long  fd, const struct iovec  *  vec,
   unsigned long  vlen)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(readv)
+{
+	debugf("%s - SYS_READV(%lu, 0x" PTRSTR ", %lu)\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned long)ARG1(variantnum),
+		   (unsigned long)ARG2(variantnum),
+		   (unsigned long)ARG3(variantnum));
+}
+
 PRECALL(readv)
 {
     CHECKPOINTER(2);
@@ -4975,11 +5402,11 @@ POSTCALL(readv)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(writev)
 {
-	debugf("%s - SYS_WRITEV(%d, 0x" PTRSTR ", %d)\n", 
+	debugf("%s - SYS_WRITEV(%lu, 0x" PTRSTR ", %lu)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum));
+		   (unsigned long)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
+		   (unsigned long)ARG3(variantnum));
 
 	struct iovec* vec = new(std::nothrow) struct iovec[ARG3(variantnum)];
 
@@ -5015,6 +5442,13 @@ PRECALL(writev)
 /*-----------------------------------------------------------------------------
   sys_fdatasync - (unsigned int fd)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(fdatasync)
+{
+	debugf("%s - SYS_FDATASYNC(%u)\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned int)ARG1(variantnum));
+}
+
 PRECALL(fdatasync)
 {
     CHECKFD(1);
@@ -5031,6 +5465,12 @@ PRECALL(fdatasync)
 /*-----------------------------------------------------------------------------
   sys_sched_yield
 -----------------------------------------------------------------------------*/
+LOG_ARGS(sched_yield)
+{
+	debugf("%s - SYS_SCHED_YIELD()\n",
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 GET_CALL_TYPE(sched_yield)
 {
     return MVEE_CALL_TYPE_UNSYNCED;
@@ -5039,24 +5479,52 @@ GET_CALL_TYPE(sched_yield)
 /*-----------------------------------------------------------------------------
   sys_nanosleep - (const struct timespec* req, struct timespec* rem)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(nanosleep)
+{
+	struct timespec req;
+	std::stringstream timestr;
+
+	if (ARG2(variantnum))
+	{
+		if (!rw::read_struct(variants[variantnum].variantpid, (void*) ARG2(variantnum), sizeof(struct timespec), &req))
+		{
+			warnf("%s - couldn't read req\n",
+				  call_get_variant_pidstr(variantnum).c_str());
+			return;
+		}
+
+		timestr << "REQ: " << timeout.tv_sec << std::setw(9) << std::setfill('0') << timeout.tv_nsec << std::setw(0) << " s";
+	}
+	else
+	{
+		timestr << "REQ: none";
+	}
+
+	debugf("%s - SYS_NANOSLEEP(%s, 0x" PTRSTR ")\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   timestr.str().c_str(),
+		   (unsigned long)ARG2(variantnum));
+}
+
 GET_CALL_TYPE(nanosleep)
 {
     return MVEE_CALL_TYPE_UNSYNCED;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_mremap - unsigned long, addr, unsigned long, old_len,
-  unsigned long, new_len, unsigned long, flags,
-  unsigned long, new_addr
+  sys_mremap - (unsigned long addr, unsigned long old_len,
+  unsigned long new_len, unsigned long flags,
+  unsigned long new_addr)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(mremap)
 {
-	debugf("%s - SYS_MREMAP(0x" PTRSTR ", %d, %d, 0x" PTRSTR ", 0x" PTRSTR ")\n",
+	debugf("%s - SYS_MREMAP(0x" PTRSTR ", %lu, %lu, 0x" PTRSTR ", 0x" PTRSTR ")\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum));
+		   (unsigned long)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
+		   (unsigned long)ARG3(variantnum), 
+		   (unsigned long)ARG4(variantnum),
+		   (unsigned long)ARG5(variantnum));
 }
 
 PRECALL(mremap)
@@ -5099,7 +5567,7 @@ POSTCALL(mremap)
             else
             {
                 warnf("remap range not found: 0x" PTRSTR "-0x" PTRSTR "\n",
-                            ARG1(i), ARG1(i) + ARG2(i));
+					  (unsigned long)ARG1(i), (unsigned long)(ARG1(i) + ARG2(i)));
                 shutdown(false);
             }
 
@@ -5114,7 +5582,7 @@ LOG_RETURN(mremap)
 {
 	debugf("%s - SYS_MREMAP return: 0x" PTRSTR "\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   call_postcall_get_variant_result(variantnum));
+		   (unsigned long)call_postcall_get_variant_result(variantnum));
 
 #ifdef MVEE_MMAN_DEBUG
     set_mmap_table->print_mmap_table();
@@ -5126,11 +5594,11 @@ LOG_RETURN(mremap)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(poll)
 {
-	debugf("%s - SYS_POLL(0x" PTRSTR ", %d, %d)\n", 
+	debugf("%s - SYS_POLL(0x" PTRSTR ", %u, %ld)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum));
+		   (unsigned long)ARG1(variantnum), 
+		   (unsigned int)ARG2(variantnum), 
+		   (long)ARG3(variantnum));
 }
 
 PRECALL(poll)
@@ -5146,7 +5614,9 @@ LOG_RETURN(poll)
 {
 	long result  = call_postcall_get_variant_result(variantnum);
 
-	debugf("%s - SYS_POLL return: %d\n", call_get_variant_pidstr(variantnum).c_str(), result);
+	debugf("%s - SYS_POLL return: %ld\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   result);
 
 	for (unsigned int j = 0; j < result; ++j)
 	{
@@ -5175,6 +5645,17 @@ POSTCALL(poll)
   sys_prctl - (int option, unsigned long arg2, unsigned long arg3,
   unsigned long arg4, unsigned long arg5)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(prctl)
+{
+	debugf("%s - SYS_PRCTL(%d, %lu, %lu, %lu, %lu)\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (int)ARG1(variantnum),
+		   (unsigned long)ARG2(variantnum),
+		   (unsigned long)ARG3(variantnum),
+		   (unsigned long)ARG4(variantnum),
+		   (unsigned long)ARG5(variantnum));
+}
+
 PRECALL(prctl)
 {
     // TODO: not all arguments are always used here, comparing unused args may cause false positives
@@ -5304,7 +5785,7 @@ LOG_ARGS(rt_sigprocmask)
 {
 	debugf("%s - SYS_RT_SIGPROCMASK(%s, 0x" PTRSTR " - %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   getTextualSigHow(ARG1(variantnum)), ARG2(variantnum), 
+		   getTextualSigHow(ARG1(variantnum)), (unsigned long)ARG2(variantnum), 
 		   getTextualSigSet(call_get_sigset(variantnum, (void*) ARG2(variantnum), OLDCALLIFNOT(__NR_rt_sigprocmask))).c_str());
 }
 
@@ -5372,12 +5853,12 @@ POSTCALL(rt_sigprocmask)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(pread64)
 {
-	debugf("%s - SYS_PREAD64(%d, 0x" PTRSTR ", %d, %d)\n",
+	debugf("%s - SYS_PREAD64(%u, 0x" PTRSTR ", %ld, %ld)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum));
+		   (unsigned int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
+		   (size_t)ARG3(variantnum), 
+		   (loff_t)ARG4(variantnum));
 }
 
 PRECALL(pread64)
@@ -5401,7 +5882,7 @@ LOG_RETURN(pread64)
 	long result  = call_postcall_get_variant_result(variantnum);
 	auto result_str = call_serialize_io_buffer(variantnum, (const unsigned char*) ARG2(variantnum), result);
 	
-	debugf("%s - SYS_PREAD64 RETURN: %d => %s\n", 
+	debugf("%s - SYS_PREAD64 RETURN: %ld => %s\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   result, 
 		   result_str.c_str());
@@ -5421,12 +5902,12 @@ LOG_ARGS(pwrite64)
 {
 	auto buf_str = call_serialize_io_buffer(variantnum, (const unsigned char*) ARG2(variantnum), ARG3(variantnum));
 
-	debugf("%s - SYS_PWRITE64(%d, %s, %d, %d)\n", 
+	debugf("%s - SYS_PWRITE64(%u, %s, %ld, %ld)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (unsigned int)ARG1(variantnum), 
 		   buf_str.c_str(), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum));
+		   (size_t)ARG3(variantnum), 
+		   (loff_t)ARG4(variantnum));
 }
 
 PRECALL(pwrite64)
@@ -5455,11 +5936,11 @@ LOG_ARGS(chown)
 	auto user = getTextualUserId(ARG2(variantnum));
 	auto group = getTextualGroupId(ARG3(variantnum));
 
-	debugf("%s - SYS_CHOWN(%s, %ld - %s, %ld - %s)\n", 
+	debugf("%s - SYS_CHOWN(%s, %u - %s, %u - %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   str1.c_str(), 
-		   ARG2(variantnum), user.c_str(),
-		   ARG3(variantnum), group.c_str());
+		   (uid_t)ARG2(variantnum), user.c_str(),
+		   (gid_t)ARG3(variantnum), group.c_str());
 }
 
 PRECALL(chown)
@@ -5478,6 +5959,18 @@ PRECALL(chown)
 /*-----------------------------------------------------------------------------
   sys_fchown - (int fd, uid_t user, gid_t group)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(fchown)
+{
+	auto user = getTextualUserId(ARG2(variantnum));
+	auto group = getTextualGroupId(ARG3(variantnum));
+
+	debugf("%s - SYS_FCHOWN(%d, %u - %s, %u - %s)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (int)ARG1(variantnum), 
+		   (uid_t)ARG2(variantnum), user.c_str(),
+		   (gid_t)ARG3(variantnum), group.c_str());
+}
+
 PRECALL(fchown)
 {
     CHECKFD(1);
@@ -5496,6 +5989,14 @@ PRECALL(fchown)
 /*-----------------------------------------------------------------------------
   sys_getcwd - (char* buf, int buflen)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(getcwd)
+{
+	debugf("%s - SYS_GETCWD(0x" PTRSTR ", %d)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (unsigned long)ARG1(variantnum), 
+		   (int)ARG2(variantnum));
+}
+
 PRECALL(getcwd)
 {
     CHECKPOINTER(1);
@@ -5506,7 +6007,7 @@ PRECALL(getcwd)
 /*-----------------------------------------------------------------------------
   sys_getrlimit - (unsigned int  resource, struct rlimit  *  rlim)
 -----------------------------------------------------------------------------*/
-PRECALL(ugetrlimit)
+PRECALL(getrlimit)
 {
     CHECKPOINTER(2);
     CHECKARG(1);
@@ -5523,12 +6024,12 @@ LOG_ARGS(mmap)
 {
 	debugf("%s - SYS_MMAP(0x" PTRSTR ", %lu, %s, %s, %d, %lu)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum),
+		   (unsigned long)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum),
 		   getTextualProtectionFlags(ARG3(variantnum)).c_str(),
 		   getTextualMapType(ARG4(variantnum)).c_str(), 
 		   (int)ARG5(variantnum), 
-		   ARG6(variantnum));
+		   (unsigned long)ARG6(variantnum));
 }
 
 #ifdef MVEE_ENABLE_VALGRIND_HACKS
@@ -5761,7 +6262,9 @@ POSTCALL(mmap)
 				}
 
 				info->original_file_size = _st.st_size;
-				warnf("size for: %s - %d bytes\n", info->paths[0].c_str(), _st.st_size);
+				warnf("size for: %s - %ld bytes\n", 
+					  info->paths[0].c_str(), 
+					  _st.st_size);
 			}
 		}
 
@@ -5943,7 +6446,7 @@ LOG_ARGS(truncate64)
 	debugf("%s - SYS_TRUNCATE64(%s, %ld)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   str1.c_str(), 
-		   ARG2(variantnum));
+		   (loff_t)ARG2(variantnum));
 }
 
 PRECALL(truncate64)
@@ -6100,10 +6603,10 @@ POSTCALL(lstat64)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(fstat)
 {
-	debugf("%s - SYS_FSTAT(%d, 0x" PTRSTR ")\n",
+	debugf("%s - SYS_FSTAT(%lu, 0x" PTRSTR ")\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum));
+		   (unsigned long)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum));
 }
 
 PRECALL(fstat)
@@ -6182,10 +6685,10 @@ POSTCALL(fstat)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(fstat64)
 {
-	debugf("%s - SYS_FSTAT64(%d, 0x" PTRSTR ")\n", 
+	debugf("%s - SYS_FSTAT64(%lu, 0x" PTRSTR ")\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum));
+		   (unsigned long)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum));
 }
 
 PRECALL(fstat64)
@@ -6264,10 +6767,10 @@ GET_CALL_TYPE(madvise)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(shmget)
 {
-	debugf("%s - SYS_SHMGET(%s, %d, %s)\n", 
+	debugf("%s - SYS_SHMGET(%s, %ld, %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   getTextualIpcShmKey(ARG1(variantnum)).c_str(), 
-		   ARG2(variantnum),
+		   (size_t)ARG2(variantnum),
 		   getTextualIpcShmFlags(ARG3(variantnum)).c_str());
 }
 
@@ -6347,8 +6850,8 @@ LOG_ARGS(gettid)
 					  err.msg,
 					  getTextualAllocResult(err.alloc_type, err.msg),
 					  err.chunksize,
-					  err.ar_ptr,
-					  err.chunk_ptr
+					  (unsigned long)err.ar_ptr,
+					  (unsigned long)err.chunk_ptr
 					);
 			}
 		}
@@ -6363,8 +6866,8 @@ LOG_ARGS(gettid)
 					  err.msg,
 					  getTextualAllocResult(err.alloc_type, err.msg),
 					  err.chunksize,
-					  err.ar_ptr,
-					  err.chunk_ptr
+					  (unsigned long)err.ar_ptr,
+					  (unsigned long)err.chunk_ptr
 					);
 			}
 			shutdown(false);
@@ -6372,7 +6875,7 @@ LOG_ARGS(gettid)
 		else if (ARG3(variantnum) == 76)
 		{
 			warnf("[PID:%05d] - [INTERPOSER_DATA_SIZE_MISMATCH] - [POS:%d] - [SLOT_SIZE:%d] - [DATA_SIZE:%d]\n",
-				  variants[variantnum].variantpid, ARG4(variantnum), ARG5(variantnum), ARG6(variantnum));
+				  variants[variantnum].variantpid, (int)ARG4(variantnum), (int)ARG5(variantnum), (int)ARG6(variantnum));
 			shutdown(false);
 		}
 	}
@@ -6400,24 +6903,24 @@ CALL(gettid)
 		if (ARG3(i) == 10)
 		{
 			warnf("[PID:%05d] - [LIBC_LOCK_BUFFER_ATTACHED:0x" PTRSTR "]\n",
-				  variants[i].variantpid, ARG4(i));
+				  variants[i].variantpid, (unsigned long)ARG4(i));
 		}
 		if (ARG3(i) == 59)
 		{
 			warnf("[PID:%05d] - [INVALID_LOCK_TYPE=>READ:%d (%s) - EXPECTED:%d (%s)]\n",
-				  variants[i].variantpid, ARG4(i), getTextualAtomicType(ARG4(i)),
-				  ARG5(i), getTextualAtomicType(ARG5(i)));
+				  variants[i].variantpid, (int)ARG4(i), getTextualAtomicType(ARG4(i)),
+				  (int)ARG5(i), getTextualAtomicType(ARG5(i)));
 			shutdown(false);
 		}
 		else if (ARG3(i) == 60)
 		{
 			warnf("[PID:%05d] - [INVALID_LOCK_TYPE] - [SLOT_SIZE:%d] - TMPPOS:%d\n",
-				  variants[i].variantpid, ARG4(i), ARG5(i));
+				  variants[i].variantpid, (int)ARG4(i), (int)ARG5(i));
 		}
 		else if (ARG3(i) == 61)
 		{
 			warnf("[PID:%05d] - [INVALID_LOCK_PTR] - [SLAVE_PTR:0x" PTRSTR "] - TMPPOS:%d\n",
-				  variants[i].variantpid, ARG4(i), ARG5(i));
+				  variants[i].variantpid, (unsigned long)ARG4(i), (int)ARG5(i));
 			shutdown(false);
 			
 		}
@@ -6427,7 +6930,7 @@ CALL(gettid)
 			std::string actual_callee = set_mmap_table->get_caller_info(i, variants[i].variantpid, ARG6(i));
 
 			warnf("[PID:%05d] - [INVALID_LOCK_CALLEE] - [LOCK_TYPE:%d (%s)] - [MASTER CALLEE:%s] - [ACTUAL CALLEE:%s]\n",
-				  variants[i].variantpid, ARG4(i), getTextualAtomicType(ARG4(i)),
+				  variants[i].variantpid, (int)ARG4(i), getTextualAtomicType(ARG4(i)),
 				  master_callee.c_str(), actual_callee.c_str());
 
 			shutdown(false);
@@ -6473,12 +6976,12 @@ LOG_ARGS(setxattr)
 	auto path  = rw::read_string(variants[variantnum].variantpid, (void*) ARG1(variantnum));
 	auto name  = rw::read_string(variants[variantnum].variantpid, (void*) ARG2(variantnum));
 
-	debugf("%s - SYS_SETXATTR(%s, %s, %d, 0x" PTRSTR ", %d, %s)\n",
+	debugf("%s - SYS_SETXATTR(%s, %s, 0x" PTRSTR ", %ld, %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   path.c_str(), 
 		   name.c_str(), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum), 
+		   (unsigned long)ARG3(variantnum), 
+		   (size_t)ARG4(variantnum), 
 		   getTextualXattrFlags(ARG5(variantnum)));
 }
 
@@ -6507,12 +7010,12 @@ LOG_ARGS(fsetxattr)
 {
 	auto name  = rw::read_string(variants[variantnum].variantpid, (void*) ARG2(variantnum));
 
-	debugf("%s - SYS_FSETXATTR(%d, %s, %d, 0x" PTRSTR ", %d, %s)\n",
+	debugf("%s - SYS_FSETXATTR(%d, %s, 0x" PTRSTR ", %ld, %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   name.c_str(), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum), 
+		   (unsigned long)ARG3(variantnum), 
+		   (size_t)ARG4(variantnum), 
 		   getTextualXattrFlags(ARG5(variantnum)));
 }
 
@@ -6544,12 +7047,12 @@ LOG_ARGS(getxattr)
 	auto path = rw::read_string(variants[variantnum].variantpid, (void*) ARG1(variantnum));
 	auto name = rw::read_string(variants[variantnum].variantpid, (void*) ARG2(variantnum));
 
-	debugf("%s - SYS_GETXATTR(%s, %s, %d, 0x" PTRSTR ", %d)\n",
+	debugf("%s - SYS_GETXATTR(%s, %s, 0x" PTRSTR ", %ld)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   path.c_str(), 
 		   name.c_str(), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum));
+		   (unsigned long)ARG3(variantnum), 
+		   (size_t)ARG4(variantnum));
 }
 
 PRECALL(getxattr)
@@ -6581,12 +7084,12 @@ LOG_ARGS(fgetxattr)
 {
 	auto name = rw::read_string(variants[variantnum].variantpid, (void*) ARG2(variantnum));
 
-	debugf("%s - SYS_FGETXATTR(%d, %s, %d, 0x" PTRSTR ", %d)\n",
+	debugf("%s - SYS_FGETXATTR(%d, %s, 0x" PTRSTR ", %ld)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   name.c_str(), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum));
+		   (unsigned long)ARG3(variantnum), 
+		   (size_t)ARG4(variantnum));
 }
 
 PRECALL(fgetxattr)
@@ -6618,14 +7121,14 @@ POSTCALL(fgetxattr)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(futex)
 {
-	debugf("%s - SYS_FUTEX(0x" PTRSTR ", %s, %d, 0x" PTRSTR ", 0x" PTRSTR ", %d)\n",
+	debugf("%s - SYS_FUTEX(0x" PTRSTR ", %s, %u, 0x" PTRSTR ", 0x" PTRSTR ", %u)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum),
+		   (unsigned long)ARG1(variantnum),
 		   getTextualFutexOp(ARG2(variantnum)), 
-		   ARG3(variantnum),
-		   ARG4(variantnum), 
-		   ARG5(variantnum),
-		   ARG6(variantnum));
+		   (unsigned int)ARG3(variantnum),
+		   (unsigned long)ARG4(variantnum), 
+		   (unsigned long)ARG5(variantnum),
+		   (unsigned int)ARG6(variantnum));
 }
 
 PRECALL(futex)
@@ -6702,10 +7205,10 @@ LOG_ARGS(sched_setaffinity)
 		return;
 	}
 
-	debugf("%s - SYS_SCHED_SETAFFINITY(%d, %d, %s)\n",
+	debugf("%s - SYS_SCHED_SETAFFINITY(%d, %ld, %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum),
-		   ARG2(variantnum), 
+		   (pid_t)ARG1(variantnum),
+		   (size_t)ARG2(variantnum), 
 		   getTextualCPUSet(&mask).c_str());
 }
 
@@ -6750,8 +7253,8 @@ PRECALL(sched_setaffinity)
 				if (modified_mask)
 				{
 #ifndef MVEE_BENCHMARK
-					debugf("manipulated virtual CPU mask for the variant: %d - %s\n", i,
-                           getTextualCPUSet(&available_cores).c_str());
+					debugf("manipulated virtual CPU mask for the variant: %d - %s\n", 
+						   i, getTextualCPUSet(&available_cores).c_str());
 #endif
 					if (!rw::write_data(variants[i].variantpid, (void*) ARG3(i), ARG2(i), &available_cores))
 						warnf("Couldn't write cpu_set_t\n");
@@ -6836,7 +7339,7 @@ LOG_ARGS(epoll_create)
 {
 	debugf("%s - SYS_EPOLL_CREATE(%d)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum));
+		   (int)ARG1(variantnum));
 }
 
 PRECALL(epoll_create)
@@ -6958,7 +7461,7 @@ LOG_ARGS(clock_gettime)
 	debugf("%s - SYS_CLOCK_GETTIME(%s, 0x" PTRSTR ")\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   getTextualTimerType(ARG1(variantnum)), 
-		   ARG2(variantnum));
+		   (unsigned long)ARG2(variantnum));
 }
 
 PRECALL(clock_gettime)
@@ -6984,7 +7487,7 @@ LOG_ARGS(statfs)
 	debugf("%s - SYS_STATFS(%s, 0x" PTRSTR ")\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   str1.c_str(), 
-		   ARG2(variantnum));
+		   (unsigned long)ARG2(variantnum));
 }
 
 PRECALL(statfs)
@@ -7015,8 +7518,8 @@ LOG_ARGS(statfs64)
 	debugf("%s - SYS_STATFS64(%s, %ld, 0x" PTRSTR ")\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   str1.c_str(), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum));
+		   (size_t)ARG2(variantnum), 
+		   (unsigned long)ARG3(variantnum));
 }
 
 PRECALL(statfs64)
@@ -7130,10 +7633,10 @@ LOG_ARGS(epoll_wait)
 {
 	debugf("%s - SYS_EPOLL_WAIT(%d, 0x" PTRSTR ", %d, %d)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum),
-		   ARG2(variantnum),
-		   ARG3(variantnum),
-		   ARG4(variantnum));
+		   (int)ARG1(variantnum),
+		   (unsigned long)ARG2(variantnum),
+		   (int)ARG3(variantnum),
+		   (int)ARG4(variantnum));
 }
 
 PRECALL(epoll_wait)
@@ -7149,7 +7652,7 @@ LOG_RETURN(epoll_wait)
 {
 	long result  = call_postcall_get_variant_result(variantnum);
 
-	debugf("%s - SYS_EPOLL_WAIT return: %d\n", 
+	debugf("%s - SYS_EPOLL_WAIT return: %ld\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   result);
 
@@ -7249,9 +7752,9 @@ LOG_ARGS(epoll_ctl)
 
 	debugf("%s - SYS_EPOLL_CTL(%d, %s, %d, %s, ID = 0x" PTRSTR ")\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum),
+		   (int)ARG1(variantnum),
 		   getTextualEpollOp(ARG2(variantnum)),
-		   ARG3(variantnum),
+		   (int)ARG3(variantnum),
 		   events.c_str(),
 		   (unsigned long)event.data.ptr);
 }
@@ -7304,9 +7807,9 @@ LOG_ARGS(tgkill)
 {
 	debugf("%s - SYS_TGKILL(%d, %d, %d = %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
+		   (int)ARG1(variantnum), 
+		   (int)ARG2(variantnum), 
+		   (int)ARG3(variantnum), 
 		   getTextualSig(ARG3(variantnum)));
 }
 
@@ -7380,11 +7883,11 @@ LOG_ARGS(waitid)
 {
 	debugf("%s - SYS_WAITID(%d, %d, 0x" PTRSTR ", 0x" PTRSTR ", 0x" PTRSTR ")\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum), 
-		   ARG5(variantnum));
+		   (int)ARG1(variantnum), 
+		   (pid_t)ARG2(variantnum), 
+		   (unsigned long)ARG3(variantnum), 
+		   (unsigned long)ARG4(variantnum), 
+		   (unsigned long)ARG5(variantnum));
 }
 
 PRECALL(waitid)
@@ -7471,7 +7974,7 @@ LOG_ARGS(inotify_add_watch)
 
 	debugf("%s - SYS_INOTIFY_ADD_WATCH(%d, %s, %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   str1.c_str(), 
 		   mask.c_str());
 }
@@ -7507,10 +8010,10 @@ LOG_ARGS(openat)
 
 	debugf("%s - SYS_OPENAT(%d, %s, 0x%08X (%s), 0x%08X (%s))\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   filename.c_str(), 		   
-		   ARG3(variantnum), getTextualFileFlags(ARG3(variantnum)).c_str(),
-		   ARG4(variantnum), getTextualFileMode(ARG4(variantnum) & S_FILEMODEMASK).c_str());
+		   (int)ARG3(variantnum), getTextualFileFlags(ARG3(variantnum)).c_str(),
+		   (int)ARG4(variantnum), getTextualFileMode(ARG4(variantnum) & S_FILEMODEMASK).c_str());
 }
 
 PRECALL(openat)
@@ -7633,7 +8136,7 @@ LOG_ARGS(mkdirat)
 
 	debugf("%s - SYS_MKDIRAT(%d, %s, %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   str1.c_str(), 
 		   mode.c_str());
 }
@@ -7667,10 +8170,10 @@ LOG_ARGS(newfstatat)
 
 	debugf("%s - SYS_NEWFSTATAT(%d, %s, 0x" PTRSTR ", 0x%08X)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   path.c_str(), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum));
+		   (unsigned long)ARG3(variantnum), 
+		   (unsigned int)ARG4(variantnum));
 }
 
 PRECALL(newfstatat)
@@ -7703,10 +8206,10 @@ LOG_ARGS(fstatat64)
 
 	debugf("%s - SYS_FSTATAT64(%d, %s, 0x" PTRSTR ", 0x%08X)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   path.c_str(), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum));
+		   (unsigned long)ARG3(variantnum), 
+		   (unsigned int)ARG4(variantnum));
 }
 
 PRECALL(fstatat64)
@@ -7736,7 +8239,7 @@ LOG_RETURN(fstatat64)
 		return;
 	}
 	debugf("%s - SYS_FSTATAT64 return\n", 
-		   variants[variantnum].variantpid);
+		   call_get_variant_pidstr(variantnum).c_str());
 
 	switch (sb.st_mode & S_IFMT) {
 		case S_IFBLK:  debugf("File type:                block device\n");            break;
@@ -7786,7 +8289,7 @@ LOG_ARGS(unlinkat)
 
 	debugf("%s - SYS_UNLINKAT(%d, %s, %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   str1.c_str(), 
 		   flags.c_str());
 }
@@ -7822,9 +8325,9 @@ LOG_ARGS(renameat)
 
 	debugf("%s - SYS_RENAMEAT(%d, %s, %d, %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   str1.c_str(), 
-		   ARG3(variantnum), 
+		   (int)ARG3(variantnum), 
 		   str2.c_str());
 }
 
@@ -7865,9 +8368,9 @@ LOG_ARGS(linkat)
 
 	debugf("%s - SYS_LINKAT(%d, %s, %d, %s, %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   str1.c_str(), 
-		   ARG3(variantnum), 
+		   (int)ARG3(variantnum), 
 		   str2.c_str(), 
 		   flags.c_str());
 }
@@ -7908,7 +8411,7 @@ LOG_ARGS(symlinkat)
 	debugf("%s - SYS_SYMLINKAT(%s, %d, %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   str1.c_str(), 
-		   ARG2(variantnum), 
+		   (int)ARG2(variantnum), 
 		   str2.c_str());
 }
 
@@ -7944,10 +8447,10 @@ LOG_ARGS(readlinkat)
 
 	debugf("%s - SYS_READLINKAT(%d, %s, 0x" PTRSTR", %ld)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   str1.c_str(), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum));
+		   (unsigned long)ARG3(variantnum), 
+		   (size_t)ARG4(variantnum));
 }
 
 PRECALL(readlinkat)
@@ -7985,7 +8488,7 @@ LOG_ARGS(fchmodat)
 
 	debugf("%s - SYS_FCHMODAT(%d, %s, %s, %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   str1.c_str(), 
 		   mode.c_str(), 
 		   flags.c_str());
@@ -8015,13 +8518,12 @@ LOG_ARGS(faccessat)
 {
 	auto str1 = rw::read_string(variants[variantnum].variantpid, (void*)ARG2(variantnum));
 
-	debugf("%s - SYS_FACCESSAT(%d, %s, 0x%08X = %s, 0x%08x)\n",
+	debugf("%s - SYS_FACCESSAT(%d, %s, 0x%08X = %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   str1.c_str(), 
-		   ARG3(variantnum),
-		   getTextualAccessMode(ARG3(variantnum)).c_str(), 
-		   ARG4(variantnum));
+		   (unsigned int)ARG3(variantnum),
+		   getTextualAccessMode(ARG3(variantnum)).c_str());
 }
 
 PRECALL(faccessat)
@@ -8051,7 +8553,7 @@ LOG_ARGS(unshare)
 {
 	debugf("%s - SYS_UNSHARE(%d)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum));
+		   (int)ARG1(variantnum));
 }
 
 PRECALL(unshare)
@@ -8122,7 +8624,7 @@ LOG_ARGS(utimensat)
 
 	debugf("%s - SYS_UTIMENSAT(%d, %s, %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum),
+		   (int)ARG1(variantnum),
 		   str1.c_str(),
 		   timestr.str().c_str());
 }
@@ -8189,8 +8691,8 @@ LOG_ARGS(timerfd_create)
 {
 	debugf("%s - SYS_TIMERFD_CREATE(%d (%s), %d (%s))\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), getTextualTimerType(ARG1(variantnum)),
-		   ARG2(variantnum), getTextualTimerFlags(ARG2(variantnum)).c_str());
+		   (int)ARG1(variantnum), getTextualTimerType(ARG1(variantnum)),
+		   (int)ARG2(variantnum), getTextualTimerFlags(ARG2(variantnum)).c_str());
 }
 
 PRECALL(timerfd_create)
@@ -8305,10 +8807,10 @@ POSTCALL(timerfd_gettime)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(dup3)
 {
-	debugf("%s - SYS_DUP3(%d, %d, %s)\n", 
+	debugf("%s - SYS_DUP3(%u, %u, %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
+		   (unsigned int)ARG1(variantnum), 
+		   (unsigned int)ARG2(variantnum), 
 		   getTextualFileFlags(ARG3(variantnum)).c_str());
 }
 
@@ -8502,10 +9004,10 @@ LOG_ARGS(perf_event_open)
 {
 	debugf("%s - SYS_PERF_EVENT_OPEN(0x" PTRSTR ", %d, %d, %d, %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum), 
+		   (unsigned long)ARG1(variantnum), 
+		   (pid_t)ARG2(variantnum), 
+		   (int)ARG3(variantnum), 
+		   (int)ARG4(variantnum), 
 		   getTextualPerfFlags(ARG5(variantnum)).c_str());
 }
 
@@ -8577,7 +9079,7 @@ PRECALL(seccomp)
 		case SECCOMP_SET_MODE_FILTER:
 			break;
 		default:
-			warnf("unknown seccomp option used: %d\n", ARG1(0));
+			warnf("unknown seccomp option used: %d\n", (int)ARG1(0));
 			return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
 
 	}

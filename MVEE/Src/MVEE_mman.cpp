@@ -716,7 +716,7 @@ int mmap_table::foreach_region
 
         if (infos_found != mvee::numvariants)
         {
-            warnf("only found %d regions while iterating over ranges:\n");
+            warnf("only found %d regions while iterating over ranges:\n", infos_found);
             for (int i = 0; i < mvee::numvariants; ++i)
             {
                 warnf("> variant %d range: 0x" PTRSTR "-0x" PTRSTR "\n", i, addresses[i], addresses[i] + size);

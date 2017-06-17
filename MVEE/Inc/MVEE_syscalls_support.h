@@ -550,7 +550,7 @@
             {															\
 				if (ARG ## numarg(0) != info->fds[i])					\
 				{														\
-					debugf("%s - mapped fd %lu to fd %lu\n", call_get_variant_pidstr(i).c_str(), ARG ## numarg(0), info->fds[i]); \
+					debugf("%s - mapped fd %llu to fd %lu\n", call_get_variant_pidstr(i).c_str(), ARG ## numarg(0), info->fds[i]); \
 					call_overwrite_arg_value(i, numarg, info->fds[i], true); \
 				}														\
             }															\

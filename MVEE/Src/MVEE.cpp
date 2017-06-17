@@ -488,7 +488,7 @@ bool mvee::os_try_update_shmmax()
 
 #ifndef MVEE_BENCHMARK
     unsigned long shmmax         = std::stoul(mvee::log_read_from_proc_pipe("sysctl kernel.shmmax | cut -d' ' -f3 | tr -d '\\n'", NULL));
-    debugf("current kernel.shmmax = %d\n", shmmax);
+    debugf("current kernel.shmmax = %lu\n", shmmax);
     debugf("===> trying to adjust kernel.shmmax\n");
 #endif
 

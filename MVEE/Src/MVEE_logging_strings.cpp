@@ -31,6 +31,8 @@
 #include <linux/hw_breakpoint.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
+#include <asm/prctl.h>
+#include <linux/dqblk_xfs.h>
 #include "MVEE.h"
 #include "MVEE_monitor.h"
 #include "MVEE_logging.h"
@@ -42,6 +44,7 @@
 #include "MVEE_memory.h"
 #include "MVEE_filedesc.h"
 #include "MVEE_interaction.h"
+#include <linux/quota.h>
 
 /*-----------------------------------------------------------------------------
     Flag Check Macro
@@ -148,9 +151,9 @@ const char* getTextualSigHow(int how)
 }
 
 /*-----------------------------------------------------------------------------
-    getTextualRequest
+    getTextualPtraceRequest
 -----------------------------------------------------------------------------*/
-const char* getTextualRequest(unsigned int request)
+const char* getTextualPtraceRequest(unsigned int request)
 {
     const char* result = "PTRACE_UNKNOWN";
 
@@ -1298,6 +1301,122 @@ const char* getTextualErrno(int err)
 		default:
 			result = strerror(err);
 			break;
+	}
+
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualIntervalTimerType
+-----------------------------------------------------------------------------*/
+const char* getTextualIntervalTimerType(int which)
+{
+	const char* result = "Unknown Timer Type";
+
+	switch (which)
+	{
+		DEF_CASE(ITIMER_REAL);
+		DEF_CASE(ITIMER_VIRTUAL);
+		DEF_CASE(ITIMER_PROF);
+	}
+
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualArchPrctl
+-----------------------------------------------------------------------------*/
+const char* getTextualArchPrctl(int code)
+{
+	const char* result = "UNKNOWN";
+
+	switch (code)
+	{
+		DEF_CASE(ARCH_SET_FS);
+		DEF_CASE(ARCH_GET_FS);
+		DEF_CASE(ARCH_SET_GS);
+		DEF_CASE(ARCH_GET_GS);
+	}
+
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualRusageWho
+-----------------------------------------------------------------------------*/
+const char* getTextualRusageWho(int who)
+{
+	const char* result = "UNKNOWN";
+
+	switch (who)
+	{
+		DEF_CASE(RUSAGE_SELF);
+		DEF_CASE(RUSAGE_CHILDREN);
+		DEF_CASE(RUSAGE_THREAD);
+	}
+
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualQuotactlType
+-----------------------------------------------------------------------------*/
+const char* getTextualQuotactlType(int type)
+{
+	const char* result = "UNKNOWN";
+
+	switch (type)
+	{
+		DEF_CASE(USRQUOTA);
+		DEF_CASE(GRPQUOTA);
+	}
+
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualQuotactlCmd
+-----------------------------------------------------------------------------*/
+const char* getTextualQuotactlCmd(int cmd)
+{
+	const char* result = "Q_UNKNOWN";
+
+	switch (cmd)
+	{
+		DEF_CASE(Q_QUOTAON);
+		DEF_CASE(Q_QUOTAOFF);
+		DEF_CASE(Q_GETQUOTA);
+		DEF_CASE(Q_SETQUOTA);
+		DEF_CASE(Q_GETINFO);
+		DEF_CASE(Q_SETINFO);
+		DEF_CASE(Q_GETFMT);
+		DEF_CASE(Q_SYNC);
+#ifdef Q_GETSTATS
+		DEF_CASE(Q_GETSTATS);
+#endif
+		DEF_CASE(Q_XQUOTAON);
+		DEF_CASE(Q_XQUOTAOFF);
+		DEF_CASE(Q_XGETQUOTA);
+		DEF_CASE(Q_XSETQLIM);
+		DEF_CASE(Q_XGETQSTAT);
+		DEF_CASE(Q_XQUOTARM);
+	}
+
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualQuotactlFmt
+-----------------------------------------------------------------------------*/
+const char* getTextualQuotactlFmt(unsigned long fmt)
+{
+	const char* result = "QFMT_UNKNOWN";
+
+	switch (fmt)
+	{
+		DEF_CASE(QFMT_VFS_OLD);
+		DEF_CASE(QFMT_VFS_V0);
+		DEF_CASE(QFMT_VFS_V1);
 	}
 
 	return result;

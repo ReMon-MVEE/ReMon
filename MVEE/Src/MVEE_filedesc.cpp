@@ -80,7 +80,7 @@ void fd_info::print_fd_info ()
     SERIALIZEVECTOR(fds, fd_vector);
     debugf("> fds          = %s\n",         fd_vector.c_str());
 	debugf("> paths        = %s\n",         get_path_string().c_str());
-    debugf("> flags        = 0x%04X, %s\n", access_flags, getTextualFileFlags(access_flags).c_str());
+    debugf("> flags        = 0x%04X, %s\n", (unsigned int)access_flags, getTextualFileFlags(access_flags).c_str());
     debugf("> cloexec      = %s\n",         close_on_exec ? "true" : "false");
     debugf("> master file  = %s\n",         master_file ? "true" : "false");
 	debugf("> unsynced     = %s\n",         unsynced_access ? "true" : "false");
@@ -422,7 +422,7 @@ std::map<unsigned long, fd_info>::iterator fd_table::free_fd_info (unsigned long
     auto it = table.find(fd);
     if (it != table.end())
     {
-        debugf("removed fd: %d (%s)\n", fd, it->second.get_path_string().c_str());
+        debugf("removed fd: %lu (%s)\n", fd, it->second.get_path_string().c_str());
         it = table.erase(it);
     }
 
@@ -430,7 +430,7 @@ std::map<unsigned long, fd_info>::iterator fd_table::free_fd_info (unsigned long
     auto epoll_it = epoll_map.find(fd);
     if (epoll_it != epoll_map.end())
     {
-        debugf("removed fd from epoll map: %d\n", fd);
+        debugf("removed fd from epoll map: %lu\n", fd);
         epoll_map.erase(epoll_it);
     }
 
@@ -439,7 +439,7 @@ std::map<unsigned long, fd_info>::iterator fd_table::free_fd_info (unsigned long
     {
         if (epoll_it->second.find(fd) != epoll_it->second.end())
         {
-            debugf("fd: %d was registered with epoll fd: %d\n", fd, epoll_it->first);
+            debugf("fd: %lu was registered with epoll fd: %lu\n", fd, epoll_it->first);
             epoll_it->second.erase(fd);
         }
     }
@@ -470,7 +470,7 @@ void fd_table::free_cloexec_fds ()
          */
         if (it->second.close_on_exec)
         {
-            debugf("removing cloexec fd: %d (%s)\n", it->second.fds[0], it->second.get_path_string().c_str());
+            debugf("removing cloexec fd: %lu (%s)\n", it->second.fds[0], it->second.get_path_string().c_str());
             it = free_fd_info(it->second.fds[0]);
         }
 		else
@@ -526,7 +526,7 @@ void fd_table::free_temporary_fd_info (int variantnum, unsigned long fd)
 	auto it = temporary_files[variantnum].find(fd);
     if (it != temporary_files[variantnum].end())
     {
-        debugf("removed fd: %d (%s)\n", fd, it->second.get_path_string().c_str());
+        debugf("removed fd: %lu (%s)\n", fd, it->second.get_path_string().c_str());
         temporary_files[variantnum].erase(it);
     }
 }
@@ -857,7 +857,7 @@ std::vector<unsigned long> fd_table::epoll_id_map(unsigned long epfd, unsigned l
         }
     }
 
-    warnf("couldn't map master id 0x" PTRSTR " to slave ids for epoll fd: %d\n", master_id, epfd);
+    warnf("couldn't map master id 0x" PTRSTR " to slave ids for epoll fd: %lu\n", master_id, epfd);
 
     std::vector<unsigned long> result(mvee::numvariants);
     for (int i = 0; i < mvee::numvariants; ++i)

@@ -398,8 +398,8 @@ dwarf_info::dwarf_info(std::string& file, int variantnum, pid_t variantpid, mmap
 
         if ((int)dwarf_data.dwarf_fd < 0 || !dwarf_elf)
         {
-            warnf("libelf error: trying to open file: %s (%d 0x%08x) - err: %s\n",
-                        region_info->region_backing_file_path.c_str(), dwarf_data.dwarf_fd, dwarf_elf, elf_errmsg(elf_errno()));
+            warnf("libelf error: trying to open file: %s (%d 0x" PTRSTR ") - err: %s\n",
+				  region_info->region_backing_file_path.c_str(), dwarf_data.dwarf_fd, (unsigned long)dwarf_elf, elf_errmsg(elf_errno()));
 
             info_valid = false;
             return;
@@ -613,7 +613,7 @@ int mmap_table::dwarf_step (int variantnum, pid_t variantpid, mvee_dwarf_context
     if (!found_region)
     {
         warnf("DWARF: couldn't map EIP " PTRSTR " to a known region for variant: %d (pid: %d)\n",
-                    IP_IN_REGS(context->regs), variantnum, variantpid);
+			  (unsigned long)IP_IN_REGS(context->regs), variantnum, variantpid);
         goto out;
     }
 
