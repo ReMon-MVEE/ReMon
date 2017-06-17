@@ -5493,7 +5493,7 @@ LOG_ARGS(nanosleep)
 			return;
 		}
 
-		timestr << "REQ: " << timeout.tv_sec << std::setw(9) << std::setfill('0') << timeout.tv_nsec << std::setw(0) << " s";
+		timestr << "REQ: " << req.tv_sec << std::setw(9) << std::setfill('0') << req.tv_nsec << std::setw(0) << " s";
 	}
 	else
 	{
@@ -6001,16 +6001,6 @@ PRECALL(getcwd)
 {
     CHECKPOINTER(1);
     CHECKARG(2);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
-}
-
-/*-----------------------------------------------------------------------------
-  sys_getrlimit - (unsigned int  resource, struct rlimit  *  rlim)
------------------------------------------------------------------------------*/
-PRECALL(getrlimit)
-{
-    CHECKPOINTER(2);
-    CHECKARG(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
