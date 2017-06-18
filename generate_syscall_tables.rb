@@ -37,7 +37,7 @@ File.open(@unistd).each { |line|
 }
 
 File.open("MVEE/Src/MVEE_syscalls_handlers.cpp").each { |line|
-  if line.match(/^(GET_CALL_TYPE|PRECALL|LOG_ARGS|LOG_RETURN|POSTCALL|CALL)\([[:graph:]]*\)/)
+  if line.match(/(GET_CALL_TYPE|PRECALL|LOG_ARGS|LOG_RETURN|POSTCALL|CALL)\([[:graph:]]*\)/)
     syscall     = line.split("(")[1].split(")")[0]
     handlertype = line.match(/(GET_CALL_TYPE|PRECALL|LOG_ARGS|LOG_RETURN|POSTCALL|CALL)/)[1]
     notneeded   = line.match(/DONTNEED/)

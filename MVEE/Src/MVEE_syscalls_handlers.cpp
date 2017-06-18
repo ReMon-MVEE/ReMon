@@ -330,12 +330,6 @@ GET_CALL_TYPE(restart_syscall)
     return MVEE_CALL_TYPE_UNSYNCED;
 }
 
-LOG_ARGS(restart_syscall)
-{
-	debugf("%s - SYS_RESTART_SYSCALL() - NOTE: This marks the return from a signal handler. This syscall will not return!\n", 
-		   call_get_variant_pidstr(variantnum).c_str());
-}
-
 /*-----------------------------------------------------------------------------
   sys_exit - terminates the calling thread. Note that sys_exit and exit(3) have
   different semantics. exit(3) is a wrapper around sys_exit_group, which 
