@@ -96,6 +96,12 @@ class fd_table;
 class sighand_table;
 class writeback_info;
 
+struct raven_syscall_info
+{
+	long max_unchecked_syscalls;
+	long unchecked_syscalls[1];
+};
+
 class mvee_pending_signal
 {
 public:
@@ -151,6 +157,48 @@ public:
 	bool          fast_forward_to_entry_point;                      // Are we dispatching all syscalls as unsynced calls until we reach the entry point?
 	bool          entry_point_bp_set;                               // Have we set the breakpoint on the program entry point?
 	bool          have_overwritten_args;                            // Do we have any overwritten syscall args that need to be restored?
+
+	// 
+	// RAVEN syscall check toggling support.
+	//
+	// Variants can call sys_write(ESC_XCHECKS_OFF, syscall_info,
+	// syscall_info_size) to temporarily disable syscall checking for a set of
+	// syscalls specified in the @syscall_info struct.
+	//
+	// sys_write(ESC_XCHECKS_ON, NULL, 0) turns syscall checking back on.
+	//
+	// The @syscall_info struct has the following layout:
+	//
+	// struct syscall_info {
+	//    long max_unchecked_syscalls;
+	//    long unchecked_syscalls[];
+	// };
+	//
+	// The @syscall_info_size argument contains the size of the syscall_info
+	// struct (in bytes). If the syscall_info.unchecked_syscalls[] array
+	// contains 5 elements, then @syscall_info_size should be (5 + 1) *
+	// sizeof(long).
+	//
+	// After issuing this syscall, the MVEE will temporarily disable
+	// cross-checking for the issuing variant. In GHUMVEE-speak, this means that
+	// we will temporarily dispatch the issuing variant's syscalls as unsynced
+	// calls.
+	//
+	// We expect to see only the syscalls in syscall_info.unchecked_syscalls[]
+	// while checking is disabled. We also expect to see no more than
+	// syscall_info.max_unchecked_syscalls syscalls while checking is
+	// disabled.
+	//
+	// Two conditions can trigger divergence while checking is disabled: 
+	// * We see a syscall that is not in the syscall_info.unchecked_syscalls[]
+	// list.
+	// * We see more than syscall_info.max_unchecked_syscalls while checking
+	// is disabled.
+	// 
+	bool          syscall_checking_disabled;
+	long          max_unchecked_syscalls;
+	SYSCALL_MASK(unchecked_syscalls);
+	
 
     // ptmalloc2 heap allocation hacks
     //

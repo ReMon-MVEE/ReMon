@@ -72,6 +72,8 @@ variantstate::variantstate()
 	, fast_forward_to_entry_point (false)
 	, entry_point_bp_set (false)
     , have_overwritten_args (false)
+	, syscall_checking_disabled(false)
+	, max_unchecked_syscalls (0)
     , last_lower_region_start (0)
     , last_lower_region_size (0)
     , last_upper_region_start (0)
@@ -100,6 +102,7 @@ variantstate::variantstate()
     memset(hw_bps,      0, 4*sizeof(unsigned long));
     memset(hw_bps_type, 0, 4*sizeof(unsigned char));
     memset(tid_address, 0, 2*sizeof(void*));
+	SYSCALL_MASK_CLEAR(unchecked_syscalls);
 }
 
 /*-----------------------------------------------------------------------------

@@ -152,6 +152,44 @@ std::string mvee::upcase(const char* lower_case_string)
 }
 
 /*-----------------------------------------------------------------------------
+    mask_is_unchecked_syscall
+-----------------------------------------------------------------------------*/
+unsigned char mvee::mask_is_unchecked_syscall(unsigned char* mask, unsigned long syscall_no)
+{
+	unsigned long no_to_byte, bit_in_byte;
+
+	if (syscall_no > ROUND_UP(MAX_CALLS, 8))
+		return 0;
+
+	no_to_byte  = syscall_no / 8;
+	bit_in_byte = syscall_no % 8;
+
+	if (mask[no_to_byte] & (1 << (7 - bit_in_byte)))
+		return 1;
+	return 0;
+}
+
+/*-----------------------------------------------------------------------------
+    mask_set_unchecked_syscall
+-----------------------------------------------------------------------------*/
+void mvee::mask_set_unchecked_syscall(unsigned char* mask, unsigned long syscall_no, unsigned char unchecked)
+{
+	unsigned long no_to_byte, bit_in_byte;
+
+	if (syscall_no > ROUND_UP(MAX_CALLS, 8))
+		return;
+
+	no_to_byte  = syscall_no / 8;
+	bit_in_byte = syscall_no % 8;
+
+	if (unchecked)
+		mask[no_to_byte] |= (1 << (7 - bit_in_byte));
+	else
+		mask[no_to_byte] &= ~(1 << (7 - bit_in_byte));
+}
+
+
+/*-----------------------------------------------------------------------------
     mvee_old_sigset_to_new_sigset
 -----------------------------------------------------------------------------*/
 sigset_t mvee::old_sigset_to_new_sigset(unsigned long old_sigset)

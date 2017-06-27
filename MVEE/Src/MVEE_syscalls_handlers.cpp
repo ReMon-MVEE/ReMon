@@ -464,6 +464,14 @@ POSTCALL(read)
 /*-----------------------------------------------------------------------------
   sys_write - (unsigned int fd, const char * buf, unsigned long count)
 -----------------------------------------------------------------------------*/
+GET_CALL_TYPE(write)
+{
+	// RAVEN extended syscall support
+	if ((int)ARG1(variantnum) < 0)
+        return MVEE_CALL_TYPE_UNSYNCED;
+	return MVEE_CALL_TYPE_NORMAL;
+}
+
 LOG_ARGS(write)
 {
 	// writes to negative file descriptors are RAVEN pseudo-syscalls
@@ -516,6 +524,85 @@ PRECALL(write)
 	}
 
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+}
+
+CALL(write)
+{
+	if (IS_UNSYNCED_CALL && 
+		(int)ARG1(variantnum) < 0)
+	{
+		switch ((int)ARG1(variantnum))
+		{
+			case ESC_XCHECKS_OFF:
+			{
+				// Try to parse the syscall_info struct
+				if (ARG3(variantnum) > sizeof(long) &&
+					(ARG3(variantnum) % sizeof(long)) == 0)
+				{
+					unsigned char* raw_syscall_info = rw::read_data(variants[variantnum].variantpid,
+																	(void*) ARG2(variantnum),
+																	ARG3(variantnum));
+
+					if (raw_syscall_info)
+					{
+						struct raven_syscall_info* info = reinterpret_cast<struct raven_syscall_info*>(raw_syscall_info);
+						variants[variantnum].max_unchecked_syscalls = info->max_unchecked_syscalls;
+
+						debugf("%s - Requested %ld unchecked syscall invocations\n", 
+							   call_get_variant_pidstr(variantnum).c_str(), 
+							   variants[variantnum].max_unchecked_syscalls);
+
+						for (unsigned long i = 0; i < (ARG3(variantnum) - sizeof(long)) / sizeof(long); ++i)
+						{
+							debugf("%s - Unchecked syscall: %ld (%s)\n", 
+								   call_get_variant_pidstr(variantnum).c_str(), 
+								   info->unchecked_syscalls[i],
+								   getTextualSyscall(info->unchecked_syscalls[i]));
+							
+							SYSCALL_MASK_SET(variants[variantnum].unchecked_syscalls,
+											 info->unchecked_syscalls[i]);
+						}
+					}
+					else
+					{
+						warnf("%s - Malformed syscall_info struct or size arg for ESC_XCHECKS_OFF\n", 
+							  call_get_variant_pidstr(variantnum).c_str());
+
+						return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EINVAL);
+					}
+
+					SAFEDELETEARRAY(raw_syscall_info);
+					variants[variantnum].syscall_checking_disabled = true;				
+				}
+				else
+				{
+					warnf("%s - Malformed syscall_info struct or size arg for ESC_XCHECKS_OFF\n", 
+						   call_get_variant_pidstr(variantnum).c_str());
+					return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EINVAL);						
+				}
+
+				break;
+			}
+			case ESC_XCHECKS_ON:
+			{
+				variants[variantnum].syscall_checking_disabled = false;
+				SYSCALL_MASK_CLEAR(variants[variantnum].unchecked_syscalls);
+				break;
+			}
+			default:
+			{
+				warnf("%s - Unhandled write to negative file descriptor. This is probably a RAVEN extended syscall we have not implemented yet.\n", 
+					  call_get_variant_pidstr(variantnum).c_str());
+				warnf("%s - > fd: %d (%s)\n", call_get_variant_pidstr(variantnum).c_str(), 
+					  (int)ARG1(variantnum), getTextualRAVENCall((int)ARG1(variantnum)));
+				return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOSYS);
+			}
+		}
+
+		return MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
+	}
+
+	return MVEE_CALL_ALLOW;
 }
 
 /*-----------------------------------------------------------------------------
@@ -5675,22 +5762,6 @@ PRECALL(prctl)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-unsigned char ipmon_is_unchecked_syscall(unsigned char* mask, unsigned long syscall_no)
-{
-    unsigned long no_to_byte, bit_in_byte;
-
-    if (syscall_no > ROUND_UP(MAX_CALLS, 8))
-		return 0;
-
-    no_to_byte  = syscall_no / 8;
-    bit_in_byte = syscall_no % 8;
-
-    if (mask[no_to_byte] & (1 << (7 - bit_in_byte)))
-		return 1;
-    return 0;
-}
-
-
 CALL(prctl)
 {
     // check if the variants are trying to re-enable rdtsc
@@ -5703,13 +5774,17 @@ CALL(prctl)
 	{
 		// inspect the list of syscalls
 		unsigned char* ipmon_mask = rw::read_data(variants[0].variantpid, (void*) ARG2(0), ARG3(0));
+		SYSCALL_MASK(dummy_mask);
 
 		if (ipmon_mask)
 		{
-			if (ipmon_is_unchecked_syscall(ipmon_mask, __NR_mmap))
-				ipmon_mmap_handling = true;
-			if (ipmon_is_unchecked_syscall(ipmon_mask, __NR_open))
-				ipmon_fd_handling = true;
+			if (ARG3(0) >= sizeof(dummy_mask))
+			{
+				if (SYSCALL_MASK_ISSET(ipmon_mask, __NR_mmap))
+					ipmon_mmap_handling = true;
+				if (SYSCALL_MASK_ISSET(ipmon_mask, __NR_open))
+					ipmon_fd_handling = true;
+			}
 			
 			debugf("IP-MON handling mmap: %d - fd: %d\n", ipmon_mmap_handling, ipmon_fd_handling);
 

@@ -21,6 +21,7 @@
 #include <deque>
 #include <set>
 #include "MVEE_build_config.h"
+#include "MVEE_macros.h"
 #include <json/json.h>
 
 /*-----------------------------------------------------------------------------
@@ -58,6 +59,15 @@ public:
 -----------------------------------------------------------------------------*/
 #include "MVEE_numcalls.h" // defines MAX_CALLS
 #define NO_CALL   0x01000000
+
+/*-----------------------------------------------------------------------------
+  Syscall mask macros 
+-----------------------------------------------------------------------------*/
+#define SYSCALL_MASK(mask) 				    unsigned char mask[ROUND_UP(MAX_CALLS, 8) / 8]
+#define SYSCALL_MASK_CLEAR(mask) 			memset(mask, 0, ROUND_UP(MAX_CALLS, 8) / 8)
+#define SYSCALL_MASK_SET(mask, syscall) 	mvee::mask_set_unchecked_syscall(mask, syscall, 1)
+#define SYSCALL_MASK_UNSET(mask, syscall)   mvee::mask_set_unchecked_syscall(mask, syscall, 0)
+#define SYSCALL_MASK_ISSET(mask, syscall) 	mvee::mask_is_unchecked_syscall(mask, syscall)
 
 /*-----------------------------------------------------------------------------
     Global MVEE state
@@ -448,8 +458,14 @@ public:
     // Access to global state - This lock protects the public variables that may
     // be modified at run-time
     //
-    static void lock                        ();
-    static void unlock                      ();
+    static void                    lock ();
+    static void                    unlock ();
+
+	// 
+	// Syscall bitmask support 
+	//
+	static unsigned char           mask_is_unchecked_syscall  (unsigned char* mask, unsigned long syscall_no);
+	static void                    mask_set_unchecked_syscall (unsigned char* mask, unsigned long syscall_no, unsigned char unchecked);
     
     // *************************************************************************
     // Monitor settings and properties. All of these are initialized during

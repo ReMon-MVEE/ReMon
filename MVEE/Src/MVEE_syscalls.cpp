@@ -211,6 +211,27 @@ unsigned char monitor::call_precall_get_call_type (int variantnum, long callnum)
 		{
 			result = MVEE_CALL_TYPE_UNSYNCED;
 		}
+		// RAVEN syscall check toggling support
+		else if (variants[variantnum].syscall_checking_disabled)
+		{
+			if (--variants[variantnum].max_unchecked_syscalls < 0)
+			{
+				warnf("%s - exceeded maximum number of allowed unchecked syscalls\n",
+					  call_get_variant_pidstr(variantnum).c_str());
+				shutdown(false);
+			}
+			else if (!SYSCALL_MASK_ISSET(variants[variantnum].unchecked_syscalls, callnum))
+			{
+				warnf("%s - syscall %ld (%s) is not in the unchecked calls list\n",
+					  call_get_variant_pidstr(variantnum).c_str(),
+					  callnum, getTextualSyscall(callnum));
+				shutdown(false);
+			}
+			else
+			{
+				result = MVEE_CALL_TYPE_UNSYNCED;
+			}
+		}
 		else
 		{
 			handler = monitor::syscall_handler_table[callnum][MVEE_GET_CALL_TYPE];
