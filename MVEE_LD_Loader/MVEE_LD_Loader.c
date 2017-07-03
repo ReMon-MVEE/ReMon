@@ -29,7 +29,7 @@
 
 // we initialize everything to 1 to avoid the generation of a bss segment
 // bss segments are in the initial heap!!!
-unsigned char  interp_buf[256*1024] = {1};
+unsigned char  interp_buf[2*1024*1024] = {1};
 unsigned char* interp_mapped[256] = {(unsigned char*)1};
 char           initial_stack[8192] = { 1 };
 unsigned long  initial_stack_depth = 0;
@@ -436,6 +436,12 @@ int  main(int argc, char** argv, char** envp)
 #ifdef MVEE_DEBUG
     fprintf(stderr, "loaded interp - fd: %d - size: %d\n", interp_fd, statbuf.st_size);
 #endif
+
+	if (statbuf.st_size > sizeof(interp_buf))
+	{
+		fprintf(stderr, "cannot read interpreter - interp_buf size is too small\n");
+		return -1;
+	}
 
     int           read       = syscall(__NR_read, interp_fd, interp_buf, statbuf.st_size);
     if (statbuf.st_size != read)
