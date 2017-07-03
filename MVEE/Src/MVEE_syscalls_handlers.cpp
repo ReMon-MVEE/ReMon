@@ -6937,6 +6937,12 @@ LOG_ARGS(gettid)
 				  variants[variantnum].variantpid, (int)ARG4(variantnum), (int)ARG5(variantnum), (int)ARG6(variantnum));
 			shutdown(false);
 		}
+		else
+		{
+			debugf("[PID:%05d] - [UNKNOWN_DEBUG_EVENT:%d]\n",
+				   variants[variantnum].variantpid, (int)ARG3(variantnum));
+			log_variant_backtrace(variantnum);
+		}
 	}
 	else
 	{
