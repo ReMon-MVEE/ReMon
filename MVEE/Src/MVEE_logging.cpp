@@ -1040,7 +1040,7 @@ void monitor::log_stack(int variantnum)
 											   stack_word))
 			return;
 
-		debugf("stack[rsp + %lu] = " PTRSTR "\n", i*sizeof(unsigned long), stack_word);
+		debugf("stack[rsp + %ld] = " PTRSTR "\n", (long) i*sizeof(unsigned long), stack_word);
 	}
 #endif
 }
