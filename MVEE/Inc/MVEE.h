@@ -419,6 +419,12 @@ public:
 	//
 	static std::string   os_normalize_path_name      (std::string path);
 
+	//
+	// Find the unstripped version of an ELF file
+	//
+	static std::string   os_get_build_id             (const std::string& file);
+	static std::string   os_get_unstripped_binary    (const std::string& file);
+
     // *************************************************************************
     // Miscellaneous Support Functions
     // *************************************************************************
@@ -543,6 +549,12 @@ public:
 	//
     static std::map<std::string, std::weak_ptr<dwarf_info> >
                                     dwarf_cache;
+
+	//
+	// Cache that maps stripped ELF files onto corresponding unstripped files
+	//
+	static std::map<std::string, std::string>
+                                    unstripped_binaries_cache;
 
     //
     // We use this to coordinate the initial transfer of the variants' ptrace 

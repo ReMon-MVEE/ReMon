@@ -58,6 +58,7 @@ std::map<std::string, std::weak_ptr<mmap_addr2line_proc> >
                                        mvee::addr2line_cache;
 std::map<std::string, std::weak_ptr<dwarf_info> >
                                        mvee::dwarf_cache;
+std::map<std::string, std::string>     mvee::unstripped_binaries_cache;
 bool                                   mvee::should_garbage_collect              = false;
 std::vector<monitor*>                  mvee::monitor_gclist;
 std::map<pid_t, std::vector<pid_t> >   mvee::variant_pid_mapping;
@@ -341,7 +342,7 @@ std::shared_ptr<mmap_addr2line_proc> mvee::get_addr2line_proc(const std::string&
 }
 
 /*-----------------------------------------------------------------------------
-    mvee_mman_dwarf_find_info - we store weak pointers in the dwarf cache so
+    get_dwarf_info - we store weak pointers in the dwarf cache so
     there's always a chance that a dwarf_info we find in the cache has been
     invalidated
 
@@ -361,6 +362,65 @@ std::shared_ptr<dwarf_info> mvee::get_dwarf_info(const std::string& file)
     }
 
     return result;
+}
+
+/*-----------------------------------------------------------------------------
+    os_get_build_id - get the GNU build ID from the ELF notes section
+-----------------------------------------------------------------------------*/
+std::string mvee::os_get_build_id(const std::string& file)
+{
+	std::stringstream cmd;
+	cmd << "readelf -n " << file << " | grep \"Build ID:\" | cut -d':' -f2 | tr -d ' '";
+	return mvee::log_read_from_proc_pipe(cmd.str().c_str(), NULL);
+}
+
+/*-----------------------------------------------------------------------------
+    os_get_unstripped_binary - look for the unstripped version of the specified
+	ELF binary. Return "" if no such binary can be found in /usr/lib/debug
+-----------------------------------------------------------------------------*/
+std::string mvee::os_get_unstripped_binary(const std::string& file)
+{
+	// First, see if we've already done this lookup before
+	{
+		MutexLock lock(&mvee::global_lock);
+
+		auto it = mvee::unstripped_binaries_cache.find(file);
+		if (it != mvee::unstripped_binaries_cache.end())
+			return it->second;
+	}
+
+	// Not in the cache. Let's fetch the build ID and see if we
+	// can find a binary with a matching build ID and name in /usr/lib/debug
+	auto orig_build_id = mvee::os_get_build_id(file);
+
+	// Look for other unstripped versions of the binary now...
+	auto basename = file.substr(file.find_last_of('/'));
+	std::stringstream cmd;
+	cmd << "find /usr/lib/debug/* | grep " << basename;
+	std::stringstream binaries(mvee::log_read_from_proc_pipe(cmd.str().c_str(), NULL));
+	std::string binary;
+
+	while(std::getline(binaries, binary))
+	{
+		auto build_id = mvee::os_get_build_id(binary);
+
+		if (orig_build_id == build_id)
+		{
+			MutexLock lock(&mvee::global_lock);
+
+			auto it = mvee::unstripped_binaries_cache.find(file);
+			if (it == mvee::unstripped_binaries_cache.end())
+			{
+				debugf("Found unstripped version of ELF file\n");
+				debugf("> Original (stripped) file: %s\n", file.c_str());
+				debugf("> Unstripped file: %s\n", binary.c_str());
+				mvee::unstripped_binaries_cache.insert(std::make_pair(file, binary));
+			}
+			return binary;
+		}
+	}
+
+	return "";	
 }
 
 /*-----------------------------------------------------------------------------
