@@ -4,7 +4,7 @@ set -e
 ORIG_PWD=$(pwd)
 
 # Install the necessary ubuntu packages
-sudo apt-get install ruby gcc g++ libselinux-dev musl-tools libelf-dev libdwarf-dev libgmp-dev libmpfr-dev libmpc-dev libisl-dev libcloog-isl-dev libconfig-dev libcap-dev cmake bison flex git texinfo texi2html linux-headers-generic
+sudo apt-get install ruby gcc g++ libselinux-dev musl-tools libelf-dev libdwarf-dev libgmp-dev libmpfr-dev libmpc-dev libisl-dev libcloog-isl-dev libconfig-dev libcap-dev cmake bison flex git texinfo texi2html zlib1g-dev
 
 # Download & Install binutils
 if [ ! -e deps/binutils ]
@@ -37,7 +37,7 @@ if [ ! -e deps/llvm/build-tree ]
 then
 	mkdir -p deps/llvm/build-tree
 	cd deps/llvm/build-tree
-	cmake -DLLVM_TARGETS_TO_BUILD=X86 -DCMAKE_BUILD_TYPE=Release -DLLVM_BINUTILS_INCDIR=$ORIG_PWD/deps/binutils/include ..
+	cmake -DLLVM_TARGETS_TO_BUILD="X86;ARM" -DCMAKE_BUILD_TYPE=Release -DLLVM_BINUTILS_INCDIR=$ORIG_PWD/deps/binutils/include ..
 	make -j `getconf _NPROCESSORS_ONLN`
 	cd ../../../
 fi
