@@ -3,14 +3,8 @@
 #-----------------------------------------------------------------------------
 
 ifndef _ARCH
-  BITS := $(shell getconf LONG_BIT)
-  ifeq ($(BITS),32)
-    _ARCH := i386
-	_ALT_ARCH := i386
-  else
-    _ARCH := amd64
-	_ALT_ARCH := x86_64
-  endif
+  _ARCH := $(shell build_scripts/getmakearch.rb | grep "^ARCH" | cut -d':' -f2)
+  _ALT_ARCH := $(shell build_scripts/getmakearch.rb | grep "^ALT\_ARCH" | cut -d':' -f2)
   export _ARCH
   export _ALT_ARCH
 endif
@@ -47,7 +41,7 @@ STD_LDFLAGS  = deps/jsoncpp/build/src/lib_json/libjsoncpp.a deps/libdwarf/libdwa
 #-----------------------------------------------------------------------------
 
 OBJ := $(SRCS:%.cpp=$(MVEE_BUILD)/%.o)
-PRE_BUILD_TABLES := $(shell ./generate_syscall_tables.rb)
+PRE_BUILD_TABLES := $(shell build_scripts/generate_syscall_tables.rb)
 BIN = $(MVEE_OUT)/MVEE
 
 .PHONY: all clean 
