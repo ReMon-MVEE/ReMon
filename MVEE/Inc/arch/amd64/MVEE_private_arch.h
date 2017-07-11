@@ -12,14 +12,13 @@
 #include <sys/reg.h>
 
 /*-----------------------------------------------------------------------------
-  IP-MON Stuff
+  Architecture-specific features
 -----------------------------------------------------------------------------*/
-#define MVEE_SUPPORTS_IPMON
-
-/*-----------------------------------------------------------------------------
-  Hardware Breakpoint Support
------------------------------------------------------------------------------*/
-#define MVEE_HWBP_X86
+#define MVEE_ARCH_SUPPORTS_IPMON
+#define MVEE_ARCH_SUPPORTS_DISASSEMBLY
+#define MVEE_ARCH_HAS_X86_HWBP
+#define MVEE_ARCH_HAS_RDTSC
+#define MVEE_ARCH_HAS_ARCH_PRCTL
 
 /*-----------------------------------------------------------------------------
   SPEC PROFILES
@@ -86,6 +85,7 @@
 /*-----------------------------------------------------------------------------
   Register selection
 -----------------------------------------------------------------------------*/
+#define PTRACE_REGS struct user_regs_struct
 #define SYSCALL_INS_LEN            2
 
 //

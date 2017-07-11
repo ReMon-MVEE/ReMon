@@ -12,14 +12,13 @@
 #include <sys/reg.h>
 
 /*-----------------------------------------------------------------------------
-  IP-MON Stuff
+  Architecture-specific features
 -----------------------------------------------------------------------------*/
-//#define MVEE_SUPPORTS_IPMON
-
-/*-----------------------------------------------------------------------------
-  Hardware Breakpoint Support
------------------------------------------------------------------------------*/
-#define MVEE_HWBP_X86
+#define MVEE_ARCH_SUPPORTS_IPMON
+#define MVEE_ARCH_SUPPORTS_DISASSEMBLY
+#define MVEE_ARCH_HAS_X86_HWBP
+#define MVEE_ARCH_HAS_RDTSC
+#define MVEE_ARCH_HAS_ARCH_PRCTL
 
 /*-----------------------------------------------------------------------------
   SPEC PROFILES
@@ -52,8 +51,8 @@
 #define STDHEXSTR(w, x) std::setw(w) << std::hex << std::setfill('0') << (unsigned long)(x) << std::setfill(' ') << std::setw(0) << std::dec
 #define STDPTRSTR(x)    STDHEXSTR(8, x)
 #define LONGPTRSTR                 "%08lx"
-#define PTRSTR                     "%08x"
-#define LONGRESULTSTR              "%08d"
+#define PTRSTR                     "%08lx"
+#define LONGRESULTSTR              "%08ld"
 #define OBJDUMP_ARCH               "i386"
 #define OBJDUMP_SUBARCH            "i386"
 
@@ -78,6 +77,7 @@
 /*-----------------------------------------------------------------------------
   Register selection
 -----------------------------------------------------------------------------*/
+#define PTRACE_REGS struct user_regs_struct
 #define SYSCALL_INS_LEN            2
 
 #define SYSCALL_NO_REG_OFFSET      (ORIG_EAX * 4)
