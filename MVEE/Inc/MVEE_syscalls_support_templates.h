@@ -16,7 +16,7 @@
   The ARG<n> macros are platform-specific and implemented in MVEE_private_arch.h
 -----------------------------------------------------------------------------*/
 template<int N> constexpr 
-    unsigned long long int& arg(int variantnum)
+    unsigned long int& arg(int variantnum)
 {
 	switch(N)
 	{

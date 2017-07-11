@@ -408,7 +408,7 @@ bool monitor::call_compare_io_vectors(std::vector<struct iovec*>& addresses, siz
                     if ((!io || !master_io[j])
                         && (io || master_io[j]))
                     {
-                        warnf("couldn't read I/O vector data - iov_base @ 0x" PTRSTR " - len: %lu - j: %lu\n", 
+                        warnf("couldn't read I/O vector data - iov_base @ 0x" PTRSTR " - len: %u - j: %u\n", 
 							  (unsigned long)slave_vec[j].iov_base, len, j);
                         result = false;
                         goto out;
@@ -416,7 +416,7 @@ bool monitor::call_compare_io_vectors(std::vector<struct iovec*>& addresses, siz
 
                     if (memcmp(io, master_io[j], slave_vec[j].iov_len) != 0)
                     {
-                        warnf("I/O vector mismatch - content %lu - syscall: %ld (%s)\n",
+                        warnf("I/O vector mismatch - content %u - syscall: %ld (%s)\n",
                                     j, variants[0].callnum,
                                     getTextualSyscall(variants[0].callnum));
                         SAFEDELETEARRAY(io);
@@ -786,7 +786,7 @@ void monitor::call_replicate_msgvector(std::vector<struct msghdr*>& addresses, l
 
         if (!master_control)
         {
-            warnf("couldn't read control from master msgvector - msg_control: 0x" PTRSTR " - msg_controllen: %lu\n", 
+            warnf("couldn't read control from master msgvector - msg_control: 0x" PTRSTR " - msg_controllen: %u\n", 
 				  (unsigned long)hdrs[0].msg_control, variants[0].orig_controllen);
         }
 
@@ -1102,7 +1102,7 @@ std::string monitor::call_serialize_msgvector(int variantnum, struct msghdr* msg
         struct iovec* tmp    = new(std::nothrow) struct iovec[msg->msg_iovlen];
         if (!tmp)
         {
-            warnf("msgvector serialization failed - could not allocate memory - iovlen: %lu\n", msg->msg_iovlen);
+            warnf("msgvector serialization failed - could not allocate memory - iovlen: %u\n", msg->msg_iovlen);
             return "";
         }
         if (!rw::read_struct(variants[variantnum].variantpid, msg->msg_iov, sizeof(struct iovec) * msg->msg_iovlen, tmp))

@@ -23,6 +23,7 @@
 #include <vector>
 #include <map>
 #include "MVEE_build_config.h"
+#include "MVEE_private_arch.h"
 
 /*-----------------------------------------------------------------------------
     Enumerations
@@ -44,8 +45,8 @@ class fd_info;
 class mvee_dwarf_context
 {
 public:
-    struct user_regs_struct regs;
-    long int                cfa;
+    PTRACE_REGS regs;
+    long int    cfa;
 
     mvee_dwarf_context(pid_t variantpid);
 };

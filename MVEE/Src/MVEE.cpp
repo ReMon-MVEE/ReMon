@@ -811,7 +811,7 @@ unsigned long mvee::os_get_entry_point_address(std::string& binary)
 		{
 			Elf64_Phdr* phdr = elf64_getphdr(elf);
 			size_t phdr_cnt;
-			unsigned long image_base = 0xFFFFFFFFFFFFFFFF;
+			unsigned long long image_base = 0xFFFFFFFFFFFFFFFF;
 			
 			if (!phdr || elf_getphdrnum(elf, &phdr_cnt) == -1)
 				goto error;
@@ -837,7 +837,7 @@ unsigned long mvee::os_get_entry_point_address(std::string& binary)
 		{
 			Elf32_Phdr* phdr = elf32_getphdr(elf);
 			size_t phdr_cnt;
-			unsigned long image_base = 0x00000000FFFFFFFF;
+			unsigned long long image_base = 0x00000000FFFFFFFF;
 			
 			if (!phdr || elf_getphdrnum(elf, &phdr_cnt) == -1)
 				goto error;

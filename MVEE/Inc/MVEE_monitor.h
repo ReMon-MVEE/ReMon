@@ -138,8 +138,7 @@ public:
     long          prevcallnum;                                      // Previous system call executed by the variant. Set when the call returns.
     long          callnum;                                          // System call number being executed by this variant.
     int           call_flags;                                       // Result of the call handler
-    struct user_regs_struct
-                  regs;                                             // Arguments for the syscall are copied into the variantstate just before entering the call
+    PTRACE_REGS   regs;                                             // Arguments for the syscall are copied into the variantstate just before entering the call
     long          return_value;                                     // Return of the current syscall. 
     long          extended_value;                                   // Extended value to be returned through the EAX register.
 
@@ -236,8 +235,7 @@ public:
     unsigned long infinite_loop_ptr;                                // pointer to the sys_pause loop
     unsigned long should_sync_ptr;                                  // pointer to the should_sync flag
     long          callnumbackup;                                    // Backup of the syscall num. Made when the monitor is delivering a signal
-    struct user_regs_struct
-                  regsbackup;                                       // Backup of the registers. Made when the monitor is delivering a signal
+    PTRACE_REGS   regsbackup;                                       // Backup of the registers. Made when the monitor is delivering a signal
     unsigned long hw_bps[4];                                        // currently set hardware breakpoints
     unsigned char hw_bps_type[4];                                   // type of hw bp. 0 = exec only, 1 = write only, 2 = I/O read/write, 3 = data read/write but no instr fetches
     void*         tid_address[2];                                   // optional pointers to the thread id
@@ -704,8 +702,10 @@ private:
 	// RDTSC instruction. We disassemble the faulting instruction to verify
 	// this. If the faulting instruction is indeed RDTSC, we ensure that
 	// all variants get consistent results and return true.
-	// 
+	//
+#ifdef MVEE_ARCH_HAS_RDTSC
     bool handle_rdtsc_event                  (int index);
+#endif
 
 	// 
 	// Generic SIGTRAP handling. 
@@ -1115,8 +1115,7 @@ public:
     monitor*      new_monitor;                                // monitor the variant should be transferred to
     int           parentmonitorid;                            // id of the monitor this variant was detached from
     int           parent_has_detached;                        // set to true when the original monitor, under whose control this variant was spawned, has detached
-    struct user_regs_struct
-                  original_regs;                              // original contents of the registers
+    PTRACE_REGS   original_regs;                              // original contents of the registers
     unsigned long transfer_func;                              // pointer to the sys_pause loop
     void*         tid_address[2];                             // set if we should tell the variant what its thread id is (e.g. if the variant was created by clone(CLONE_CHILD_SETTID)
 	unsigned long should_sync_ptr;

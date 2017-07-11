@@ -31,7 +31,6 @@
 #include <linux/hw_breakpoint.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
-#include <asm/prctl.h>
 #include <linux/dqblk_xfs.h>
 #include "MVEE.h"
 #include "MVEE_monitor.h"
@@ -45,6 +44,9 @@
 #include "MVEE_filedesc.h"
 #include "MVEE_interaction.h"
 #include <linux/quota.h>
+#ifdef MVEE_ARCH_HAS_ARCH_PRCTL
+#include <asm/prctl.h>
+#endif
 
 /*-----------------------------------------------------------------------------
     Flag Check Macro
@@ -1330,6 +1332,7 @@ const char* getTextualArchPrctl(int code)
 {
 	const char* result = "UNKNOWN";
 
+#ifdef MVEE_ARCH_HAS_ARCH_PRCTL
 	switch (code)
 	{
 		DEF_CASE(ARCH_SET_FS);
@@ -1337,6 +1340,7 @@ const char* getTextualArchPrctl(int code)
 		DEF_CASE(ARCH_SET_GS);
 		DEF_CASE(ARCH_GET_GS);
 	}
+#endif
 
 	return result;
 }

@@ -27,7 +27,9 @@
 #include "MVEE_memory.h"
 #include "MVEE_logging.h"
 #include "MVEE_interaction.h"
+#ifdef MVEE_SUPPORTS_DISASSEMBLY
 #include "hde.h"
+#endif
 
 /*-----------------------------------------------------------------------------
     overwritten_syscall_arg
@@ -96,9 +98,9 @@ variantstate::variantstate()
     , sync_primitives_ptr (NULL)
 #endif
 {
-    memset(&regs, 0, sizeof(struct user_regs_struct));
+    memset(&regs, 0, sizeof(PTRACE_REGS));
     sigemptyset(&last_sigset);
-    memset(&regsbackup, 0, sizeof(struct user_regs_struct));
+    memset(&regsbackup, 0, sizeof(PTRACE_REGS));
     memset(hw_bps,      0, 4*sizeof(unsigned long));
     memset(hw_bps_type, 0, 4*sizeof(unsigned char));
     memset(tid_address, 0, 2*sizeof(void*));
@@ -1073,11 +1075,13 @@ void monitor::handle_event (interaction::mvee_wait_status& status)
 		{
 			handle_trap_event(index);
 		}
+#ifdef MVEE_ARCH_HAS_RDTSC
 		else if (status.data == SIGSEGV)
 		{
 			if (handle_rdtsc_event(index))
 				return;
 		}
+#endif
 		else if (status.data == SIGSTOP)
 		{
 			if (state == STATE_WAITING_ATTACH && !variants[index].variant_attached)
@@ -1109,6 +1113,7 @@ void monitor::handle_event (interaction::mvee_wait_status& status)
 
     @return true if the SIGSEGV signal was handled, false otherwise
 -----------------------------------------------------------------------------*/
+#ifdef MVEE_ARCH_HAS_RDTSC
 bool monitor::handle_rdtsc_event(int variantnum)
 {
     // get signal info
@@ -1220,6 +1225,7 @@ bool monitor::handle_rdtsc_event(int variantnum)
 
     return false;
 }
+#endif
 
 /*-----------------------------------------------------------------------------
     handle_attach_event
@@ -1293,8 +1299,8 @@ void monitor::handle_detach_event(pid_t variantpid)
 		return;
 	}
 
-	user_regs_struct tmp;
-	memcpy(&tmp, &new_variant->original_regs, sizeof(user_regs_struct));
+	PTRACE_REGS tmp;
+	memcpy(&tmp, &new_variant->original_regs, sizeof(PTRACE_REGS));
 	// instruct the variant to execute the transfer func
 	IP_IN_REGS(tmp) = (unsigned long)new_variant->transfer_func;
 	// set arg1 to 0 to make sure that the transfer func just executes a plain busy loop without syscall
@@ -1608,7 +1614,7 @@ void monitor::handle_trap_event(int index)
 	{
 		if (variants[index].fast_forward_to_entry_point)
 		{
-#ifdef MVEE_HWBP_X86
+#ifdef MVEE_ARCH_HAS_X86_HWBP
 			unsigned long dr6;
 			
 			if (!interaction::read_specific_reg(variants[index].variantpid, 
@@ -2202,8 +2208,13 @@ dont_resolve_segv_origin:
 				return;
 			}		
 
+# ifdef MVEE_ARCH_SUPPORTS_DISASSEMBLY
 			HDE_INS(disas_ins);
 			HDE_DISAS(disas_ins_len, &instr, &disas_ins);
+# else
+			// We're assuming RISC here...
+			long disas_ins_len = sizeof(long);
+# endif
 			if (disas_ins_len > 0)
 			{
 				if (!interaction::write_ip(variants[variantnum].variantpid, ip + disas_ins_len))
@@ -2772,7 +2783,7 @@ bool monitor::sig_prepare_delivery ()
         // backup context
         for (int i = 0; i < mvee::numvariants; ++i)
         {
-            memcpy(&variants[i].regsbackup, &variants[i].regs, sizeof(user_regs_struct));
+            memcpy(&variants[i].regsbackup, &variants[i].regs, sizeof(PTRACE_REGS));
             variants[i].callnumbackup = variants[i].callnum;
         }
 
@@ -2844,8 +2855,8 @@ void monitor::sig_finish_delivery ()
     for (int i = 0; i < mvee::numvariants; ++i)
     {
         // jump to the infinite loop while we wait for async signal delivery
-		user_regs_struct tmp;
-		memcpy(&tmp, &variants[i].regs, sizeof(user_regs_struct));
+		PTRACE_REGS tmp;
+		memcpy(&tmp, &variants[i].regs, sizeof(PTRACE_REGS));
 		IP_IN_REGS(tmp) = (unsigned long) variants[i].infinite_loop_ptr;
 		FASTCALL_ARG1_IN_REGS(tmp) = 0;
 
@@ -3032,7 +3043,7 @@ void monitor::sig_restart_syscall(int variantnum)
 -----------------------------------------------------------------------------*/
 void monitor::hwbp_refresh_regs(int variantnum)
 {
-#ifdef MVEE_HWBP_X86
+#ifdef MVEE_ARCH_HAS_X86_HWBP
     unsigned long dr7;
     int           i;
 
@@ -3105,7 +3116,7 @@ void monitor::hwbp_refresh_regs(int variantnum)
 -----------------------------------------------------------------------------*/
 bool monitor::hwbp_set_watch(int variantnum, unsigned long addr, unsigned char bp_type)
 {
-#ifdef MVEE_HWBP_X86
+#ifdef MVEE_ARCH_HAS_X86_HWBP
     int i;
 
     // check if we've already registered this data watch...

@@ -376,7 +376,7 @@ namespace interaction
 
         ssize_t nread = process_vm_readv(variantpid, local, 1, remote, 1, 0);
         if (nread != data_len)
-            warnf("interaction::read_memory failed. tried to read %ld bytes - actually read %ld bytes\n", 
+            warnf("interaction::read_memory failed. tried to read %ld bytes - actually read %zd bytes\n", 
 				  data_len, nread);
 
 #ifdef MVEE_GENERATE_EXTRA_STATS
@@ -402,7 +402,7 @@ namespace interaction
 
         ssize_t nwritten = process_vm_writev(variantpid, local, 1, remote, 1, 0);
         if (nwritten != data_len)
-            warnf("interaction::write_memory failed. tried to write %ld bytes - actually wrote %ld bytes\n", 
+            warnf("interaction::write_memory failed. tried to write %ld bytes - actually wrote %zd bytes\n", 
 				  data_len, nwritten);
 
 #ifdef MVEE_GENERATE_EXTRA_STATS
@@ -417,7 +417,7 @@ namespace interaction
     // Read all of the variant's general purpose registers into a
     // user_regs_struct
     //
-	static bool read_all_regs (pid_t variantpid, user_regs_struct* regs)
+	static bool read_all_regs (pid_t variantpid, PTRACE_REGS* regs)
 	{
 		if (ptrace(PTRACE_GETREGS, variantpid, 0, regs) == 0)
 			return true;
@@ -428,7 +428,7 @@ namespace interaction
     // Copy an entire user_regs_struct into the variant's general purpose
     // register context
     //
-	static bool write_all_regs (pid_t variantpid, user_regs_struct* regs)
+	static bool write_all_regs (pid_t variantpid, PTRACE_REGS* regs)
 	{
 		if (ptrace(PTRACE_SETREGS, variantpid, 0, regs) == 0)
 			return true;
