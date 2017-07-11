@@ -35,6 +35,10 @@
   #define SIGSYSTRAP (SIGTRAP | 0x80)
 #endif
 
+#ifndef PTRACE_SET_SYSCALL
+  #define PTRACE_SET_SYSCALL (__ptrace_request)23
+#endif
+
 /*-----------------------------------------------------------------------------
     Constants
 -----------------------------------------------------------------------------*/
@@ -480,7 +484,13 @@ namespace interaction
 	//
 	static bool write_syscall_no (pid_t variantpid, unsigned long new_syscall_no)
 	{
+#ifdef MVEE_ARCH_HAS_PTRACE_SET_SYSCALL
+		if (ptrace(PTRACE_SET_SYSCALL, variantpid, 0, (void*) new_syscall_no))
+			return false;
+		return true;
+#else
 		return write_specific_reg (variantpid, SYSCALL_NO_REG_OFFSET, new_syscall_no);
+#endif
 	}
 
 	// 

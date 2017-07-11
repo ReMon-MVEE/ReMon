@@ -19,6 +19,7 @@
 // #define MVEE_ARCH_HAS_X86_HWBP
 // #define MVEE_ARCH_HAS_RDTSC
 // #define MVEE_ARCH_HAS_ARCH_PRCTL
+#define MVEE_ARCH_HAS_PTRACE_SET_SYSCALL
 #define PAGE_SIZE 4096
 
 /*-----------------------------------------------------------------------------
