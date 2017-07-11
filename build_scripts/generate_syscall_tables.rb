@@ -26,8 +26,8 @@ File.open('syscalls.c', 'w+') { |tmpfile|
   tmpfile.write("#include <stdio.h>\n#include <asm/unistd.h>\nint main(int argc, char** argv) {\n")
   
   File.open(@unistd).each { |line|
-    if line.match(/^#define.*__NR_[a-z_]*\s+/)
-      callname = line.match(/.*?__NR_([a-z_]*)\s+/)[1]
+    if line.match(/^#define.*__NR_[a-z0-9_]*\s+/)
+      callname = line.match(/.*?__NR_([a-z0-9_]*)\s+/)[1]
       tmpfile.write("#ifdef __NR_#{callname}\nprintf(\"#{callname}:%d\\n\", __NR_#{callname});\n#endif\n");
     end
   }
@@ -81,7 +81,7 @@ end
 
 def write_header(file, name, num, cnt, default)
     while num>cnt
-      file.write("/* gap in syscall table - num: #{num} */\n\{\n")
+      file.write("/* gap in syscall table - num: #{cnt} */\n\{\n")
       default.each { |h|
         file.write("\t#{h},\n")
       }
