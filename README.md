@@ -13,6 +13,7 @@ The current version of **IP-MON** takes quite a lot of manual effort to set up. 
 You will need:
 - A GNU/Linux distribution based on Debian. I **_strongly_** recommend Ubuntu 14.04 x64.
 - Ruby
+- CMake (>= 3.4.3)
 - The ReMon toolchain, which can be installed using the `bootstrap.sh` script.
 
 ## GHUMVEE Instructions
