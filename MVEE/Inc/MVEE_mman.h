@@ -101,7 +101,7 @@ public:
     bool         info_valid;
     union
     {
-        unsigned int   dwarf_fd;              // fd to the open file
+        int            dwarf_fd;              // fd to the open file
         unsigned char* dwarf_buffer;          // pointer to the in-memory file
     }            dwarf_data;
     Elf*         dwarf_elf;                   // Elf struct for the file
@@ -113,6 +113,7 @@ public:
 
     dwarf_info(std::string& file, int variantnum, pid_t variantpid, mmap_region_info* region_info);
     ~dwarf_info();
+	void reset();
 };
 
 //

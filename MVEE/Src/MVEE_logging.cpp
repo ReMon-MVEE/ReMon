@@ -582,18 +582,16 @@ was_interrupted:
         }
     }
 
-    // read /proc/maps
-//    unsigned long      stack_base = set_mmap_table->get_stack_base(variantnum);
     i = 1;
 
-    // Stack walk
+	// Stack walk
+#ifndef MVEE_ARCH_USE_LIBUNWIND    
     unsigned long      prev_ip    = 0;
     mvee_dwarf_context context(variants[variantnum].variantpid);
     log_caller_info(variantnum, 0, IP_IN_REGS(context.regs), 0, logfunc);
     while (1)
     {
         if (set_mmap_table->dwarf_step(variantnum, variants[variantnum].variantpid, &context) != 1
-/*            || (unsigned long)SP_IN_REGS(context.regs) > stack_base */
 			|| (unsigned long)IP_IN_REGS(context.regs) == prev_ip)
         {
             logfunc(">>> end of stack\n");
@@ -603,6 +601,36 @@ was_interrupted:
         log_caller_info(variantnum, i++, IP_IN_REGS(context.regs), 0, logfunc);
         prev_ip = IP_IN_REGS(context.regs);
     }
+#else
+	unw_cursor_t c;
+	unw_word_t ip = 0, prev_ip = 0;
+	
+	if (!variants[variantnum].unwind_info)
+		variants[variantnum].unwind_info = (struct UPT_info*) _UPT_create(variants[variantnum].variantpid);
+	
+	int err = unw_init_remote(&c, variants[variantnum].unwind_as, variants[variantnum].unwind_info);
+
+	if (err < 0)
+	{
+		warnf("libunwind-based backtrace for variant %d failed\n", variantnum);
+	}
+	else
+	{		
+		for (i = 0; i < 128; ++i)
+		{
+			if (unw_get_reg(&c, UNW_REG_IP, &ip) < 0 || !ip || ip == prev_ip)
+				break;
+			prev_ip = ip;
+
+			log_caller_info(variantnum, i, ip, 0, logfunc);
+
+			if (unw_step(&c) < 0)
+				break;
+		}
+
+		logfunc(">>> end of stack\n");
+	}   	
+#endif
 
     log_registers(variantnum, logfunc);
 	log_stack(variantnum);
@@ -1040,7 +1068,7 @@ void monitor::log_stack(int variantnum)
 											   stack_word))
 			return;
 
-		debugf("stack[rsp + %ld] = " PTRSTR "\n", (long) i*sizeof(unsigned long), stack_word);
+		debugf("stack[%ld] = " PTRSTR "\n", (long) i*sizeof(unsigned long), stack_word);
 	}
 #endif
 }

@@ -24,6 +24,10 @@
 #include "MVEE_private_arch.h"
 #include "MVEE_interaction.h"
 #include "MVEE_filedesc.h"
+#ifdef MVEE_ARCH_USE_LIBUNWIND
+#define UNW_REMOTE_ONLY
+#include "libunwind-ptrace.h"
+#endif
 
 /*-----------------------------------------------------------------------------
     Typedefs
@@ -157,6 +161,11 @@ public:
 	bool          entry_point_bp_set;                               // Have we set the breakpoint on the program entry point?
 	bool          have_overwritten_args;                            // Do we have any overwritten syscall args that need to be restored?
 
+#ifdef MVEE_ARCH_USE_LIBUNWIND
+	unw_addr_space_t unwind_as;
+	struct UPT_info* unwind_info;
+#endif
+
 	// 
 	// RAVEN syscall check toggling support.
 	//
@@ -254,6 +263,7 @@ public:
        	  	      overwritten_args;
 
     variantstate();
+	~variantstate();
 };
 
 //

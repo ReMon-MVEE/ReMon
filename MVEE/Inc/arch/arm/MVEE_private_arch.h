@@ -20,6 +20,7 @@
 // #define MVEE_ARCH_HAS_RDTSC
 // #define MVEE_ARCH_HAS_ARCH_PRCTL
 #define MVEE_ARCH_HAS_PTRACE_SET_SYSCALL
+#define MVEE_ARCH_USE_LIBUNWIND
 #define PAGE_SIZE 4096
 
 /*-----------------------------------------------------------------------------

@@ -1244,6 +1244,17 @@ POSTCALL(execve)
             }
         }
 
+#ifdef MVEE_ARCH_USE_LIBUNWIND
+		for (i = 0; i < mvee::numvariants; ++i)
+		{
+			unw_destroy_addr_space(variants[i].unwind_as);
+			variants[i].unwind_as = unw_create_addr_space(&_UPT_accessors, 0);
+			if (variants[i].unwind_info)
+				_UPT_destroy(variants[i].unwind_info);
+			variants[i].unwind_info = nullptr;
+		}
+#endif
+
 		// enable fast forwarding?
 		/*for (int i = 0; i < mvee::numvariants; ++i)
 		{

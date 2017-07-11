@@ -105,6 +105,20 @@ variantstate::variantstate()
     memset(hw_bps_type, 0, 4*sizeof(unsigned char));
     memset(tid_address, 0, 2*sizeof(void*));
 	SYSCALL_MASK_CLEAR(unchecked_syscalls);
+
+#ifdef MVEE_ARCH_USE_LIBUNWIND
+	unwind_as = unw_create_addr_space(&_UPT_accessors, 0);
+	unwind_info = nullptr;
+#endif
+}
+
+variantstate::~variantstate()
+{
+#ifdef MVEE_ARCH_USE_LIBUNWIND
+	unw_destroy_addr_space(unwind_as);
+	if (unwind_info)
+		_UPT_destroy(unwind_info);
+#endif
 }
 
 /*-----------------------------------------------------------------------------
