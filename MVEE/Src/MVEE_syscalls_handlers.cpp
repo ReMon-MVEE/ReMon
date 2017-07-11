@@ -9247,6 +9247,7 @@ void mvee::init_syslocks()
     ALIAS getxattr lgetxattr
     ALIAS setxattr lsetxattr
     ALIAS getgroups getgroups32
+    ALIAS getrlimit ugetrlimit
     */
 
     // Syslock init
