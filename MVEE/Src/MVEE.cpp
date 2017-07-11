@@ -459,7 +459,8 @@ int mvee::os_get_num_physical_cpus()
 -----------------------------------------------------------------------------*/
 void mvee::os_check_ptrace_scope()
 {
-    std::string yama = mvee::log_read_from_proc_pipe("sysctl kernel.yama.ptrace_scope", NULL);
+#ifdef MVEE_ARCH_HAS_YAMA_LSM
+    std::string yama = mvee::log_read_from_proc_pipe("/sbin/sysctl kernel.yama.ptrace_scope", NULL);
 
     // If we're not running on ubuntu, we won't get any feedback through stdout
     if (yama == "")
@@ -483,6 +484,7 @@ void mvee::os_check_ptrace_scope()
             printf("Disabled yama!\n");
         printf("============================================================================================================================\n");
     }
+#endif
 }
 
 /*-----------------------------------------------------------------------------
@@ -491,6 +493,7 @@ void mvee::os_check_ptrace_scope()
 -----------------------------------------------------------------------------*/
 void mvee::os_check_kernel_cmdline()
 {
+#ifdef MVEE_ARCH_HAS_VSYSCALL
     std::string cmdline = mvee::log_read_from_proc_pipe("cat /proc/cmdline", NULL);
 
     if (cmdline == "")
@@ -511,6 +514,7 @@ void mvee::os_check_kernel_cmdline()
         printf("GHUMVEE will now continue running but keep in mind that you will probably see mismatches until you fix the vsyscall setting!\n");
         printf("============================================================================================================================\n");
     }
+#endif
 }
 
 /*-----------------------------------------------------------------------------

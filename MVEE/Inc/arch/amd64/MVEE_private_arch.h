@@ -19,6 +19,8 @@
 #define MVEE_ARCH_HAS_X86_HWBP
 #define MVEE_ARCH_HAS_RDTSC
 #define MVEE_ARCH_HAS_ARCH_PRCTL
+#define MVEE_ARCH_HAS_VSYSCALL
+#define MVEE_ARCH_HAS_YAMA_LSM
 
 /*-----------------------------------------------------------------------------
   SPEC PROFILES
