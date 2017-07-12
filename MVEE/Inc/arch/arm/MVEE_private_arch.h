@@ -22,6 +22,7 @@
 #define MVEE_ARCH_HAS_PTRACE_SET_SYSCALL
 #define MVEE_ARCH_USE_LIBUNWIND
 #define PAGE_SIZE 4096
+#define MVEE_ARCH_REG_TYPE unsigned long
 
 /*-----------------------------------------------------------------------------
   SPEC PROFILES

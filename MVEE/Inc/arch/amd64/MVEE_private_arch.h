@@ -21,6 +21,7 @@
 #define MVEE_ARCH_HAS_ARCH_PRCTL
 #define MVEE_ARCH_HAS_VSYSCALL
 #define MVEE_ARCH_HAS_YAMA_LSM
+#define MVEE_ARCH_REG_TYPE unsigned long long
 
 /*-----------------------------------------------------------------------------
   SPEC PROFILES
