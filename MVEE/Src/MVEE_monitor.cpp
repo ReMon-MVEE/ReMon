@@ -27,7 +27,7 @@
 #include "MVEE_memory.h"
 #include "MVEE_logging.h"
 #include "MVEE_interaction.h"
-#ifdef MVEE_SUPPORTS_DISASSEMBLY
+#ifdef MVEE_ARCH_SUPPORTS_DISASSEMBLY
 #include "hde.h"
 #endif
 
