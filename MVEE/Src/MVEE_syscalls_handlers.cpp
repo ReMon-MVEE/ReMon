@@ -8475,6 +8475,12 @@ POSTCALL(waitid)
 /*-----------------------------------------------------------------------------
   sys_inotify_init - (void)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(inotify_init)
+{
+	debugf("%s - SYS_INOTIFY_INIT()\n", 
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 PRECALL(inotify_init)
 {
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
@@ -8540,6 +8546,14 @@ PRECALL(inotify_add_watch)
   man(2): (int fd, int wd)
   kernel: (int fd, __s32 wd)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(inotify_rm_watch)
+{
+	debugf("%s - SYS_INOTIFY_RM_WATCH(%d, %d)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (int)ARG1(variantnum), 
+		   (int)ARG2(variantnum));
+}
+
 PRECALL(inotify_rm_watch)
 {
 	CHECKARG(1);
@@ -9526,6 +9540,13 @@ POSTCALL(pipe2)
 /*-----------------------------------------------------------------------------
   sys_inotify_init1 - (int flags)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(inotify_init1)
+{
+	debugf("%s - SYS_INOTIFY_INIT1(%s)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   getTextualInotifyFlags(ARG1(variantnum)));
+}
+
 PRECALL(inotify_init1)
 {
     CHECKARG(1);

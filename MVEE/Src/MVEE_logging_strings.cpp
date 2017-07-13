@@ -1463,6 +1463,22 @@ const char* getTextualSchedulingPolicy(int policy)
 }
 
 /*-----------------------------------------------------------------------------
+    getTextualInotifyFlags
+-----------------------------------------------------------------------------*/
+const char* getTextualInotifyFlags(int flags)
+{
+	const char* result = "IN_UNKNOWN";
+
+	switch (flags)
+	{
+		DEF_CASE(IN_NONBLOCK);
+		DEF_CASE(IN_CLOEXEC);
+	}
+
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
     getTextualTimerFlags
 -----------------------------------------------------------------------------*/
 std::string getTextualTimerFlags(int flags)
