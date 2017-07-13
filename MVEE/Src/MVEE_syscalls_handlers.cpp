@@ -9321,6 +9321,17 @@ POSTCALL(timerfd_create)
   man(2): (int fd, int mode, off_t offset, off_t len)
   kernel: (int fd, int mode, loff_t offset, loff_t len)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(fallocate)
+{
+	debugf("%s - SYS_FALLOCATE(%d, %d = %s, %lld, %lld)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (int)ARG1(variantnum), 
+		   (int)ARG2(variantnum), 
+		   getTextualFallocateFlags(ARG2(variantnum)).c_str(),
+		   (long long)arg64<3, 3>(variantnum), 
+		   (long long)arg64<4, 5>(variantnum));
+}
+
 PRECALL(fallocate)
 {
     CHECKFD(1);

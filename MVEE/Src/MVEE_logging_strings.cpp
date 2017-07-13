@@ -2098,7 +2098,23 @@ std::string getTextualIpcShmFlags (int shmflg)
 #endif
 
     return result;
-
 }
 
+/*-----------------------------------------------------------------------------
+    getTextualFallocateFlags
+-----------------------------------------------------------------------------*/
+std::string getTextualFallocateFlags (int mode)
+{
+    std::string result;
 
+    TEST_FLAG(mode, FALLOC_FL_KEEP_SIZE      , result);
+    TEST_FLAG(mode, FALLOC_FL_PUNCH_HOLE     , result);
+#ifdef FALLOC_FL_COLLAPSE_RANGE
+    TEST_FLAG(mode, FALLOC_FL_COLLAPSE_RANGE , result);
+#endif
+#ifdef FALLOC_FL_ZERO_RANGE
+    TEST_FLAG(mode, FALLOC_FL_ZERO_RANGE     , result);
+#endif
+
+    return result;
+}
