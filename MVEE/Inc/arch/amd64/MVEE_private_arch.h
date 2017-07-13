@@ -22,6 +22,8 @@
 #define MVEE_ARCH_HAS_VSYSCALL
 #define MVEE_ARCH_HAS_YAMA_LSM
 #define MVEE_ARCH_REG_TYPE unsigned long long
+#define MVEE_ARCH_IS_64BIT
+#define MVEE_ARCH_LITTLE_ENDIAN
 
 /*-----------------------------------------------------------------------------
   SPEC PROFILES

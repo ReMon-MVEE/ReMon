@@ -6,12 +6,70 @@
  */
 
 // *****************************************************************************
-//
 // PLEASE READ THE INSTRUCTIONS IN MVEE/INC/MVEE_SYSCALLS.H BEFORE WRITING 
 // SYSCALL HANDLERS!!!
-//
 // *****************************************************************************
 
+//
+// Section 2 (System Calls) of the man pages and the kernel itself often
+// disagree on the types of system call arguments. Whenever there is such a
+// disagreement, we should use the kernel's types, not those documented in the
+// man pages.
+// 
+// List of interesting types:
+// - mode_t    : aka unsigned int (all archs)
+// - umode_t   : aka unsigned short (all archs)
+// - dev_t     : aka unsigned long (x86), aka unsigned long long (ARM)
+// - pid_t     : aka int (all archs)
+// - time_t    : aka long (all archs)
+// - loff_t    : aka long long (all archs)
+// - off_t     : aka long (all archs)
+// - uid_t     : aka unsigned int (x86-64), aka unsigned short (x86-32, ARM)
+// - gid_t     : aka unsigned int (x86-64), aka unsigned short (x86-32, ARM)
+// - qid_t     : aka unsigned int (all archs)
+// - caddr_t   : aka char* (all archs)
+// - socklen_t : aka unsigned int (all archs)
+// - clockid_t : aka int (all archs)
+//
+// List of common disagreements:
+// - The kernel usually (not always) expects file descriptors to be of type
+// 'unsigned int', while user space uses type 'int'
+//
+// - The kernel usually expects mode flags to be of type 'umode_t' (aka unsigned
+// short), while user space uses type 'mode_t' (aka unsigned int)
+//
+// - The kernel doesn't know type 'socklen_t' (aka 'unsigned int') and expects
+// socket lengths of type 'int' instead
+//
+
+// ****************************************************************************
+// IMPORTANT NOTE ABOUT SYSCALLS WITH 64-BIT ARGUMENTS:
+//
+// Some syscalls (e.g., pread64) accept one or more 64-bit arguments EVEN ON
+// architectures 32-bit. The ABI specifies how such arguments are passed.
+//
+// On 32-bit platforms, these 64-bit arguments are split up into a lower and
+// upper half, which are passed as separate 32-bit args to the kernel.
+// Optionally, the ABI might also require that the first half of the argument
+// be aligned to an even register number. This is, for example, the case for
+// the ARM EABI.
+//
+// Consider for example sys_pwrite64(unsigned int fd, const char* buf, size_t
+// count, loff_t pos). The 4th argument, pos, is always 64-bit. It needs special
+// handling on i386 and ARM EABI.
+//
+// Depending on the architecture, we have to calculate the value of pos as
+// follows:
+//
+// AMD64: native 64-bit architecture. no special handling needed
+// -> ARG4(variantnum)
+// i386: native 32-bit architecture. ABI doesn't require register alignment
+// -> (uint64_t)ARG4 (variantnum) + (((uint64_t)ARG5(variantnum)) << 32)
+// ARM: native 32-bit architecture. ABI requires register alignment.
+// an uneven number of arguments precede the 'pos' argument, so alignment is
+// required in this case
+// -> (uint64_t)ARG5 (variantnum) + (((uint64_t)ARG6(variantnum)) << 32)
+// ****************************************************************************
 
 /*-----------------------------------------------------------------------------
   Includes
@@ -327,7 +385,7 @@ long monitor::handle_check_open_call(const std::string& full_path, int flags, in
 }
 
 /*-----------------------------------------------------------------------------
-  sys_restart_syscall 
+  sys_restart_syscall - (void)
 -----------------------------------------------------------------------------*/
 GET_CALL_TYPE(restart_syscall)
 {
@@ -335,9 +393,11 @@ GET_CALL_TYPE(restart_syscall)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_exit - terminates the calling thread. Note that sys_exit and exit(3) have
-  different semantics. exit(3) is a wrapper around sys_exit_group, which 
-  terminates the entire thread group and not just the calling thread!
+  sys_exit - (int status)
+
+  terminates the calling thread. Note that sys_exit and exit(3) have different
+  semantics. exit(3) is a wrapper around sys_exit_group, which terminates the
+  entire thread group and not just the calling thread!
 -----------------------------------------------------------------------------*/
 LOG_ARGS(exit)
 {
@@ -356,7 +416,7 @@ PRECALL(exit)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fork
+  sys_fork - (void)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(fork)
 {
@@ -381,8 +441,10 @@ POSTCALL(fork)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_vfork - similar to fork but suspends the calling process until the
-  child process terminates
+  sys_vfork - (void)
+
+  similar to fork but suspends the calling process until the child process
+  terminates
 -----------------------------------------------------------------------------*/
 LOG_ARGS(vfork)
 {
@@ -407,7 +469,10 @@ POSTCALL(vfork)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_read - (unsigned int fd, char __user *buf, size_t count)
+  sys_read - 
+
+  man(2): (int fd, char *buf, size_t count)
+  kernel: (unsigned int fd, char* buf, size_t count)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(read)
 {
@@ -466,7 +531,10 @@ POSTCALL(read)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_write - (unsigned int fd, const char * buf, unsigned long count)
+  sys_write - 
+
+  man(2): (int fd, const void * buf, size_t count)
+  kernel: (unsigned int fd, const char* buf, size_t count)
 -----------------------------------------------------------------------------*/
 GET_CALL_TYPE(write)
 {
@@ -492,12 +560,12 @@ LOG_ARGS(write)
 	{
 		auto buf_str = call_serialize_io_buffer(variantnum, (const unsigned char*) ARG2(variantnum), ARG3(variantnum));
 
-		debugf("%s - SYS_WRITE(%u, 0x" PTRSTR " (%s), %lu)\n",
+		debugf("%s - SYS_WRITE(%u, 0x" PTRSTR " (%s), %zu)\n",
 			   call_get_variant_pidstr(variantnum).c_str(), 
 			   (unsigned int)ARG1(variantnum), 
 			   (unsigned long)ARG2(variantnum), 
 			   buf_str.c_str(), 
-			   (unsigned long)ARG3(variantnum));
+			   (size_t)ARG3(variantnum));
 	}
 }
 
@@ -610,7 +678,10 @@ CALL(write)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_open - (const char* filename, int flags, int mode)
+  sys_open - 
+
+  man(2): (const char* filename, int flags, mode_t mode)
+  kernel: (const char* filename, int flags, umode_t mode)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(open)
 {
@@ -773,7 +844,10 @@ POSTCALL(open)
 
 
 /*-----------------------------------------------------------------------------
-  sys_close - (int filedescriptor)
+  sys_close - 
+
+  man(2): (int fd)
+  kernel: (unsigned int fd)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(close)
 {
@@ -824,7 +898,7 @@ POSTCALL(close)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_waitpid - (pid_t pid, int __user *stat_addr, int options)
+  sys_waitpid - (pid_t pid, int *stat_addr, int options)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(waitpid)
 {
@@ -854,7 +928,7 @@ POSTCALL(waitpid)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_link - (const char __user *oldname, const char __user *newname)
+  sys_link - (const char *oldname, const char *newname)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(link)
 {
@@ -884,7 +958,7 @@ PRECALL(link)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_unlink - (const char __user *pathname)
+  sys_unlink - (const char *pathname)
 -----------------------------------------------------------------------------*/
 GET_CALL_TYPE(unlink)
 {
@@ -952,8 +1026,7 @@ POSTCALL(unlink)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_execve - (char __user *filename, char __user * __user *argv,
-  char __user * __user *envp);
+  sys_execve - (char* filename, char** argv, char** envp)
 -----------------------------------------------------------------------------*/
 // Fetching the execve arguments is very costly, especially without the GHUMVEE
 // ptrace extension.  it must only be done once!
@@ -1287,7 +1360,7 @@ POSTCALL(execve)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_chdir - (const char __user *filename)
+  sys_chdir - (const char *filename)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(chdir)
 {
@@ -1326,7 +1399,7 @@ POSTCALL(chdir)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_time - (time_t __user *tloc)
+  sys_time - (time_t *tloc)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(time)
 {
@@ -1349,7 +1422,10 @@ POSTCALL(time)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_chmod - (const char __user *filename, mode_t mode)
+  sys_chmod - 
+
+  man(2): (const char* filename, mode_t mode)
+  kernel: (const char* filename, umode_t mode)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(chmod)
 {
@@ -1376,7 +1452,10 @@ PRECALL(chmod)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fchmod - (unsigned int fd, mode_t mode)
+  sys_fchmod - 
+
+  man(2): (int fd, mode_t mode)
+  kernel: (unsigned int fd, umode_t mode)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(fchmod)
 {
@@ -1401,7 +1480,10 @@ PRECALL(fchmod)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_lseek - (unsigned int fd, off_t offset, unsigned int origin)
+  sys_lseek - 
+
+  man(2): (int fd, off_t offset, int whence)
+  kernel: (unsigned int fd, off_t offset, unsigned int whence)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(lseek)
 {
@@ -1444,7 +1526,8 @@ PRECALL(alarm)
 }
 
 /*-----------------------------------------------------------------------------
-    sys_setitimer - (int which, const struct itimerval* new_value, struct itimerval* old_value)
+  sys_setitimer - (int which, const struct itimerval* new_value, struct
+  itimerval* old_value)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(setitimer)
 {
@@ -1492,7 +1575,7 @@ POSTCALL(setitimer)
 }
 
 /*-----------------------------------------------------------------------------
-    sys_getpid
+  sys_getpid - (void)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(getpid)
 {
@@ -1519,7 +1602,7 @@ POSTCALL(getpid)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_sendfile - (int out_fd, int in_fd, off_t __user * offset, size_t count)
+  sys_sendfile - (int out_fd, int in_fd, off_t* offset, size_t count)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(sendfile)
 {
@@ -1549,14 +1632,17 @@ PRECALL(sendfile)
 }
 
 /*-----------------------------------------------------------------------------
-    sys_ptrace
+  sys_ptrace - 
+
+  man(2): (enum __ptrace_request request, pid_t pid, void* addr, void* data)
+  kernel: (long request, long pid, unsigned long addr, unsigned long data)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(ptrace)
 {
-	debugf("%s - SYS_PTRACE(%s, %d, 0x" PTRSTR ", 0x" PTRSTR ")\n", 
+	debugf("%s - SYS_PTRACE(%s, %ld, 0x" PTRSTR ", 0x" PTRSTR ")\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
 		   getTextualPtraceRequest(ARG1(variantnum)),
-		   (pid_t)ARG2(variantnum),
+		   (long)ARG2(variantnum),
 		   (unsigned long)ARG3(variantnum),
 		   (unsigned long)ARG4(variantnum));
 }
@@ -1573,7 +1659,7 @@ CALL(ptrace)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_pause
+  sys_pause - (void)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(pause)
 {
@@ -1656,8 +1742,9 @@ POSTCALL(rt_sigsuspend)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_utime - change access and/or modification times of an inode
-  (char __user * filename, struct utimbuf __user * times)
+  sys_utime - (char * filename, struct utimbuf * times)
+
+  change access and/or modification times of an inode
 -----------------------------------------------------------------------------*/
 LOG_ARGS(utime)
 {
@@ -1696,20 +1783,22 @@ PRECALL(utime)
 }
 
 /*-----------------------------------------------------------------------------
-    sys_mknod - (const char *pathname, mode_t mode, dev_t dev)
+  sys_mknod - 
+
+  man(2): (const char *pathname, mode_t mode, dev_t dev)
+  kernel: (const char* filename umode_t mode, unsigned dev)
 -----------------------------------------------------------------------------*/
-// TODO: Check if dev needs arg shifting on ARM
 LOG_ARGS(mknod)
 {
 	auto str1 = rw::read_string(variants[variantnum].variantpid, (void*)ARG1(variantnum));
 	auto mode = getTextualFileMode(ARG2(variantnum));
 	
-	debugf("%s - SYS_MKNOD(%s, %08x - %s, %llu)\n", 
+	debugf("%s - SYS_MKNOD(%s, %08x - %s, %u)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   str1.c_str(), 
 		   (mode_t)ARG2(variantnum), 
 		   mode.c_str(), 
-		   (dev_t)ARG3(variantnum));
+		   (unsigned)ARG3(variantnum));
 }
 
 PRECALL(mknod)
@@ -1752,13 +1841,13 @@ PRECALL(access)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_kill - (int pid, int sig)
+  sys_kill - (pid_t pid, int sig)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(kill)
 {
 	debugf("%s - SYS_KILL(%d, %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   (int)ARG1(variantnum), 
+		   (pid_t)ARG1(variantnum), 
 		   getTextualSig(ARG2(variantnum)));
 }
 
@@ -1770,7 +1859,7 @@ PRECALL(kill)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_rename - (const char __user *oldname, const char __user *newname)
+  sys_rename - (const char *oldname, const char *newname)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(rename)
 {
@@ -1800,7 +1889,10 @@ PRECALL(rename)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_mkdir - (const char __user *pathname, int mode)
+  sys_mkdir - 
+
+  man(2): (const char* pathname, mode_t mode)
+  kernel: (const char* pathname, umode_t mode)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(mkdir)
 {
@@ -1825,7 +1917,7 @@ PRECALL(mkdir)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_rmdir - (const char __user *pathname)
+  sys_rmdir - (const char *pathname)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(rmdir)
 {
@@ -1848,7 +1940,10 @@ PRECALL(rmdir)
 }
 
 /*-----------------------------------------------------------------------------
-    sys_creat - (const char __user* pathname, umode_t mode)
+  sys_creat - 
+
+  man(2): (const char* pathname, mode_t mode)
+  kernel: (const char* pathname, umode_t mode)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(creat)
 {
@@ -1918,7 +2013,10 @@ POSTCALL(creat)
 }
 
 /*-----------------------------------------------------------------------------
-    sys_dup - (unsigned int oldfd)
+  sys_dup - 
+
+  man(2): (int oldfd)
+  kernel: (unsigned int oldfd)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(dup)
 {
@@ -1983,7 +2081,7 @@ POSTCALL(dup)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_pipe - (int __user * fildes)
+  sys_pipe - (int* fildes)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(pipe)
 {
@@ -2048,7 +2146,7 @@ POSTCALL(pipe)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_times - (struct tms  *  tbuf)
+  sys_times - (struct tms* tbuf)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(times)
 {
@@ -2172,7 +2270,7 @@ LOG_RETURN(getgid)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_syslog - (int type, char __user * buf, int len)
+  sys_syslog - (int type, char* buf, int len)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(syslog)
 {
@@ -2292,7 +2390,10 @@ POSTCALL(signal)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_ioctl - (unsigned int fd, unsigned int cmd, unsigned long arg)
+  sys_ioctl - 
+
+  man(2): (int fd, int cmd, ...)
+  kernel: (unsigned int fd, unsigned int cmd, unsigned long arg)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(ioctl)
 {
@@ -2463,7 +2564,10 @@ POSTCALL(ioctl)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fcntl - (unsigned int fd, unsigned int cmd, unsigned long arg)
+  sys_fcntl - 
+
+  man(2): (int fd, int cmd, ...)
+  kernel: (unsigned int fd, unsigned int cmd, unsigned long arg)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(fcntl)
 {
@@ -2564,7 +2668,10 @@ POSTCALL(fcntl)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_flock - (unsigned int fd, unsigned int operation)
+  sys_flock - 
+
+  man(2): (int fd, int cmd)
+  kernel: (unsigned int fd, unsigned int cmd)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(flock)
 {
@@ -2590,7 +2697,10 @@ PRECALL(flock)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_umask - (int mask)
+  sys_umask - 
+
+  man(2): (mode_t mask)
+  kernel: (int mask)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(umask)
 {
@@ -2613,7 +2723,10 @@ POSTCALL(umask)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_dup2 - (unsigned int oldfd, unsigned int newfd)
+  sys_dup2 - 
+
+  man(2): (int oldfd, int newfd)
+  kernel: (unsigned int oldfd, unsigned int newfd)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(dup2)
 {
@@ -2764,7 +2877,7 @@ PRECALL(setsid)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getgroups - (int gidsetsize, gid_t __user* grouplist)
+  sys_getgroups - (int gidsetsize, gid_t* grouplist)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(getgroups)
 {
@@ -2809,7 +2922,7 @@ LOG_RETURN(getgroups)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_setgroups - (int gidsetsize, gid_t __user* grouplist)
+  sys_setgroups - (int gidsetsize, gid_t* grouplist)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(setgroups)
 {
@@ -2887,8 +3000,8 @@ PRECALL(setresgid)
 }
 
 /*-----------------------------------------------------------------------------
-    sys_rt_sigaction - (int sig, const struct sigaction __user *act,
-    struct sigaction __user *oact, size_t sigsetsize)
+  sys_rt_sigaction - (int sig, const struct sigaction* act, struct sigaction*
+  oact, size_t sigsetsize)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(rt_sigaction)
 {
@@ -2931,9 +3044,9 @@ POSTCALL(rt_sigaction)
 }
 
 /*-----------------------------------------------------------------------------
-    sys_arch_prctl - (int code, unsigned long addr)
+  sys_arch_prctl - (int code, unsigned long addr)
 
-	This is used to get/set the FS/GS base on x86
+  This is used to get/set the FS/GS base on x86
 -----------------------------------------------------------------------------*/
 LOG_ARGS(arch_prctl)
 {
@@ -2950,7 +3063,7 @@ PRECALL(arch_prctl)
 }
 
 /*-----------------------------------------------------------------------------
-    sys_sync - (void)
+  sys_sync - (void)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(sync)
 {
@@ -2964,7 +3077,10 @@ PRECALL(sync)
 }
 
 /*-----------------------------------------------------------------------------
-    sys_setrlimit - (int resource, const struct rlimit *rlim)
+  sys_setrlimit - 
+
+  man(2): (int resource, const struct rlimit* rlim)
+  kernel: (unsigned int resource, struct rlimit* rlim)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(setrlimit)
 {
@@ -2990,7 +3106,7 @@ PRECALL(setrlimit)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getrusage - (int who, struct rusage *usage)
+  sys_getrusage - (int who, struct rusage* usage)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(getrusage)
 {
@@ -3015,7 +3131,7 @@ POSTCALL(getrusage)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_sysinfo - (struct sysinfo *info)
+  sys_sysinfo - (struct sysinfo* info)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(sysinfo)
 {
@@ -3037,7 +3153,7 @@ POSTCALL(sysinfo)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_gettimeofday - (struct timeval *tv, struct timezone *tz)
+  sys_gettimeofday - (struct timeval* tv, struct timezone* tz)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(gettimeofday)
 {
@@ -3062,7 +3178,10 @@ POSTCALL(gettimeofday)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getrlimit (unsigned int resource, struct rlimit __user* limit)
+  sys_getrlimit - 
+
+  man(2): (int resource, struct rlimit* rlim)
+  kernel: (unsigned int resource, struct rlimit* limit)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(getrlimit)
 {
@@ -3080,7 +3199,7 @@ PRECALL(getrlimit)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_symlink - (const char  *  oldname, const char  *  newname)
+  sys_symlink - (const char* oldname, const char* newname)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(symlink)
 {
@@ -3110,7 +3229,10 @@ PRECALL(symlink)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_readlink - (const char __user *path, char __user *buf, int bufsiz)
+  sys_readlink - 
+
+  man(2): (const char* path, char* buf, size_t bufsz)
+  kernel: (const char* path, char* buf, int bufsiz)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(readlink)
 {
@@ -3165,7 +3287,10 @@ POSTCALL(readlink)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_munmap - (void* addr, size_t length)
+  sys_munmap - 
+
+  man(2): (void* addr, size_t length)
+  kernel: (unsigned long addr, size_t length)
 -----------------------------------------------------------------------------*/
 GET_CALL_TYPE(munmap)
 {
@@ -3371,7 +3496,12 @@ POSTCALL(munmap)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_truncate - (const char  *  path, long  length)
+  sys_truncate - 
+
+  man(2): (const char* path, off_t length)
+  kernel: (const char* path, long length)
+
+  These type lists should be equivalent...
 -----------------------------------------------------------------------------*/
 LOG_ARGS(truncate)
 {
@@ -3396,7 +3526,10 @@ PRECALL(truncate)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_ftruncate - (unsigned int  fd, unsigned long  length)
+  sys_ftruncate - 
+
+  man(2): (int fd, off_t length)
+  kernel: (unsigned int fd, unsigned long length)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(ftruncate)
 {
@@ -3439,7 +3572,10 @@ CALL(ioperm)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_quotactl - (unsigned int cmd, const char* special, qid_t id, void* addr)
+  sys_quotactl - 
+
+  man(2): (int cmd, const char* special, int id, caddr_t addr)
+  kernel: (unsigned int cmd, const char* special, qid_t id, void* addr)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(quotactl)
 {
@@ -3696,7 +3832,10 @@ POSTCALL(socket)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_bind - (int fd, struct sockaddr __user * umyaddr, int addrlen)
+  sys_bind - 
+
+  man(2): (int fd, const struct sockaddr* addr, socklen_t addrlen)
+  kernel: (int fd, struct sockaddr* addr, int addrlen)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(bind)
 {
@@ -3731,7 +3870,10 @@ POSTCALL(bind)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_connect - (int fd, struct sockaddr __user * uservaddr, int addrlen)
+  sys_connect - 
+
+  man(2): (int fd, const struct sockaddr* addr, socklen_t addrlen)
+  kernel: (int fd, struct sockaddr* addr, int addrlen)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(connect)
 {
@@ -3784,8 +3926,10 @@ PRECALL(listen)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getsockname - (int fd, struct sockaddr __user * usockaddr,
-  int __user * usockaddr_len)
+  sys_getsockname - 
+
+  man(2): (int fd, struct sockaddr* addr, socklen_t* addrlen)
+  kernel: (int fd, struct sockaddr* addr, int* addrlen)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(getsockname)
 {
@@ -3811,8 +3955,10 @@ POSTCALL(getsockname)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getpeername - (int fd, struct sockaddr __user * usockaddr,
-  int __user * usockaddr_len)
+  sys_getpeername - 
+
+  man(2): (int fd, struct sockaddr* addr, socklen_t* addrlen)
+  kernel: (int fd, struct sockaddr* addr, int* addrlen)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(getpeername)
 {
@@ -3838,8 +3984,7 @@ POSTCALL(getpeername)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_socketpair - (int family, int type, int protocol,
-  int __user * usockvec)
+  sys_socketpair - (int family, int type, int protocol, int* usockvec)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(socketpair)
 {
@@ -3935,8 +4080,12 @@ POSTCALL(socketpair)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_sendto -  (int fd, void __user * buff, size_t len,
-  unsigned int flags, struct sockaddr __user * addr, int addr_len)
+  sys_sendto -  
+
+  man(2): (int fd, const void* buf, size_t len, int flags, constr struct
+  sockaddr* addr, socklen_t addrlen)
+  kernel: (int fd, void* buff, size_t len, unsigned int flags, struct sockaddr*
+  addr, int addrlen)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(sendto)
 {
@@ -3967,8 +4116,10 @@ PRECALL(sendto)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_send -  (int fd, void __user * buff, size_t len,
-  unsigned int flags)
+  sys_send -  
+
+  man(2): (int fd, const void* buf, size_t len, int flags)
+  kernel: (int fd, void* buf, size_t len, unsigned int flags)
 
   WRAPPER AROUND SENDTO!!!
 
@@ -3992,9 +4143,12 @@ PRECALL(send)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_recvfrom - (int fd, void __user * ubuf, size_t size,
-  unsigned int flags, struct sockaddr __user * addr,
-  int __user * addr_len)
+  sys_recvfrom - 
+
+  man(2): (int fd, void* buf, size_t len, int flags, struct sockaddr*
+  addr, socklen_t* addrlen)
+  kernel: (int fd, void* buf, size_t len, unsigned int flags, struct sockaddr*
+  addr, int* addrlen)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(recvfrom)
 {
@@ -4054,8 +4208,10 @@ PRECALL(shutdown)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_setsockopt - (int fd, int level, int optname,
-  char __user * optval, int optlen)
+  sys_setsockopt - 
+
+  man(2): (int fd, int level, int optname, void* optval, socklen_t optlen)
+  kernel: (int fd, int level, int optname, char* optval, int optlen)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(setsockopt)
 {
@@ -4082,8 +4238,10 @@ PRECALL(setsockopt)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getsockopt - (int fd, int level, int optname, char __user * optval, 
-  int __user * optlen)
+  sys_getsockopt - 
+
+  man(2): (int fd, int level, int optname, void* optval, socklen_t* optlen)
+  kernel: (int fd, int level, int optname, char* optval, int* optlen)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(getsockopt)
 {
@@ -4114,7 +4272,10 @@ POSTCALL(getsockopt)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_sendmsg - (int fd, struct msghdr __user * msg, unsigned int flags)
+  sys_sendmsg - 
+
+  man(2): (int fd, const struct msghdr* msg, int flags)
+  kernel: (int fd, struct msghdr* msg, unsigned int flags)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(sendmsg)
 {
@@ -4146,8 +4307,8 @@ PRECALL(sendmsg)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_sendmmsg - (int fd, struct mmsghdr __user * mmsg,
-  unsigned int vlen, unsigned int flags)
+  sys_sendmmsg - (int fd, struct mmsghdr* mmsg, unsigned int vlen, unsigned int
+  flags)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(sendmmsg)
 {
@@ -4178,8 +4339,10 @@ POSTCALL(sendmmsg)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_recvmsg - (int fd, struct msghdr __user * msg,
-  unsigned int flags)
+  sys_recvmsg - 
+
+  man(2): (int fd, struct msghdr* msg, int flags)
+  kernel: (int fd, struct msghdr* msg, unsigned int flags)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(recvmsg)
 {
@@ -4223,9 +4386,8 @@ POSTCALL(recvmsg)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_recvmmsg - (int fd, struct mmsghdr __user * mmsg,
-  unsigned int vlen, unsigned int flags,
-  struct timespec __user * timeout)
+  sys_recvmmsg - (int fd, struct mmsghdr* mmsg, unsigned int vlen, unsigned int
+  flags, struct timespec* timeout)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(recvmmsg)
 {
@@ -4277,8 +4439,8 @@ POSTCALL(recvmmsg)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_accept4 - (int fd, struct sockaddr __user * upeer_sockaddr,
-  int __user * upeer_addrlen, int flags)
+  sys_accept4 - (int fd, struct sockaddr* upeer_sockaddr, int* upeer_addrlen,
+  int flags)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(accept4)
 {
@@ -4449,8 +4611,10 @@ POSTCALL(epoll_create1)
 
 
 /*-----------------------------------------------------------------------------
-  sys_accept - (int fd, struct sockaddr __user * upeer_sockaddr,
-  int __user * upeer_addrlen)
+  sys_accept - 
+
+  man(2): (int fd, struct sockaddr* addr, socklen_t* addrlen)
+  kernel: (int fd, struct sockaddr* addr, int* addrlen)
 
   WRAPPER AROUND sys_accept4!!!
 -----------------------------------------------------------------------------*/
@@ -4476,9 +4640,9 @@ POSTCALL(accept)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_socketcall - (int call, unsigned long __user *args)
+  sys_socketcall - (int call, unsigned long *args)
 
-  This is i386 only!!! The syscall has now been split up. See the comment at
+  This is i386/ARM only!!! The syscall has now been split up. See the comment at
   the top. We extract the arguments in handle_socketcall_get_call_type
   and from there on, we use the specialized handlers even on i386!!!
 -----------------------------------------------------------------------------*/
@@ -4623,8 +4787,7 @@ LOG_RETURN(socketcall)
 #endif
 
 /*-----------------------------------------------------------------------------
-  sys_wait4 - (pid_t pid, int __user *stat_addr,
-  int options, struct rusage __user *ru)
+  sys_wait4 - (pid_t pid, int* stat_addr, int options, struct rusage *ru)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(wait4)
 {
@@ -4675,9 +4838,11 @@ POSTCALL(wait4)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_shmat - (int shmid, char __user * shmaddr, int shmflg)
+  sys_shmat - (int shmid, char * shmaddr, int shmflg)
 
-  AMD64-only!!! this used to be sys_ipc(SHMAT, shmid, shmaddr, shmflg)
+  sys_shmat did not exist on i386 when we added support for it. i386 used
+  sys_ipc(SHMAT, shmid, shmaddr, shmflg) instead. The syscall might have been
+  added by now.
 -----------------------------------------------------------------------------*/
 LOG_ARGS(shmat)
 {
@@ -4839,7 +5004,13 @@ LOG_RETURN(shmat)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_ipc - i386 only!!!
+  sys_ipc - This is a demultiplexer for SysV ipc requests. ARM and i386 use
+  this.  AMD64 does not use this. It calls the SysV ipc syscalls directly.
+
+  man(2): (unsigned int call, int first, int second, int third, void* ptr, long
+  fifth)
+  kernel: (unsigned int call, int first, unsigned long second, unsigned long
+  third, void* ptr, long fifth)
 -----------------------------------------------------------------------------*/
 PRECALL(ipc)
 {
@@ -4882,7 +5053,10 @@ LOG_RETURN(ipc)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fsync - (unsigned int fd)
+  sys_fsync - 
+
+  man(2): (int fd)
+  kernel: (unsigned int fd)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(fsync)
 {
@@ -4905,7 +5079,10 @@ PRECALL(fsync)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_sigreturn - (unsigned long unused)
+  sys_sigreturn - 
+
+  man(2): (unsigned long unused)
+  kernel: (void)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(rt_sigreturn)
 {
@@ -4939,8 +5116,15 @@ POSTCALL(rt_sigreturn)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_clone - (unsigned long clone_flags, unsigned long newsp,
-  void __user *parent_tid, void __user *variant_tid, struct pt_regs *regs)
+  sys_clone - 
+
+  The signature of this syscall function is distribution-specific. 
+  Ubuntu uses this version:
+
+  man(2): (unsigned long clone_flags, void* child_stack, void* parent_tid, void*
+  child_tid, struct pt_regs* regs)
+  kernel: (unsigned long clone_flags, unsigned long child_stack, int*
+  parent_tid, int* child_tid, int tls_val)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(clone)
 {
@@ -5000,18 +5184,18 @@ POSTCALL(clone)
     }
 
     return 0;
-    //	return MVEE_POSTCALL_DONTRESUME;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_mprotect - (unsigned long start, size_t len, unsigned long prot)
+  sys_mprotect - 
+
+  man(2): (void* start, size_t len, int prot)
+  kernel: (unsigned long start, size_t len, unsigned long prot)
 
   Unfortunately, it appears that this function must be synced. MMAP2 has a
   tendency to align new regions to existing bordering regions with the same
   protection flags. This behaviour CAN cause problems if we do not sync
   mprotect.
-
-TODO: Verify/Further documentation
 -----------------------------------------------------------------------------*/
 LOG_ARGS(mprotect)
 {
@@ -5216,7 +5400,7 @@ POSTCALL(mprotect)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getpgid
+  sys_getpgid - (void)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(getpgid)
 {
@@ -5257,7 +5441,10 @@ POSTCALL(capget)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fchdir - (unsigned int fd)
+  sys_fchdir - 
+
+  man(2): (int fd)
+  kernel: (unsigned int fd)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(fchdir)
 {
@@ -5287,7 +5474,7 @@ POSTCALL(fchdir)
 
 /*-----------------------------------------------------------------------------
   sys__llseek - (unsigned int fd, unsigned long offset_high,
-  unsigned long offset_low, loff_t __user * result,
+  unsigned long offset_low, loff_t * result,
   unsigned int origin)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(_llseek)
@@ -5325,8 +5512,8 @@ POSTCALL(_llseek)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getdents - (unsigned int fd,
-  struct linux_dirent __user * dirent, unsigned int count)
+  sys_getdents - (unsigned int fd, struct linux_dirent* dirent, unsigned int
+  count)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(getdents)
 {
@@ -5359,8 +5546,8 @@ POSTCALL(getdents)
 }
 
 /*-----------------------------------------------------------------------------
-  sys__newselect - (int n, fd_set __user *inp, fd_set __user *outp,
-  fd_set __user *exp, struct timeval __user *tvp)
+  sys__newselect - (int n, fd_set *inp, fd_set *outp, fd_set *exp, struct
+  timeval* tvp)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(select)
 {
@@ -5395,7 +5582,10 @@ POSTCALL(select)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_msync - (unsigned long start, size_t len, int flags)
+  sys_msync - 
+
+  man(2): (void* start, size_t len, int flags)
+  kernel: (unsigned long start, size_t len, int flags)
 
   syncs a shared mapping with the backing file. i.e., writes changes
   to the memory mapping back to the file.
@@ -5459,8 +5649,10 @@ PRECALL(msync)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_readv - (unsigned long  fd, const struct iovec  *  vec,
-  unsigned long  vlen)
+  sys_readv - 
+
+  man(2): (int fd, const struct iovec* iov, int iovcnt)
+  kernel: (unsigned long fd, const struct iovec* iov, unsigned long iovcnt)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(readv)
 {
@@ -5494,8 +5686,10 @@ POSTCALL(readv)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_writev - (unsigned long  fd, const struct iovec  *  vec,
-  unsigned long  vlen)
+  sys_writev - 
+
+  man(2): (int fd, const struct iovec* iov, int iovcnt)
+  kernel: (unsigned long fd, const struct iovec* iov, unsigned long iovcnt)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(writev)
 {
@@ -5537,7 +5731,10 @@ PRECALL(writev)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fdatasync - (unsigned int fd)
+  sys_fdatasync - 
+
+  man(2): (int fd)
+  kernel: (unsigned int fd)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(fdatasync)
 {
@@ -5560,7 +5757,7 @@ PRECALL(fdatasync)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_sched_yield
+  sys_sched_yield - (void)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(sched_yield)
 {
@@ -5609,9 +5806,11 @@ GET_CALL_TYPE(nanosleep)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_mremap - (unsigned long addr, unsigned long old_len,
-  unsigned long new_len, unsigned long flags,
-  unsigned long new_addr)
+  sys_mremap - 
+
+  man(2): (void* old_addr, size_t old_len, size_t new_len, int flags, ...)
+  kernel: (unsigned long old_addr, unsigned long old_len, unsigned long new_len,
+  unsigned long flags, unsigned long new_addr)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(mremap)
 {
@@ -5687,7 +5886,7 @@ LOG_RETURN(mremap)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_poll - (struct pollfd __user *ufds, unsigned int nfds, long timeout)
+  sys_poll - (struct pollfd* ufds, unsigned int nfds, long timeout)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(poll)
 {
@@ -5868,10 +6067,23 @@ POSTCALL(prctl)
 }
 
 /*-----------------------------------------------------------------------------
-  long sys32_rt_sigprocmask(int how,
-  compat_sigset_t __user *set,
-  compat_sigset_t __user *oset,
-  unsigned int sigsetsize)
+  sys_rt_sigprocmask - We use these handlers for sys_rt_sigprocmask AND
+  sys_sigprocmask.  The two calls are very similar. They differ in two respects:
+
+  * sys_sigprocmask accepts 'old_sigset_t' (aka 'unsigned int') arguments.
+  sys_rt_sigprocmask accepts 'sigset_t' (aka 'unsigned long') arguments.
+
+  * sys_rt_sigprocmask accepts a sigsetsize argument. sys_sigprocmask does not.
+
+  There is no rt_sigprocmask wrapper in user space. sigprocmask just calls one 
+  of the two syscalls, depending on which platform you're on.
+
+  Args for the syscalls: 
+
+  * sys_rt_sigprocmask: (int how, sigset_t* nset, sigset_t* oset, size_t
+  sigsetsize)
+
+  * sys_sigprocmask: (int how, sigset_t* nset, sigset_t* oset)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(rt_sigprocmask)
 {
@@ -5941,9 +6153,11 @@ POSTCALL(rt_sigprocmask)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_pread64 - (unsigned int fd, char __user *buf, size_t count, loff_t pos)
+  sys_pread64 - 
+
+  man(2): (int fd, void* buf, size_t count, loff_t pos)
+  kernel: (unsigned int fd, char* buf, size_t count, loff_t pos)
 -----------------------------------------------------------------------------*/
-// TODO: Check of pos needs arg shifting on ARM
 LOG_ARGS(pread64)
 {
 	debugf("%s - SYS_PREAD64(%u, 0x" PTRSTR ", %zd, %lld)\n",
@@ -5951,14 +6165,15 @@ LOG_ARGS(pread64)
 		   (unsigned int)ARG1(variantnum), 
 		   (unsigned long)ARG2(variantnum), 
 		   (size_t)ARG3(variantnum), 
-		   (loff_t)ARG4(variantnum));
+		   (loff_t)arg64<4, 5>(variantnum));
 }
 
 PRECALL(pread64)
 {
     CHECKPOINTER(2);
     CHECKARG(3);
-    CHECKARG(4);
+	// pos is ARG4 for AMD64, ARG4:ARG5 for i386 and ARG5:ARG6 for ARM
+    CHECKARG64(4, 5);
     CHECKFD(1);
 
 	if (set_fd_table->is_fd_unsynced(ARG1(0)))
@@ -5988,10 +6203,12 @@ POSTCALL(pread64)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_pwrite64 - (unsigned int fd, const char __user *buf,
-  size_t count, loff_t pos)
+  sys_pwrite64 - 
+
+  man(2): no standardized user-space wrapper exists. pwrite(2) is used instead.
+  pwrite(2) calls sys_pwrite64 if sys_pwrite isn't available
+  kernel: (unsigned int fd, const char *buf, size_t count, loff_t pos)
 -----------------------------------------------------------------------------*/
-// TODO: Check if pos needs arg shifting on ARM
 LOG_ARGS(pwrite64)
 {
 	auto buf_str = call_serialize_io_buffer(variantnum, (const unsigned char*) ARG2(variantnum), ARG3(variantnum));
@@ -6001,14 +6218,15 @@ LOG_ARGS(pwrite64)
 		   (unsigned int)ARG1(variantnum), 
 		   buf_str.c_str(), 
 		   (size_t)ARG3(variantnum), 
-		   (loff_t)ARG4(variantnum));
+		   (loff_t)arg64<4, 5>(variantnum));
 }
 
 PRECALL(pwrite64)
 {
     CHECKPOINTER(2);
     CHECKARG(3);
-    CHECKARG(4);
+	// pos is ARG4 on AMD64, ARG4:ARG5 on i386 and ARG5:ARG6 on ARM
+    CHECKARG64(4, 5);
     CHECKFD(1);
     CHECKBUFFER(2, ARG3(0));
 
@@ -6022,7 +6240,7 @@ PRECALL(pwrite64)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_chown - (const char  *  filename, uid_t  user, gid_t  group)
+  sys_chown - (const char* filename, uid_t user, gid_t group)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(chown)
 {
@@ -6051,7 +6269,10 @@ PRECALL(chown)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fchown - (int fd, uid_t user, gid_t group)
+  sys_fchown - 
+
+  man(2): (int fd, uid_t user, gid_t group)
+  kernel: (unsigned int fd, uid_t user, gid_t group)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(fchown)
 {
@@ -6081,14 +6302,17 @@ PRECALL(fchown)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getcwd - (char* buf, int buflen)
+  sys_getcwd - 
+
+  man(2): (char* buf, size_t buflen)
+  kernel: (char* buf, unsigned long buflen)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(getcwd)
 {
-	debugf("%s - SYS_GETCWD(0x" PTRSTR ", %d)\n", 
+	debugf("%s - SYS_GETCWD(0x" PTRSTR ", %lu)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   (unsigned long)ARG1(variantnum), 
-		   (int)ARG2(variantnum));
+		   (unsigned long)ARG2(variantnum));
 }
 
 PRECALL(getcwd)
@@ -6099,10 +6323,33 @@ PRECALL(getcwd)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_mmap2 - (unsigned long  addr, unsigned long  len, unsigned long  prot,
-  unsigned long  flags, int  fd, unsigned long  pgoff)
+  sys_mmap - There are several variants of this function: 
 
-  !!!!! fd is implicitly cast from unsigned long to int on AMD64 !!!
+  * AMD64 exposes sys_mmap. AMD64's sys_mmap is implemented by sys_mmap in 
+  arch/x86/kernel/sys_x86_64.c. This version of sys_mmap is a pretty simple
+  wrapper around sys_mmap_pgoff.
+
+  * i386 and ARM expose sys_old_mmap and sys_mmap2. i386's sys_old_mmap is
+  implemented by sys32_mmap in arch/x86/ia32/sys_ia32.c. ARM's sys_old_mmap is
+  implemented by sys_old_mmap in mm/mmap.c.
+
+  Both architectures' sys_mmap2 is implemented by sys_mmap_pgoff in mm/mmap.c.
+
+  sys_old_mmap is deprecated so we don't support it. sys_mmap and sys_mmap2 are
+  both supported by this set of handlers. There is only one important difference
+  between sys_mmap and sys_mmap2: sys_mmap accepts a byte offset as its 6th
+  argument.  sys_mmap2 accepts a page offset as its 6th argument.
+
+  Args:
+
+  man(2) mmap: (void* addr, size_t len, int prot, int flags, int fd, off_t
+  offset)
+  kernel mmap: (unsigned long addr, unsigned long len, unsigned long prot,
+  unsigned long flags, unsigned long fd, unsigned long pgoff)
+
+  man(2) mmap2: does not exist
+  kernel mmap2: (unsigned long addr, unsigned long len, unsigned long prot,
+  unsigned long flags, unsigned long fd, unsigned long pgoff)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(mmap)
 {
@@ -6521,9 +6768,12 @@ LOG_RETURN(mmap)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_truncate64 - (const char __user * path, loff_t length)
+  sys_truncate64 - 
+
+  man(2): no standardized user-space wrapper exists. truncate(2) is used instead.
+  truncate(2) calls sys_truncate64 if sys_truncate is not available.
+  kernel: (const char* path, loff_t length)
 -----------------------------------------------------------------------------*/
-// TODO: Check if length needs arg shifting on ARM
 LOG_ARGS(truncate64)
 {
 	auto str1 = rw::read_string(variants[variantnum].variantpid, (void*)ARG1(variantnum));
@@ -6531,13 +6781,13 @@ LOG_ARGS(truncate64)
 	debugf("%s - SYS_TRUNCATE64(%s, %lld)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   str1.c_str(), 
-		   (loff_t)ARG2(variantnum));
+		   (loff_t)arg64<2, 3>(variantnum));
 }
 
 PRECALL(truncate64)
 {
     CHECKPOINTER(1);
-    CHECKARG(2);
+    CHECKARG64(2, 3);
     CHECKSTRING(1);
 
 	if (call_do_alias<1>())
@@ -6547,20 +6797,23 @@ PRECALL(truncate64)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_ftruncate64 - (unsigned int fd, loff_t length)
+  sys_ftruncate64 - 
+
+  man(2): no standardized user-space wrapper exists. ftruncate(2) is used instead.
+  ftruncate(2) calls sys_ftruncate64 if sys_ftruncate is not available
+  kernel: (unsigned int fd, loff_t length)
 -----------------------------------------------------------------------------*/
-// TODO: Check if length needs arg shifting on ARM
 LOG_ARGS(ftruncate64)
 {
 	debugf("%s - SYS_FTRUNCATE64(%u, %lld)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 	       (unsigned int)ARG1(variantnum), 
-		   (loff_t)ARG2(variantnum));
+		   (loff_t)arg64<2, 3>(variantnum));
 }
 
 PRECALL(ftruncate64)
 {
-    CHECKARG(2);
+    CHECKARG64(2, 3);
     CHECKFD(1);
 
 	if (set_fd_table->is_fd_unsynced(ARG1(0)))
@@ -6573,7 +6826,11 @@ PRECALL(ftruncate64)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_stat64 - (char __user *filename, struct stat64 __user *statbuf);
+  sys_stat - (char* filename, struct stat* statbuf)
+
+  Even though the kernel exposes a sys_stat on all architectures, the actual
+  sys_stat implementation doesn't seem to get used anymore. Instead, the kernel
+  calls sys_newstat.
 -----------------------------------------------------------------------------*/
 LOG_ARGS(stat)
 {
@@ -6603,6 +6860,13 @@ POSTCALL(stat)
     return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
 
+/*-----------------------------------------------------------------------------
+  sys_stat64 - 
+
+  man(2): no standardized user-space wrapper exists. stat(2) calls sys_stat64
+  if it is available.
+  kernel: (char* filename, struct stat64* statbuf)
+-----------------------------------------------------------------------------*/
 LOG_ARGS(stat64)
 {
 	auto str1 = rw::read_string(variants[variantnum].variantpid, (void*) ARG1(variantnum));
@@ -6629,7 +6893,11 @@ POSTCALL(stat64)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_lstat64 - (char __user *filename, struct stat64 __user *statbuf);
+  sys_lstat - (char* filename, struct stat* statbuf)
+
+  Even though the kernel exposes a sys_lstat on all architectures, the actual
+  sys_lstat implementation doesn't seem to get used anymore. Instead, the kernel
+  calls sys_newlstat.
 -----------------------------------------------------------------------------*/
 LOG_ARGS(lstat)
 {
@@ -6665,6 +6933,13 @@ POSTCALL(lstat)
     return 0;
 }
 
+/*-----------------------------------------------------------------------------
+  sys_lstat64 - 
+
+  man(2): no standardized user-space wrapper exists. lstat(2) calls sys_lstat64
+  if it is available.
+  kernel: (char* filename, struct stat64* statbuf)
+-----------------------------------------------------------------------------*/
 LOG_ARGS(lstat64)
 {
 	auto str1 = rw::read_string(variants[variantnum].variantpid, (void*) ARG1(variantnum));
@@ -6693,7 +6968,14 @@ POSTCALL(lstat64)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fstat - (unsigned long fd, struct stat64 * statbuf)
+  sys_fstat - 
+
+  man(2): (int fd, struct stat* statbuf)
+  kernel: (unsigned int fd, struct stat* statbuf)
+
+  Even though the kernel exposes a sys_fstat on all architectures, the actual
+  sys_fstat implementation doesn't seem to get used anymore. Instead, the kernel
+  calls sys_newfstat.
 -----------------------------------------------------------------------------*/
 LOG_ARGS(fstat)
 {
@@ -6775,7 +7057,11 @@ POSTCALL(fstat)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fstat64 - (unsigned long fd, struct stat64 * statbuf)
+  sys_fstat64 - 
+
+  man(2): no standardized user-space wrapper exists. fstat(2) calls sys_fstat64
+  if it is available.
+  kernel: (unsigned long fd, struct stat64* statbuf)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(fstat64)
 {
@@ -6849,11 +7135,23 @@ POSTCALL(fstat64)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_madvise - (void* addr, size_t length, int advice)
+  sys_madvise - 
+
+  man(2): (void* addr, size_t length, int advice)
+  kernel: (unsigned long addr, size_t len, int advice)
 -----------------------------------------------------------------------------*/
 GET_CALL_TYPE(madvise)
 {
     return MVEE_CALL_TYPE_UNSYNCED;
+}
+
+LOG_ARGS(madvise)
+{
+	debugf("%s - SYS_MADVISE(" PTRSTR ", %zd, %d)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (unsigned long)ARG1(variantnum), 
+		   (size_t)ARG2(variantnum),
+		   (int)ARG3(variantnum));
 }
 
 /*-----------------------------------------------------------------------------
@@ -6879,9 +7177,20 @@ CALL(shmget)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getdents64 - (unsigned int  fd, struct linux_dirent64  *  dirent,
-  unsigned int  count)
+  sys_getdents64 - (unsigned int fd, struct linux_dirent64* dirent,
+  unsigned int count)
+
+  This syscall exists on all architectures, including AMD64.
 -----------------------------------------------------------------------------*/
+LOG_ARGS(getdents64)
+{
+	debugf("%s - SYS_GETDENTS(%u, 0x" PTRSTR ", %u)\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned int)ARG1(variantnum),
+		   (unsigned long)ARG2(variantnum),
+		   (unsigned int)ARG3(variantnum));
+}
+
 PRECALL(getdents64)
 {
     CHECKPOINTER(2);
@@ -7050,11 +7359,20 @@ CALL(gettid)
 /*-----------------------------------------------------------------------------
   sys_readahead - (int fd, loff_t offset, size_t sz)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(readahead)
+{
+	debugf("%s - SYS_READAHEAD(%d, %llu, %zu)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (int)ARG1(variantnum), 
+		   (loff_t)arg64<2, 3>(variantnum),
+		   (size_t)aligned_arg<3, 5>(variantnum));
+}
+
 PRECALL(readahead)
 {
     CHECKFD(1);
-    CHECKARG(2);
-    CHECKARG(3);
+    CHECKARG64(2, 3);
+    CHECKALIGNEDARG(3, 5);
     MAPFDS(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
@@ -7068,8 +7386,8 @@ POSTCALL(readahead)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_setxattr - (const char __user * pathname,
-  const char __user * name, void __user * value, size_t size, int flags)
+  sys_setxattr - (const char* pathname, const char* name, void* value, size_t
+  size, int flags)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(setxattr)
 {
@@ -7103,8 +7421,8 @@ PRECALL(setxattr)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fsetxattr - (int fd,
-  const char __user * name, void __user * value, size_t size, int flags)
+  sys_fsetxattr - (int fd, const char* name, void* value, size_t size, int
+  flags)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(fsetxattr)
 {
@@ -7139,8 +7457,8 @@ PRECALL(fsetxattr)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getxattr - (const char __user *, pathname,
-  const char __user *, name, void __user *, value, size_t, size)
+  sys_getxattr - (const char* pathname, const char* name, void* value, size_t
+  size)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(getxattr)
 {
@@ -7177,8 +7495,7 @@ POSTCALL(getxattr)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fgetxattr - (int fd,
-  const char __user * name, void __user * value, size_t size)
+  sys_fgetxattr - (int fd, const char* name, void* value, size_t size)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(fgetxattr)
 {
@@ -7216,8 +7533,14 @@ POSTCALL(fgetxattr)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_futex - (u32* uaddr, int op, u32 val, struct timespec* utime,
-  u32* uaddr2, u32 val3)
+  sys_futex - 
+
+  man(2): (int* uaddr, int op, int val, const struct timespec* utime, int*
+  uaddr2, int val3)
+  kernel: (u32* uaddr, int op, u32 val, struct timespec* utime, u32* uaddr2, u32
+  val3)
+
+  These type lists should be compatible
 -----------------------------------------------------------------------------*/
 LOG_ARGS(futex)
 {
@@ -7291,7 +7614,10 @@ POSTCALL(futex)
 }
 
 /*-----------------------------------------------------------------------------
-  int sched_setaffinity(pid_t pid, size_t cpusetsize, cpu_set_t *mask);
+  sched_setaffinity - 
+
+  man(2): (pid_t pid, size_t len, cpu_set_t* mask)
+  kernel: (pid_t pid, unsigned int len, unsigned long* mask)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(sched_setaffinity)
 {
@@ -7374,8 +7700,10 @@ CALL(sched_setaffinity)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_sched_getaffinity - (pid_t pid, unsigned int len,
-  unsigned long __user * user_mask_ptr)
+  sys_sched_getaffinity - 
+
+  man(2): (pid_t pid, size_t len, cpu_set_t* mask)
+  kernel: (pid_t pid, unsigned int len, unsigned long* mask)
 -----------------------------------------------------------------------------*/
 GET_CALL_TYPE(sched_getaffinity)
 {
@@ -7383,15 +7711,18 @@ GET_CALL_TYPE(sched_getaffinity)
     return MVEE_CALL_TYPE_UNSYNCED;
 }
 
+LOG_ARGS(sched_getaffinity)
+{
+	debugf("%s - SYS_SCHED_GETAFFINITY(%d, %zd, " PTRSTR ")\n",
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (pid_t)ARG1(variantnum),
+		   (size_t)ARG2(variantnum), 
+		   (unsigned long)ARG3(variantnum));
+}
+
 POSTCALL(sched_getaffinity)
 {
     // mask the return with the CPU cores we wish to make available to this variant
-
-    //debugf("%s - SYS_SCHED_GETAFFINITY return: %d\n",
-    //     variants[variantnum].variantpid,
-    //     call_postcall_get_variant_result(variantnum));
-
-
     int res = call_postcall_get_variant_result(variantnum);
     if (call_check_result(res) && ARG3(variantnum))
     {
@@ -7475,8 +7806,9 @@ POSTCALL(epoll_create)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_exit_group - NOTE: this syscall does not seem to complete until all
-  variants have exited
+  sys_exit_group - (int error_code)
+
+  NOTE: this syscall does not seem to complete until all variants have exited
 -----------------------------------------------------------------------------*/
 #ifdef MVEE_DUMP_MEM_STATS
 static void handle_get_mem_size(int pid, unsigned long* phys_sz, unsigned long* virt_sz)
@@ -7511,6 +7843,13 @@ static void handle_get_mem_size(int pid, unsigned long* phys_sz, unsigned long* 
 }
 #endif
 
+LOG_ARGS(exit_group)
+{
+	debugf("%s - SYS_EXIT_GROUP(%d)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (int)ARG1(variantnum));
+}
+
 CALL(exit_group)
 {
 #ifdef MVEE_DUMP_MEM_STATS
@@ -7543,8 +7882,15 @@ CALL(exit_group)
 }
 
 /*-----------------------------------------------------------------------------
-    sys_set_tid_address - (int* tidptr)
+  sys_set_tid_address - (int* tidptr)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(set_tid_address)
+{
+	debugf("%s - SYS_SET_TID_ADDRESS(" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (unsigned long)ARG1(variantnum));
+}
+
 POSTCALL(set_tid_address)
 {
 	// Always returns the caller's thread ID
@@ -7554,7 +7900,7 @@ POSTCALL(set_tid_address)
 }
 
 /*-----------------------------------------------------------------------------
-  clock_gettime - (clockid_t which_clock, struct timespec __user* tp)
+  sys_clock_gettime - (clockid_t which_clock, struct timespec* tp)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(clock_gettime)
 {
@@ -7578,7 +7924,7 @@ POSTCALL(clock_gettime)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_statfs - (const char  *  pathname, struct statfs64  *  buf)
+  sys_statfs - (const char* pathname, struct statfs* buf)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(statfs)
 {
@@ -7609,7 +7955,11 @@ POSTCALL(statfs)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_statfs64 - (const char  *  pathname, size_t  sz, struct statfs64  *  buf)
+  sys_statfs64 - 
+
+  man(2): there is no standardized user-space wrapper for this
+  function. statfs(2) seems to use sys_statfs64 if it is available.  
+  kernel: (const char* pathname, size_t sz, struct statfs64* buf)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(statfs64)
 {
@@ -7642,9 +7992,19 @@ POSTCALL(statfs64)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fstatfs - (int fd, struct statfs* buf)
-  sys_fstatfs64 - (int fd, size_t  sz, struct statfs64  *  buf)
+  sys_fstatfs - 
+
+  man(2): (int fd, struct statfs* buf)
+  kernel: (unsigned int fd, struct statfs* buf)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(fstatfs)
+{
+	debugf("%s - SYS_FSTATFS(%u, 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (unsigned int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum));
+}
+
 PRECALL(fstatfs)
 {
     CHECKFD(1);
@@ -7663,6 +8023,22 @@ POSTCALL(fstatfs)
 {
     REPLICATEBUFFERFIXEDLEN(2, sizeof(struct statfs));
     return 0;
+}
+
+/*-----------------------------------------------------------------------------
+  sys_fstatfs64 - 
+
+  man(2): there is no standardized user-space wrapper for this
+  function. fstatfs(2) seems to use sys_fstatfs64 if it is available.  
+  kernel: (unsigned int fd, size_t sz, struct statfs64* buf)
+-----------------------------------------------------------------------------*/
+LOG_ARGS(fstatfs64)
+{
+	debugf("%s - SYS_FSTATFS64(%u, %zu, 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (unsigned int)ARG1(variantnum), 
+		   (size_t)ARG2(variantnum),
+		   (unsigned long)ARG3(variantnum));
 }
 
 PRECALL(fstatfs64)
@@ -7687,7 +8063,10 @@ POSTCALL(fstatfs64)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getpriority - (int which, int who)
+  sys_getpriority - 
+
+  man(2): (int which, id_t who)
+  kernel: (int which, int who)
 -----------------------------------------------------------------------------*/
 PRECALL(getpriority)
 {
@@ -7697,7 +8076,10 @@ PRECALL(getpriority)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_setpriority - (int which, int who, int niceval)
+  sys_setpriority - 
+
+  man(2): (int which, id_t who, int niceval)
+  kernel: (int which, int who, int niceval)
 -----------------------------------------------------------------------------*/
 PRECALL(setpriority)
 {
@@ -7713,10 +8095,13 @@ PRECALL(setpriority)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_sched_setscheduler
+  sys_sched_setscheduler - (pid_t pid, int policy, struct sched_param* param)
 -----------------------------------------------------------------------------*/
 PRECALL(sched_setscheduler)
 {
+	CHECKARG(1);
+	CHECKARG(2);
+	CHECKPOINTER(3);
 	return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
@@ -7726,8 +8111,8 @@ CALL(sched_setscheduler)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_epoll_wait - (int epfd, struct epoll_event __user* events, 
-  int maxevents, int timeout)
+  sys_epoll_wait - (int epfd, struct epoll_event* events, int maxevents, int
+  timeout)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(epoll_wait)
 {
@@ -7833,7 +8218,7 @@ POSTCALL(epoll_wait)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_epoll_ctl - (int epfd, int op, int fd, struct epoll_event __user* event)
+  sys_epoll_ctl - (int epfd, int op, int fd, struct epoll_event* event)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(epoll_ctl)
 {
@@ -7901,7 +8286,10 @@ POSTCALL(epoll_ctl)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_tgkill - (int tgid, int pid, int sig)
+  sys_tgkill - 
+
+  man(2): (int tgid, int pid, int sig)
+  kernel: (pid_t tgid, pid_t pid, int sig)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(tgkill)
 {
@@ -7976,8 +8364,14 @@ PRECALL(utimes)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_waitid - (int which, pid_t pid, struct siginfo __user *infop,
-  int options, struct rusage __user *ru);
+  sys_waitid - 
+
+  man(2): (idtype_t which, id_t pid, struct siginfo* infop, int options, struct
+  rusage* ru)
+  kernel: (int which, pid_t pid, struct siginfo *infop, int options, struct
+  rusage* ru)
+
+  These type lists should be equivalent
 -----------------------------------------------------------------------------*/
 LOG_ARGS(waitid)
 {
@@ -8092,7 +8486,10 @@ PRECALL(inotify_add_watch)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_inotify_rm_watch - (int fd, int wd)
+  sys_inotify_rm_watch - 
+
+  man(2): (int fd, int wd)
+  kernel: (int fd, __s32 wd)
 -----------------------------------------------------------------------------*/
 PRECALL(inotify_rm_watch)
 {
@@ -8102,7 +8499,10 @@ PRECALL(inotify_rm_watch)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_openat - (int dfd, const char __user *filename, int flags, int mode)
+  sys_openat - 
+
+  man(2): (int dfd, const char *filename, int flags, mode_t mode)
+  kernel: (int dfd, const char *filename, int flags, umode_t mode)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(openat)
 {
@@ -8227,7 +8627,10 @@ POSTCALL(openat)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_mkdirat - (int dirfd, const char *pathname, mode_t mode)
+  sys_mkdirat - 
+
+  man(2): (int dirfd, const char *pathname, mode_t mode)
+  kernel: (int dirfd, const char *pathname, umode_t mode)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(mkdirat)
 {
@@ -8259,10 +8662,12 @@ PRECALL(mkdirat)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fstatat64 - (int dirfd, const char *pathname, struct stat *buf, int flags)
+  sys_newfstatat - (int dfd, const char* filename, struct stat* statbuf, int
+  flag)
 
-  sys_newfstatat - (int dfd, const char __user * filename,
-  struct stat __user * statbuf, int flag)
+  sys_fstatat is deprecated so fstatat(2) now uses this syscall instead. This
+  call only exists on 64-bit platforms.  32-bit platforms use sys_fstatat64
+  instead.  
 -----------------------------------------------------------------------------*/
 LOG_ARGS(newfstatat)
 {
@@ -8300,6 +8705,12 @@ POSTCALL(newfstatat)
     return 0;
 }
 
+/*-----------------------------------------------------------------------------
+  sys_fstatat64 - (int dfd, const char* filename, struct stat64* statbuf, int
+  flag)
+
+  fstat(2) uses this syscall on 32-bit platforms.
+-----------------------------------------------------------------------------*/
 LOG_ARGS(fstatat64)
 {
 	auto path = rw::read_string(variants[variantnum].variantpid, (void*) ARG2(variantnum));
@@ -8415,8 +8826,8 @@ PRECALL(unlinkat)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_renameat - (int olddirfd, const char *oldpath,
-  int newdirfd, const char *newpath)
+  sys_renameat - (int olddirfd, const char *oldpath, int newdirfd, const char
+  *newpath)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(renameat)
 {
@@ -8457,8 +8868,8 @@ PRECALL(renameat)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_linkat - (int olddirfd, const char *oldpath,
-  int newdirfd, const char *newpath, int flags)
+  sys_linkat - (int olddirfd, const char *oldpath, int newdirfd, const char
+  *newpath, int flags)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(linkat)
 {
@@ -8538,8 +8949,7 @@ PRECALL(symlinkat)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_readlinkat - (int dirfd, const char *pathname,
-  char *buf, size_t bufsiz)
+  sys_readlinkat - (int dirfd, const char *pathname, char *buf, size_t bufsiz)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(readlinkat)
 {
@@ -8578,7 +8988,10 @@ POSTCALL(readlinkat)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fchmodat - (int dfd, const char __user * filename, umode_t mode, int flags)
+  sys_fchmodat - 
+
+  man(2): (int dfd, const char * filename, mode_t mode, int flags)
+  kernel: (int dfd, const char * filename, umode_t mode, int flags)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(fchmodat)
 {
@@ -8612,7 +9025,13 @@ PRECALL(fchmodat)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_faccessat - (int dirfd, const char *pathname, int mode)
+  sys_faccessat - 
+
+  man(2): (int dirfd, const char* pathname, int mode, int flags)
+  kernel: (int dirfd, const char* pathname, int mode)
+
+  The flags argument is only used in glibc itself and never passed to the
+  syscall.
 -----------------------------------------------------------------------------*/
 LOG_ARGS(faccessat)
 {
@@ -8644,7 +9063,10 @@ PRECALL(faccessat)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_unshare - (int flags)
+  sys_unshare - 
+
+  man(2): (int flags)
+  kernel: (unsigned long flags)
 
   reverses the effect of sharing certain kernel data structures through
   sys_clone
@@ -8696,8 +9118,8 @@ CALL(unshare)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_utimensat - (int dirfd, const char *pathname,
-  const struct timespec times[2], int flags)
+  sys_utimensat - (int dirfd, const char *pathname, const struct timespec
+  times[2], int flags)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(utimensat)
 {
@@ -8831,14 +9253,17 @@ POSTCALL(timerfd_create)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fallocate - (int fd, int mode, off_t offset, off_t len)
+  sys_fallocate - 
+
+  man(2): (int fd, int mode, off_t offset, off_t len)
+  kernel: (int fd, int mode, loff_t offset, loff_t len)
 -----------------------------------------------------------------------------*/
 PRECALL(fallocate)
 {
     CHECKFD(1);
     CHECKARG(2);
-    CHECKARG(3);
-    CHECKARG(4);
+    CHECKARG64(3, 3);
+    CHECKARG64(4, 5);
 
 	if (set_fd_table->is_fd_unsynced(ARG1(0)))
 	{
@@ -8850,8 +9275,8 @@ PRECALL(fallocate)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_timerfd_settime - (int ufd, int flags,
-  const struct itimerspec* utmr, struct itimerspec* otmr)
+  sys_timerfd_settime - (int ufd, int flags, const struct itimerspec* utmr,
+  struct itimerspec* otmr)
 -----------------------------------------------------------------------------*/
 PRECALL(timerfd_settime)
 {
@@ -8902,8 +9327,13 @@ POSTCALL(timerfd_gettime)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_dup3 - (unsigned int oldfd, unsigned int newfd, int flags)
-  the only valid flag that can be passed to dup3 through the flags field is O_CLOEXEC!!!
+  sys_dup3 - 
+
+  man(2): (int oldfd, int newfd, int flags)
+  kernel: (unsigned int oldfd, unsigned int newfd, int flags)
+
+  the only valid flag that can be passed to dup3 through the flags field is
+  O_CLOEXEC!!!
 -----------------------------------------------------------------------------*/
 LOG_ARGS(dup3)
 {
@@ -9159,7 +9589,12 @@ POSTCALL(perf_event_open)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_seccomp - seccomp can be used to filter syscalls based on the syscall
+  sys_seccomp - 
+
+  man(2): (unsigned int op, unsigned int flags, void* uargs)
+  kernel: (unsigned int op, unsigned int flags, const char* uargs)
+
+  seccomp can be used to filter syscalls based on the syscall
   numbers or arguments. We currently disable this syscall as our sync agents
   might trigger seccomp violations.
 
@@ -9254,6 +9689,7 @@ void mvee::init_syslocks()
     ALIAS rt_sigaction sigaction
     ALIAS rt_sigreturn sigreturn
     ALIAS rt_sigsuspend sigsuspend
+	ALIAS rt_sigprocmask sigprocmask
     ALIAS select _newselect
     ALIAS getxattr lgetxattr
     ALIAS setxattr lsetxattr

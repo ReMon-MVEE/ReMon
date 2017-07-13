@@ -14,15 +14,12 @@
 /*-----------------------------------------------------------------------------
   Architecture-specific features
 -----------------------------------------------------------------------------*/
-// #define MVEE_ARCH_SUPPORTS_IPMON
-// #define MVEE_ARCH_SUPPORTS_DISASSEMBLY
-// #define MVEE_ARCH_HAS_X86_HWBP
-// #define MVEE_ARCH_HAS_RDTSC
-// #define MVEE_ARCH_HAS_ARCH_PRCTL
 #define MVEE_ARCH_HAS_PTRACE_SET_SYSCALL
 #define MVEE_ARCH_USE_LIBUNWIND
 #define PAGE_SIZE 4096
 #define MVEE_ARCH_REG_TYPE unsigned long
+#define MVEE_ARCH_LITTLE_ENDIAN
+#define MVEE_ARCH_REQUIRES_REG_ALIGNMENT
 
 /*-----------------------------------------------------------------------------
   SPEC PROFILES
