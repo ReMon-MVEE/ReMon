@@ -8137,6 +8137,15 @@ PRECALL(setpriority)
 /*-----------------------------------------------------------------------------
   sys_sched_setscheduler - (pid_t pid, int policy, struct sched_param* param)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(sched_setscheduler)
+{
+	debugf("%s - SYS_SCHED_SETSCHEDULER(%d, %s, 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (int)ARG1(variantnum),
+		   getTextualSchedulingPolicy(ARG2(variantnum)),
+		   (unsigned long)ARG3(variantnum));
+}
+
 PRECALL(sched_setscheduler)
 {
 	CHECKARG(1);

@@ -1444,6 +1444,25 @@ const char* getTextualPriorityWhich(int which)
 }
 
 /*-----------------------------------------------------------------------------
+    getTextualSchedulingPolicy
+-----------------------------------------------------------------------------*/
+const char* getTextualSchedulingPolicy(int policy)
+{
+	const char* result = "SCHED_UNKNOWN";
+
+	switch (policy)
+	{
+		DEF_CASE(SCHED_OTHER);
+		DEF_CASE(SCHED_BATCH);
+		DEF_CASE(SCHED_IDLE);
+		DEF_CASE(SCHED_FIFO);
+		DEF_CASE(SCHED_RR);
+	}
+
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
     getTextualTimerFlags
 -----------------------------------------------------------------------------*/
 std::string getTextualTimerFlags(int flags)
