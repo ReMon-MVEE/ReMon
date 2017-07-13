@@ -1427,6 +1427,23 @@ const char* getTextualQuotactlFmt(unsigned long fmt)
 }
 
 /*-----------------------------------------------------------------------------
+    getTextualPriorityWhich
+-----------------------------------------------------------------------------*/
+const char* getTextualPriorityWhich(int which)
+{
+	const char* result = "PRIO_UNKNOWN";
+
+	switch (which)
+	{
+		DEF_CASE(PRIO_PROCESS);
+		DEF_CASE(PRIO_PGRP);
+		DEF_CASE(PRIO_USER);
+	}
+
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
     getTextualTimerFlags
 -----------------------------------------------------------------------------*/
 std::string getTextualTimerFlags(int flags)

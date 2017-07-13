@@ -8068,6 +8068,25 @@ POSTCALL(fstatfs64)
   man(2): (int which, id_t who)
   kernel: (int which, int who)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(getpriority)
+{
+	if (ARG1(variantnum) == PRIO_USER)
+	{
+		debugf("%s - SYS_GETPRIORITY(%s, %d = %s)\n", 
+			   call_get_variant_pidstr(variantnum).c_str(), 
+			   getTextualPriorityWhich(ARG1(variantnum)),
+			   (int)ARG2(variantnum),
+			   getTextualUserId(ARG2(variantnum)).c_str());
+	}
+	else
+	{
+		debugf("%s - SYS_GETPRIORITY(%s, %d)\n", 
+			   call_get_variant_pidstr(variantnum).c_str(), 
+			   getTextualPriorityWhich(ARG1(variantnum)),
+			   (int)ARG2(variantnum));		
+	}
+}
+
 PRECALL(getpriority)
 {
     CHECKARG(1);
@@ -8081,6 +8100,27 @@ PRECALL(getpriority)
   man(2): (int which, id_t who, int niceval)
   kernel: (int which, int who, int niceval)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(setpriority)
+{
+	if (ARG1(variantnum) == PRIO_USER)
+	{
+		debugf("%s - SYS_SETPRIORITY(%s, %d = %s, %d)\n", 
+			   call_get_variant_pidstr(variantnum).c_str(), 
+			   getTextualPriorityWhich(ARG1(variantnum)),
+			   (int)ARG2(variantnum),
+			   getTextualUserId(ARG2(variantnum)).c_str(),
+			   (int)ARG3(variantnum));
+	}
+	else
+	{
+		debugf("%s - SYS_SETPRIORITY(%s, %d, %d)\n", 
+			   call_get_variant_pidstr(variantnum).c_str(), 
+			   getTextualPriorityWhich(ARG1(variantnum)),
+			   (int)ARG2(variantnum),
+			   (int)ARG3(variantnum));		
+	}
+}
+
 PRECALL(setpriority)
 {
     CHECKARG(1);

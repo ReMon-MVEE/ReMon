@@ -72,6 +72,7 @@ const char* getTextualRusageWho         (int who);
 const char* getTextualQuotactlType      (int type);
 const char* getTextualQuotactlCmd       (int cmd);
 const char* getTextualQuotactlFmt       (unsigned long fmt);
+const char* getTextualPriorityWhich     (int which);
 std::string getTextualTimerFlags        (int flags);
 std::string getTextualWaitEventType     (int status);
 std::string getTextualEpollEvents       (unsigned int events);
