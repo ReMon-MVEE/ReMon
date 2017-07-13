@@ -6165,7 +6165,7 @@ LOG_ARGS(pread64)
 		   (unsigned int)ARG1(variantnum), 
 		   (unsigned long)ARG2(variantnum), 
 		   (size_t)ARG3(variantnum), 
-		   (loff_t)arg64<4, 5>(variantnum));
+		   (long long)arg64<4, 5>(variantnum));
 }
 
 PRECALL(pread64)
@@ -6218,7 +6218,7 @@ LOG_ARGS(pwrite64)
 		   (unsigned int)ARG1(variantnum), 
 		   buf_str.c_str(), 
 		   (size_t)ARG3(variantnum), 
-		   (loff_t)arg64<4, 5>(variantnum));
+		   (long long)arg64<4, 5>(variantnum));
 }
 
 PRECALL(pwrite64)
@@ -6781,7 +6781,7 @@ LOG_ARGS(truncate64)
 	debugf("%s - SYS_TRUNCATE64(%s, %lld)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   str1.c_str(), 
-		   (loff_t)arg64<2, 3>(variantnum));
+		   (long long)arg64<2, 3>(variantnum));
 }
 
 PRECALL(truncate64)
@@ -6808,7 +6808,7 @@ LOG_ARGS(ftruncate64)
 	debugf("%s - SYS_FTRUNCATE64(%u, %lld)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 	       (unsigned int)ARG1(variantnum), 
-		   (loff_t)arg64<2, 3>(variantnum));
+		   (long long)arg64<2, 3>(variantnum));
 }
 
 PRECALL(ftruncate64)
@@ -7364,7 +7364,7 @@ LOG_ARGS(readahead)
 	debugf("%s - SYS_READAHEAD(%d, %llu, %zu)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   (int)ARG1(variantnum), 
-		   (loff_t)arg64<2, 3>(variantnum),
+		   (long long)arg64<2, 3>(variantnum),
 		   (size_t)aligned_arg<3, 5>(variantnum));
 }
 
