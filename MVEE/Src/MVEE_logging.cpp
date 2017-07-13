@@ -970,7 +970,7 @@ void monitor::log_calculate_clock_spread()
 
 	SAFEDELETEARRAY(counters);
 
-	warnf("Clock stats - clocks used: %u - range: [%d, %d] - mean: %le - variance: %le\n",
+	warnf("Clock stats - clocks used: %zu - range: [%d, %d] - mean: %le - variance: %le\n",
 				cntrs.size(), lowest_clock_used, highest_clock_used, mean, variance);
 }
 
