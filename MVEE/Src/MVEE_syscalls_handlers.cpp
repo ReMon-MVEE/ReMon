@@ -9624,6 +9624,29 @@ POSTCALL(inotify_init1)
 /*-----------------------------------------------------------------------------
   sys_rt_tgsigqueueinfo - (pid_t tgid, pid_t pid, int sig, siginfo_t* uinfo)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(rt_tgsigqueueinfo)
+{
+	siginfo_t* si = (siginfo_t*)rw::read_data(variants[variantnum].variantpid,
+											  (void*) ARG3(variantnum),
+											  sizeof(siginfo_t));
+	
+	if (!si)
+	{
+		warnf("Couldn't read uinfo\n");
+		return;
+	}
+
+	debugf("%s - SYS_RT_TGSIGQUEUEINFO(%d, %d, %s, [si_code: %s, si_pid: %d, si_uid: %d, si_value: %d])\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (pid_t)ARG1(variantnum), 
+		   (pid_t)ARG2(variantnum), 
+		   getTextualSig(ARG3(variantnum)), 
+		   getTextualSEGVCode(si->si_code),
+		   si->si_pid,
+		   si->si_uid,
+		   si->si_value.sival_int);
+}
+
 PRECALL(rt_tgsigqueueinfo)
 {
 	CHECKARG(1);
