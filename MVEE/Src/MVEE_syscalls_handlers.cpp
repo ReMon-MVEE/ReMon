@@ -9508,6 +9508,15 @@ POSTCALL(dup3)
 /*-----------------------------------------------------------------------------
   sys_pipe2 - (int* pipefd, int flags)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(pipe2)
+{
+	debugf("%s - SYS_PIPE2(0x" PTRSTR ", %d = %s)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned long)ARG1(variantnum),
+		   (int)ARG2(variantnum),
+		   getTextualFileFlags(ARG2(variantnum)).c_str());
+}
+
 PRECALL(pipe2)
 {
     CHECKPOINTER(1);
