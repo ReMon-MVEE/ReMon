@@ -9352,6 +9352,17 @@ PRECALL(fallocate)
   sys_timerfd_settime - (int ufd, int flags, const struct itimerspec* utmr,
   struct itimerspec* otmr)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(timerfd_settime)
+{
+	debugf("%s - SYS_TIMERFD_SETTIME(%d, %d = %s, 0x" PTRSTR ", 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (int)ARG1(variantnum), 
+		   (int)ARG2(variantnum), 
+		   getTextualTimerFlags(ARG2(variantnum)).c_str(),
+		   (unsigned long)ARG3(variantnum), 
+		   (unsigned long)ARG4(variantnum));
+}
+
 PRECALL(timerfd_settime)
 {
     CHECKFD(1);
@@ -9379,6 +9390,14 @@ POSTCALL(timerfd_settime)
 /*-----------------------------------------------------------------------------
   sys_timerfd_gettime - (int ufd, struct itimerspec* otmr)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(timerfd_gettime)
+{
+	debugf("%s - SYS_TIMERFD_GETTIME(%d, 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum));
+}
+
 PRECALL(timerfd_gettime)
 {
     CHECKFD(1);

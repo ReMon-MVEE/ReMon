@@ -1485,8 +1485,9 @@ std::string getTextualTimerFlags(int flags)
 {
     std::string result;
 
-    TEST_FLAG(flags, TFD_NONBLOCK, result);
-    TEST_FLAG(flags, TFD_CLOEXEC,  result);
+    TEST_FLAG(flags, TFD_NONBLOCK     , result);
+    TEST_FLAG(flags, TFD_CLOEXEC      , result);
+    TEST_FLAG(flags, TFD_TIMER_ABSTIME, result);
 
     return result;
 }
