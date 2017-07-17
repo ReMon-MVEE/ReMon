@@ -14,15 +14,87 @@
 /*-----------------------------------------------------------------------------
   Architecture-specific features
 -----------------------------------------------------------------------------*/
+//
+// MVEE_ARCH_SUPPORTS_IPMON: if this is defined, we allow the variants to 
+// load and initialize IP-MON via sys_prctl.
+//
 #define MVEE_ARCH_SUPPORTS_IPMON
+
+//
+// MVEE_ARCH_SUPPORTS_DISASSEMBLY: we define this if we can disassemble
+// executable code for this architecture. We currently only support disassembly
+// on AMD64 and i386. We primarily use this disassembly feature to calculate the
+// lengths of instructions that caused certain events requiring monitor
+// intervention (e.g., syscall traps, segmentation faults, ...)  Calculating the
+// instruction length allows us to skip specific instructions.
+//
 #define MVEE_ARCH_SUPPORTS_DISASSEMBLY
+
+//
+// MVEE_ARCH_HAS_X86_HWBP: this is defined if we have hardware breakpoint
+// support for this architecture.
+//
 #define MVEE_ARCH_HAS_X86_HWBP
+
+//
+// MVEE_ARCH_HAS_RDTSC: this is defined if this architecture has a Read
+// TimeStamp Counter (RDTSC) instruction that can be disabled by the monitor.
+// If we disable RDTSC, then any attempt to execute this instruction will
+// result in a trap.
+//
 #define MVEE_ARCH_HAS_RDTSC
+
+//
+// MVEE_ARCH_HAS_ARCH_PRCTL: this is defined if this architecture implements
+// sys_arch_prctl. This syscall is currently only used to set/get the fs/gs
+// segment bases on x86.
+//
 #define MVEE_ARCH_HAS_ARCH_PRCTL
+
+// 
+// MVEE_ARCH_HAS_VSYSCALL: this is defined if this architecture has a vsyscall
+// page that might need to be disabled. NOTE: the vsyscall page is the older
+// version of the VDSO.  vsyscall and vdso coexist on AMD64. i386 uses only the
+// vdso page.
+//
 #define MVEE_ARCH_HAS_VSYSCALL
+
+//
+// MVEE_ARCH_HAS_YAMA_LSM: this is defined if this architecture is expected to
+// be using the Yama Linux Security Modules. Yama has an annoying ptrace bug
+// that prevents us from monitoring variant subprocesses whose parent process
+// has died.
+// More info here: https://lkml.org/lkml/2014/12/24/196
+//
 #define MVEE_ARCH_HAS_YAMA_LSM
+
+//
+// MVEE_ARCH_HAS_VDSO: this is defined if this architecture has a Virtual
+// Dynamic Shared Object (VDSO) page that implements user-space syscalls.
+// The user-space syscalls exposed by the VDSO are not reported to the monitor
+// and must therefore be disabled if we want to give equivalent input
+// to all variants.
+//
+#define MVEE_ARCH_HAS_VDSO
+
+// 
+// MVEE_ARCH_REG_TYPE: primitive type of the register fields in the
+// user_regs_struct. These are the structs we read using PTRACE_GETREGS.
+//
 #define MVEE_ARCH_REG_TYPE unsigned long long
+
+//
+// MVEE_ARCH_IS_64BIT: defined on 64-bit architectures. On 64-bit archs, we
+// don't need to do any fancy register shifting for syscalls that accept
+// unsigned long long arguments.
+//
 #define MVEE_ARCH_IS_64BIT
+
+//
+// MVEE_ARCH_LITTLE_ENDIAN: defined on little-endian architectures. The
+// endianness of the platform affects how we do register shifting for syscalls
+// that accept unsigned long long arguments.
+//
 #define MVEE_ARCH_LITTLE_ENDIAN
 
 /*-----------------------------------------------------------------------------

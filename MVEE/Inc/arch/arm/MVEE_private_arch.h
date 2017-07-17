@@ -14,12 +14,72 @@
 /*-----------------------------------------------------------------------------
   Architecture-specific features
 -----------------------------------------------------------------------------*/
-#define MVEE_ARCH_HAS_PTRACE_SET_SYSCALL
-#define MVEE_ARCH_USE_LIBUNWIND
-#define PAGE_SIZE 4096
+// 
+// MVEE_ARCH_REG_TYPE: primitive type of the register fields in the
+// user_regs_struct. These are the structs we read using PTRACE_GETREGS.
+//
 #define MVEE_ARCH_REG_TYPE unsigned long
+
+//
+// MVEE_ARCH_LITTLE_ENDIAN: defined on little-endian architectures. The
+// endianness of the platform affects how we do register shifting for syscalls
+// that accept unsigned long long arguments.
+//
 #define MVEE_ARCH_LITTLE_ENDIAN
+
+//
+// MVEE_ARCH_REQUIRES_REG_ALIGNMENT: this is defined if the first half of 64-bit
+// arguments passed to syscalls must be in an even-numbered register.
+//
+// Currently, this is only used for ARM. Consider for example sys_pread64(int
+// fd, char* buf, size_t count, loff_t pos). The 4th argument (pos) is of type
+// loff_t, which is 64-bit sized on all platforms.
+//
+// Normally, ARM would pass fd in register R0, buf in register R1, count in
+// register R2 and pos in register R3.  However, because the registers are only
+// 32-bit sized, pos is split up into pos[0..31] and pos[32..63].  Additionally,
+// because this architecture requires register alignment, we must pass the first
+// half (pos[0..31]) in an even-numbered register (aka R4).
+//
+// This gives us the following register contents on ARM:
+// R0: fd
+// R1: buf
+// R2: count
+// R3: <not used>
+// R4: pos[0..31]
+// R5: pos[32..63]
+//
+// It is worth noting that ARMv7 is technically bi-endian. When running in big
+// endian mode, the contents of registers R4 and R5 would be swapped. However,
+// we assume that ARM variants will always use the GNU extended ABI, which
+// mandates little endianness.
+//
 #define MVEE_ARCH_REQUIRES_REG_ALIGNMENT
+
+//
+// MVEE_ARCH_HAS_PTRACE_SET_SYSCALL: this is defined if this architecture
+// implements the PTRACE_SET_SYSCALL ptrace operation. PTRACE_SET_SYSCALL must
+// be used to overwrite the syscall number while the syscall is already in
+// progress. GHUMVEE uses this option to inject fake syscalls (e.g. for
+// mastercalls).
+//
+#define MVEE_ARCH_HAS_PTRACE_SET_SYSCALL
+
+//
+// MVEE_ARCH_USE_LIBUNWIND: this is defined if we want to use libunwind to do
+// backtracing. We currently only use this on ARM because ARM binaries do not
+// have valid DWARF unwind information in their .eh_frame and .debug_frame
+// sections. Instead, ARM binaries have a weird .ARM.exidx section that contains
+// unwind info in an ARM-specific format. GHUMVEE does not know how to parse
+// such frames.
+//
+#define MVEE_ARCH_USE_LIBUNWIND
+
+//
+// PAGE_SIZE: This is here because the ARM system headers do not define the
+// default page size.
+//
+#define PAGE_SIZE 4096
 
 /*-----------------------------------------------------------------------------
   SPEC PROFILES

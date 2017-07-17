@@ -479,7 +479,10 @@ void monitor::rewrite_execve_args(int variantnum, bool write_to_stack, bool rewr
 	// insert ELF interpreter if necessary
 	if (lib_path.str().length() > 0)
 	{
-		if ((*mvee::config_variant_global)["hide_vdso"].asBool() ||
+		if (
+#ifdef MVEE_ARCH_HAS_VDSO
+			(*mvee::config_variant_global)["hide_vdso"].asBool() ||
+#endif
 			(*mvee::config_variant_global)["non_overlapping_mmaps"].asInt())
 		{
 			argv.push_front(mvee::strdup(MVEE_LD_LOADER_NAME));

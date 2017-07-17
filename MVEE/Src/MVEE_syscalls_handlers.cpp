@@ -1198,7 +1198,10 @@ CALL(execve)
         perf = 1;
 
 	// return immediately if we don't have to use the MVEE_LD_Loader
-	if (!(*mvee::config_variant_global)["hide_vdso"].asBool() && 
+	if (
+#ifdef MVEE_ARCH_HAS_VDSO
+		!(*mvee::config_variant_global)["hide_vdso"].asBool() && 
+#endif
 		!(*mvee::config_variant_global)["non_overlapping_mmaps"].asInt() && 
 		(!(*mvee::config_variant_exec)["library_path"]
 		 || (*mvee::config_variant_exec)["library_path"].asString().length() == 0))
