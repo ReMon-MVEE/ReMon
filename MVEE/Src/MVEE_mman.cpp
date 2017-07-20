@@ -1268,10 +1268,11 @@ void mmap_table::calculate_disjoint_bases (unsigned long size, std::vector<unsig
 int mmap_table::check_vdso_overlap(int variantnum)
 {
     mmap_region_info* vdso = get_vdso_region(variantnum);
-    vdso->print_region_info("Checking overlap for VDSO");
 
     if (!vdso)
         return -1;
+
+	vdso->print_region_info("Checking overlap for VDSO");
 
     for (int i = 0; i < variantnum; ++i)
     {
