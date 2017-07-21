@@ -121,9 +121,20 @@ void monitor::log_donthave(int variantnum)
 
 	if (entry)
 	{
-		debugf("%s - %s(...)\n", 
-			   call_get_variant_pidstr(variantnum).c_str(),
-			   mvee::upcase(getTextualSyscall(variants[variantnum].callnum)).c_str());
+		const char* syscall_name = getTextualSyscall(variants[variantnum].callnum);
+		if (strcmp(syscall_name, "sys_unknown") == 0)
+		{
+			debugf("%s - SYS_UNKNOWN - CALLNO: %ld (0x" PTRSTR ")\n", 
+				   call_get_variant_pidstr(variantnum).c_str(),
+				   variants[variantnum].callnum,
+				   variants[variantnum].callnum);			
+		}
+		else
+		{			
+			debugf("%s - %s(...)\n", 
+				call_get_variant_pidstr(variantnum).c_str(),
+				mvee::upcase(syscall_name).c_str());
+		}
 	}
 	else
 	{
