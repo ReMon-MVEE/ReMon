@@ -464,14 +464,12 @@ mmap_region_info* mmap_table::get_heap_region(int variantnum)
 -----------------------------------------------------------------------------*/
 bool mmap_table::get_ld_loader_bounds(int variantnum, unsigned long& loader_base, unsigned long& loader_size)
 {
-    mmap_region_info* info = NULL;
-    if (sizeof(long) == 4)
-        info = get_region_info(variantnum, 0x08048000, 0);
-    else
-        info = get_region_info(variantnum, 0x10000000, 0);
+    auto info = get_region_info(variantnum, MVEE_LD_LOADER_BASE, 0);	
 
     if (info)
     {
+		info->print_region_info("Found loader base");
+
         // also look for the data segment
         std::set<mmap_region_info*, region_sort>::iterator it =
             full_map[variantnum].find(info);
