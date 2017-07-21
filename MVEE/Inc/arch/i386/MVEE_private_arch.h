@@ -82,6 +82,12 @@
 //
 #define MVEE_ARCH_LITTLE_ENDIAN
 
+//
+// the base constant from which all fake syscall numbers used by the monitor
+// are derived
+//
+#define MVEE_FAKE_SYSCALL_BASE   0x6FFFFFFF
+
 /*-----------------------------------------------------------------------------
   SPEC PROFILES
 -----------------------------------------------------------------------------*/
@@ -98,6 +104,7 @@
 #define MVEE_ARCH_INTERP_NAME      "ld-linux.so.2"
 #define MVEE_LD_LOADER_PATH        "/MVEE_LD_Loader/"
 #define MVEE_LD_LOADER_NAME        "MVEE_LD_Loader_this_is_a_very_long_process_name_that_must_be_at_least_as_long_as_slash_lib_slash_ld-linux.so.2_times_two"
+#define MVEE_LD_LOADER_BASE        0x08048000
 // Assuming the 3G/1G split...
 #define HIGHEST_USERMODE_ADDRESS   0xc0000000
 

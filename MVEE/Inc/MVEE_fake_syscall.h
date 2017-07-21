@@ -44,12 +44,6 @@ enum mvee_shared_buffer_types
  Constants
  -----------------------------------------------------------------------------*/
 
-//
-// the base constant from which all fake syscall numbers used by the monitor
-// are derived
-//
-#define MVEE_FAKE_SYSCALL_BASE   0x6FFFFFFF
-
 #define MVEE_RDTSC_FAKE_SYSCALL  MVEE_FAKE_SYSCALL_BASE + 1
 
 //

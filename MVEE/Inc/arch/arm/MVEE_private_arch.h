@@ -81,6 +81,12 @@
 //
 #define PAGE_SIZE 4096
 
+//
+// the base constant from which all fake syscall numbers used by the monitor
+// are derived
+//
+#define MVEE_FAKE_SYSCALL_BASE   0x6FF
+
 /*-----------------------------------------------------------------------------
   SPEC PROFILES
 -----------------------------------------------------------------------------*/
@@ -97,6 +103,7 @@
 #define MVEE_ARCH_INTERP_NAME      "ld-linux-armhf.so.3"
 #define MVEE_LD_LOADER_PATH        "/MVEE_LD_Loader/"
 #define MVEE_LD_LOADER_NAME        "MVEE_LD_Loader_this_is_a_very_long_process_name_that_must_be_at_least_as_long_as_slash_lib_slash_ld-linux-armhf.so.3_times_two"
+#define MVEE_LD_LOADER_BASE        0x14000
 // Assuming the 3G/1G split...
 #define HIGHEST_USERMODE_ADDRESS   0xc0000000
 
@@ -186,7 +193,7 @@
 #define SETARG4(variantnum, value)                interaction::write_specific_reg(variants[variantnum].variantpid, REG_R3 * 4, (value))
 #define SETARG5(variantnum, value)                interaction::write_specific_reg(variants[variantnum].variantpid, REG_R4 * 4, (value))
 #define SETARG6(variantnum, value)                interaction::write_specific_reg(variants[variantnum].variantpid, REG_R5 * 4, (value))
-#define SETSYSCALLNO(variantnum, value)           interaction::write_specific_reg(variants[variantnum].variantpid, REG_R7 * 4, (value))
+#define SETSYSCALLNO(variantnum, value)           interaction::write_syscall_no(variants[variantnum].variantpid, (value))
 
 /*-----------------------------------------------------------------------------
   Print Registers
