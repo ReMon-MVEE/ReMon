@@ -41,3 +41,4 @@ typedef Elf64_Off    Elf_Off;
         :: "m" (new_sp), "m" (new_entry) :); \
 
 #define FSTAT_NO            __NR_fstat
+#define MVEE_FAKE_SYSCALL_BASE 0x6FFFFFFF
