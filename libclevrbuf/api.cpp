@@ -4,13 +4,13 @@
 __thread struct rbuf* buf = nullptr;
 int my_variant_num = 0;
 
-void rb_init()
+extern "C" void rb_init()
 {
 	buf = rbuf_init<unsigned long>(4096, 0);
 	syscall(MVEE_GET_THREAD_NUM, &my_variant_num);
 }
 
-void rb_xcheck(unsigned long item)
+extern "C" void rb_xcheck(unsigned long item)
 {
 	if (my_variant_num == 0)
 	{
