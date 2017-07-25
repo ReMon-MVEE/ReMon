@@ -1,14 +1,14 @@
 CXXFLAGS=-c -fPIC -Wall -O3 -std=c++11
 TEST=test.cpp
 LIB=api.cpp
-TEST_OBJS=$(TEST:.cpp=.o)
-LIB_OBJS=$(LIB:.cpp=.o)
+TEST_OBJS:=$(TEST:%.cpp=%.o)
+LIB_OBJS:=$(LIB:%.cpp=%.o)
 
-.PHONY : test all lib
+.PHONY : test all lib clean
 
-all: $(TEST) $(LIB) test lib
+all: test lib
 
-.cpp.o:
+%.o: %.cpp
 	$(CXX) $(CXXFLAGS) $< -o $@
 
 lib: $(LIB_OBJS)
