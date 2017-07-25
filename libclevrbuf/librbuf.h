@@ -119,7 +119,7 @@ struct rbuf* rbuf_init(size_t capacity, int variants)
 		buf_id = syscall(MVEE_GET_SHARED_BUFFER, 
 						 0, // normal buffer
 						 MVEE_RING_BUFFER,
-						 buf_sz,
+						 &buf_sz,
 						 sizeof(T));
 
 		if (buf_id == -1)
@@ -127,8 +127,6 @@ struct rbuf* rbuf_init(size_t capacity, int variants)
 			fprintf(stderr, "failed to allocate ring buffer\n");
 			return nullptr;
 		}
-
-		printf("attaching to buffer\n");
 
 		buf = (struct rbuf*) shmat(buf_id, NULL, 0);
 
