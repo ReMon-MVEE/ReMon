@@ -36,7 +36,8 @@ enum mvee_shared_buffer_types
 	MVEE_UTCB_REG_FILE_MAP,        /* 19 - !!!DEPRECATED in favor of MVEE_IPMON_REG_FILE_MAP!!! */
 	MVEE_IPMON_BUFFER,             /* 20 */
 	MVEE_IPMON_REG_FILE_MAP,       /* 21 */
-    MVEE_MAX_SHM_TYPES             /* 22 */
+	MVEE_RING_BUFFER,              /* 22 */
+    MVEE_MAX_SHM_TYPES             /* 23 */
 };
 #endif
 

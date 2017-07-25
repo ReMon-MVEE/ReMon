@@ -1090,6 +1090,7 @@ private:
     std::vector<void*>                atomic_queue_pos;
 
     _shm_info*                        ipmon_buffer;
+	_shm_info*                        ring_buffer;
 
     // Signal info
     unsigned short                    current_signal;         // signal no for the signal we're currently delivering

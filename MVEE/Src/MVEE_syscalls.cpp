@@ -604,7 +604,6 @@ long monitor::call_call_dispatch ()
                     {
                         info = atomic_buffer;
                     }
-
                 }
 				else if (buffer_type == MVEE_IPMON_BUFFER)
 				{
@@ -656,6 +655,25 @@ long monitor::call_call_dispatch ()
 
                     result = MVEE_CALL_DENY | MVEE_CALL_RETURN_EXTENDED_VALUE;
 					break;
+				}
+				else if (buffer_type == MVEE_RING_BUFFER)
+				{
+                    if (!ring_buffer)
+                    {
+                        ring_buffer = new _shm_info();
+						
+						int requested_capacity = 4096;
+
+						if (ARG3(0))
+						{
+							if (!rw::read_primitive<int>(variants[0].variantpid, (void*) ARG3(0), requested_capacity))
+								warnf("Couldn't read capacity for ring buffer allocation\n");
+						}
+
+						alloc_size = requested_slot_size * requested_capacity + (mvee::numvariants + 1) * 64;
+                    }
+
+					info = ring_buffer;
 				}
                 else if (buffer_type <= MVEE_MAX_SHM_TYPES)
                 {

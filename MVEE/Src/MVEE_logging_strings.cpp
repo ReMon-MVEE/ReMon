@@ -686,6 +686,7 @@ const char* getTextualBufferType(int buffer_type)
 		DEF_CASE(MVEE_UTCB_REG_FILE_MAP);
         DEF_CASE(MVEE_IPMON_BUFFER);
         DEF_CASE(MVEE_IPMON_REG_FILE_MAP);
+		DEF_CASE(MVEE_RING_BUFFER);
     }
 
     return result;
