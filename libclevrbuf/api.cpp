@@ -4,7 +4,12 @@
 __thread struct rbuf* buf = nullptr;
 int my_variant_num = 0;
 
+#ifdef EXPLICIT_RB_INIT
 extern "C" void rb_init()
+#else
+__attribute__((constructor))
+static void rb_init()
+#endif
 {
 	buf = rbuf_init<unsigned long>(4096, 0);
 	syscall(MVEE_GET_THREAD_NUM, &my_variant_num);
