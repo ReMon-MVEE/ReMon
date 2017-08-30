@@ -77,12 +77,12 @@ struct rbuf
 };
 
 template<typename T> 
-struct rbuf* rbuf_init(size_t capacity, int variants)
+struct rbuf* rbuf_init(size_t capacity, int variants, bool debug)
 {
 	int buf_id, buf_sz;
 	struct rbuf* buf = nullptr;
 
-	// not in the MVEE
+	// Not in the MVEE. This is just for native benchmarking.
 	if (variants != 0)
 	{
 		buf_sz = ROUND_UP(64 * (variants + 1) + capacity * sizeof(T), 4096);		
@@ -145,10 +145,6 @@ struct rbuf* rbuf_init(size_t capacity, int variants)
 		buf->elem_size = sizeof(T);
 		buf->data_offset = 64 * (variants + 1);
 		buf->slaves = variants - 1;
-/*
-		printf("Attached to rbuf - effective size: %d (bytes) - effective capacity: %lu (items)\n",
-			   buf_sz, buf->elems);
-*/
 	}
 
 	return buf;

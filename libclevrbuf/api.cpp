@@ -6,7 +6,7 @@ int my_variant_num = 0;
 
 extern "C" void rb_init()
 {
-	buf = rbuf_init<unsigned long>(4096, 0);
+	buf = rbuf_init<unsigned long>(4096, 0, false);
 	syscall(MVEE_GET_THREAD_NUM, &my_variant_num);
 }
 
