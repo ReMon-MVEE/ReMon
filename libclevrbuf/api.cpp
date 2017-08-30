@@ -11,7 +11,7 @@ __attribute__((constructor))
 static void rb_init()
 #endif
 {
-	buf = rbuf_init<unsigned long>(4096, 0, false);
+	buf = rbuf_init<unsigned long>(4096, 0);
 	syscall(MVEE_GET_THREAD_NUM, &my_variant_num);
 }
 
