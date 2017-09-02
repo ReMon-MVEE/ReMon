@@ -1149,12 +1149,14 @@ PRECALL(execve)
 
 CALL(execve)
 {
+#if 0
 	if IS_UNSYNCED_CALL
 	{
 		warnf("unsynced execve dispatch - was this intentional?\n");
 		variants[variantnum].entry_point_bp_set = false;
 		return MVEE_CALL_ALLOW;
 	}
+#endif
 
 	// check if the file exists first
 	for (int i = 0; i < mvee::numvariants; ++i)
@@ -1219,7 +1221,7 @@ CALL(execve)
 	for (int i = 0; i < mvee::numvariants; ++i)
 	{
 		rewrite_execve_args(i, true, false);
-		variants[i].entry_point_bp_set = false;
+//		variants[i].entry_point_bp_set = false;
 	}
 
     return MVEE_CALL_ALLOW;
@@ -1332,13 +1334,15 @@ POSTCALL(execve)
 #endif
 
 		// enable fast forwarding?
-		/*for (int i = 0; i < mvee::numvariants; ++i)
+		if (!(*mvee::config_variant_global)["xchecks_initially_enabled"].asBool())
 		{
-			variants[i].entry_point_address = 
-				mvee::os_get_entry_point_address(...);
-			
-			variants[i].fast_forward_to_entry_point = true;				
-		 }*/
+			for (int i = 0; i < mvee::numvariants; ++i)
+			{
+				variants[i].fast_forwarding = true;				
+				debugf("%s - Variant will start with cross-checks DISABLED\n", 
+					   call_get_variant_pidstr(variantnum).c_str());
+			}
+		}
     }
 	else
 	{		
@@ -6713,8 +6717,10 @@ POSTCALL(mmap)
 		set_mmap_table->map_range(variantnum, result, ARG2(variantnum), ARG4(variantnum), ARG3(variantnum), info, actual_offset);
 		set_mmap_table->verify_mman_table(variantnum, variants[variantnum].variantpid);
 
+// old code that did fast forwarding to the entry point
+#if 0
 		// Check if we mapped the main binary
-		/*if (info &&
+		if (info &&
 			variants[variantnum].fast_forward_to_entry_point &&
 			!variants[variantnum].entry_point_bp_set)
 		{
@@ -6725,11 +6731,11 @@ POSTCALL(mmap)
 //			warnf("Mapping %s\n", info->path.c_str());
 
 			if ((ARG3(variantnum) & PROT_EXEC) &&
-				info->path.compare(program_image) == 0)
+				info->paths[variantnum].compare(program_image) == 0)
 			{
 				// see if we can get a handle to the executable region that
 				// contains the entry point
-				unsigned long region_base = set_mmap_table->find_image_base(variantnum, info->path);
+				unsigned long region_base = set_mmap_table->find_image_base(variantnum, info->paths[variantnum]);
 
 				if (region_base)
 				{
@@ -6751,7 +6757,8 @@ POSTCALL(mmap)
 					}
 				}
 			}
-			}*/
+		}
+#endif
 
 		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 	}
@@ -7896,9 +7903,16 @@ LOG_ARGS(set_tid_address)
 
 POSTCALL(set_tid_address)
 {
-	// Always returns the caller's thread ID
-	for (int i = 0; i < mvee::numvariants; ++i)
-		call_postcall_set_variant_result(i, variants[0].variantpid);
+	if IS_UNSYNCED_CALL
+	{
+		call_postcall_set_variant_result(variantnum, variants[0].variantpid);
+	}
+	else
+	{
+		// Always returns the caller's thread ID
+		for (int i = 0; i < mvee::numvariants; ++i)
+			call_postcall_set_variant_result(i, variants[0].variantpid);
+	}
     return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
 

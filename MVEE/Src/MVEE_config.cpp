@@ -49,6 +49,7 @@ void mvee::init_config_set_defaults()
 {
 #define WEAK_INIT_KEY(key, value) if (!key) key = value;
 
+	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["xchecks_initially_enabled"], true);
 	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["disable_syscall_checks"], false); // also used in RAVEN
 	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["use_ipmon"], false);
 	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["hide_vdso"], true);

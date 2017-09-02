@@ -218,7 +218,7 @@ unsigned char monitor::call_precall_get_call_type (int variantnum, long callnum)
 
     if (callnum >= 0 && callnum < MAX_CALLS)
     {
-		if (variants[variantnum].fast_forward_to_entry_point)
+		if (variants[variantnum].fast_forwarding)
 		{
 			result = MVEE_CALL_TYPE_UNSYNCED;
 		}
@@ -261,14 +261,25 @@ unsigned char monitor::call_precall_get_call_type (int variantnum, long callnum)
 			case MVEE_SET_SYNC_PRIMITIVES_PTR:
 			case MVEE_INVOKE_LD:
 			case MVEE_RUNS_UNDER_MVEE_CONTROL:
+			case MVEE_ENABLE_XCHECKS:
             {
                 result = MVEE_CALL_TYPE_UNSYNCED;
                 break;
             }
 
+			case MVEE_GET_VIRTUALIZED_ARGV0: 
+			{
+                // TODO: Review this. We might want this to be synced even while fast forwarding
+				if (variants[variantnum].fast_forwarding)
+				{
+					result = MVEE_CALL_TYPE_UNSYNCED;
+					break;
+				}
+			}
+
 			default:
 			{
-				if (variants[variantnum].fast_forward_to_entry_point)
+				if (variants[variantnum].fast_forwarding)
 				{
 					warnf("Don't have an unsynced call handler for call: %lu (%s)\n",
 						  callnum, getTextualSyscall(callnum));
@@ -512,6 +523,24 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
                 break;
             }
 
+			case MVEE_GET_VIRTUALIZED_ARGV0:
+			{
+				// This is fine, though we might want to change this policy later
+				if (variants[variantnum].fast_forwarding)
+					break;
+			}
+
+			case MVEE_ENABLE_XCHECKS:
+			{
+				if (variants[variantnum].fast_forwarding)
+				{
+					debugf("%s - SYS_ENABLE_XCHECKS() => variant is leaving fast-forwarding state\n", 
+					   call_get_variant_pidstr(variantnum).c_str());
+					variants[variantnum].fast_forwarding = false;
+				}
+				result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
+				break;
+			}
 
 			//
 			// 
