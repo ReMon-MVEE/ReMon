@@ -13,6 +13,7 @@
 #define MVEE_FAKE_SYSCALL_BASE 0x6FFFFFFF
 #define MVEE_GET_THREAD_NUM MVEE_FAKE_SYSCALL_BASE + 10
 #define MVEE_GET_SHARED_BUFFER MVEE_FAKE_SYSCALL_BASE + 4
+#define MVEE_ENABLE_XCHECKS MVEE_FAKE_SYSCALL_BASE + 18
 #define MVEE_RING_BUFFER 22
 #define MAX_WAIT_CYCLES 10000
 
@@ -113,6 +114,9 @@ struct rbuf* rbuf_init(size_t capacity, int variants)
 	}
 	else
 	{
+		// if we started with cross-checks disabled, enable them now
+		syscall(MVEE_ENABLE_XCHECKS, NULL);
+
 		variants = syscall(MVEE_GET_THREAD_NUM, NULL);
 		buf_sz = capacity;
 
