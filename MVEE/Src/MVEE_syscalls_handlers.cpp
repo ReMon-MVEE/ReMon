@@ -2668,6 +2668,10 @@ POSTCALL(fcntl)
 				else
 					set_fd_table->set_blocking(ARG1(0));
 			}
+			else if (ARG2(0) == F_GETFD)
+			{
+				return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+			}
         }
     }
 
