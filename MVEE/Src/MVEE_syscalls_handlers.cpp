@@ -3290,7 +3290,7 @@ CALL(readlink)
 POSTCALL(readlink)
 {
     REPLICATEBUFFER(2);
-    return 0;
+    return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
 
 /*-----------------------------------------------------------------------------
