@@ -3308,6 +3308,10 @@ POSTCALL(readlink)
 -----------------------------------------------------------------------------*/
 GET_CALL_TYPE(munmap)
 {
+	// munmap xchecks can be relaxed regardless of the target region
+	if ((*mvee::config_variant_global)["relaxed_mman_xchecks"].asBool())
+		return MVEE_CALL_TYPE_UNSYNCED;
+
     // We do NOT want to sync on the munmap of the lower region
     if (in_new_heap_allocation)
     {
@@ -5211,6 +5215,18 @@ POSTCALL(clone)
   protection flags. This behaviour CAN cause problems if we do not sync
   mprotect.
 -----------------------------------------------------------------------------*/
+GET_CALL_TYPE(mprotect)
+{
+	// Unless we're making something PROT_EXEC, we can always relax this xcheck
+	if ((*mvee::config_variant_global)["relaxed_mman_xchecks"].asBool() &&
+		!(ARG3(variantnum) & PROT_EXEC))
+	{
+		return MVEE_CALL_TYPE_UNSYNCED;
+	}
+
+	return MVEE_CALL_TYPE_NORMAL;
+}
+
 LOG_ARGS(mprotect)
 {
 	debugf("%s - SYS_MPROTECT(0x" PTRSTR ", %zd, " PTRSTR " = %s)\n",
@@ -5407,6 +5423,9 @@ POSTCALL(mprotect)
 	}
 	else
 	{
+		if (call_succeeded)
+			set_mmap_table->mprotect_range(variantnum, ARG1(variantnum), ARG2(variantnum), ARG3(variantnum));
+
 		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 	}
 
@@ -5826,6 +5845,28 @@ GET_CALL_TYPE(nanosleep)
   kernel: (unsigned long old_addr, unsigned long old_len, unsigned long new_len,
   unsigned long flags, unsigned long new_addr)
 -----------------------------------------------------------------------------*/
+GET_CALL_TYPE(mremap)
+{
+	// This one can be relaxed if the new region has MAP_ANONYMOUS and not PROT_EXEC
+	if ((*mvee::config_variant_global)["relaxed_mman_xchecks"].asBool())
+	{
+		bool has_prot_exec = false;
+		mmap_region_info* old_region = set_mmap_table->get_region_info(variantnum, ARG1(variantnum), ARG2(variantnum));
+
+		if (old_region && 
+			(old_region->region_prot_flags & PROT_EXEC))
+		{
+			has_prot_exec = true;
+		}
+
+		if (!has_prot_exec &&
+			(ARG4(variantnum) & MAP_ANONYMOUS))
+			return MVEE_CALL_TYPE_UNSYNCED;
+	}
+
+	return MVEE_CALL_TYPE_NORMAL;
+}
+
 LOG_ARGS(mremap)
 {
 	debugf("%s - SYS_MREMAP(0x" PTRSTR ", %lu, %lu, 0x" PTRSTR ", 0x" PTRSTR ")\n",
@@ -6365,6 +6406,19 @@ PRECALL(getcwd)
   kernel mmap2: (unsigned long addr, unsigned long len, unsigned long prot,
   unsigned long flags, unsigned long fd, unsigned long pgoff)
 -----------------------------------------------------------------------------*/
+GET_CALL_TYPE(mmap)
+{
+	// mman xchecks can be relaxed for non-executable heap allocations
+	if ((*mvee::config_variant_global)["relaxed_mman_xchecks"].asBool() &&
+		(ARG4(variantnum) & MAP_ANONYMOUS) &&
+		!(ARG3(variantnum) & PROT_EXEC))
+	{
+		return MVEE_CALL_TYPE_UNSYNCED;
+	}
+
+	return MVEE_CALL_TYPE_NORMAL;
+}
+
 LOG_ARGS(mmap)
 {
 	debugf("%s - SYS_MMAP(0x" PTRSTR ", %lu, %s, %s, %d, %lu)\n",

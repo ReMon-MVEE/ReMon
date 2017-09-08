@@ -267,6 +267,13 @@ unsigned char monitor::call_precall_get_call_type (int variantnum, long callnum)
                 break;
             }
 
+			case MVEE_ALL_HEAPS_ALIGNED:
+			{
+				if ((*mvee::config_variant_global)["relaxed_mman_xchecks"].asBool())
+					result = MVEE_CALL_TYPE_UNSYNCED;
+				break;
+			}
+
 			case MVEE_GET_VIRTUALIZED_ARGV0: 
 			{
                 // TODO: Review this. We might want this to be synced even while fast forwarding
@@ -539,6 +546,13 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 					variants[variantnum].fast_forwarding = false;
 				}
 				result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
+				break;
+			}
+
+			// This is only ever dispatched as unsynced if we have enabled relaxed_mman_xchecks
+			case MVEE_ALL_HEAPS_ALIGNED:
+			{
+				result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(1);
 				break;
 			}
 
