@@ -53,6 +53,7 @@ all: target
 target: $(BIN)															\
 		patched_binaries/libc/$(_ARCH)/libc.so.6						\
 		patched_binaries/libc/$(_ARCH)/libpthread.so.0					\
+		patched_binaries/libc/$(_ARCH)/librt.so.1						\
 		patched_binaries/libc/$(_ARCH)/libdl.so.2					\
 		patched_binaries/libc/$(_ARCH)/libclang_rt.sync-$(_ALT_ARCH).so \
 		MVEE_LD_Loader/MVEE_LD_Loader
@@ -68,6 +69,10 @@ patched_binaries/libc/$(_ARCH)/libpthread.so.0 : patched_binaries/libc/$(_ARCH)/
 patched_binaries/libc/$(_ARCH)/libdl.so.2 : patched_binaries/libc/$(_ARCH)/libdl.so
 	@-echo "Creating symlink to GHUMVEE-ready libdl"
 	ln -f -s libdl.so patched_binaries/libc/$(_ARCH)/libdl.so.2
+
+patched_binaries/libc/$(_ARCH)/librt.so.1 : patched_binaries/libc/$(_ARCH)/librt.so
+	@-echo "Creating symlink to GHUMVEE-ready librt"
+	ln -f -s librt.so patched_binaries/libc/$(_ARCH)/librt.so.1
 
 patched_binaries/libc/$(_ARCH)/libclang_rt.sync-$(_ALT_ARCH).so : libsync/libsync.cpp
 	build_scripts/compile_syncagent.rb
