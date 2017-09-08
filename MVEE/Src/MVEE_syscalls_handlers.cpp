@@ -2607,6 +2607,13 @@ PRECALL(fcntl)
 
 POSTCALL(fcntl)
 {
+	if IS_UNSYNCED_CALL
+	{
+		if (ARG2(variantnum) == F_GETFD)
+			return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+		return 0;
+	}
+
     if (call_succeeded)
     {
         if (ARG2(0) == F_GETLK || ARG2(0) == F_GETLK64) // locking operations
@@ -2641,7 +2648,7 @@ POSTCALL(fcntl)
                     REPLICATEFDRESULT();
                 }
 
-                fd_info*                   fd_info = set_fd_table->get_fd_info(ARG1(0));
+                fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0));
                 if (!fd_info)
                     return 0;
 
@@ -2667,10 +2674,6 @@ POSTCALL(fcntl)
 					set_fd_table->set_non_blocking(ARG1(0));
 				else
 					set_fd_table->set_blocking(ARG1(0));
-			}
-			else if (ARG2(0) == F_GETFD)
-			{
-				return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 			}
         }
     }
