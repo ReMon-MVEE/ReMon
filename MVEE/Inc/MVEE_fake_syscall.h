@@ -169,9 +169,16 @@ enum mvee_shared_buffer_types
 #define MVEE_GET_VIRTUALIZED_ARGV0     MVEE_FAKE_SYSCALL_BASE + 17
 
 //
-// MVEE_ENABLE_XCHECKS: re-enables crosschecking for fastforwarding variants
+// MVEE_ENABLE_XCHECKS: re-enables crosschecking for fastforwarding variants.
+// Only works if variants.global.settings.xchecks_initially_enabled is false.
 //
 #define MVEE_ENABLE_XCHECKS            MVEE_FAKE_SYSCALL_BASE + 18
+
+//
+// MVEE_DISABLE_XCHECKS: turns crosschecking back off. Only works if
+// variants.global.settings.xchecks_initially_enabled is false.
+//
+#define MVEE_DISABLE_XCHECKS           MVEE_FAKE_SYSCALL_BASE + 19
 
 
 //

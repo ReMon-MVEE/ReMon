@@ -262,6 +262,7 @@ unsigned char monitor::call_precall_get_call_type (int variantnum, long callnum)
 			case MVEE_INVOKE_LD:
 			case MVEE_RUNS_UNDER_MVEE_CONTROL:
 			case MVEE_ENABLE_XCHECKS:
+			case MVEE_DISABLE_XCHECKS:
             {
                 result = MVEE_CALL_TYPE_UNSYNCED;
                 break;
@@ -537,6 +538,11 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 					break;
 			}
 
+			//
+			// Only works if we're fast forwarding, which only happens if 
+			// variants.global.settings.xchecks_initially_enabled is set to false at the
+			// time we see a sys_execve.
+			//
 			case MVEE_ENABLE_XCHECKS:
 			{
 				if (variants[variantnum].fast_forwarding)
@@ -544,6 +550,21 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 					debugf("%s - SYS_ENABLE_XCHECKS() => variant is leaving fast-forwarding state\n", 
 					   call_get_variant_pidstr(variantnum).c_str());
 					variants[variantnum].fast_forwarding = false;
+				}
+				result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
+				break;
+			}
+
+			//
+			// And turn it back on...
+			// 
+			case MVEE_DISABLE_XCHECKS:
+			{
+				if (!(*mvee::config_variant_global)["xchecks_initially_enabled"].asBool())
+				{
+					debugf("%s - SYS_DISABLE_XCHECKS() => variant is re-entering fast-forwarding state\n", 
+					   call_get_variant_pidstr(variantnum).c_str());
+					variants[variantnum].fast_forwarding = true;
 				}
 				result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
 				break;
