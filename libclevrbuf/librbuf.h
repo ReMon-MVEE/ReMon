@@ -14,6 +14,7 @@
 #define MVEE_GET_THREAD_NUM MVEE_FAKE_SYSCALL_BASE + 10
 #define MVEE_GET_SHARED_BUFFER MVEE_FAKE_SYSCALL_BASE + 4
 #define MVEE_ENABLE_XCHECKS MVEE_FAKE_SYSCALL_BASE + 18
+#define MVEE_DISABLE_XCHECKS MVEE_FAKE_SYSCALL_BASE + 19
 #define MVEE_RING_BUFFER 22
 #define MAX_WAIT_CYCLES 10000
 
@@ -139,6 +140,10 @@ struct rbuf* rbuf_init(size_t capacity, int variants)
 			fprintf(stderr, "failed to attach to ring buffer\n");
 			return nullptr;
 		}
+
+		// we only wanted cross-checks for MVEE_GET_SHARED_BUFFER,
+		// disable them now
+		syscall(MVEE_DISABLE_XCHECKS, NULL);
 	}
 
 	// buf->elems will most likely differ from capacity because we 
