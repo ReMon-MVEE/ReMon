@@ -9,9 +9,11 @@
 
 #define INTERP              "/lib/ld-linux-armhf.so.3"
 #define INTERP_SHORT        "MVEE Variant %d >"
+#define INTERP_ARCH         "arm"
 
 //#define MVEE_HIDE_DSO
 //#define MVEE_DEBUG
+#define MVEE_USE_MVEE_LD
 
 typedef Elf32_auxv_t Elf_auxv_t;
 typedef Elf32_Ehdr   Elf_Ehdr;
