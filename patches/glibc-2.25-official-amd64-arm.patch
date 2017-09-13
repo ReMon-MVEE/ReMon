@@ -1,6 +1,6 @@
 diff -N -r --unified glibc-2.25.orig/csu/libc-start.c glibc-2.25/csu/libc-start.c
---- glibc-2.25.orig/csu/libc-start.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/csu/libc-start.c	2017-09-13 11:51:18.767015505 -0700
+--- glibc-2.25.orig/csu/libc-start.c	2017-09-11 17:14:55.241208737 +0000
++++ glibc-2.25/csu/libc-start.c	2017-09-13 19:55:55.826730718 +0000
 @@ -104,6 +104,14 @@
  # define MAIN_AUXVEC_PARAM
  #endif
@@ -29,8 +29,8 @@ diff -N -r --unified glibc-2.25.orig/csu/libc-start.c glibc-2.25/csu/libc-start.
    /* Memory for the cancellation buffer.  */
    struct pthread_unwind_buf unwind_buf;
 diff -N -r --unified glibc-2.25.orig/csu/mvee-totalpartial-agent.c glibc-2.25/csu/mvee-totalpartial-agent.c
---- glibc-2.25.orig/csu/mvee-totalpartial-agent.c	1969-12-31 16:00:00.000000000 -0800
-+++ glibc-2.25/csu/mvee-totalpartial-agent.c	2017-09-13 11:51:48.458014973 -0700
+--- glibc-2.25.orig/csu/mvee-totalpartial-agent.c	1970-01-01 00:00:00.000000000 +0000
++++ glibc-2.25/csu/mvee-totalpartial-agent.c	2017-09-13 19:55:55.839732858 +0000
 @@ -0,0 +1,879 @@
 +static __thread int   mvee_master_thread_id         = 0;
 +static unsigned char  mvee_sync_enabled             = 0;
@@ -912,8 +912,8 @@ diff -N -r --unified glibc-2.25.orig/csu/mvee-totalpartial-agent.c glibc-2.25/cs
 +
 +#endif // !MVEE_DEBUG_MALLOC
 diff -N -r --unified glibc-2.25.orig/csu/mvee-woc-agent.c glibc-2.25/csu/mvee-woc-agent.c
---- glibc-2.25.orig/csu/mvee-woc-agent.c	1969-12-31 16:00:00.000000000 -0800
-+++ glibc-2.25/csu/mvee-woc-agent.c	2017-09-13 11:53:52.165012758 -0700
+--- glibc-2.25.orig/csu/mvee-woc-agent.c	1970-01-01 00:00:00.000000000 +0000
++++ glibc-2.25/csu/mvee-woc-agent.c	2017-09-13 19:55:55.843733418 +0000
 @@ -0,0 +1,223 @@
 +#define MVEE_SLAVE_YIELD
 +#define MVEE_TOTAL_CLOCK_COUNT   2048
@@ -1139,8 +1139,8 @@ diff -N -r --unified glibc-2.25.orig/csu/mvee-woc-agent.c glibc-2.25/csu/mvee-wo
 +	return (!mvee_master_variant && mvee_sync_enabled) ? 1 : 0;
 +}
 diff -N -r --unified glibc-2.25.orig/csu/Versions glibc-2.25/csu/Versions
---- glibc-2.25.orig/csu/Versions	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/csu/Versions	2017-09-13 06:56:55.956331812 -0700
+--- glibc-2.25.orig/csu/Versions	2017-09-11 17:14:55.239208594 +0000
++++ glibc-2.25/csu/Versions	2017-09-13 19:55:55.845733686 +0000
 @@ -2,6 +2,14 @@
    GLIBC_2.0 {
      # helper functions
@@ -1157,8 +1157,8 @@ diff -N -r --unified glibc-2.25.orig/csu/Versions glibc-2.25/csu/Versions
    GLIBC_2.1 {
      # New special glibc functions.
 diff -N -r --unified glibc-2.25.orig/elf/rtld.c glibc-2.25/elf/rtld.c
---- glibc-2.25.orig/elf/rtld.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/elf/rtld.c	2017-09-13 06:56:55.957331812 -0700
+--- glibc-2.25.orig/elf/rtld.c	2017-09-11 17:14:55.334215390 +0000
++++ glibc-2.25/elf/rtld.c	2017-09-13 19:55:55.853734683 +0000
 @@ -932,6 +932,18 @@
        main_map->l_name = (char *) "";
        *user_entry = main_map->l_entry;
@@ -1179,8 +1179,8 @@ diff -N -r --unified glibc-2.25.orig/elf/rtld.c glibc-2.25/elf/rtld.c
        /* Adjust the on-stack auxiliary vector so that it looks like the
  	 binary was executed directly.  */
 diff -N -r --unified glibc-2.25.orig/gmon/bb_init_func.c glibc-2.25/gmon/bb_init_func.c
---- glibc-2.25.orig/gmon/bb_init_func.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/gmon/bb_init_func.c	2017-09-13 06:56:55.958331812 -0700
+--- glibc-2.25.orig/gmon/bb_init_func.c	2017-09-11 17:14:55.383218895 +0000
++++ glibc-2.25/gmon/bb_init_func.c	2017-09-13 19:55:55.856735030 +0000
 @@ -26,6 +26,7 @@
  #include <sys/gmon.h>
  
@@ -1199,8 +1199,8 @@ diff -N -r --unified glibc-2.25.orig/gmon/bb_init_func.c glibc-2.25/gmon/bb_init
        /* we didn't register _mcleanup yet and pc profiling doesn't seem
  	 to be active, so let's register it now: */
 diff -N -r --unified glibc-2.25.orig/gmon/gmon.c glibc-2.25/gmon/gmon.c
---- glibc-2.25.orig/gmon/gmon.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/gmon/gmon.c	2017-09-13 06:56:55.958331812 -0700
+--- glibc-2.25.orig/gmon/gmon.c	2017-09-11 17:14:55.383218895 +0000
++++ glibc-2.25/gmon/gmon.c	2017-09-13 19:55:55.860735473 +0000
 @@ -77,20 +77,20 @@
    struct gmonparam *p = &_gmonparam;
  
@@ -1259,8 +1259,8 @@ diff -N -r --unified glibc-2.25.orig/gmon/gmon.c glibc-2.25/gmon/gmon.c
  
    /* free the memory. */
 diff -N -r --unified glibc-2.25.orig/gmon/mcount.c glibc-2.25/gmon/mcount.c
---- glibc-2.25.orig/gmon/mcount.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/gmon/mcount.c	2017-09-13 06:56:55.959331812 -0700
+--- glibc-2.25.orig/gmon/mcount.c	2017-09-11 17:14:55.384218967 +0000
++++ glibc-2.25/gmon/mcount.c	2017-09-13 19:55:55.862735688 +0000
 @@ -166,10 +166,10 @@
  
  	}
@@ -1275,8 +1275,8 @@ diff -N -r --unified glibc-2.25.orig/gmon/mcount.c glibc-2.25/gmon/mcount.c
  }
  
 diff -N -r --unified glibc-2.25.orig/include/atomic.h glibc-2.25/include/atomic.h
---- glibc-2.25.orig/include/atomic.h	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/include/atomic.h	2017-09-13 06:56:55.960331812 -0700
+--- glibc-2.25.orig/include/atomic.h	2017-09-11 17:14:56.867325058 +0000
++++ glibc-2.25/include/atomic.h	2017-09-13 19:55:55.881737800 +0000
 @@ -86,73 +86,73 @@
  
  /* Atomically store NEWVAL in *MEM if *MEM is equal to OLDVAL.
@@ -2119,8 +2119,8 @@ diff -N -r --unified glibc-2.25.orig/include/atomic.h glibc-2.25/include/atomic.
  	     == 0));							      \
       __atg104_expected; })
 diff -N -r --unified glibc-2.25.orig/inet/getnameinfo.c glibc-2.25/inet/getnameinfo.c
---- glibc-2.25.orig/inet/getnameinfo.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/inet/getnameinfo.c	2017-09-13 06:56:55.961331812 -0700
+--- glibc-2.25.orig/inet/getnameinfo.c	2017-09-11 17:14:56.983333356 +0000
++++ glibc-2.25/inet/getnameinfo.c	2017-09-13 19:55:55.884738078 +0000
 @@ -91,8 +91,6 @@
  {
    static int not_first;
@@ -2139,8 +2139,8 @@ diff -N -r --unified glibc-2.25.orig/inet/getnameinfo.c glibc-2.25/inet/getnamei
    return domain;
  };
 diff -N -r --unified glibc-2.25.orig/malloc/arena.c glibc-2.25/malloc/arena.c
---- glibc-2.25.orig/malloc/arena.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/malloc/arena.c	2017-09-13 11:36:12.649031732 -0700
+--- glibc-2.25.orig/malloc/arena.c	2017-09-11 17:15:01.342645189 +0000
++++ glibc-2.25/malloc/arena.c	2017-09-13 19:55:55.890738655 +0000
 @@ -456,7 +456,7 @@
  new_heap (size_t size, size_t top_pad)
  {
@@ -2245,8 +2245,8 @@ diff -N -r --unified glibc-2.25.orig/malloc/arena.c glibc-2.25/malloc/arena.c
           very large number and that the underflow is OK.  If arena_max
           is set the value of arena_test is irrelevant.  If arena_test
 diff -N -r --unified glibc-2.25.orig/malloc/hooks.c glibc-2.25/malloc/hooks.c
---- glibc-2.25.orig/malloc/hooks.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/malloc/hooks.c	2017-09-13 06:56:55.962331812 -0700
+--- glibc-2.25.orig/malloc/hooks.c	2017-09-11 17:15:01.361646548 +0000
++++ glibc-2.25/malloc/hooks.c	2017-09-13 19:55:55.894738998 +0000
 @@ -77,10 +77,10 @@
        return;
      }
@@ -2278,8 +2278,8 @@ diff -N -r --unified glibc-2.25.orig/malloc/hooks.c glibc-2.25/malloc/hooks.c
  
    /* Patch the dumped heap.  We no longer try to integrate into the
 diff -N -r --unified glibc-2.25.orig/malloc/malloc.c glibc-2.25/malloc/malloc.c
---- glibc-2.25.orig/malloc/malloc.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/malloc/malloc.c	2017-09-13 06:56:55.964331812 -0700
+--- glibc-2.25.orig/malloc/malloc.c	2017-09-11 17:15:01.384648194 +0000
++++ glibc-2.25/malloc/malloc.c	2017-09-13 19:55:55.910740181 +0000
 @@ -1601,7 +1601,7 @@
  
  #define FASTCHUNKS_BIT        (1U)
@@ -2385,8 +2385,8 @@ diff -N -r --unified glibc-2.25.orig/malloc/malloc.c glibc-2.25/malloc/malloc.c
  	   total_aspace, total_aspace_mprotect);
  
 diff -N -r --unified glibc-2.25.orig/malloc/mcheck.c glibc-2.25/malloc/mcheck.c
---- glibc-2.25.orig/malloc/mcheck.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/malloc/mcheck.c	2017-09-13 06:56:55.965331812 -0700
+--- glibc-2.25.orig/malloc/mcheck.c	2017-09-11 17:15:01.386648337 +0000
++++ glibc-2.25/malloc/mcheck.c	2017-09-13 19:55:55.916740610 +0000
 @@ -189,12 +189,12 @@
        flood (ptr, FREEFLOOD, hdr->size);
        ptr = hdr->block;
@@ -2489,8 +2489,8 @@ diff -N -r --unified glibc-2.25.orig/malloc/mcheck.c glibc-2.25/malloc/mcheck.c
  
    return mcheck_used ? 0 : -1;
 diff -N -r --unified glibc-2.25.orig/malloc/mtrace.c glibc-2.25/malloc/mtrace.c
---- glibc-2.25.orig/malloc/mtrace.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/malloc/mtrace.c	2017-09-13 06:56:55.966331812 -0700
+--- glibc-2.25.orig/malloc/mtrace.c	2017-09-11 17:15:01.407649839 +0000
++++ glibc-2.25/malloc/mtrace.c	2017-09-13 19:55:55.921740967 +0000
 @@ -137,12 +137,12 @@
        tr_break ();
        __libc_lock_lock (lock);
@@ -2602,8 +2602,8 @@ diff -N -r --unified glibc-2.25.orig/malloc/mtrace.c glibc-2.25/malloc/mtrace.c
    fprintf (f, "= End\n");
    fclose (f);
 diff -N -r --unified glibc-2.25.orig/nptl/allocatestack.c glibc-2.25/nptl/allocatestack.c
---- glibc-2.25.orig/nptl/allocatestack.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/nptl/allocatestack.c	2017-09-13 06:56:55.966331812 -0700
+--- glibc-2.25.orig/nptl/allocatestack.c	2017-09-11 17:15:06.345003021 +0000
++++ glibc-2.25/nptl/allocatestack.c	2017-09-13 19:55:55.925741253 +0000
 @@ -865,7 +865,7 @@
        if (curp != self)
  	{
@@ -2614,8 +2614,8 @@ diff -N -r --unified glibc-2.25.orig/nptl/allocatestack.c glibc-2.25/nptl/alloca
  	  /* Account for the size of the stack.  */
  	  stack_cache_actsize += curp->stackblock_size;
 diff -N -r --unified glibc-2.25.orig/nptl/cancellation.c glibc-2.25/nptl/cancellation.c
---- glibc-2.25.orig/nptl/cancellation.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/nptl/cancellation.c	2017-09-13 06:56:55.966331812 -0700
+--- glibc-2.25.orig/nptl/cancellation.c	2017-09-11 17:15:06.346003093 +0000
++++ glibc-2.25/nptl/cancellation.c	2017-09-13 19:55:55.928741468 +0000
 @@ -30,7 +30,7 @@
  __pthread_enable_asynccancel (void)
  {
@@ -2652,8 +2652,8 @@ diff -N -r --unified glibc-2.25.orig/nptl/cancellation.c glibc-2.25/nptl/cancell
      }
  }
 diff -N -r --unified glibc-2.25.orig/nptl/lll_timedwait_tid.c glibc-2.25/nptl/lll_timedwait_tid.c
---- glibc-2.25.orig/nptl/lll_timedwait_tid.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/nptl/lll_timedwait_tid.c	2017-09-13 10:23:22.344109996 -0700
+--- glibc-2.25.orig/nptl/lll_timedwait_tid.c	2017-09-11 17:15:06.360004095 +0000
++++ glibc-2.25/nptl/lll_timedwait_tid.c	2017-09-13 19:55:55.931741682 +0000
 @@ -37,7 +37,7 @@
      return EINVAL;
  
@@ -2677,8 +2677,8 @@ diff -N -r --unified glibc-2.25.orig/nptl/lll_timedwait_tid.c glibc-2.25/nptl/ll
  
    return 0;
 diff -N -r --unified glibc-2.25.orig/nptl/lowlevellock.c glibc-2.25/nptl/lowlevellock.c
---- glibc-2.25.orig/nptl/lowlevellock.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/nptl/lowlevellock.c	2017-09-13 06:56:55.966331812 -0700
+--- glibc-2.25.orig/nptl/lowlevellock.c	2017-09-11 17:15:06.360004095 +0000
++++ glibc-2.25/nptl/lowlevellock.c	2017-09-13 19:55:55.933741825 +0000
 @@ -26,7 +26,7 @@
  void
  __lll_lock_wait_private (int *futex)
@@ -2698,8 +2698,8 @@ diff -N -r --unified glibc-2.25.orig/nptl/lowlevellock.c glibc-2.25/nptl/lowleve
  
    while (atomic_exchange_acq (futex, 2) != 0)
 diff -N -r --unified glibc-2.25.orig/nptl/pthread_cond_common.c glibc-2.25/nptl/pthread_cond_common.c
---- glibc-2.25.orig/nptl/pthread_cond_common.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/nptl/pthread_cond_common.c	2017-09-13 06:56:55.966331812 -0700
+--- glibc-2.25.orig/nptl/pthread_cond_common.c	2017-09-11 17:15:06.389006169 +0000
++++ glibc-2.25/nptl/pthread_cond_common.c	2017-09-13 19:55:55.936742039 +0000
 @@ -54,7 +54,7 @@
  __condvar_add_g1_start_relaxed (pthread_cond_t *cond, unsigned int val)
  {
@@ -2710,8 +2710,8 @@ diff -N -r --unified glibc-2.25.orig/nptl/pthread_cond_common.c glibc-2.25/nptl/
  
  #else
 diff -N -r --unified glibc-2.25.orig/nptl/pthread_join.c glibc-2.25/nptl/pthread_join.c
---- glibc-2.25.orig/nptl/pthread_join.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/nptl/pthread_join.c	2017-09-13 06:56:55.966331812 -0700
+--- glibc-2.25.orig/nptl/pthread_join.c	2017-09-11 17:15:06.410007671 +0000
++++ glibc-2.25/nptl/pthread_join.c	2017-09-13 19:55:55.938742182 +0000
 @@ -100,7 +100,7 @@
    if (__glibc_likely (result == 0))
      {
@@ -2722,8 +2722,8 @@ diff -N -r --unified glibc-2.25.orig/nptl/pthread_join.c glibc-2.25/nptl/pthread
        /* Store the return value if the caller is interested.  */
        if (thread_return != NULL)
 diff -N -r --unified glibc-2.25.orig/nptl/pthread_mutex_setprioceiling.c glibc-2.25/nptl/pthread_mutex_setprioceiling.c
---- glibc-2.25.orig/nptl/pthread_mutex_setprioceiling.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/nptl/pthread_mutex_setprioceiling.c	2017-09-13 06:56:55.966331812 -0700
+--- glibc-2.25.orig/nptl/pthread_mutex_setprioceiling.c	2017-09-11 17:15:06.412007815 +0000
++++ glibc-2.25/nptl/pthread_mutex_setprioceiling.c	2017-09-13 19:55:55.941742397 +0000
 @@ -109,9 +109,9 @@
  
    int newlock = 0;
@@ -2738,8 +2738,8 @@ diff -N -r --unified glibc-2.25.orig/nptl/pthread_mutex_setprioceiling.c glibc-2
  
    lll_futex_wake (&mutex->__data.__lock, INT_MAX,
 diff -N -r --unified glibc-2.25.orig/nptl/pthread_spin_lock.c glibc-2.25/nptl/pthread_spin_lock.c
---- glibc-2.25.orig/nptl/pthread_spin_lock.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/nptl/pthread_spin_lock.c	2017-09-13 06:56:55.967331812 -0700
+--- glibc-2.25.orig/nptl/pthread_spin_lock.c	2017-09-11 17:15:06.442009961 +0000
++++ glibc-2.25/nptl/pthread_spin_lock.c	2017-09-13 19:55:55.943742540 +0000
 @@ -54,12 +54,12 @@
  	{
  	  int wait = SPIN_LOCK_READS_BETWEEN_CMPXCHG;
@@ -2756,8 +2756,8 @@ diff -N -r --unified glibc-2.25.orig/nptl/pthread_spin_lock.c glibc-2.25/nptl/pt
  	}
      }
 diff -N -r --unified glibc-2.25.orig/nptl/pthread_spin_unlock.c glibc-2.25/nptl/pthread_spin_unlock.c
---- glibc-2.25.orig/nptl/pthread_spin_unlock.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/nptl/pthread_spin_unlock.c	2017-09-13 06:56:55.967331812 -0700
+--- glibc-2.25.orig/nptl/pthread_spin_unlock.c	2017-09-11 17:15:06.442009961 +0000
++++ glibc-2.25/nptl/pthread_spin_unlock.c	2017-09-13 19:55:55.945742682 +0000
 @@ -24,6 +24,6 @@
  pthread_spin_unlock (pthread_spinlock_t *lock)
  {
@@ -2767,8 +2767,8 @@ diff -N -r --unified glibc-2.25.orig/nptl/pthread_spin_unlock.c glibc-2.25/nptl/
    return 0;
  }
 diff -N -r --unified glibc-2.25.orig/nptl/register-atfork.c glibc-2.25/nptl/register-atfork.c
---- glibc-2.25.orig/nptl/register-atfork.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/nptl/register-atfork.c	2017-09-13 06:56:55.967331812 -0700
+--- glibc-2.25.orig/nptl/register-atfork.c	2017-09-11 17:15:06.443010032 +0000
++++ glibc-2.25/nptl/register-atfork.c	2017-09-13 19:55:55.948742897 +0000
 @@ -51,18 +51,19 @@
      {
        /* Search for an empty entry.  */
@@ -2834,8 +2834,8 @@ diff -N -r --unified glibc-2.25.orig/nptl/register-atfork.c glibc-2.25/nptl/regi
      }
  }
 diff -N -r --unified glibc-2.25.orig/nptl/unregister-atfork.c glibc-2.25/nptl/unregister-atfork.c
---- glibc-2.25.orig/nptl/unregister-atfork.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/nptl/unregister-atfork.c	2017-09-13 06:56:55.967331812 -0700
+--- glibc-2.25.orig/nptl/unregister-atfork.c	2017-09-11 17:15:06.618022551 +0000
++++ glibc-2.25/nptl/unregister-atfork.c	2017-09-13 19:55:55.951743111 +0000
 @@ -33,7 +33,7 @@
       We do not worry about other threads adding entries for this DSO
       right this moment.  If this happens this is a race and we can do
@@ -2894,8 +2894,8 @@ diff -N -r --unified glibc-2.25.orig/nptl/unregister-atfork.c glibc-2.25/nptl/un
      }
  }
 diff -N -r --unified glibc-2.25.orig/resolv/res_libc.c glibc-2.25/resolv/res_libc.c
---- glibc-2.25.orig/resolv/res_libc.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/resolv/res_libc.c	2017-09-13 06:56:55.967331812 -0700
+--- glibc-2.25.orig/resolv/res_libc.c	2017-09-11 17:15:07.654096665 +0000
++++ glibc-2.25/resolv/res_libc.c	2017-09-13 19:55:55.953743254 +0000
 @@ -28,7 +28,7 @@
  
  extern unsigned long long int __res_initstamp attribute_hidden;
@@ -2906,8 +2906,8 @@ diff -N -r --unified glibc-2.25.orig/resolv/res_libc.c glibc-2.25/resolv/res_lib
  # define atomicincunlock(lock) (void) 0
  # define atomicinc(var) catomic_increment (&(var))
 diff -N -r --unified glibc-2.25.orig/stdlib/cxa_atexit.c glibc-2.25/stdlib/cxa_atexit.c
---- glibc-2.25.orig/stdlib/cxa_atexit.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/stdlib/cxa_atexit.c	2017-09-13 06:56:55.967331812 -0700
+--- glibc-2.25.orig/stdlib/cxa_atexit.c	2017-09-11 17:15:08.086127569 +0000
++++ glibc-2.25/stdlib/cxa_atexit.c	2017-09-13 19:55:55.956743469 +0000
 @@ -44,7 +44,7 @@
    new->func.cxa.arg = arg;
    new->func.cxa.dso_handle = d;
@@ -2936,8 +2936,8 @@ diff -N -r --unified glibc-2.25.orig/stdlib/cxa_atexit.c glibc-2.25/stdlib/cxa_a
      }
  
 diff -N -r --unified glibc-2.25.orig/stdlib/cxa_finalize.c glibc-2.25/stdlib/cxa_finalize.c
---- glibc-2.25.orig/stdlib/cxa_finalize.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/stdlib/cxa_finalize.c	2017-09-13 06:56:55.967331812 -0700
+--- glibc-2.25.orig/stdlib/cxa_finalize.c	2017-09-11 17:15:08.086127569 +0000
++++ glibc-2.25/stdlib/cxa_finalize.c	2017-09-13 19:55:55.958743611 +0000
 @@ -70,7 +70,7 @@
  
        for (f = &funcs->fns[funcs->idx - 1]; f >= &funcs->fns[0]; --f)
@@ -2948,8 +2948,8 @@ diff -N -r --unified glibc-2.25.orig/stdlib/cxa_finalize.c glibc-2.25/stdlib/cxa
  
    /* Remove the registered fork handlers.  We do not have to
 diff -N -r --unified glibc-2.25.orig/stdlib/exit.c glibc-2.25/stdlib/exit.c
---- glibc-2.25.orig/stdlib/exit.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/stdlib/exit.c	2017-09-13 06:56:55.967331812 -0700
+--- glibc-2.25.orig/stdlib/exit.c	2017-09-11 17:15:08.098128427 +0000
++++ glibc-2.25/stdlib/exit.c	2017-09-13 19:55:55.960743754 +0000
 @@ -52,7 +52,7 @@
  	{
  	  const struct exit_function *const f =
@@ -2960,8 +2960,8 @@ diff -N -r --unified glibc-2.25.orig/stdlib/exit.c glibc-2.25/stdlib/exit.c
  	      void (*atfct) (void);
  	      void (*onfct) (int status, void *arg);
 diff -N -r --unified glibc-2.25.orig/stdlib/on_exit.c glibc-2.25/stdlib/on_exit.c
---- glibc-2.25.orig/stdlib/on_exit.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/stdlib/on_exit.c	2017-09-13 06:56:55.967331812 -0700
+--- glibc-2.25.orig/stdlib/on_exit.c	2017-09-11 17:15:08.151132219 +0000
++++ glibc-2.25/stdlib/on_exit.c	2017-09-13 19:55:55.962743897 +0000
 @@ -35,7 +35,7 @@
    new->func.on.fn = func;
    new->func.on.arg = arg;
@@ -2972,8 +2972,8 @@ diff -N -r --unified glibc-2.25.orig/stdlib/on_exit.c glibc-2.25/stdlib/on_exit.
  }
  weak_alias (__on_exit, on_exit)
 diff -N -r --unified glibc-2.25.orig/sysdeps/arm/atomic-machine.h glibc-2.25/sysdeps/arm/atomic-machine.h
---- glibc-2.25.orig/sysdeps/arm/atomic-machine.h	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/arm/atomic-machine.h	2017-09-13 12:38:37.475964669 -0700
+--- glibc-2.25.orig/sysdeps/arm/atomic-machine.h	2017-09-11 17:15:08.941188734 +0000
++++ glibc-2.25/sysdeps/arm/atomic-machine.h	2017-09-13 19:58:08.735967877 +0000
 @@ -55,68 +55,68 @@
     a pattern to do this efficiently.  */
  #ifdef __GCC_HAVE_SYNC_COMPARE_AND_SWAP_4
@@ -3078,7 +3078,7 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/arm/atomic-machine.h glibc-2.25/sys
    __arm_assisted_compare_and_exchange_val_32_acq ((mem), (newval), (oldval))
  #endif
  
-@@ -152,3 +152,869 @@
+@@ -152,3 +152,867 @@
  # define __arm_assisted_compare_and_exchange_val_32_acq(mem, newval, oldval) \
    ({ __arm_link_error (); oldval; })
  #endif
@@ -3946,11 +3946,9 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/arm/atomic-machine.h glibc-2.25/sys
 +#define arch_cpu_relax() __asm__ __volatile__("mov\tr0,r0\t@ nop\n\t");
 +
 +#endif // !IS_IN (rtld)
-+
-+#endif // !USE_MVEE_LIBC
 diff -N -r --unified glibc-2.25.orig/sysdeps/arm/mvee-totalpartial-agent.h glibc-2.25/sysdeps/arm/mvee-totalpartial-agent.h
---- glibc-2.25.orig/sysdeps/arm/mvee-totalpartial-agent.h	1969-12-31 16:00:00.000000000 -0800
-+++ glibc-2.25/sysdeps/arm/mvee-totalpartial-agent.h	2017-09-13 12:36:12.109967272 -0700
+--- glibc-2.25.orig/sysdeps/arm/mvee-totalpartial-agent.h	1970-01-01 00:00:00.000000000 +0000
++++ glibc-2.25/sysdeps/arm/mvee-totalpartial-agent.h	2017-09-13 19:55:55.983745398 +0000
 @@ -0,0 +1,134 @@
 +//
 +// MVEE_PARTIAL_ORDER_REPLICATION: when defined, slaves will use
@@ -4087,8 +4085,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/arm/mvee-totalpartial-agent.h glibc
 +	register unsigned char __tmp_mvee_preop = mvee_atomic_preop_internal(is_store, (void*)mem);
 +#endif // !MVEE_EXTENDED_QUEUE
 diff -N -r --unified glibc-2.25.orig/sysdeps/arm/mvee-woc-agent.h glibc-2.25/sysdeps/arm/mvee-woc-agent.h
---- glibc-2.25.orig/sysdeps/arm/mvee-woc-agent.h	1969-12-31 16:00:00.000000000 -0800
-+++ glibc-2.25/sysdeps/arm/mvee-woc-agent.h	2017-09-13 12:36:21.092967112 -0700
+--- glibc-2.25.orig/sysdeps/arm/mvee-woc-agent.h	1970-01-01 00:00:00.000000000 +0000
++++ glibc-2.25/sysdeps/arm/mvee-woc-agent.h	2017-09-13 19:55:55.985745541 +0000
 @@ -0,0 +1,16 @@
 +#define MVEE_MAX_COUNTERS 65536
 +
@@ -4107,8 +4105,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/arm/mvee-woc-agent.h glibc-2.25/sys
 +#define MVEE_PREOP(op_type, mem, is_store)								\
 +	register unsigned char  __tmp_mvee_preop = mvee_atomic_preop_internal(mem);
 diff -N -r --unified glibc-2.25.orig/sysdeps/nptl/fork.c glibc-2.25/sysdeps/nptl/fork.c
---- glibc-2.25.orig/sysdeps/nptl/fork.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/nptl/fork.c	2017-09-13 06:56:55.968331812 -0700
+--- glibc-2.25.orig/sysdeps/nptl/fork.c	2017-09-11 17:15:12.163419229 +0000
++++ glibc-2.25/sysdeps/nptl/fork.c	2017-09-13 19:55:55.988745755 +0000
 @@ -63,12 +63,12 @@
    /* Run all the registered preparation handlers.  In reverse order.
       While doing this we build up a list of all the entries.  */
@@ -4161,8 +4159,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/nptl/fork.c glibc-2.25/sysdeps/nptl
      }
  
 diff -N -r --unified glibc-2.25.orig/sysdeps/nptl/lowlevellock.h glibc-2.25/sysdeps/nptl/lowlevellock.h
---- glibc-2.25.orig/sysdeps/nptl/lowlevellock.h	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/nptl/lowlevellock.h	2017-09-13 10:28:31.630104457 -0700
+--- glibc-2.25.orig/sysdeps/nptl/lowlevellock.h	2017-09-11 17:15:12.166419443 +0000
++++ glibc-2.25/sysdeps/nptl/lowlevellock.h	2017-09-13 19:55:55.991745970 +0000
 @@ -184,8 +184,10 @@
  #define lll_wait_tid(tid) \
    do {					\
@@ -4186,8 +4184,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/nptl/lowlevellock.h glibc-2.25/sysd
      __res;						\
    })
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/check_pf.c glibc-2.25/sysdeps/unix/sysv/linux/check_pf.c
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/check_pf.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/check_pf.c	2017-09-13 06:56:55.968331812 -0700
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/check_pf.c	2017-09-11 17:15:13.642525033 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/check_pf.c	2017-09-13 19:55:55.994746184 +0000
 @@ -269,7 +269,7 @@
    if (seen_ipv6 && result != NULL)
      {
@@ -4216,8 +4214,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/check_pf.c glibc-2.
  	    free (data);
  
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/lowlevellock-futex.h glibc-2.25/sysdeps/unix/sysv/linux/lowlevellock-futex.h
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/lowlevellock-futex.h	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/lowlevellock-futex.h	2017-09-13 06:56:55.968331812 -0700
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/lowlevellock-futex.h	2017-09-11 17:15:13.937546137 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/lowlevellock-futex.h	2017-09-13 19:55:55.997746398 +0000
 @@ -115,7 +115,7 @@
  		     nr_wake, nr_move, mutex, val)
  
@@ -4228,8 +4226,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/lowlevellock-futex.
  		     __lll_private_flag (FUTEX_WAKE_OP, private),       \
  		     nr_wake, nr_wake2, futexp2,                        \
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86/elision-lock.c glibc-2.25/sysdeps/unix/sysv/linux/x86/elision-lock.c
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86/elision-lock.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/x86/elision-lock.c	2017-09-13 06:58:38.934329968 -0700
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86/elision-lock.c	2017-09-11 17:15:15.722673832 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/x86/elision-lock.c	2017-09-13 19:55:55.999746541 +0000
 @@ -99,7 +99,7 @@
        /* Use a normal lock until the threshold counter runs out.
  	 Lost updates possible.  */
@@ -4240,8 +4238,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86/elision-lock.c 
  
    /* Use a normal lock here.  */
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86/elision-trylock.c glibc-2.25/sysdeps/unix/sysv/linux/x86/elision-trylock.c
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86/elision-trylock.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/x86/elision-trylock.c	2017-09-13 06:58:38.935329968 -0700
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86/elision-trylock.c	2017-09-11 17:15:15.723673904 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/x86/elision-trylock.c	2017-09-13 19:55:56.001746684 +0000
 @@ -68,7 +68,7 @@
      {
        /* Lost updates are possible but harmless (see above).  */
@@ -4252,8 +4250,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86/elision-trylock
  
    return lll_trylock (*futex);
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86/elision-unlock.c glibc-2.25/sysdeps/unix/sysv/linux/x86/elision-unlock.c
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86/elision-unlock.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/x86/elision-unlock.c	2017-09-13 06:58:38.935329968 -0700
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86/elision-unlock.c	2017-09-11 17:15:15.724673975 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/x86/elision-unlock.c	2017-09-13 19:55:56.003746827 +0000
 @@ -25,7 +25,7 @@
  {
    /* When the lock was free we're in a transaction.
@@ -4264,8 +4262,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86/elision-unlock.
    else
      lll_unlock ((*lock), private);
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/cancellation.S glibc-2.25/sysdeps/unix/sysv/linux/x86_64/cancellation.S
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/cancellation.S	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/cancellation.S	1969-12-31 16:00:00.000000000 -0800
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/cancellation.S	2017-09-11 17:15:15.746675549 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/cancellation.S	1970-01-01 00:00:00.000000000 +0000
 @@ -1,115 +0,0 @@
 -/* Copyright (C) 2009-2017 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -4383,8 +4381,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/cancellation
 -	jmp	3b
 -END(__pthread_disable_asynccancel)
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/libc-cancellation.S glibc-2.25/sysdeps/unix/sysv/linux/x86_64/libc-cancellation.S
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/libc-cancellation.S	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/libc-cancellation.S	1969-12-31 16:00:00.000000000 -0800
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/libc-cancellation.S	2017-09-11 17:15:15.753676050 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/libc-cancellation.S	1970-01-01 00:00:00.000000000 +0000
 @@ -1,21 +0,0 @@
 -/* Copyright (C) 2009-2017 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -4408,8 +4406,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/libc-cancell
 -#define __pthread_disable_asynccancel __libc_disable_asynccancel
 -#include "cancellation.S"
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S glibc-2.25/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S	1969-12-31 16:00:00.000000000 -0800
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S	2017-09-11 17:15:15.753676050 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S	1970-01-01 00:00:00.000000000 +0000
 @@ -1,19 +0,0 @@
 -/* Copyright (C) 2002-2017 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -4431,8 +4429,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/libc-lowleve
 -
 -#include "lowlevellock.S"
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/librt-cancellation.S glibc-2.25/sysdeps/unix/sysv/linux/x86_64/librt-cancellation.S
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/librt-cancellation.S	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/librt-cancellation.S	1969-12-31 16:00:00.000000000 -0800
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/librt-cancellation.S	2017-09-11 17:15:15.754676121 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/librt-cancellation.S	1970-01-01 00:00:00.000000000 +0000
 @@ -1,21 +0,0 @@
 -/* Copyright (C) 2009-2017 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -4456,20 +4454,20 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/librt-cancel
 -#define __pthread_disable_asynccancel __librt_disable_asynccancel
 -#include "cancellation.S"
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lll_timedlock_wait.c glibc-2.25/sysdeps/unix/sysv/linux/x86_64/lll_timedlock_wait.c
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lll_timedlock_wait.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/lll_timedlock_wait.c	2017-09-13 07:33:48.554292189 -0700
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lll_timedlock_wait.c	2017-09-11 17:15:15.755676193 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/lll_timedlock_wait.c	2017-09-13 19:55:56.013747542 +0000
 @@ -1 +1 @@
 -/* __lll_timedlock_wait is in lowlevellock.S.  */
 +#include "../../../../../nptl/lll_timedlock_wait.c"
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lll_timedwait_tid.c glibc-2.25/sysdeps/unix/sysv/linux/x86_64/lll_timedwait_tid.c
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lll_timedwait_tid.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/lll_timedwait_tid.c	2017-09-13 07:33:24.197292625 -0700
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lll_timedwait_tid.c	2017-09-11 17:15:15.755676193 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/lll_timedwait_tid.c	2017-09-13 19:55:56.015747685 +0000
 @@ -1 +1 @@
 -/* __lll_timedwait_tid is in lowlevellock.S.  */
 +#include "../../../../../nptl/lll_timedwait_tid.c"
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h glibc-2.25/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h	2017-09-13 10:27:16.883105796 -0700
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h	2017-09-11 17:15:15.841682345 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h	2017-09-13 19:55:56.025748399 +0000
 @@ -1,6 +1,6 @@
 -/* Copyright (C) 2002-2017 Free Software Foundation, Inc.
 +/* Low-level lock implementation.  Generic futex-based version.
@@ -4910,8 +4908,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lowlevellock
  
  #endif	/* lowlevellock.h */
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S glibc-2.25/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S	1969-12-31 16:00:00.000000000 -0800
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S	2017-09-11 17:15:15.756676264 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S	1970-01-01 00:00:00.000000000 +0000
 @@ -1,463 +0,0 @@
 -/* Copyright (C) 2002-2017 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -5377,8 +5375,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lowlevellock
 -	.size	__lll_timedwait_tid,.-__lll_timedwait_tid
 -#endif
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/sysdep-cancel.h glibc-2.25/sysdeps/unix/sysv/linux/x86_64/sysdep-cancel.h
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/sysdep-cancel.h	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/sysdep-cancel.h	2017-09-13 06:58:38.939329968 -0700
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/sysdep-cancel.h	2017-09-11 17:15:15.859683633 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/sysdep-cancel.h	2017-09-13 19:55:56.034749042 +0000
 @@ -28,6 +28,18 @@
     functions are special.  They don't modify registers other than %rax
     and %r11 if they return.  Therefore we don't have to preserve other
@@ -5442,8 +5440,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/sysdep-cance
      addq $8,%rsp; cfi_adjust_cfa_offset (-8);				      \
      cmpq $-4095, %rax;							      \
 diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/atomic-machine.h glibc-2.25/sysdeps/x86_64/atomic-machine.h
---- glibc-2.25.orig/sysdeps/x86_64/atomic-machine.h	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/x86_64/atomic-machine.h	2017-09-13 12:16:18.511988648 -0700
+--- glibc-2.25.orig/sysdeps/x86_64/atomic-machine.h	2017-09-11 17:15:16.105701231 +0000
++++ glibc-2.25/sysdeps/x86_64/atomic-machine.h	2017-09-13 19:55:56.054750472 +0000
 @@ -58,13 +58,13 @@
  #define __HAVE_64B_ATOMICS 1
  #define USE_ATOMIC_COMPILER_BUILTINS 1
@@ -6581,8 +6579,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/atomic-machine.h glibc-2.25/
 +
 +
 diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/mvee-totalpartial-agent.h glibc-2.25/sysdeps/x86_64/mvee-totalpartial-agent.h
---- glibc-2.25.orig/sysdeps/x86_64/mvee-totalpartial-agent.h	1969-12-31 16:00:00.000000000 -0800
-+++ glibc-2.25/sysdeps/x86_64/mvee-totalpartial-agent.h	2017-09-13 11:59:39.961006530 -0700
+--- glibc-2.25.orig/sysdeps/x86_64/mvee-totalpartial-agent.h	1970-01-01 00:00:00.000000000 +0000
++++ glibc-2.25/sysdeps/x86_64/mvee-totalpartial-agent.h	2017-09-13 19:55:56.058750758 +0000
 @@ -0,0 +1,134 @@
 +//
 +// MVEE_PARTIAL_ORDER_REPLICATION: when defined, slaves will use
@@ -6719,8 +6717,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/mvee-totalpartial-agent.h gl
 +	register unsigned char __tmp_mvee_preop = mvee_atomic_preop_internal(is_store, (void*)mem);
 +#endif // !MVEE_EXTENDED_QUEUE
 diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/mvee-woc-agent.h glibc-2.25/sysdeps/x86_64/mvee-woc-agent.h
---- glibc-2.25.orig/sysdeps/x86_64/mvee-woc-agent.h	1969-12-31 16:00:00.000000000 -0800
-+++ glibc-2.25/sysdeps/x86_64/mvee-woc-agent.h	2017-09-13 11:59:38.236006561 -0700
+--- glibc-2.25.orig/sysdeps/x86_64/mvee-woc-agent.h	1970-01-01 00:00:00.000000000 +0000
++++ glibc-2.25/sysdeps/x86_64/mvee-woc-agent.h	2017-09-13 19:55:56.060750900 +0000
 @@ -0,0 +1,16 @@
 +#define MVEE_MAX_COUNTERS 65536
 +
@@ -6739,8 +6737,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/mvee-woc-agent.h glibc-2.25/
 +#define MVEE_PREOP(op_type, mem, is_store)								\
 +	register unsigned char  __tmp_mvee_preop = mvee_atomic_preop_internal(mem);
 diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/nptl/pthread_spin_lock.S glibc-2.25/sysdeps/x86_64/nptl/pthread_spin_lock.S
---- glibc-2.25.orig/sysdeps/x86_64/nptl/pthread_spin_lock.S	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/x86_64/nptl/pthread_spin_lock.S	1969-12-31 16:00:00.000000000 -0800
+--- glibc-2.25.orig/sysdeps/x86_64/nptl/pthread_spin_lock.S	2017-09-11 17:15:16.647740005 +0000
++++ glibc-2.25/sysdeps/x86_64/nptl/pthread_spin_lock.S	1970-01-01 00:00:00.000000000 +0000
 @@ -1,34 +0,0 @@
 -/* Copyright (C) 2012-2017 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -6777,8 +6775,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/nptl/pthread_spin_lock.S gli
 -	jmp	2b
 -END(pthread_spin_lock)
 diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/nptl/pthread_spin_trylock.S glibc-2.25/sysdeps/x86_64/nptl/pthread_spin_trylock.S
---- glibc-2.25.orig/sysdeps/x86_64/nptl/pthread_spin_trylock.S	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/x86_64/nptl/pthread_spin_trylock.S	1969-12-31 16:00:00.000000000 -0800
+--- glibc-2.25.orig/sysdeps/x86_64/nptl/pthread_spin_trylock.S	2017-09-11 17:15:16.647740005 +0000
++++ glibc-2.25/sysdeps/x86_64/nptl/pthread_spin_trylock.S	1970-01-01 00:00:00.000000000 +0000
 @@ -1,37 +0,0 @@
 -/* Copyright (C) 2002-2017 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -6818,8 +6816,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/nptl/pthread_spin_trylock.S 
 -	retq
 -END(pthread_spin_trylock)
 diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/nptl/pthread_spin_unlock.S glibc-2.25/sysdeps/x86_64/nptl/pthread_spin_unlock.S
---- glibc-2.25.orig/sysdeps/x86_64/nptl/pthread_spin_unlock.S	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/x86_64/nptl/pthread_spin_unlock.S	1969-12-31 16:00:00.000000000 -0800
+--- glibc-2.25.orig/sysdeps/x86_64/nptl/pthread_spin_unlock.S	2017-09-11 17:15:16.647740005 +0000
++++ glibc-2.25/sysdeps/x86_64/nptl/pthread_spin_unlock.S	1970-01-01 00:00:00.000000000 +0000
 @@ -1,29 +0,0 @@
 -/* Copyright (C) 2002-2017 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -6851,8 +6849,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/nptl/pthread_spin_unlock.S g
 -	.globl	pthread_spin_init
 -pthread_spin_init = pthread_spin_unlock
 diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/nptl/tls.h glibc-2.25/sysdeps/x86_64/nptl/tls.h
---- glibc-2.25.orig/sysdeps/x86_64/nptl/tls.h	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/x86_64/nptl/tls.h	2017-09-13 06:58:38.943329968 -0700
+--- glibc-2.25.orig/sysdeps/x86_64/nptl/tls.h	2017-09-11 17:15:16.648740076 +0000
++++ glibc-2.25/sysdeps/x86_64/nptl/tls.h	2017-09-13 19:55:56.069751544 +0000
 @@ -290,7 +290,7 @@
  
  
