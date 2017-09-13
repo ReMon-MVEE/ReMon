@@ -71,6 +71,8 @@ if [ ! -e deps/jsoncpp ]
 then
 	git clone https://github.com/open-source-parsers/jsoncpp.git deps/jsoncpp
 	cd deps/jsoncpp
+	git checkout 6a15ca64429e1ce6d2fff915ff14ce1c2a96975c
+	git reset --hard
 	mkdir build
 	cd build
 	cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_STATIC_LIBS=ON -DBUILD_SHARED_LIBS=OFF -DCMAKE_CXX_COMPILER=$ORIG_PWD/deps/llvm/build-tree/bin/clang++ -DCMAKE_CXX_FLAGS=-O3 ..
