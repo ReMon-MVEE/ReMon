@@ -482,7 +482,11 @@ void monitor::rewrite_execve_args(int variantnum, bool write_to_stack, bool rewr
 #ifdef MVEE_ARCH_HAS_VDSO
 			(*mvee::config_variant_global)["hide_vdso"].asBool() ||
 #endif
-			(*mvee::config_variant_global)["non_overlapping_mmaps"].asInt())
+			(*mvee::config_variant_global)["non_overlapping_mmaps"].asInt() 
+#ifdef MVEE_ARCH_ALWAYS_USE_LD_LOADER
+			|| true
+#endif
+			)
 		{
 			argv.push_front(mvee::strdup(MVEE_LD_LOADER_NAME));
 			image = mvee::os_get_mvee_ld_loader();

@@ -1,12 +1,920 @@
 diff -N -r --unified glibc-2.25.orig/csu/libc-start.c glibc-2.25/csu/libc-start.c
---- glibc-2.25.orig/csu/libc-start.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/csu/libc-start.c	2017-07-03 16:33:58.660114473 -0700
-@@ -104,6 +104,222 @@
+--- glibc-2.25.orig/csu/libc-start.c	2017-09-11 17:14:55.241208737 +0000
++++ glibc-2.25/csu/libc-start.c	2017-09-13 19:55:55.826730718 +0000
+@@ -104,6 +104,14 @@
  # define MAIN_AUXVEC_PARAM
  #endif
  
 +#ifdef USE_MVEE_LIBC
++# ifdef MVEE_USE_TOTALPARTIAL_AGENT
++#  include "mvee-totalpartial-agent.c"
++# else
++#  include "mvee-woc-agent.c"
++# endif
++#endif
 +
+ STATIC int LIBC_START_MAIN (int (*main) (int, char **, char **
+ 					 MAIN_AUXVEC_DECL),
+ 			    int argc,
+@@ -274,6 +282,11 @@
+ #ifndef SHARED
+   _dl_debug_initialize (0, LM_ID_BASE);
+ #endif
++
++  (void) syscall(MVEE_RUNS_UNDER_MVEE_CONTROL, &mvee_sync_enabled, &mvee_infinite_loop, 
++				 NULL, NULL, &mvee_master_variant);
++  mvee_libc_initialized = 1;
++
+ #ifdef HAVE_CLEANUP_JMP_BUF
+   /* Memory for the cancellation buffer.  */
+   struct pthread_unwind_buf unwind_buf;
+diff -N -r --unified glibc-2.25.orig/csu/mvee-totalpartial-agent.c glibc-2.25/csu/mvee-totalpartial-agent.c
+--- glibc-2.25.orig/csu/mvee-totalpartial-agent.c	1970-01-01 00:00:00.000000000 +0000
++++ glibc-2.25/csu/mvee-totalpartial-agent.c	2017-09-13 19:55:55.839732858 +0000
+@@ -0,0 +1,879 @@
++static __thread int   mvee_master_thread_id         = 0;
++static unsigned char  mvee_sync_enabled             = 0;
++static unsigned char  mvee_libc_initialized         = 0;
++static unsigned char  mvee_master_variant           = 0;
++static unsigned char  mvee_buffer_valid             = 0;
++static unsigned short mvee_num_childs               = 0;
++static unsigned short mvee_child_num                = 0;
++#ifdef MVEE_EXTENDED_QUEUE
++static unsigned short mvee_op_number                = 1;
++#endif
++#ifdef MVEE_LOG_EIPS
++DEFINE_MVEE_QUEUE(lock, 1);
++#else
++DEFINE_MVEE_QUEUE(lock, 0);
++#endif
++static __thread unsigned long  mvee_prev_flush_cnt           = 0;
++static __thread unsigned long  mvee_lock_buffer_prev_pos     = 0;
++#if defined(MVEE_EXTENDED_QUEUE) && defined(MVEE_CHECK_LOCK_TYPE)
++static __thread unsigned long  mvee_original_call_site       = 0;
++#endif
++
++#define likely(x)       __builtin_expect((x),1)
++#define unlikely(x)     __builtin_expect((x),0)
++
++#ifdef MVEE_DEBUG_MALLOC
++DEFINE_MVEE_QUEUE(malloc, 1);
++#endif
++
++/* MVEE PATCH:
++   Checks wether or not all variants got ALIGNMENT aligned heaps from
++   the previous mmap request. If some of them have not, ALL variants
++   have to bail out and fall back to another heap allocation method.
++   This ensures that the variants stay in sync with respect to future mm
++   requests.
++*/
++#define ALIGNMENT 0x4000000
++
++int
++mvee_all_heaps_aligned(char* heap, unsigned long alloc_size)
++{
++  // if we're not running under MVEE control,
++  // just check the alignment of the current heap
++  if (!mvee_master_thread_id)
++  {
++      if ((unsigned long)heap & (ALIGNMENT-1))
++		  return 0;
++      return 1;
++  }
++
++  // We ARE running under MVEE control
++  // => ask the MVEE to check the alignments
++  // of ALL heaps
++  return syscall(MVEE_ALL_HEAPS_ALIGNED, heap, ALIGNMENT, alloc_size);
++}
++
++/* 
++ * mvee_infinite_loop:
++ * this function is used for both thread transfering and signal delivery 
++ * 
++ * 1) to transfer threads to a new monitor, the original monitor (i.e. the 
++ * monitor that monitors the childs that instigated the fork event) needs to
++ * detach from the threads first. While the threads are detached, they can
++ * run freely, without the intervention of a debugger.
++ * As such, we have to move the program counter to an infinite loop while
++ * the threads are detached. This way, the threads will all be in an equivalent
++ * state when the new monitor attaches to them.
++ * Because we're going to replace the registers by their original contents
++ * when the new monitor attaches, we can use sys_pause calls in the infinite
++ * loop.
++ * 
++ * 2) delivering signals through the ptrace API happens asynchronously 
++ * (I found out the hard way). As such, we should wait for the threads to be
++ * in equivalent states (e.g. stopped on the same syscall). Then the registers
++ * should be backed up and the syscall nr should be replaced by a harmless
++ * syscall that doesn't modify the program state. We use sys_getpid for this
++ * purpose. When that replaced syscall returns, we change the pc to this
++ * infinite loop while we wait for async signal delivery.
++ * We probably cannot use syscalls while waiting for signal delivery. 
++ * One possible exception is sys_sched_yield. Our modified MVEE kernel does
++ * not report this syscall to the ptracer
++ * 
++ * the with_syscalls parameter is passed through the ecx register!
++ */
++void mvee_infinite_loop(int with_syscalls, int dummy)
++{
++	if (with_syscalls)
++    {
++		for (;;)
++			syscall(__NR_pause);
++    }
++	else
++    {
++		for (;;)
++		{
++			dummy = dummy << 2;
++		}
++    }
++}
++
++/*
++ * logs a (truncated) stack into the specified "eip" buffer. This stack is logged for EVERY variant,
++ * which greatly facilitates debugging. The MVEE can dump the contents of this buffer very efficiently, 
++ * including source lines/info
++ * 
++ * Do note that __builtin_return_address() can trap (SEGV) if the entire stack contains less than
++ * MVEE_MAX_STACK_DEPTH entries. The MVEE will however trap the SEGV and if it comes from this function,
++ * the offending instruction will be skipped.
++ */
++static void __attribute__ ((noinline)) mvee_log_stack(void* eip_buffer, int eip_buffer_slot_size, volatile unsigned int* eip_buffer_pos_ptr, int start_depth)
++{
++#ifdef MVEE_LOG_EIPS
++	int entries_logged = 0;
++	int next_entry = start_depth;
++
++	while (entries_logged < MVEE_STACK_DEPTH)
++    {
++		unsigned long ret_addr = 0;
++		switch (next_entry)
++		{
++			// __builtin_* intrinics need const arguments so unfortunately, we have to do the following...
++#define DEF_CASE(x)														\
++			case x:														\
++				ret_addr = (unsigned long)__builtin_return_address(x);	\
++				break;
++			DEF_CASE(0);
++#if defined(MVEE_EXTENDED_QUEUE) && defined (MVEE_CHECK_LOCK_TYPE)
++			case 1:
++				ret_addr = (unsigned long)mvee_original_call_site;
++				break;
++#else
++			DEF_CASE(1);
++#endif
++
++#if MVEE_STACK_DEPTH > 1
++			DEF_CASE(2);
++# if MVEE_STACK_DEPTH > 2
++			DEF_CASE(3);
++#  if MVEE_STACK_DEPTH > 3
++			DEF_CASE(4);
++#   if MVEE_STACK_DEPTH > 4
++			DEF_CASE(5);
++#    if MVEE_STACK_DEPTH > 5
++			DEF_CASE(6);
++#     if MVEE_STACK_DEPTH > 6
++			DEF_CASE(7);
++#      if MVEE_STACK_DEPTH > 7
++			DEF_CASE(8);
++#       if MVEE_STACK_DEPTH > 8
++			DEF_CASE(9);
++#        if MVEE_STACK_DEPTH > 9
++			DEF_CASE(10);
++#        endif
++#       endif
++#      endif
++#     endif
++#    endif
++#   endif
++#  endif
++# endif
++#endif
++		}
++		*(unsigned long*)((unsigned long)eip_buffer + 
++						  eip_buffer_slot_size * (*eip_buffer_pos_ptr) + 
++						  MVEE_STACK_DEPTH * sizeof(unsigned long) * mvee_child_num + 
++						  sizeof(unsigned long) * entries_logged) 
++			= ret_addr;
++		entries_logged++;
++		next_entry++;
++    }
++#endif
++}
++
++static void mvee_check_buffer(void)
++{
++	register unsigned short tid asm("al") = mvee_master_thread_id;
++	if (unlikely(!tid))
++    {
++		int tmp_id;
++		__asm__ volatile("int $0x80" : "=a" (tmp_id) : "0" (MVEE_GET_MASTERTHREAD_ID) : "memory", "cc");
++		mvee_master_thread_id = tmp_id;
++
++		if (!mvee_buffer_valid)
++		{
++			mvee_buffer_valid = 1;
++#ifdef MVEE_PARTIAL_ORDER_REPLICATION
++			INIT_MVEE_QUEUE(lock, MVEE_LOCK_QUEUE_SLOT_SIZE, MVEE_LIBC_LOCK_BUFFER_PARTIAL);
++#else
++			INIT_MVEE_QUEUE(lock, MVEE_LOCK_QUEUE_SLOT_SIZE, MVEE_LIBC_LOCK_BUFFER);
++#endif
++
++#ifdef MVEE_DEBUG_MALLOC
++			INIT_MVEE_QUEUE(malloc, 4*sizeof(int) + 3*sizeof(long), MVEE_LIBC_MALLOC_DEBUG_BUFFER);
++#endif
++		}
++    }
++}
++
++
++// This function is a bit tricky, especially on x86_64!
++// In some contexts, such as syscalls that enable asynchronous cancellation,
++// libc expects none of the code it executes to touch registers other than
++// %rax and %r11. Consequently, we have to make sure that at most 2 registers
++// live at any point during our mvee funcs!
++static inline int mvee_should_sync(void)
++{
++	if (unlikely(!mvee_libc_initialized))
++	{
++		long res = syscall(MVEE_RUNS_UNDER_MVEE_CONTROL, &mvee_sync_enabled, &mvee_infinite_loop, 
++						   &mvee_num_childs, &mvee_child_num, &mvee_master_variant);
++		if (!(res < 0 && res > -4095))
++			mvee_check_buffer();
++		mvee_libc_initialized = 1;
++	}
++	return mvee_sync_enabled;
++}
++
++
++int mvee_should_sync_tid(void)
++{
++	return mvee_should_sync();
++}
++
++// the buffer initialization is NOT thread-safe. Therefore, it must be initialized
++// in single threaded context!!!
++void mvee_invalidate_buffer(void)
++{
++	mvee_buffer_valid = 0;
++	mvee_master_thread_id = 0;
++}
++
++#define cpu_relax() asm volatile("rep; nop" ::: "memory")
++
++#define gcc_barrier() asm volatile("" ::: "memory")
++
++static inline unsigned int mvee_write_lock_result_prepare(void)
++{
++	while (1)
++    {
++		if (orig_atomic_decrement_and_test(mvee_lock_buffer_lock))
++			return *mvee_lock_buffer_pos;
++      
++		while (*mvee_lock_buffer_lock <= 0)
++			cpu_relax();
++    }
++
++	return *mvee_lock_buffer_pos;
++}
++
++static inline void mvee_write_lock_result_finish(void)
++{
++	gcc_barrier();
++	orig_atomic_increment(mvee_lock_buffer_pos);
++	*mvee_lock_buffer_lock = 1;
++}
++
++#ifdef MVEE_EXTENDED_QUEUE
++static inline void mvee_write_lock_result_write(unsigned int pos, unsigned short op_type, void* word_ptr, unsigned char is_store)
++#else
++	static inline void mvee_write_lock_result_write(unsigned int pos, void* word_ptr, unsigned char is_store)
++#endif
++{
++restart:
++	if (likely(pos < mvee_lock_buffer_slots))
++    {
++#if defined(MVEE_LOG_EIPS) && defined(MVEE_EXTENDED_QUEUE)
++		MVEE_LOG_STACK(lock, 1, &pos);
++#endif
++		gcc_barrier();
++
++#ifdef MVEE_PARTIAL_ORDER_REPLICATION
++		MVEE_LOG_QUEUE_DATA(lock, pos, 0, (unsigned long)(((unsigned long)word_ptr) | is_store));
++# ifdef MVEE_EXTENDED_QUEUE
++		MVEE_LOG_QUEUE_DATA(lock, pos, sizeof(long) + sizeof(short), op_type);
++# endif
++		MVEE_LOG_QUEUE_DATA(lock, pos, sizeof(long), ((unsigned short)mvee_master_thread_id));
++#else // MVEE_TOTAL_ORDER_REPLICATION
++# ifdef MVEE_EXTENDED_QUEUE
++		MVEE_LOG_QUEUE_DATA(lock, pos, sizeof(long), ((unsigned long)word_ptr));
++		MVEE_LOG_QUEUE_DATA(lock, pos, sizeof(short), op_type);
++# endif
++		MVEE_LOG_QUEUE_DATA(lock, pos, 0, ((unsigned short)mvee_master_thread_id));
++#endif // !MVEE_PARTIAL_ORDER_REPLICATION
++    }
++	else
++    {      
++		// we log the tid of the flushing thread into the last slot
++#ifdef MVEE_PARTIAL_ORDER_REPLICATION
++		MVEE_LOG_QUEUE_DATA(lock, pos, sizeof(long), ((unsigned short)mvee_master_thread_id));
++		syscall(MVEE_FLUSH_SHARED_BUFFER, MVEE_LIBC_LOCK_BUFFER_PARTIAL);
++#else
++		MVEE_LOG_QUEUE_DATA(lock, pos, 0, ((unsigned short)mvee_master_thread_id));
++		syscall(MVEE_FLUSH_SHARED_BUFFER, MVEE_LIBC_LOCK_BUFFER);
++#endif
++		*mvee_lock_buffer_pos = pos = 0;
++		goto restart;
++    }
++}
++
++static inline unsigned char mvee_op_is_tagged(unsigned long pos)
++{
++#ifdef MVEE_EXTENDED_QUEUE
++	unsigned short tagged;
++	MVEE_READ_QUEUE_DATA(lock, pos, sizeof(long) + sizeof(short) * (mvee_child_num + 1), tagged);
++#else
++	unsigned char tagged;
++	MVEE_READ_QUEUE_DATA(lock, pos, sizeof(long) + sizeof(short) + (mvee_child_num - 1), tagged);
++#endif
++	return tagged ? 1 : 0;
++}
++
++static inline unsigned char mvee_pos_still_valid(void)
++{
++	if (*mvee_lock_buffer_flushing || *mvee_lock_buffer_flush_cnt != mvee_prev_flush_cnt)
++		return 0;
++	return 1;
++}
++
++#ifdef MVEE_EXTENDED_QUEUE
++static inline void mvee_read_lock_result_wait(unsigned short op_type, void* word_ptr)
++#else
++static inline void mvee_read_lock_result_wait(void)
++#endif
++{
++#ifdef MVEE_PARTIAL_ORDER_REPLICATION
++	unsigned char is_store = 0;
++	unsigned char all_tagged;
++	unsigned long master_word_ptr;
++	unsigned int i;
++	unsigned int orig_pos;
++	unsigned int nextpos = 0;
++	unsigned int temppos;
++
++	while(true)
++	{
++		// STEP 1: FIND THE CORRESPONDING MASTER WORD POINTER
++		//
++		// Our algorithm relies on the fact that all replicae
++		// are semantically equivalent.
++		//
++		// Therefore, we may safely assume that the first non-tagged
++		// operation of this thread's corresponding master thread.
++		// is an operation on the same logical word.
++		//
++		// Caching:
++		// We start the search at the previously replicated operation 
++		// by this thread. The index of the previously replicated
++		// operation is stored in mvee_lock_buffer_prev_pos.
++		// It remains valid until the queue is flushed.
++		// When the queue is flushed, we increment the flush counter
++		// which is stored in the upper 4 bytes of mvee_lock_buffer_pos.
++		//
++
++		// check if the queue has been flushed since the last operation we've replicated
++		if (unlikely(*mvee_lock_buffer_flush_cnt != mvee_prev_flush_cnt))
++		{
++			// it has been flushed, update flush cnt and reset the 
++			// position of our previously replicated operation
++			mvee_prev_flush_cnt = *mvee_lock_buffer_flush_cnt;
++			mvee_lock_buffer_prev_pos = 0;
++			nextpos = 0;
++		}
++
++		temppos = *mvee_lock_buffer_pos;
++
++		// Meanwhile, some other thread _MAY_ have moved the position
++		// pointer past our previously replicated operation
++		//
++		// If so, we start the search there instead
++		orig_pos = temppos;
++		if (temppos < mvee_lock_buffer_prev_pos)
++			nextpos = mvee_lock_buffer_prev_pos;
++		else if (!nextpos)
++			nextpos = orig_pos;
++
++		master_word_ptr = 0;
++
++		for (temppos = nextpos; temppos <= mvee_lock_buffer_slots; ++temppos)
++		{
++			unsigned short tid;
++			MVEE_READ_QUEUE_DATA(lock, temppos, sizeof(long), tid);
++			// MVEE_READ_QUEUE_DATA(lock, temppos, 0, tid);
++
++			// no tid => the slaves are running ahead of the master
++			// or the master stores are not visible yet
++			if (!tid)
++			{
++				master_word_ptr = 0;
++				break;
++			}
++
++			if (tid != (unsigned short)mvee_master_thread_id || mvee_op_is_tagged(temppos))
++				continue;
++
++			// if tid is visible, then this will be too
++			MVEE_READ_QUEUE_DATA(lock, temppos, 0, master_word_ptr);
++			if (master_word_ptr & 1)
++				is_store = 1;
++			master_word_ptr &= ~(sizeof(long) - 1);
++
++			// this will only happen if we're at the end of the queue
++			// at which point we log a pseudo-operation with master_word_ptr == 0
++			if (!master_word_ptr)
++			{
++				if (temppos == mvee_lock_buffer_slots)
++				{
++					while (true)
++					{
++						all_tagged = 1;
++
++						for (temppos = orig_pos; temppos < mvee_lock_buffer_slots; ++temppos)
++						{		    
++							if (!mvee_op_is_tagged(temppos))
++							{
++								all_tagged = 0;
++								orig_pos = temppos;
++								break;
++							}
++						}
++
++						if (!all_tagged)
++							syscall(__NR_sched_yield);
++						else
++							break;
++					}
++
++					*mvee_lock_buffer_flushing = 1;
++					atomic_full_barrier();
++
++					syscall(MVEE_FLUSH_SHARED_BUFFER, MVEE_LIBC_LOCK_BUFFER_PARTIAL);
++
++#ifdef MVEE_EXTENDED_QUEUE
++					mvee_op_number = 1;
++#endif
++
++					*mvee_lock_buffer_pos = 0;
++					atomic_full_barrier();
++					*mvee_lock_buffer_flush_cnt = (++mvee_prev_flush_cnt);
++					*mvee_lock_buffer_flushing = 0;
++
++					temppos = mvee_lock_buffer_prev_pos = 0;
++					break;
++				}
++
++				// we could also see a NULLed out master_word_ptr if another thread is flushing
++				temppos = mvee_lock_buffer_prev_pos = 0;
++				break;
++			}
++
++			// a weird corner case could happen here.
++			// it is possible that by the time we get here, some other thread has flushed and the master
++			// thread has caught up with us again. In other words,
++			// we MIGHT have missed a complete flush cycle
++			//
++			// => we need to check if our data is still valid!!!
++			if (!mvee_pos_still_valid())
++			{
++				master_word_ptr = 0;
++				break;
++			}
++
++#if defined(MVEE_EXTENDED_QUEUE) && defined(MVEE_CHECK_LOCK_TYPE)
++			unsigned short master_op_type;
++			MVEE_READ_QUEUE_DATA(lock, temppos, sizeof(long) + sizeof(short), master_op_type);
++
++			if (master_op_type != op_type && mvee_pos_still_valid())
++			{
++#  ifdef MVEE_LOG_EIPS
++				MVEE_LOG_STACK(lock, 1, &temppos);
++#  endif
++
++				syscall(__NR_gettid, 1337, 10000001, 60, mvee_lock_buffer_slot_size, temppos);
++				syscall(__NR_gettid, 1337, 10000001, 59, master_op_type, op_type);
++				return;
++			}
++/*
++			if ((master_word_ptr & 0xfff) != (((unsigned long)word_ptr & ~(sizeof(long) - 1) & 0xfff)) && mvee_pos_still_valid())
++			{
++#  ifdef MVEE_LOG_EIPS
++				MVEE_LOG_STACK(lock, 1, &temppos);
++#  endif
++
++				syscall(__NR_gettid, 1337, 10000001, 61, word_ptr, temppos);
++			}
++*/
++#endif
++
++			break;
++		}
++
++		if (master_word_ptr)
++			break;
++
++		// if we get to this point, it means that the slave 
++		// has caught up with the master
++		// => we restart the iteration but this time
++		// we start at the position we were at
++		nextpos = temppos;
++		syscall(__NR_sched_yield);
++	}
++
++	// STEP 2: FIND PRECEDING OPERATIONS ON THIS LOCATION
++	// 
++	// Rules:
++	// * Stores can continue if all preceding loads and stores
++	// have been replicated
++	// * Loads can continue if all preceding stores 
++	// have been replicated
++	//
++	unsigned char seen_preceding_op = 1;
++	while (seen_preceding_op)
++    {
++		seen_preceding_op = 0;
++		for (i = orig_pos; i < temppos; ++i)
++		{
++			unsigned long temp_word_ptr;
++			MVEE_READ_QUEUE_DATA(lock, i, 0, temp_word_ptr);
++
++			// check if the results are being logged out of order
++			if (!temp_word_ptr)
++			{
++				seen_preceding_op = 1;
++				orig_pos = i;
++				break;
++			}
++
++			if ((temp_word_ptr & ~(sizeof(long) - 1)) == master_word_ptr)
++			{
++				if (is_store || (temp_word_ptr & (sizeof(long) - 1)))
++				{
++					if (!mvee_op_is_tagged(i))
++					{
++						seen_preceding_op = 1;
++						orig_pos = i;
++						break;
++					}
++				}
++			}
++		}
++
++		// We haven't seen a preceding operation that must be completed
++		// before this one
++		if (!seen_preceding_op)
++		{
++			mvee_lock_buffer_prev_pos = temppos;
++			break;
++		}
++
++		syscall(__NR_sched_yield);
++    } 
++ 
++#ifdef MVEE_LOG_EIPS
++	MVEE_LOG_STACK(lock, 1, &temppos);
++#endif
++
++#else
++
++	while (true)
++    {
++		int temppos = *(volatile int*)mvee_lock_buffer_pos;
++      
++		if (temppos < mvee_lock_buffer_slots)
++		{
++			unsigned short tid, type;
++
++			MVEE_READ_QUEUE_DATA(lock, temppos, 0, tid);
++			if (tid == (unsigned short)mvee_master_thread_id)
++			{
++# if defined(MVEE_EXTENDED_QUEUE) && defined(MVEE_CHECK_LOCK_TYPE)
++	      
++				MVEE_READ_QUEUE_DATA(lock, temppos, sizeof(short), type);
++
++				if (type != op_type)
++				{
++#  ifdef MVEE_LOG_EIPS
++					MVEE_LOG_STACK(lock, 1, &temppos);
++#  endif
++					syscall(__NR_gettid, 1337, 10000001, 60, mvee_lock_buffer_slot_size, temppos);
++					syscall(__NR_gettid, 1337, 10000001, 59, type, op_type);
++				}
++# endif
++				break;
++			}
++
++			syscall(__NR_sched_yield);
++		}
++		else
++		{
++			// we have to flush... figure out which thread does the flush
++			unsigned short tid;
++			MVEE_READ_QUEUE_DATA(lock, temppos, 0, tid);
++
++			if (tid == (unsigned short)mvee_master_thread_id)
++			{
++				// we should do it...
++				syscall(MVEE_FLUSH_SHARED_BUFFER, MVEE_LIBC_LOCK_BUFFER);
++				*mvee_lock_buffer_pos = 0;
++			}
++			else if (!tid)
++			{
++				// we don't know who should do it yet. wait for more info
++				while (temppos >= mvee_lock_buffer_slots && 
++					   !tid)
++				{
++					cpu_relax();
++					temppos = *(volatile int*)mvee_lock_buffer_pos;
++					MVEE_READ_QUEUE_DATA(lock, temppos, 0, tid);					
++				}
++			}
++			else
++			{
++				// some other thread should do it. wait for the flush
++				while (*mvee_lock_buffer_pos >= mvee_lock_buffer_slots)
++					syscall(__NR_sched_yield);
++			}
++		}
++    }
++#endif
++}
++
++static inline void mvee_read_lock_result_wake(void)
++{
++#ifdef MVEE_EXTENDED_QUEUE
++	int pos;
++
++# ifdef MVEE_PARTIAL_ORDER_REPLICATION
++	pos = mvee_lock_buffer_prev_pos;
++# else
++	pos = *mvee_lock_buffer_pos;
++# endif
++
++# ifdef MVEE_LOG_EIPS
++//	MVEE_LOG_STACK(lock, 1, &pos);
++# endif
++
++	// check call site, should be ASLR proof
++# ifdef MVEE_CHECK_LOCK_TYPE
++#  ifdef MVEE_LOG_EIPS
++	unsigned long parent_eip = *(unsigned long*)((unsigned long)mvee_lock_eip_buffer + sizeof(unsigned long)*MVEE_STACK_DEPTH*mvee_num_childs * pos);
++	unsigned long our_eip = (unsigned long)mvee_original_call_site;
++
++	//  if (parent_eip != our_eip)
++	if ((parent_eip & 0xfff) != (our_eip & 0xfff))
++#  endif
++    {
++		unsigned short lock_type;
++#  ifdef MVEE_PARTIAL_ORDER_REPLICATION
++		MVEE_READ_QUEUE_DATA(lock, pos, sizeof(long) + sizeof(short), lock_type);
++#  else
++		MVEE_READ_QUEUE_DATA(lock, pos, sizeof(short), lock_type);
++#  endif
++#  ifdef MVEE_LOG_EIPS
++		syscall(__NR_gettid, 1337, 10000001, 90, lock_type, parent_eip, our_eip);
++#  endif
++    }
++# endif // !MVEE_CHECK_LOCK_TYPE
++
++#endif // !MVEE_EXTENDED_QUEUE
++
++#ifdef MVEE_PARTIAL_ORDER_REPLICATION
++	// see if we can move the position pointer
++	unsigned int orig_pos = *mvee_lock_buffer_pos;
++	if (!mvee_pos_still_valid())
++		return;
++
++	for (unsigned int i = orig_pos; i < mvee_lock_buffer_slots; ++i)
++    {
++		if (!mvee_op_is_tagged(i) && i != mvee_lock_buffer_prev_pos)
++		{
++			// if it looks like we're able to move the position pointer, 
++			// attempt to do so with a CAS. Again, keep in mind that this
++			// operation might happen at the same time as a flush from another thread
++			// => check if the original pos pointer is still in place
++			// If not, another thread has either increased the pos or has flushed => bail out
++			// If yes, the flushing thread will just need an extra iteration to flush
++			//
++			// we cannot use a regular store here since that might cause us to not flush!
++			// i.e. some thread might move us to the last position, which will cause the next atomic op to flush first
++			// but some other thread might move use back!
++			if (i > orig_pos)
++				__sync_bool_compare_and_swap(mvee_lock_buffer_pos, orig_pos, i);
++			break;
++		}
++    }
++
++	// now tag the slot
++  
++# ifdef MVEE_EXTENDED_QUEUE
++	//  unsigned short tag = __sync_fetch_and_add(&mvee_op_number, 1);
++	unsigned short tag = 1;
++	MVEE_LOG_QUEUE_DATA(lock, mvee_lock_buffer_prev_pos, sizeof(long) + sizeof(short) * (mvee_child_num + 1), tag);
++# else  
++	unsigned char tag = 1;
++	MVEE_LOG_QUEUE_DATA(lock, mvee_lock_buffer_prev_pos, sizeof(long) + sizeof(short) + (mvee_child_num - 1), tag);
++# endif
++
++#else // MVEE_TOTAL_ORDER_REPLICATION
++    (*mvee_lock_buffer_pos)++;
++#endif // !MVEE_PARTIAL_ORDER_REPLICATION
++}
++
++#ifdef MVEE_EXTENDED_QUEUE
++unsigned char mvee_atomic_preop_internal(unsigned char is_store, void* word_ptr, unsigned short op_type)
++#else
++	unsigned char mvee_atomic_preop_internal(unsigned char is_store, void* word_ptr)
++#endif
++{
++	if (unlikely(!mvee_should_sync()))
++		return 0;
++	mvee_check_buffer();
++#if defined(MVEE_EXTENDED_QUEUE) && defined(MVEE_CHECK_LOCK_TYPE)
++	if (!mvee_original_call_site)
++		mvee_original_call_site = (unsigned long)__builtin_return_address(0);
++#endif
++	if (likely(mvee_master_variant))
++    {
++		unsigned int pos = mvee_write_lock_result_prepare();
++#ifdef MVEE_EXTENDED_QUEUE
++		mvee_write_lock_result_write(pos, op_type, word_ptr, is_store);
++#else
++		mvee_write_lock_result_write(pos, word_ptr, is_store);
++#endif
++		return 1;
++    }
++	else
++    {
++#ifdef MVEE_EXTENDED_QUEUE
++		mvee_read_lock_result_wait(op_type, word_ptr);
++#else
++		mvee_read_lock_result_wait();
++#endif
++		return 2;
++    }
++}
++
++void mvee_atomic_postop_internal(unsigned char preop_result)
++{
++	if(likely(preop_result) == 1)
++		mvee_write_lock_result_finish();
++	else if (likely(preop_result) == 2)
++		mvee_read_lock_result_wake();
++#if defined(MVEE_EXTENDED_QUEUE) && defined(MVEE_CHECK_LOCK_TYPE)		
++	mvee_original_call_site = 0;
++#endif   
++}
++
++unsigned char mvee_atomic_preop(unsigned short op_type, void* word_ptr)
++{
++#ifdef MVEE_EXTENDED_QUEUE
++# ifdef MVEE_CHECK_LOCK_TYPE
++	mvee_original_call_site = (unsigned long)__builtin_return_address(0);
++# endif
++	return mvee_atomic_preop_internal(op_type > mvee_atomic_load ? 1 : 0, word_ptr, op_type + __MVEE_BASE_ATOMICS_MAX__);
++#else
++	return mvee_atomic_preop_internal(op_type > mvee_atomic_load ? 1 : 0, word_ptr);
++#endif
++}
++
++void mvee_atomic_postop(unsigned char preop_result)
++{
++	mvee_atomic_postop_internal(preop_result);
++}
++
++
++#ifdef MVEE_DEBUG_MALLOC
++void mvee_malloc_hook(int alloc_type, int msg, long chunksize, void* ar_ptr, void* chunk_ptr)
++{
++	if (mvee_num_childs)
++    {
++		mvee_check_buffer();
++		if (mvee_master_variant)
++			mvee_write_malloc_info(alloc_type, msg, chunksize, ar_ptr, chunk_ptr);
++		else
++			mvee_verify_malloc_info(alloc_type, msg, chunksize, ar_ptr, chunk_ptr);
++    }
++}
++
++void mvee_write_malloc_info(int alloc_type, int msg, long chunksize, void* ar_ptr, void* chunk_ptr)
++{
++	while (1)
++    {
++		if (orig_atomic_decrement_and_test(mvee_malloc_buffer_lock))
++			break;
++      
++		while (*mvee_lock_buffer_lock <= 0)
++			cpu_relax();
++    }
++
++	unsigned int pos = *mvee_malloc_buffer_pos;
++
++	MVEE_LOG_QUEUE_DATA(malloc, pos, 4*sizeof(int) + 2 * sizeof(long), (unsigned long)chunk_ptr);
++	MVEE_LOG_QUEUE_DATA(malloc, pos, 4*sizeof(int) +     sizeof(long), (unsigned long)ar_ptr);
++	MVEE_LOG_QUEUE_DATA(malloc, pos, 4*sizeof(int)                   , chunksize);
++	MVEE_LOG_QUEUE_DATA(malloc, pos, 3*sizeof(int)                   , msg);
++	MVEE_LOG_QUEUE_DATA(malloc, pos, 2*sizeof(int)                   , alloc_type);
++
++	MVEE_LOG_STACK(malloc, 1, mvee_malloc_buffer_pos);
++
++	MVEE_LOG_QUEUE_DATA(malloc, pos, 0, mvee_master_thread_id);
++
++	gcc_barrier();
++	if (++(*mvee_malloc_buffer_pos) >= mvee_malloc_buffer_slots)
++    {
++		syscall(MVEE_FLUSH_SHARED_BUFFER, MVEE_LIBC_MALLOC_DEBUG_BUFFER);
++		*mvee_malloc_buffer_pos = 0;
++    }
++
++	*mvee_malloc_buffer_lock = 1;
++}
++
++struct mvee_malloc_error
++{
++  int alloc_type, msg;
++  long chunksize;
++  void* ar_ptr, * chunk_ptr;
++};
++
++void mvee_verify_malloc_info(int alloc_type, int msg, long chunksize, void* ar_ptr, void* chunk_ptr)
++{
++	unsigned int prevpos = 0;
++	int master_alloc_type, master_msg;
++	long master_chunksize;
++	void* master_ar_ptr, * master_chunk_ptr;
++
++	while (true)
++    {
++		volatile unsigned int temppos = *mvee_malloc_buffer_pos;
++
++		if (temppos < mvee_malloc_buffer_slots)
++		{
++			int tid;
++			MVEE_READ_QUEUE_DATA(malloc, temppos, 0, tid);
++			if (tid == mvee_master_thread_id)
++			{
++				MVEE_READ_QUEUE_DATA(malloc, temppos, 2*sizeof(int), master_alloc_type);
++				MVEE_READ_QUEUE_DATA(malloc, temppos, 3*sizeof(int), master_msg);
++				MVEE_READ_QUEUE_DATA(malloc, temppos, 4*sizeof(int), master_chunksize);
++				MVEE_READ_QUEUE_DATA(malloc, temppos, 4*sizeof(int)+sizeof(long), master_ar_ptr);
++				MVEE_READ_QUEUE_DATA(malloc, temppos, 4*sizeof(int)+2*sizeof(long), master_chunk_ptr);
++				MVEE_LOG_STACK(malloc, 1, mvee_malloc_buffer_pos);
++	      
++				if (alloc_type != master_alloc_type
++					|| msg != master_msg
++					|| chunksize != master_chunksize
++#ifndef MVEE_MALLOC_IGNORE_ASLR
++					|| ar_ptr != master_ar_ptr
++					|| chunk_ptr != master_chunk_ptr
++#endif
++					)
++				{
++					struct mvee_malloc_error err;
++					err.alloc_type = master_alloc_type;
++					err.msg = master_msg;
++					err.chunksize = master_chunksize;
++					err.ar_ptr = master_ar_ptr;
++					err.chunk_ptr = master_chunk_ptr;
++					syscall(__NR_gettid, 1337, 10000001, 74, &err);
++		  
++					err.alloc_type = alloc_type;
++					err.msg = msg;
++					err.chunksize = chunksize;
++					err.ar_ptr = ar_ptr;
++					err.chunk_ptr = chunk_ptr;
++					syscall(__NR_gettid, 1337, 10000001, 75, &err);
++				}
++				break;
++			}
++		}
++    }
++
++	if (*mvee_malloc_buffer_pos +1 >= mvee_malloc_buffer_slots)
++    {
++		syscall(MVEE_FLUSH_SHARED_BUFFER, MVEE_LIBC_MALLOC_DEBUG_BUFFER);
++		*mvee_malloc_buffer_pos = 0;
++    }
++	else
++		(*mvee_malloc_buffer_pos)++;
++}
++
++#endif // !MVEE_DEBUG_MALLOC
+diff -N -r --unified glibc-2.25.orig/csu/mvee-woc-agent.c glibc-2.25/csu/mvee-woc-agent.c
+--- glibc-2.25.orig/csu/mvee-woc-agent.c	1970-01-01 00:00:00.000000000 +0000
++++ glibc-2.25/csu/mvee-woc-agent.c	2017-09-13 19:55:55.843733418 +0000
+@@ -0,0 +1,223 @@
 +#define MVEE_SLAVE_YIELD
 +#define MVEE_TOTAL_CLOCK_COUNT   2048
 +#define MVEE_CLOCK_GROUP_SIZE    64
@@ -38,8 +946,10 @@ diff -N -r --unified glibc-2.25.orig/csu/libc-start.c glibc-2.25/csu/libc-start.
 +
 +#define likely(x)       __builtin_expect((x),1)
 +#define unlikely(x)     __builtin_expect((x),0)
-+#define cpu_relax()    asm volatile("rep; nop" ::: "memory")
 +#define gcc_barrier()  asm volatile("" ::: "memory")
++#ifndef arch_cpu_relax
++#define arch_cpu_relax()
++#endif
 +
 +void mvee_invalidate_buffer(void)
 +{
@@ -73,12 +983,14 @@ diff -N -r --unified glibc-2.25.orig/csu/libc-start.c glibc-2.25/csu/libc-start.
 +						 & 0xFFF) + 1;
 +
 +		while (!__sync_bool_compare_and_swap(&mvee_counters[mvee_prev_idx].lock, 0, 1))
-+			cpu_relax();
++			arch_cpu_relax();
 +		
 +		unsigned long pos = mvee_counters[mvee_prev_idx].counter;    
 +
 +		mvee_thread_local_queue[mvee_thread_local_pos++].counter_and_idx 
 +			= (pos << 12) | mvee_prev_idx;
++
++		atomic_full_barrier();
 +
 +		return 1;
 +    }
@@ -96,29 +1008,37 @@ diff -N -r --unified glibc-2.25.orig/csu/libc-start.c glibc-2.25/csu/libc-start.
 +#ifdef MVEE_SLAVE_YIELD
 +			syscall(__NR_sched_yield);
 +#else
-+			cpu_relax();
++			arch_cpu_relax();
 +#endif
 +		}
 +
 +		mvee_prev_idx = counter_and_idx & 0xFFF;
 +		counter_and_idx &= ~0xFFF;
 +
++		atomic_full_barrier();
++
 +		while ((mvee_counters[mvee_prev_idx].counter << 12) != counter_and_idx)
 +#ifdef MVEE_SLAVE_YIELD
 +			syscall(__NR_sched_yield);
 +#else
-+		cpu_relax();
++		arch_cpu_relax();
 +#endif
++
++		atomic_full_barrier();
++		
 +		return 2;
 +    }
 +}
 +
 +void mvee_atomic_postop_internal(unsigned char preop_result)
 +{
++	atomic_full_barrier();
++	
 +	if(likely(preop_result) == 1)
 +	{
 +		gcc_barrier();
 +		orig_atomic_increment(&mvee_counters[mvee_prev_idx].counter);
++		atomic_full_barrier();
 +		mvee_counters[mvee_prev_idx].lock = 0;
 +	}
 +	else if (likely(preop_result) == 2)
@@ -218,27 +1138,9 @@ diff -N -r --unified glibc-2.25.orig/csu/libc-start.c glibc-2.25/csu/libc-start.
 +{
 +	return (!mvee_master_variant && mvee_sync_enabled) ? 1 : 0;
 +}
-+
-+#endif
-+
- STATIC int LIBC_START_MAIN (int (*main) (int, char **, char **
- 					 MAIN_AUXVEC_DECL),
- 			    int argc,
-@@ -274,6 +490,11 @@
- #ifndef SHARED
-   _dl_debug_initialize (0, LM_ID_BASE);
- #endif
-+
-+  (void) syscall(MVEE_RUNS_UNDER_MVEE_CONTROL, &mvee_sync_enabled, &mvee_infinite_loop, 
-+				 NULL, NULL, &mvee_master_variant);
-+  mvee_libc_initialized = 1;
-+
- #ifdef HAVE_CLEANUP_JMP_BUF
-   /* Memory for the cancellation buffer.  */
-   struct pthread_unwind_buf unwind_buf;
 diff -N -r --unified glibc-2.25.orig/csu/Versions glibc-2.25/csu/Versions
---- glibc-2.25.orig/csu/Versions	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/csu/Versions	2017-07-03 10:20:17.267515998 -0700
+--- glibc-2.25.orig/csu/Versions	2017-09-11 17:14:55.239208594 +0000
++++ glibc-2.25/csu/Versions	2017-09-13 19:55:55.845733686 +0000
 @@ -2,6 +2,14 @@
    GLIBC_2.0 {
      # helper functions
@@ -255,9 +1157,9 @@ diff -N -r --unified glibc-2.25.orig/csu/Versions glibc-2.25/csu/Versions
    GLIBC_2.1 {
      # New special glibc functions.
 diff -N -r --unified glibc-2.25.orig/elf/rtld.c glibc-2.25/elf/rtld.c
---- glibc-2.25.orig/elf/rtld.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/elf/rtld.c	2017-07-03 16:24:45.180124385 -0700
-@@ -932,6 +932,19 @@
+--- glibc-2.25.orig/elf/rtld.c	2017-09-11 17:14:55.334215390 +0000
++++ glibc-2.25/elf/rtld.c	2017-09-13 19:55:55.853734683 +0000
+@@ -932,6 +932,18 @@
        main_map->l_name = (char *) "";
        *user_entry = main_map->l_entry;
  
@@ -265,8 +1167,7 @@ diff -N -r --unified glibc-2.25.orig/elf/rtld.c glibc-2.25/elf/rtld.c
 +     necessary if we run compile-time diversified variants that print out their
 +     argv[0] value. */                                                                                                                                                                                             
 +	 char virtualized_argv0[4096];
-+	 // 0x6FFFFFFF + 17 = MVEE_GET_VIRTUALIZED_ARGV0
-+	 if (syscall(0x6FFFFFFF + 17, _dl_argv[0], virtualized_argv0, 4096) == 0)
++	 if (syscall(MVEE_GET_VIRTUALIZED_ARGV0, _dl_argv[0], virtualized_argv0, 4096) == 0)
 +	 {
 +		 // should we do this?
 +		 if (_dl_argv[0])
@@ -278,8 +1179,8 @@ diff -N -r --unified glibc-2.25.orig/elf/rtld.c glibc-2.25/elf/rtld.c
        /* Adjust the on-stack auxiliary vector so that it looks like the
  	 binary was executed directly.  */
 diff -N -r --unified glibc-2.25.orig/gmon/bb_init_func.c glibc-2.25/gmon/bb_init_func.c
---- glibc-2.25.orig/gmon/bb_init_func.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/gmon/bb_init_func.c	2017-06-27 16:13:50.976419658 -0700
+--- glibc-2.25.orig/gmon/bb_init_func.c	2017-09-11 17:14:55.383218895 +0000
++++ glibc-2.25/gmon/bb_init_func.c	2017-09-13 19:55:55.856735030 +0000
 @@ -26,6 +26,7 @@
  #include <sys/gmon.h>
  
@@ -298,8 +1199,8 @@ diff -N -r --unified glibc-2.25.orig/gmon/bb_init_func.c glibc-2.25/gmon/bb_init
        /* we didn't register _mcleanup yet and pc profiling doesn't seem
  	 to be active, so let's register it now: */
 diff -N -r --unified glibc-2.25.orig/gmon/gmon.c glibc-2.25/gmon/gmon.c
---- glibc-2.25.orig/gmon/gmon.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/gmon/gmon.c	2017-05-08 16:15:32.465780818 -0700
+--- glibc-2.25.orig/gmon/gmon.c	2017-09-11 17:14:55.383218895 +0000
++++ glibc-2.25/gmon/gmon.c	2017-09-13 19:55:55.860735473 +0000
 @@ -77,20 +77,20 @@
    struct gmonparam *p = &_gmonparam;
  
@@ -358,8 +1259,8 @@ diff -N -r --unified glibc-2.25.orig/gmon/gmon.c glibc-2.25/gmon/gmon.c
  
    /* free the memory. */
 diff -N -r --unified glibc-2.25.orig/gmon/mcount.c glibc-2.25/gmon/mcount.c
---- glibc-2.25.orig/gmon/mcount.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/gmon/mcount.c	2017-05-08 16:08:37.914788242 -0700
+--- glibc-2.25.orig/gmon/mcount.c	2017-09-11 17:14:55.384218967 +0000
++++ glibc-2.25/gmon/mcount.c	2017-09-13 19:55:55.862735688 +0000
 @@ -166,10 +166,10 @@
  
  	}
@@ -374,8 +1275,8 @@ diff -N -r --unified glibc-2.25.orig/gmon/mcount.c glibc-2.25/gmon/mcount.c
  }
  
 diff -N -r --unified glibc-2.25.orig/include/atomic.h glibc-2.25/include/atomic.h
---- glibc-2.25.orig/include/atomic.h	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/include/atomic.h	2017-06-29 15:32:19.117369763 -0700
+--- glibc-2.25.orig/include/atomic.h	2017-09-11 17:14:56.867325058 +0000
++++ glibc-2.25/include/atomic.h	2017-09-13 19:55:55.881737800 +0000
 @@ -86,73 +86,73 @@
  
  /* Atomically store NEWVAL in *MEM if *MEM is equal to OLDVAL.
@@ -892,7 +1793,7 @@ diff -N -r --unified glibc-2.25.orig/include/atomic.h glibc-2.25/include/atomic.
    ({ __typeof (*(mem)) __atg19_old;					      \
       __typeof (mem) __atg19_memp = (mem);				      \
       __typeof (*(mem)) __atg19_mask = (mask);				      \
-@@ -498,30 +498,30 @@
+@@ -498,7 +498,7 @@
       do									      \
         __atg19_old = (*__atg19_memp);					      \
       while (__builtin_expect						      \
@@ -901,27 +1802,7 @@ diff -N -r --unified glibc-2.25.orig/include/atomic.h glibc-2.25/include/atomic.
  						   __atg19_old | __atg19_mask,\
  						   __atg19_old), 0));	      \
  									      \
-      __atg19_old; })
- #endif
- 
--#ifndef atomic_full_barrier
--# define atomic_full_barrier() __asm ("" ::: "memory")
-+#ifndef orig_atomic_full_barrier
-+# define orig_atomic_full_barrier() __asm ("" ::: "memory")
- #endif
- 
- 
--#ifndef atomic_read_barrier
--# define atomic_read_barrier() atomic_full_barrier ()
-+#ifndef orig_atomic_read_barrier
-+# define orig_atomic_read_barrier() orig_atomic_full_barrier ()
- #endif
- 
- 
--#ifndef atomic_write_barrier
--# define atomic_write_barrier() atomic_full_barrier ()
-+#ifndef orig_atomic_write_barrier
-+# define orig_atomic_write_barrier() orig_atomic_full_barrier ()
+@@ -520,8 +520,8 @@
  #endif
  
  
@@ -1036,9 +1917,210 @@ diff -N -r --unified glibc-2.25.orig/include/atomic.h glibc-2.25/include/atomic.
    ({ __atomic_check_size((mem));					      \
    __atomic_fetch_xor ((mem), (operand), __ATOMIC_RELEASE); })
  
+@@ -666,25 +666,25 @@
+ #  define atomic_thread_fence_seq_cst() atomic_full_barrier ()
+ # endif
+ 
+-# ifndef atomic_load_relaxed
+-#  define atomic_load_relaxed(mem) \
++# ifndef orig_atomic_load_relaxed
++#  define orig_atomic_load_relaxed(mem) \
+    ({ __typeof (*(mem)) __atg100_val;					      \
+    __asm ("" : "=r" (__atg100_val) : "0" (*(mem)));			      \
+    __atg100_val; })
+ # endif
+-# ifndef atomic_load_acquire
+-#  define atomic_load_acquire(mem) \
++# ifndef orig_atomic_load_acquire
++#  define orig_atomic_load_acquire(mem) \
+    ({ __typeof (*(mem)) __atg101_val = atomic_load_relaxed (mem);	      \
+    atomic_thread_fence_acquire ();					      \
+    __atg101_val; })
+ # endif
+ 
+-# ifndef atomic_store_relaxed
++# ifndef orig_atomic_store_relaxed
+ /* XXX Use inline asm here?  */
+-#  define atomic_store_relaxed(mem, val) do { *(mem) = (val); } while (0)
++#  define orig_atomic_store_relaxed(mem, val) do { *(mem) = (val); } while (0)
+ # endif
+-# ifndef atomic_store_release
+-#  define atomic_store_release(mem, val) \
++# ifndef orig_atomic_store_release
++#  define orig_atomic_store_release(mem, val) \
+    do {									      \
+      atomic_thread_fence_release ();					      \
+      atomic_store_relaxed ((mem), (val));				      \
+@@ -695,107 +695,107 @@
+ /* XXX This potentially has one branch more than necessary, but archs
+    currently do not define a CAS that returns both the previous value and
+    the success flag.  */
+-# ifndef atomic_compare_exchange_weak_acquire
+-#  define atomic_compare_exchange_weak_acquire(mem, expected, desired) \
++# ifndef orig_atomic_compare_exchange_weak_acquire
++#  define orig_atomic_compare_exchange_weak_acquire(mem, expected, desired) \
+    ({ typeof (*(expected)) __atg102_expected = *(expected);		      \
+    *(expected) =							      \
+-     atomic_compare_and_exchange_val_acq ((mem), (desired), *(expected));     \
++     orig_atomic_compare_and_exchange_val_acq ((mem), (desired), *(expected));     \
+    *(expected) == __atg102_expected; })
+ # endif
+-# ifndef atomic_compare_exchange_weak_relaxed
++# ifndef orig_atomic_compare_exchange_weak_relaxed
+ /* XXX Fall back to CAS with acquire MO because archs do not define a weaker
+    CAS.  */
+-#  define atomic_compare_exchange_weak_relaxed(mem, expected, desired) \
+-   atomic_compare_exchange_weak_acquire ((mem), (expected), (desired))
++#  define orig_atomic_compare_exchange_weak_relaxed(mem, expected, desired) \
++   orig_atomic_compare_exchange_weak_acquire ((mem), (expected), (desired))
+ # endif
+-# ifndef atomic_compare_exchange_weak_release
+-#  define atomic_compare_exchange_weak_release(mem, expected, desired) \
++# ifndef orig_atomic_compare_exchange_weak_release
++#  define orig_atomic_compare_exchange_weak_release(mem, expected, desired) \
+    ({ typeof (*(expected)) __atg103_expected = *(expected);		      \
+    *(expected) =							      \
+-     atomic_compare_and_exchange_val_rel ((mem), (desired), *(expected));     \
++     orig_atomic_compare_and_exchange_val_rel ((mem), (desired), *(expected));     \
+    *(expected) == __atg103_expected; })
+ # endif
+ 
+ /* XXX Fall back to acquire MO because archs do not define a weaker
+    atomic_exchange.  */
+-# ifndef atomic_exchange_relaxed
+-#  define atomic_exchange_relaxed(mem, val) \
+-   atomic_exchange_acq ((mem), (val))
++# ifndef orig_atomic_exchange_relaxed
++#  define orig_atomic_exchange_relaxed(mem, val) \
++   orig_atomic_exchange_acq ((mem), (val))
+ # endif
+-# ifndef atomic_exchange_acquire
+-#  define atomic_exchange_acquire(mem, val) \
+-   atomic_exchange_acq ((mem), (val))
++# ifndef orig_atomic_exchange_acquire
++#  define orig_atomic_exchange_acquire(mem, val) \
++   orig_atomic_exchange_acq ((mem), (val))
+ # endif
+-# ifndef atomic_exchange_release
+-#  define atomic_exchange_release(mem, val) \
+-   atomic_exchange_rel ((mem), (val))
++# ifndef orig_atomic_exchange_release
++#  define orig_atomic_exchange_release(mem, val) \
++   orig_atomic_exchange_rel ((mem), (val))
+ # endif
+ 
+-# ifndef atomic_fetch_add_acquire
+-#  define atomic_fetch_add_acquire(mem, operand) \
+-   atomic_exchange_and_add_acq ((mem), (operand))
++# ifndef orig_atomic_fetch_add_acquire
++#  define orig_atomic_fetch_add_acquire(mem, operand) \
++   orig_atomic_exchange_and_add_acq ((mem), (operand))
+ # endif
+-# ifndef atomic_fetch_add_relaxed
++# ifndef orig_atomic_fetch_add_relaxed
+ /* XXX Fall back to acquire MO because the MO semantics of
+    atomic_exchange_and_add are not documented; the generic version falls back
+    to atomic_exchange_and_add_acq if atomic_exchange_and_add is not defined,
+    and vice versa.  */
+-#  define atomic_fetch_add_relaxed(mem, operand) \
+-   atomic_fetch_add_acquire ((mem), (operand))
++#  define orig_atomic_fetch_add_relaxed(mem, operand) \
++   orig_atomic_fetch_add_acquire ((mem), (operand))
+ # endif
+-# ifndef atomic_fetch_add_release
+-#  define atomic_fetch_add_release(mem, operand) \
+-   atomic_exchange_and_add_rel ((mem), (operand))
++# ifndef orig_atomic_fetch_add_release
++#  define orig_atomic_fetch_add_release(mem, operand) \
++   orig_atomic_exchange_and_add_rel ((mem), (operand))
+ # endif
+-# ifndef atomic_fetch_add_acq_rel
+-#  define atomic_fetch_add_acq_rel(mem, operand) \
++# ifndef orig_atomic_fetch_add_acq_rel
++#  define orig_atomic_fetch_add_acq_rel(mem, operand) \
+    ({ atomic_thread_fence_release ();					      \
+-   atomic_exchange_and_add_acq ((mem), (operand)); })
++   orig_atomic_exchange_and_add_acq ((mem), (operand)); })
+ # endif
+ 
+ /* XXX Fall back to acquire MO because archs do not define a weaker
+    atomic_and_val.  */
+-# ifndef atomic_fetch_and_relaxed
+-#  define atomic_fetch_and_relaxed(mem, operand) \
+-   atomic_fetch_and_acquire ((mem), (operand))
++# ifndef orig_atomic_fetch_and_relaxed
++#  define orig_atomic_fetch_and_relaxed(mem, operand) \
++   orig_atomic_fetch_and_acquire ((mem), (operand))
+ # endif
+ /* XXX The default for atomic_and_val has acquire semantics, but this is not
+    documented.  */
+-# ifndef atomic_fetch_and_acquire
+-#  define atomic_fetch_and_acquire(mem, operand) \
+-   atomic_and_val ((mem), (operand))
++# ifndef orig_atomic_fetch_and_acquire
++#  define orig_atomic_fetch_and_acquire(mem, operand) \
++   orig_atomic_and_val ((mem), (operand))
+ # endif
+-# ifndef atomic_fetch_and_release
++# ifndef orig_atomic_fetch_and_release
+ /* XXX This unnecessarily has acquire MO.  */
+-#  define atomic_fetch_and_release(mem, operand) \
++#  define orig_atomic_fetch_and_release(mem, operand) \
+    ({ atomic_thread_fence_release ();					      \
+-   atomic_and_val ((mem), (operand)); })
++   orig_atomic_and_val ((mem), (operand)); })
+ # endif
+ 
+ /* XXX The default for atomic_or_val has acquire semantics, but this is not
+    documented.  */
+-# ifndef atomic_fetch_or_acquire
+-#  define atomic_fetch_or_acquire(mem, operand) \
+-   atomic_or_val ((mem), (operand))
++# ifndef orig_atomic_fetch_or_acquire
++#  define orig_atomic_fetch_or_acquire(mem, operand) \
++   orig_atomic_or_val ((mem), (operand))
+ # endif
+ /* XXX Fall back to acquire MO because archs do not define a weaker
+    atomic_or_val.  */
+-# ifndef atomic_fetch_or_relaxed
+-#  define atomic_fetch_or_relaxed(mem, operand) \
+-   atomic_fetch_or_acquire ((mem), (operand))
++# ifndef orig_atomic_fetch_or_relaxed
++#  define orig_atomic_fetch_or_relaxed(mem, operand) \
++   orig_atomic_fetch_or_acquire ((mem), (operand))
+ # endif
+ /* XXX Contains an unnecessary acquire MO because archs do not define a weaker
+    atomic_or_val.  */
+-# ifndef atomic_fetch_or_release
+-#  define atomic_fetch_or_release(mem, operand) \
++# ifndef orig_atomic_fetch_or_release
++#  define orig_atomic_fetch_or_release(mem, operand) \
+    ({ atomic_thread_fence_release ();					      \
+-   atomic_fetch_or_acquire ((mem), (operand)); })
++   orig_atomic_fetch_or_acquire ((mem), (operand)); })
+ # endif
+ 
+-# ifndef atomic_fetch_xor_release
++# ifndef orig_atomic_fetch_xor_release
+ /* Failing the atomic_compare_exchange_weak_release reloads the value in
+    __atg104_expected, so we need only do the XOR again and retry.  */
+-# define atomic_fetch_xor_release(mem, operand) \
++# define orig_atomic_fetch_xor_release(mem, operand) \
+   ({ __typeof (mem) __atg104_memp = (mem);				      \
+      __typeof (*(mem)) __atg104_expected = (*__atg104_memp);		      \
+      __typeof (*(mem)) __atg104_desired;				      \
+@@ -804,7 +804,7 @@
+      do									      \
+        __atg104_desired = __atg104_expected ^ __atg104_op;		      \
+      while (__glibc_unlikely						      \
+-	    (atomic_compare_exchange_weak_release (			      \
++	    (orig_atomic_compare_exchange_weak_release (			      \
+ 	       __atg104_memp, &__atg104_expected, __atg104_desired)	      \
+ 	     == 0));							      \
+      __atg104_expected; })
 diff -N -r --unified glibc-2.25.orig/inet/getnameinfo.c glibc-2.25/inet/getnameinfo.c
---- glibc-2.25.orig/inet/getnameinfo.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/inet/getnameinfo.c	2017-05-08 16:53:33.203739974 -0700
+--- glibc-2.25.orig/inet/getnameinfo.c	2017-09-11 17:14:56.983333356 +0000
++++ glibc-2.25/inet/getnameinfo.c	2017-09-13 19:55:55.884738078 +0000
 @@ -91,8 +91,6 @@
  {
    static int not_first;
@@ -1057,8 +2139,8 @@ diff -N -r --unified glibc-2.25.orig/inet/getnameinfo.c glibc-2.25/inet/getnamei
    return domain;
  };
 diff -N -r --unified glibc-2.25.orig/malloc/arena.c glibc-2.25/malloc/arena.c
---- glibc-2.25.orig/malloc/arena.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/malloc/arena.c	2017-07-03 16:21:50.277127517 -0700
+--- glibc-2.25.orig/malloc/arena.c	2017-09-11 17:15:01.342645189 +0000
++++ glibc-2.25/malloc/arena.c	2017-09-13 19:55:55.890738655 +0000
 @@ -456,7 +456,7 @@
  new_heap (size_t size, size_t top_pad)
  {
@@ -1125,7 +2207,26 @@ diff -N -r --unified glibc-2.25.orig/malloc/arena.c glibc-2.25/malloc/arena.c
        __munmap ((char *) (heap), HEAP_MAX_SIZE);			      \
      } while (0)
  
-@@ -901,7 +902,7 @@
+@@ -761,9 +762,7 @@
+ get_free_list (void)
+ {
+   mstate replaced_arena = thread_arena;
+-  mstate result = free_list;
+-  if (result != NULL)
+-    {
++  mstate result;
+       __libc_lock_lock (free_list_lock);
+       result = free_list;
+       if (result != NULL)
+@@ -784,7 +783,6 @@
+           __libc_lock_lock (result->mutex);
+ 	  thread_arena = result;
+         }
+-    }
+ 
+   return result;
+ }
+@@ -901,7 +899,7 @@
          {
            if (mp_.arena_max != 0)
              narenas_limit = mp_.arena_max;
@@ -1134,7 +2235,7 @@ diff -N -r --unified glibc-2.25.orig/malloc/arena.c glibc-2.25/malloc/arena.c
              {
                int n = __get_nprocs ();
  
-@@ -914,7 +915,7 @@
+@@ -914,7 +912,7 @@
              }
          }
      repeat:;
@@ -1144,8 +2245,8 @@ diff -N -r --unified glibc-2.25.orig/malloc/arena.c glibc-2.25/malloc/arena.c
           very large number and that the underflow is OK.  If arena_max
           is set the value of arena_test is irrelevant.  If arena_test
 diff -N -r --unified glibc-2.25.orig/malloc/hooks.c glibc-2.25/malloc/hooks.c
---- glibc-2.25.orig/malloc/hooks.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/malloc/hooks.c	2017-06-27 15:53:49.123441181 -0700
+--- glibc-2.25.orig/malloc/hooks.c	2017-09-11 17:15:01.361646548 +0000
++++ glibc-2.25/malloc/hooks.c	2017-09-13 19:55:55.894738998 +0000
 @@ -77,10 +77,10 @@
        return;
      }
@@ -1177,8 +2278,8 @@ diff -N -r --unified glibc-2.25.orig/malloc/hooks.c glibc-2.25/malloc/hooks.c
  
    /* Patch the dumped heap.  We no longer try to integrate into the
 diff -N -r --unified glibc-2.25.orig/malloc/malloc.c glibc-2.25/malloc/malloc.c
---- glibc-2.25.orig/malloc/malloc.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/malloc/malloc.c	2017-06-27 15:52:05.548443036 -0700
+--- glibc-2.25.orig/malloc/malloc.c	2017-09-11 17:15:01.384648194 +0000
++++ glibc-2.25/malloc/malloc.c	2017-09-13 19:55:55.910740181 +0000
 @@ -1601,7 +1601,7 @@
  
  #define FASTCHUNKS_BIT        (1U)
@@ -1284,8 +2385,8 @@ diff -N -r --unified glibc-2.25.orig/malloc/malloc.c glibc-2.25/malloc/malloc.c
  	   total_aspace, total_aspace_mprotect);
  
 diff -N -r --unified glibc-2.25.orig/malloc/mcheck.c glibc-2.25/malloc/mcheck.c
---- glibc-2.25.orig/malloc/mcheck.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/malloc/mcheck.c	2017-06-27 16:04:39.125429540 -0700
+--- glibc-2.25.orig/malloc/mcheck.c	2017-09-11 17:15:01.386648337 +0000
++++ glibc-2.25/malloc/mcheck.c	2017-09-13 19:55:55.916740610 +0000
 @@ -189,12 +189,12 @@
        flood (ptr, FREEFLOOD, hdr->size);
        ptr = hdr->block;
@@ -1388,8 +2489,8 @@ diff -N -r --unified glibc-2.25.orig/malloc/mcheck.c glibc-2.25/malloc/mcheck.c
  
    return mcheck_used ? 0 : -1;
 diff -N -r --unified glibc-2.25.orig/malloc/mtrace.c glibc-2.25/malloc/mtrace.c
---- glibc-2.25.orig/malloc/mtrace.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/malloc/mtrace.c	2017-06-27 16:04:38.222429557 -0700
+--- glibc-2.25.orig/malloc/mtrace.c	2017-09-11 17:15:01.407649839 +0000
++++ glibc-2.25/malloc/mtrace.c	2017-09-13 19:55:55.921740967 +0000
 @@ -137,12 +137,12 @@
        tr_break ();
        __libc_lock_lock (lock);
@@ -1500,9 +2601,21 @@ diff -N -r --unified glibc-2.25.orig/malloc/mtrace.c glibc-2.25/malloc/mtrace.c
  
    fprintf (f, "= End\n");
    fclose (f);
+diff -N -r --unified glibc-2.25.orig/nptl/allocatestack.c glibc-2.25/nptl/allocatestack.c
+--- glibc-2.25.orig/nptl/allocatestack.c	2017-09-11 17:15:06.345003021 +0000
++++ glibc-2.25/nptl/allocatestack.c	2017-09-13 19:55:55.925741253 +0000
+@@ -865,7 +865,7 @@
+       if (curp != self)
+ 	{
+ 	  /* This marks the stack as free.  */
+-	  curp->tid = 0;
++		atomic_store(curp->tid, 0);
+ 
+ 	  /* Account for the size of the stack.  */
+ 	  stack_cache_actsize += curp->stackblock_size;
 diff -N -r --unified glibc-2.25.orig/nptl/cancellation.c glibc-2.25/nptl/cancellation.c
---- glibc-2.25.orig/nptl/cancellation.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/nptl/cancellation.c	2017-07-03 15:48:50.803162966 -0700
+--- glibc-2.25.orig/nptl/cancellation.c	2017-09-11 17:15:06.346003093 +0000
++++ glibc-2.25/nptl/cancellation.c	2017-09-13 19:55:55.928741468 +0000
 @@ -30,7 +30,7 @@
  __pthread_enable_asynccancel (void)
  {
@@ -1538,9 +2651,34 @@ diff -N -r --unified glibc-2.25.orig/nptl/cancellation.c glibc-2.25/nptl/cancell
 +      newval = THREAD_ATOMIC_GETMEM (self, cancelhandling);
      }
  }
+diff -N -r --unified glibc-2.25.orig/nptl/lll_timedwait_tid.c glibc-2.25/nptl/lll_timedwait_tid.c
+--- glibc-2.25.orig/nptl/lll_timedwait_tid.c	2017-09-11 17:15:06.360004095 +0000
++++ glibc-2.25/nptl/lll_timedwait_tid.c	2017-09-13 19:55:55.931741682 +0000
+@@ -37,7 +37,7 @@
+     return EINVAL;
+ 
+   /* Repeat until thread terminated.  */
+-  while ((tid = *tidp) != 0)
++  while ((tid = (*tidp)) != 0 || mvee_should_sync_tid())
+     {
+       struct timeval tv;
+       struct timespec rt;
+@@ -62,8 +62,11 @@
+          The kernel up to version 3.16.3 does not use the private futex
+          operations for futex wake-up when the clone terminates.
+       */
+-      if (lll_futex_timed_wait (tidp, tid, &rt, LLL_SHARED) == -ETIMEDOUT)
++	  if (lll_futex_syscall (4, tidp, __lll_private_flag(mvee_should_sync_tid() ? MVEE_FUTEX_WAIT_TID : FUTEX_WAIT, LLL_SHARED),
++							 tid, &rt) == -ETIMEDOUT)
+         return ETIMEDOUT;
++	  else if (*tidp == 0)
++		  break;
+     }
+ 
+   return 0;
 diff -N -r --unified glibc-2.25.orig/nptl/lowlevellock.c glibc-2.25/nptl/lowlevellock.c
---- glibc-2.25.orig/nptl/lowlevellock.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/nptl/lowlevellock.c	2017-05-08 17:54:41.784674277 -0700
+--- glibc-2.25.orig/nptl/lowlevellock.c	2017-09-11 17:15:06.360004095 +0000
++++ glibc-2.25/nptl/lowlevellock.c	2017-09-13 19:55:55.933741825 +0000
 @@ -26,7 +26,7 @@
  void
  __lll_lock_wait_private (int *futex)
@@ -1560,8 +2698,8 @@ diff -N -r --unified glibc-2.25.orig/nptl/lowlevellock.c glibc-2.25/nptl/lowleve
  
    while (atomic_exchange_acq (futex, 2) != 0)
 diff -N -r --unified glibc-2.25.orig/nptl/pthread_cond_common.c glibc-2.25/nptl/pthread_cond_common.c
---- glibc-2.25.orig/nptl/pthread_cond_common.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/nptl/pthread_cond_common.c	2017-07-03 17:49:23.978033433 -0700
+--- glibc-2.25.orig/nptl/pthread_cond_common.c	2017-09-11 17:15:06.389006169 +0000
++++ glibc-2.25/nptl/pthread_cond_common.c	2017-09-13 19:55:55.936742039 +0000
 @@ -54,7 +54,7 @@
  __condvar_add_g1_start_relaxed (pthread_cond_t *cond, unsigned int val)
  {
@@ -1571,9 +2709,21 @@ diff -N -r --unified glibc-2.25.orig/nptl/pthread_cond_common.c glibc-2.25/nptl/
  }
  
  #else
+diff -N -r --unified glibc-2.25.orig/nptl/pthread_join.c glibc-2.25/nptl/pthread_join.c
+--- glibc-2.25.orig/nptl/pthread_join.c	2017-09-11 17:15:06.410007671 +0000
++++ glibc-2.25/nptl/pthread_join.c	2017-09-13 19:55:55.938742182 +0000
+@@ -100,7 +100,7 @@
+   if (__glibc_likely (result == 0))
+     {
+       /* We mark the thread as terminated and as joined.  */
+-      pd->tid = -1;
++		atomic_store(pd->tid, -1);
+ 
+       /* Store the return value if the caller is interested.  */
+       if (thread_return != NULL)
 diff -N -r --unified glibc-2.25.orig/nptl/pthread_mutex_setprioceiling.c glibc-2.25/nptl/pthread_mutex_setprioceiling.c
---- glibc-2.25.orig/nptl/pthread_mutex_setprioceiling.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/nptl/pthread_mutex_setprioceiling.c	2017-07-03 17:57:57.083024245 -0700
+--- glibc-2.25.orig/nptl/pthread_mutex_setprioceiling.c	2017-09-11 17:15:06.412007815 +0000
++++ glibc-2.25/nptl/pthread_mutex_setprioceiling.c	2017-09-13 19:55:55.941742397 +0000
 @@ -109,9 +109,9 @@
  
    int newlock = 0;
@@ -1588,8 +2738,8 @@ diff -N -r --unified glibc-2.25.orig/nptl/pthread_mutex_setprioceiling.c glibc-2
  
    lll_futex_wake (&mutex->__data.__lock, INT_MAX,
 diff -N -r --unified glibc-2.25.orig/nptl/pthread_spin_lock.c glibc-2.25/nptl/pthread_spin_lock.c
---- glibc-2.25.orig/nptl/pthread_spin_lock.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/nptl/pthread_spin_lock.c	2017-07-03 18:00:20.615021674 -0700
+--- glibc-2.25.orig/nptl/pthread_spin_lock.c	2017-09-11 17:15:06.442009961 +0000
++++ glibc-2.25/nptl/pthread_spin_lock.c	2017-09-13 19:55:55.943742540 +0000
 @@ -54,12 +54,12 @@
  	{
  	  int wait = SPIN_LOCK_READS_BETWEEN_CMPXCHG;
@@ -1606,8 +2756,8 @@ diff -N -r --unified glibc-2.25.orig/nptl/pthread_spin_lock.c glibc-2.25/nptl/pt
  	}
      }
 diff -N -r --unified glibc-2.25.orig/nptl/pthread_spin_unlock.c glibc-2.25/nptl/pthread_spin_unlock.c
---- glibc-2.25.orig/nptl/pthread_spin_unlock.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/nptl/pthread_spin_unlock.c	2017-07-03 17:58:19.218023848 -0700
+--- glibc-2.25.orig/nptl/pthread_spin_unlock.c	2017-09-11 17:15:06.442009961 +0000
++++ glibc-2.25/nptl/pthread_spin_unlock.c	2017-09-13 19:55:55.945742682 +0000
 @@ -24,6 +24,6 @@
  pthread_spin_unlock (pthread_spinlock_t *lock)
  {
@@ -1617,8 +2767,8 @@ diff -N -r --unified glibc-2.25.orig/nptl/pthread_spin_unlock.c glibc-2.25/nptl/
    return 0;
  }
 diff -N -r --unified glibc-2.25.orig/nptl/register-atfork.c glibc-2.25/nptl/register-atfork.c
---- glibc-2.25.orig/nptl/register-atfork.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/nptl/register-atfork.c	2017-07-03 18:08:06.454013332 -0700
+--- glibc-2.25.orig/nptl/register-atfork.c	2017-09-11 17:15:06.443010032 +0000
++++ glibc-2.25/nptl/register-atfork.c	2017-09-13 19:55:55.948742897 +0000
 @@ -51,18 +51,19 @@
      {
        /* Search for an empty entry.  */
@@ -1684,8 +2834,8 @@ diff -N -r --unified glibc-2.25.orig/nptl/register-atfork.c glibc-2.25/nptl/regi
      }
  }
 diff -N -r --unified glibc-2.25.orig/nptl/unregister-atfork.c glibc-2.25/nptl/unregister-atfork.c
---- glibc-2.25.orig/nptl/unregister-atfork.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/nptl/unregister-atfork.c	2017-07-03 18:08:22.204013050 -0700
+--- glibc-2.25.orig/nptl/unregister-atfork.c	2017-09-11 17:15:06.618022551 +0000
++++ glibc-2.25/nptl/unregister-atfork.c	2017-09-13 19:55:55.951743111 +0000
 @@ -33,7 +33,7 @@
       We do not worry about other threads adding entries for this DSO
       right this moment.  If this happens this is a race and we can do
@@ -1744,8 +2894,8 @@ diff -N -r --unified glibc-2.25.orig/nptl/unregister-atfork.c glibc-2.25/nptl/un
      }
  }
 diff -N -r --unified glibc-2.25.orig/resolv/res_libc.c glibc-2.25/resolv/res_libc.c
---- glibc-2.25.orig/resolv/res_libc.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/resolv/res_libc.c	2017-06-27 14:36:18.876524458 -0700
+--- glibc-2.25.orig/resolv/res_libc.c	2017-09-11 17:15:07.654096665 +0000
++++ glibc-2.25/resolv/res_libc.c	2017-09-13 19:55:55.953743254 +0000
 @@ -28,7 +28,7 @@
  
  extern unsigned long long int __res_initstamp attribute_hidden;
@@ -1756,8 +2906,8 @@ diff -N -r --unified glibc-2.25.orig/resolv/res_libc.c glibc-2.25/resolv/res_lib
  # define atomicincunlock(lock) (void) 0
  # define atomicinc(var) catomic_increment (&(var))
 diff -N -r --unified glibc-2.25.orig/stdlib/cxa_atexit.c glibc-2.25/stdlib/cxa_atexit.c
---- glibc-2.25.orig/stdlib/cxa_atexit.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/stdlib/cxa_atexit.c	2017-06-27 15:11:13.676486944 -0700
+--- glibc-2.25.orig/stdlib/cxa_atexit.c	2017-09-11 17:15:08.086127569 +0000
++++ glibc-2.25/stdlib/cxa_atexit.c	2017-09-13 19:55:55.956743469 +0000
 @@ -44,7 +44,7 @@
    new->func.cxa.arg = arg;
    new->func.cxa.dso_handle = d;
@@ -1786,8 +2936,8 @@ diff -N -r --unified glibc-2.25.orig/stdlib/cxa_atexit.c glibc-2.25/stdlib/cxa_a
      }
  
 diff -N -r --unified glibc-2.25.orig/stdlib/cxa_finalize.c glibc-2.25/stdlib/cxa_finalize.c
---- glibc-2.25.orig/stdlib/cxa_finalize.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/stdlib/cxa_finalize.c	2017-06-27 15:10:26.866487782 -0700
+--- glibc-2.25.orig/stdlib/cxa_finalize.c	2017-09-11 17:15:08.086127569 +0000
++++ glibc-2.25/stdlib/cxa_finalize.c	2017-09-13 19:55:55.958743611 +0000
 @@ -70,7 +70,7 @@
  
        for (f = &funcs->fns[funcs->idx - 1]; f >= &funcs->fns[0]; --f)
@@ -1798,8 +2948,8 @@ diff -N -r --unified glibc-2.25.orig/stdlib/cxa_finalize.c glibc-2.25/stdlib/cxa
  
    /* Remove the registered fork handlers.  We do not have to
 diff -N -r --unified glibc-2.25.orig/stdlib/exit.c glibc-2.25/stdlib/exit.c
---- glibc-2.25.orig/stdlib/exit.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/stdlib/exit.c	2017-06-27 15:10:05.308488168 -0700
+--- glibc-2.25.orig/stdlib/exit.c	2017-09-11 17:15:08.098128427 +0000
++++ glibc-2.25/stdlib/exit.c	2017-09-13 19:55:55.960743754 +0000
 @@ -52,7 +52,7 @@
  	{
  	  const struct exit_function *const f =
@@ -1810,8 +2960,8 @@ diff -N -r --unified glibc-2.25.orig/stdlib/exit.c glibc-2.25/stdlib/exit.c
  	      void (*atfct) (void);
  	      void (*onfct) (int status, void *arg);
 diff -N -r --unified glibc-2.25.orig/stdlib/on_exit.c glibc-2.25/stdlib/on_exit.c
---- glibc-2.25.orig/stdlib/on_exit.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/stdlib/on_exit.c	2017-06-27 15:11:27.930486689 -0700
+--- glibc-2.25.orig/stdlib/on_exit.c	2017-09-11 17:15:08.151132219 +0000
++++ glibc-2.25/stdlib/on_exit.c	2017-09-13 19:55:55.962743897 +0000
 @@ -35,7 +35,7 @@
    new->func.on.fn = func;
    new->func.on.arg = arg;
@@ -1821,9 +2971,1142 @@ diff -N -r --unified glibc-2.25.orig/stdlib/on_exit.c glibc-2.25/stdlib/on_exit.
    return 0;
  }
  weak_alias (__on_exit, on_exit)
+diff -N -r --unified glibc-2.25.orig/sysdeps/arm/atomic-machine.h glibc-2.25/sysdeps/arm/atomic-machine.h
+--- glibc-2.25.orig/sysdeps/arm/atomic-machine.h	2017-09-11 17:15:08.941188734 +0000
++++ glibc-2.25/sysdeps/arm/atomic-machine.h	2017-09-13 19:58:08.735967877 +0000
+@@ -55,68 +55,68 @@
+    a pattern to do this efficiently.  */
+ #ifdef __GCC_HAVE_SYNC_COMPARE_AND_SWAP_4
+ 
+-# define atomic_exchange_acq(mem, value)                                \
+-  __atomic_val_bysize (__arch_exchange, int, mem, value, __ATOMIC_ACQUIRE)
++# define orig_atomic_exchange_acq(mem, value)                                \
++  __atomic_val_bysize (orig___arch_exchange, int, mem, value, __ATOMIC_ACQUIRE)
+ 
+-# define atomic_exchange_rel(mem, value)                                \
+-  __atomic_val_bysize (__arch_exchange, int, mem, value, __ATOMIC_RELEASE)
++# define orig_atomic_exchange_rel(mem, value)                                \
++  __atomic_val_bysize (orig___arch_exchange, int, mem, value, __ATOMIC_RELEASE)
+ 
+ /* Atomic exchange (without compare).  */
+ 
+-# define __arch_exchange_8_int(mem, newval, model)      \
++# define orig___arch_exchange_8_int(mem, newval, model)      \
+   (__arm_link_error (), (typeof (*mem)) 0)
+ 
+-# define __arch_exchange_16_int(mem, newval, model)     \
++# define orig___arch_exchange_16_int(mem, newval, model)     \
+   (__arm_link_error (), (typeof (*mem)) 0)
+ 
+-# define __arch_exchange_32_int(mem, newval, model)     \
++# define orig___arch_exchange_32_int(mem, newval, model)     \
+   __atomic_exchange_n (mem, newval, model)
+ 
+-# define __arch_exchange_64_int(mem, newval, model)     \
++# define orig___arch_exchange_64_int(mem, newval, model)     \
+   (__arm_link_error (), (typeof (*mem)) 0)
+ 
+ /* Compare and exchange with "acquire" semantics, ie barrier after.  */
+ 
+-# define atomic_compare_and_exchange_bool_acq(mem, new, old)    \
+-  __atomic_bool_bysize (__arch_compare_and_exchange_bool, int,  \
++# define orig_atomic_compare_and_exchange_bool_acq(mem, new, old)    \
++  __atomic_bool_bysize (orig___arch_compare_and_exchange_bool, int,  \
+                         mem, new, old, __ATOMIC_ACQUIRE)
+ 
+-# define atomic_compare_and_exchange_val_acq(mem, new, old)     \
+-  __atomic_val_bysize (__arch_compare_and_exchange_val, int,    \
++# define orig_atomic_compare_and_exchange_val_acq(mem, new, old)     \
++  __atomic_val_bysize (orig___arch_compare_and_exchange_val, int,    \
+                        mem, new, old, __ATOMIC_ACQUIRE)
+ 
+ /* Compare and exchange with "release" semantics, ie barrier before.  */
+ 
+-# define atomic_compare_and_exchange_val_rel(mem, new, old)      \
+-  __atomic_val_bysize (__arch_compare_and_exchange_val, int,    \
++# define orig_atomic_compare_and_exchange_val_rel(mem, new, old)      \
++  __atomic_val_bysize (orig___arch_compare_and_exchange_val, int,    \
+                        mem, new, old, __ATOMIC_RELEASE)
+ 
+ /* Compare and exchange.
+    For all "bool" routines, we return FALSE if exchange succesful.  */
+ 
+-# define __arch_compare_and_exchange_bool_8_int(mem, newval, oldval, model) \
++# define orig___arch_compare_and_exchange_bool_8_int(mem, newval, oldval, model) \
+   ({__arm_link_error (); 0; })
+ 
+-# define __arch_compare_and_exchange_bool_16_int(mem, newval, oldval, model) \
++# define orig___arch_compare_and_exchange_bool_16_int(mem, newval, oldval, model) \
+   ({__arm_link_error (); 0; })
+ 
+-# define __arch_compare_and_exchange_bool_32_int(mem, newval, oldval, model) \
++# define orig___arch_compare_and_exchange_bool_32_int(mem, newval, oldval, model) \
+   ({                                                                    \
+     typeof (*mem) __oldval = (oldval);                                  \
+     !__atomic_compare_exchange_n (mem, (void *) &__oldval, newval, 0,   \
+                                   model, __ATOMIC_RELAXED);             \
+   })
+ 
+-# define __arch_compare_and_exchange_bool_64_int(mem, newval, oldval, model) \
++# define orig___arch_compare_and_exchange_bool_64_int(mem, newval, oldval, model) \
+   ({__arm_link_error (); 0; })
+ 
+-# define __arch_compare_and_exchange_val_8_int(mem, newval, oldval, model) \
++# define orig___arch_compare_and_exchange_val_8_int(mem, newval, oldval, model) \
+   ({__arm_link_error (); oldval; })
+ 
+-# define __arch_compare_and_exchange_val_16_int(mem, newval, oldval, model) \
++# define orig___arch_compare_and_exchange_val_16_int(mem, newval, oldval, model) \
+   ({__arm_link_error (); oldval; })
+ 
+-# define __arch_compare_and_exchange_val_32_int(mem, newval, oldval, model) \
++# define orig___arch_compare_and_exchange_val_32_int(mem, newval, oldval, model) \
+   ({                                                                    \
+     typeof (*mem) __oldval = (oldval);                                  \
+     __atomic_compare_exchange_n (mem, (void *) &__oldval, newval, 0,    \
+@@ -124,11 +124,11 @@
+     __oldval;                                                           \
+   })
+ 
+-# define __arch_compare_and_exchange_val_64_int(mem, newval, oldval, model) \
++# define orig___arch_compare_and_exchange_val_64_int(mem, newval, oldval, model) \
+   ({__arm_link_error (); oldval; })
+ 
+ #else
+-# define __arch_compare_and_exchange_val_32_acq(mem, newval, oldval) \
++# define orig___arch_compare_and_exchange_val_32_acq(mem, newval, oldval) \
+   __arm_assisted_compare_and_exchange_val_32_acq ((mem), (newval), (oldval))
+ #endif
+ 
+@@ -152,3 +152,867 @@
+ # define __arm_assisted_compare_and_exchange_val_32_acq(mem, newval, oldval) \
+   ({ __arm_link_error (); oldval; })
+ #endif
++
++/*--------------------------------------------------------------------------------
++                                  MVEE PATCHES
++--------------------------------------------------------------------------------*/
++#define USE_MVEE_LIBC
++
++#ifdef USE_MVEE_LIBC
++// NOTE: This is different from the base value for x86 because the ARM syscall
++// instruction can only encode small immediates as syscall numbers
++#define MVEE_FAKE_SYSCALL_BASE          0x6FF 
++#define MVEE_GET_MASTERTHREAD_ID        MVEE_FAKE_SYSCALL_BASE + 3
++#define MVEE_GET_SHARED_BUFFER          MVEE_FAKE_SYSCALL_BASE + 4
++#define MVEE_FLUSH_SHARED_BUFFER        MVEE_FAKE_SYSCALL_BASE + 5
++#define MVEE_SET_INFINITE_LOOP_PTR      MVEE_FAKE_SYSCALL_BASE + 6
++#define MVEE_TOGGLESYNC                 MVEE_FAKE_SYSCALL_BASE + 7
++#define MVEE_SET_SHARED_BUFFER_POS_PTR  MVEE_FAKE_SYSCALL_BASE + 8
++#define MVEE_RUNS_UNDER_MVEE_CONTROL    MVEE_FAKE_SYSCALL_BASE + 9
++#define MVEE_GET_THREAD_NUM             MVEE_FAKE_SYSCALL_BASE + 10
++#define MVEE_SET_SYNC_PRIMITIVES_PTR    MVEE_FAKE_SYSCALL_BASE + 12
++#define MVEE_ALL_HEAPS_ALIGNED          MVEE_FAKE_SYSCALL_BASE + 13
++#define MVEE_GET_VIRTUALIZED_ARGV0      MVEE_FAKE_SYSCALL_BASE + 17
++#define MVEE_LIBC_LOCK_BUFFER           3
++#define MVEE_LIBC_MALLOC_DEBUG_BUFFER   11
++#define MVEE_LIBC_ATOMIC_BUFFER         13
++#define MVEE_FUTEX_WAIT_TID             30
++
++enum mvee_alloc_types
++{
++	LIBC_MALLOC,
++	LIBC_FREE,
++	LIBC_REALLOC,
++	LIBC_MEMALIGN,
++	LIBC_CALLOC,
++	MALLOC_TRIM,
++	HEAP_TRIM,
++	MALLOC_CONSOLIDATE,
++	ARENA_GET2,
++	_INT_MALLOC,
++	_INT_FREE,
++	_INT_REALLOC
++};
++
++//
++// Atomic operations list. Keep this in sync with MVEE/Inc/MVEE_shm.h
++//
++enum mvee_atomics
++{
++    // LOAD OPERATIONS FIRST!!! DO NOT CHANGE THIS CONVENTION
++    ATOMIC_FORCED_READ,
++    ATOMIC_LOAD,
++    // THE FOLLOWING IS NOT AN ACTUAL ATOMIC OPERATION, IT JUST DENOTES THE END OF THE LOAD-ONLY ATOMICS!!!
++    ATOMIC_LOAD_MAX,
++    // STORES AFTER LOADS
++    CATOMIC_AND,
++    CATOMIC_OR,
++    CATOMIC_EXCHANGE_AND_ADD,
++    CATOMIC_ADD,
++    CATOMIC_INCREMENT,
++    CATOMIC_DECREMENT,
++    CATOMIC_MAX,
++    ATOMIC_COMPARE_AND_EXCHANGE_VAL,
++    ATOMIC_COMPARE_AND_EXCHANGE_BOOL,
++    ATOMIC_EXCHANGE,
++    ATOMIC_EXCHANGE_AND_ADD,
++    ATOMIC_INCREMENT_AND_TEST,
++    ATOMIC_DECREMENT_AND_TEST,
++	ATOMIC_ADD_NEGATIVE,
++    ATOMIC_ADD_ZERO,
++    ATOMIC_ADD,
++	ATOMIC_OR,
++	ATOMIC_OR_VAL,
++    ATOMIC_INCREMENT,
++    ATOMIC_DECREMENT,
++    ATOMIC_BIT_TEST_SET,
++    ATOMIC_BIT_SET,
++    ATOMIC_AND,
++	ATOMIC_AND_VAL,
++    ATOMIC_STORE,
++	ATOMIC_MIN,
++    ATOMIC_MAX,
++    ATOMIC_DECREMENT_IF_POSITIVE,
++	ATOMIC_FETCH_ADD,
++	ATOMIC_FETCH_AND,
++	ATOMIC_FETCH_OR,
++	ATOMIC_FETCH_XOR,
++    __THREAD_ATOMIC_CMPXCHG_VAL,
++    __THREAD_ATOMIC_AND,
++    __THREAD_ATOMIC_BIT_SET,
++    ___UNKNOWN_LOCK_TYPE___,
++    __MVEE_ATOMICS_MAX__
++};
++
++#define MVEE_ROUND_UP(x, multiple)				\
++	((x + (multiple - 1)) & ~(multiple -1))
++#define MVEE_MIN(a, b) ((a > b) ? (b) : (a))
++
++# ifdef MVEE_USE_TOTALPARTIAL_AGENT
++#  warning "The total and partial order agents have not been tested on ARM and will probably break!"
++#  include "mvee-totalpartial-agent.h"
++# else
++#  include "mvee-woc-agent.h"
++# endif
++
++#endif
++
++// We don't use our sync agent in the dynamic loader so just use the original atomics everywhere
++#if IS_IN (rtld) || !defined(USE_MVEE_LIBC)
++
++//
++// generic atomics (include/atomic.h and sysdeps/arch/atomic-machine.h)
++//
++#define __arch_c_compare_and_exchange_val_8_acq(mem, newval, oldval) orig___arch_c_compare_and_exchange_val_8_acq(mem, newval, oldval)
++#define __arch_c_compare_and_exchange_val_16_acq(mem, newval, oldval) orig___arch_c_compare_and_exchange_val_16_acq(mem, newval, oldval)
++#define __arch_c_compare_and_exchange_val_32_acq(mem, newval, oldval) orig___arch_c_compare_and_exchange_val_32_acq(mem, newval, oldval)
++#define __arch_c_compare_and_exchange_val_64_acq(mem, newval, oldval) orig___arch_c_compare_and_exchange_val_64_acq(mem, newval, oldval)
++#define atomic_compare_and_exchange_val_acq(mem, newval, oldval) orig_atomic_compare_and_exchange_val_acq(mem, newval, oldval)
++#define atomic_compare_and_exchange_val_rel(mem, newval, oldval) orig_atomic_compare_and_exchange_val_rel(mem, newval, oldval)
++#define atomic_compare_and_exchange_bool_acq(mem, newval, oldval) orig_atomic_compare_and_exchange_bool_acq(mem, newval, oldval)
++#define atomic_compare_and_exchange_bool_rel(mem, newval, oldval) orig_atomic_compare_and_exchange_bool_rel(mem, newval, oldval)
++#define atomic_exchange_acq(mem, newvalue) orig_atomic_exchange_acq(mem, newvalue)
++#define atomic_exchange_rel(mem, newvalue) orig_atomic_exchange_rel(mem, newvalue)
++#define atomic_exchange_and_add(mem, value) orig_atomic_exchange_and_add(mem, value)
++#define atomic_exchange_and_add_acq(mem, value) orig_atomic_exchange_and_add_acq(mem, value)
++#define atomic_exchange_and_add_rel(mem, value) orig_atomic_exchange_and_add_rel(mem, value)
++#define atomic_add(mem, value) orig_atomic_add(mem, value)
++#define atomic_increment(mem) orig_atomic_increment(mem)
++#define atomic_increment_and_test(mem) orig_atomic_increment_and_test(mem)
++#define atomic_increment_val(mem) orig_atomic_increment_val(mem)
++#define atomic_decrement(mem) orig_atomic_decrement(mem)
++#define atomic_decrement_and_test(mem) orig_atomic_decrement_and_test(mem)
++#define atomic_decrement_val(mem) orig_atomic_decrement_val(mem)
++#define atomic_add_negative(mem, value) orig_atomic_add_negative(mem, value)
++#define atomic_add_zero(mem, value) orig_atomic_add_zero(mem, value)
++#define atomic_bit_set(mem, bit) orig_atomic_bit_set(mem, bit)
++#define atomic_bit_test_set(mem, bit) orig_atomic_bit_test_set(mem, bit)
++#define atomic_and(mem, mask) orig_atomic_and(mem, mask)
++#define atomic_or(mem, mask) orig_atomic_or(mem, mask)
++#define atomic_max(mem, value) orig_atomic_max(mem, value)
++#define atomic_min(mem, value) orig_atomic_min(mem, value)
++#define atomic_decrement_if_positive(mem) orig_atomic_decrement_if_positive(mem)
++#define atomic_and_val(mem, mask) orig_atomic_and_val(mem, mask)
++#define atomic_or_val(mem, mask) orig_atomic_or_val(mem, mask)
++#define atomic_forced_read(x) orig_atomic_forced_read(x)
++#define catomic_compare_and_exchange_val_acq(mem, newval, oldval) orig_catomic_compare_and_exchange_val_acq(mem, newval, oldval)
++#define catomic_compare_and_exchange_val_rel(mem, newval, oldval) orig_catomic_compare_and_exchange_val_rel(mem, newval, oldval)
++#define catomic_compare_and_exchange_bool_acq(mem, newval, oldval) orig_catomic_compare_and_exchange_bool_acq(mem, newval, oldval)
++#define catomic_compare_and_exchange_bool_rel(mem, newval, oldval) orig_catomic_compare_and_exchange_bool_rel(mem, newval, oldval)
++#define catomic_exchange_and_add(mem, value) orig_catomic_exchange_and_add(mem, value)
++#define catomic_add(mem, value) orig_catomic_add(mem, value)
++#define catomic_increment(mem) orig_catomic_increment(mem)
++#define catomic_increment_val(mem) orig_catomic_increment_val(mem)
++#define catomic_decrement(mem) orig_catomic_decrement(mem)
++#define catomic_decrement_val(mem) orig_catomic_decrement_val(mem)
++#define catomic_and(mem, mask) orig_catomic_and(mem, mask)
++#define catomic_or(mem, mask) orig_catomic_or(mem, mask)
++#define catomic_max(mem, value) orig_catomic_max(mem, value)
++
++//
++// C11-style atomics (include/atomic.h)
++//
++#define atomic_load_relaxed(mem) orig_atomic_load_relaxed(mem)
++#define atomic_load_acquire(mem) orig_atomic_load_acquire(mem)
++#define atomic_store_relaxed(mem, val) orig_atomic_store_relaxed(mem, val)
++#define atomic_store_release(mem, val) orig_atomic_store_release(mem, val)
++#define atomic_compare_exchange_weak_relaxed(mem, expected, desired) orig_atomic_compare_exchange_weak_relaxed(mem, expected, desired)
++#define atomic_compare_exchange_weak_acquire(mem, expected, desired) orig_atomic_compare_exchange_weak_acquire(mem, expected, desired) 
++#define atomic_compare_exchange_weak_release(mem, expected, desired) orig_atomic_compare_exchange_weak_release(mem, expected, desired)
++#define atomic_exchange_relaxed(mem, desired) orig_atomic_exchange_relaxed(mem, desired)
++#define atomic_exchange_acquire(mem, desired) orig_atomic_exchange_acquire(mem, desired)
++#define atomic_exchange_release(mem, desired) orig_atomic_exchange_release(mem, desired)
++#define atomic_fetch_add_relaxed(mem, operand) orig_atomic_fetch_add_relaxed(mem, operand)
++#define atomic_fetch_add_acquire(mem, operand) orig_atomic_fetch_add_acquire(mem, operand)
++#define atomic_fetch_add_release(mem, operand) orig_atomic_fetch_add_release(mem, operand)
++#define atomic_fetch_add_acq_rel(mem, operand) orig_atomic_fetch_add_acq_rel(mem, operand)
++#define atomic_fetch_and_relaxed(mem, operand) orig_atomic_fetch_and_relaxed(mem, operand)
++#define atomic_fetch_and_acquire(mem, operand) orig_atomic_fetch_and_acquire(mem, operand)
++#define atomic_fetch_and_release(mem, operand) orig_atomic_fetch_and_release(mem, operand)
++#define atomic_fetch_or_relaxed(mem, operand) orig_atomic_fetch_or_relaxed(mem, operand) 
++#define atomic_fetch_or_acquire(mem, operand) orig_atomic_fetch_or_acquire(mem, operand) 
++#define atomic_fetch_or_release(mem, operand) orig_atomic_fetch_or_release(mem, operand) 
++#define atomic_fetch_xor_release(mem, operand) orig_atomic_fetch_xor_release(mem, operand) 
++
++//
++// TLS atomics (tls.h)
++//
++// stijn: ARM doesn't have these
++/*
++#define THREAD_ATOMIC_CMPXCHG_VAL(descr, member, newval, oldval) orig_THREAD_ATOMIC_CMPXCHG_VAL(descr, member, newval, oldval)
++#define THREAD_ATOMIC_AND(descr, member, val) orig_THREAD_ATOMIC_AND(descr, member, val)
++#define THREAD_ATOMIC_BIT_SET(descr, member, bit) orig_THREAD_ATOMIC_BIT_SET(descr, member, bit)
++*/
++
++//
++// MVEE additions
++//
++#define atomic_load(var) ({ var; })
++#define atomic_store(var, value) ({ var = value; })
++#define THREAD_ATOMIC_GETMEM(descr, member) THREAD_GETMEM(descr, member)
++#define THREAD_ATOMIC_SETMEM(descr, member, val) THREAD_SETMEM(descr, member, val)
++
++
++#else // !IS_IN_rtld
++
++//
++// architecture-specific atomics (atomic-machine.h)
++//
++#define __arch_c_compare_and_exchange_val_8_acq(mem, newval, oldval)	\
++	({																	\
++		typeof(*mem) ____result;										\
++		MVEE_PREOP(ATOMIC_COMPARE_AND_EXCHANGE_VAL, mem, 1);			\
++		____result = orig___arch_c_compare_and_exchange_val_8_acq(mem, newval, oldval); \
++		MVEE_POSTOP();													\
++		____result;														\
++	})
++
++#define __arch_c_compare_and_exchange_val_16_acq(mem, newval, oldval)	\
++	({																	\
++		typeof(*mem) ____result;										\
++		MVEE_PREOP(ATOMIC_COMPARE_AND_EXCHANGE_VAL, mem, 1);			\
++		____result = orig___arch_c_compare_and_exchange_val_16_acq(mem, newval, oldval); \
++		MVEE_POSTOP();													\
++		____result;														\
++	})
++
++#define __arch_c_compare_and_exchange_val_32_acq(mem, newval, oldval)	\
++	({																	\
++		typeof(*mem) ____result;										\
++		MVEE_PREOP(ATOMIC_COMPARE_AND_EXCHANGE_VAL, mem, 1);			\
++		____result = orig___arch_c_compare_and_exchange_val_32_acq(mem, newval, oldval); \
++		MVEE_POSTOP();													\
++		____result;														\
++	})
++
++#define __arch_c_compare_and_exchange_val_64_acq(mem, newval, oldval)	\
++	({																	\
++		typeof(*mem) ____result;										\
++		MVEE_PREOP(ATOMIC_COMPARE_AND_EXCHANGE_VAL, mem, 1);			\
++		____result = orig___arch_c_compare_and_exchange_val_64_acq(mem, newval, oldval); \
++		MVEE_POSTOP();													\
++		____result;														\
++	})
++
++#define atomic_compare_and_exchange_val_acq(mem, newval, oldval)		\
++	({																	\
++		typeof(*mem) ____result;										\
++		MVEE_PREOP(ATOMIC_COMPARE_AND_EXCHANGE_VAL, mem, 1);			\
++		____result = orig_atomic_compare_and_exchange_val_acq(mem, newval, oldval); \
++		MVEE_POSTOP();													\
++		____result;														\
++	})
++
++#define atomic_compare_and_exchange_val_rel(mem, newval, oldval)		\
++	({																	\
++		typeof(*mem) ____result;										\
++		MVEE_PREOP(ATOMIC_COMPARE_AND_EXCHANGE_VAL, mem, 1);			\
++		____result = orig_atomic_compare_and_exchange_val_rel(mem, newval, oldval); \
++		MVEE_POSTOP();													\
++		____result;														\
++	})
++
++#define atomic_compare_and_exchange_bool_acq(mem, newval, oldval)		\
++	({																	\
++		bool ____result;												\
++		MVEE_PREOP(ATOMIC_COMPARE_AND_EXCHANGE_BOOL, mem, 1);			\
++		____result = orig_atomic_compare_and_exchange_bool_acq(mem, newval, oldval); \
++		MVEE_POSTOP();													\
++		____result;														\
++	})
++
++#define atomic_compare_and_exchange_bool_rel(mem, newval, oldval)		\
++	({																	\
++		bool ____result;												\
++		MVEE_PREOP(ATOMIC_COMPARE_AND_EXCHANGE_BOOL, mem, 1);			\
++		____result = orig_atomic_compare_and_exchange_bool_rel(mem, newval, oldval); \
++		MVEE_POSTOP();													\
++		____result;														\
++	})
++
++#define atomic_exchange_acq(mem, newvalue)						\
++	({															\
++		typeof(*mem) ____result;								\
++		MVEE_PREOP(ATOMIC_EXCHANGE, mem, 1);					\
++		____result = orig_atomic_exchange_acq(mem, newvalue);	\
++		MVEE_POSTOP();											\
++		____result;												\
++	})
++
++#define atomic_exchange_rel(mem, newvalue)						\
++	({															\
++		typeof(*mem) ____result;								\
++		MVEE_PREOP(ATOMIC_EXCHANGE, mem, 1);					\
++		____result = orig_atomic_exchange_rel(mem, newvalue);	\
++		MVEE_POSTOP();											\
++		____result;												\
++	})
++
++#define atomic_exchange_and_add(mem, value)						\
++	({															\
++		typeof(*mem) ____result;								\
++		MVEE_PREOP(ATOMIC_EXCHANGE_AND_ADD, mem, 1);			\
++		____result = orig_atomic_exchange_and_add(mem, value);	\
++		MVEE_POSTOP();											\
++		____result;												\
++	})
++
++#define atomic_exchange_and_add_acq(mem, value)					\
++	({															\
++		typeof(*mem) ____result;								\
++		MVEE_PREOP(ATOMIC_EXCHANGE_AND_ADD, mem, 1);			\
++		____result = orig_atomic_exchange_and_add_acq(mem, value);	\
++		MVEE_POSTOP();											\
++		____result;												\
++	})
++
++#define atomic_exchange_and_add_rel(mem, value)					\
++	({															\
++		typeof(*mem) ____result;								\
++		MVEE_PREOP(ATOMIC_EXCHANGE_AND_ADD, mem, 1);			\
++		____result = orig_atomic_exchange_and_add_rel(mem, value);	\
++		MVEE_POSTOP();											\
++		____result;												\
++	})
++
++#define atomic_add(mem, value)					\
++	({											\
++		MVEE_PREOP(ATOMIC_ADD, mem, 1);			\
++		orig_atomic_add(mem, value);			\
++		MVEE_POSTOP();							\
++	})
++
++#define atomic_increment(mem)					\
++	({											\
++		MVEE_PREOP(ATOMIC_INCREMENT, mem, 1);	\
++		orig_atomic_increment(mem);				\
++		MVEE_POSTOP();							\
++	})
++
++#define atomic_increment_and_test(mem)						\
++	({														\
++		unsigned char ____result;							\
++		MVEE_PREOP(ATOMIC_INCREMENT_AND_TEST, mem, 1);		\
++		____result = orig_atomic_increment_and_test(mem);	\
++		MVEE_POSTOP();										\
++		____result;											\
++	})
++
++#define atomic_increment_val(mem)				\
++	({											\
++		typeof(*mem) ____result;				\
++		MVEE_PREOP(ATOMIC_INCREMENT, mem, 1);	\
++		____result = orig_atomic_increment_val(mem);	\
++		MVEE_POSTOP();							\
++		____result;								\
++	})
++
++#define atomic_decrement(mem)					\
++	({											\
++		MVEE_PREOP(ATOMIC_DECREMENT, mem, 1);	\
++		orig_atomic_decrement(mem);				\
++		MVEE_POSTOP();							\
++	})
++
++#define atomic_decrement_and_test(mem)						\
++	({														\
++		unsigned char ____result;							\
++		MVEE_PREOP(ATOMIC_DECREMENT_AND_TEST, mem, 1);		\
++		____result = orig_atomic_decrement_and_test(mem);	\
++		MVEE_POSTOP();										\
++		____result;											\
++	})
++
++#define atomic_decrement_val(mem)				\
++	({											\
++		typeof(*mem) ____result;				\
++		MVEE_PREOP(ATOMIC_DECREMENT, mem, 1);	\
++		____result = orig_atomic_decrement_val(mem);	\
++		MVEE_POSTOP();							\
++		____result;								\
++	})
++
++#define atomic_add_negative(mem, value)						\
++	({														\
++		unsigned char ____result;							\
++		MVEE_PREOP(ATOMIC_ADD, mem, 1);						\
++		____result = orig_atomic_add_negative(mem, value);	\
++		MVEE_POSTOP();										\
++		____result;											\
++	})
++
++#define atomic_add_zero(mem, value)						\
++	({													\
++		unsigned char ____result;						\
++		MVEE_PREOP(ATOMIC_ADD_ZERO, mem, 1);			\
++		____result = orig_atomic_add_zero(mem, value);	\
++		MVEE_POSTOP();									\
++		____result;										\
++	})
++
++#define atomic_bit_set(mem, bit)				\
++	({											\
++		MVEE_PREOP(ATOMIC_BIT_SET, mem, 1);		\
++		orig_atomic_bit_set(mem, bit);			\
++		MVEE_POSTOP();							\
++	})
++
++#define atomic_bit_test_set(mem, bit)						\
++	({														\
++		unsigned char ____result;							\
++		MVEE_PREOP(ATOMIC_BIT_TEST_SET, mem, 1);			\
++		____result = orig_atomic_bit_test_set(mem, bit);	\
++		MVEE_POSTOP();										\
++		____result;											\
++	})
++
++#define atomic_and(mem, mask)					\
++	({											\
++		MVEE_PREOP(ATOMIC_AND, mem, 1);			\
++		orig_atomic_and(mem, mask);				\
++		MVEE_POSTOP();							\
++	})
++
++#define atomic_or(mem, mask)					\
++	({											\
++		MVEE_PREOP(ATOMIC_OR, mem, 1);			\
++		orig_atomic_or(mem, mask);				\
++		MVEE_POSTOP();							\
++	})
++
++#define atomic_max(mem, value)					\
++	({											\
++		MVEE_PREOP(ATOMIC_MAX, mem, 1);			\
++		orig_atomic_max(mem, value);			\
++		MVEE_POSTOP();							\
++	})
++
++#define atomic_min(mem, value)					\
++	({											\
++		MVEE_PREOP(ATOMIC_MIN, mem, 1);			\
++		orig_atomic_max(mem, value);			\
++		MVEE_POSTOP();							\
++	})
++
++#define atomic_decrement_if_positive(mem)					\
++	({														\
++		__typeof(*mem) __result;							\
++		MVEE_PREOP(ATOMIC_DECREMENT_IF_POSITIVE, mem, 1);	\
++		__result = orig_atomic_decrement_if_positive(mem);	\
++		MVEE_POSTOP();										\
++		__result;											\
++	})
++
++#define atomic_and_val(mem, mask)							\
++	({														\
++		__typeof(*mem) __result;							\
++		MVEE_PREOP(ATOMIC_AND_VAL, mem, 1);					\
++		__result = orig_atomic_and_val(mem);				\
++		MVEE_POSTOP();										\
++		__result;											\
++	})
++
++#define atomic_or_val(mem, mask)							\
++	({														\
++		__typeof(*mem) __result;							\
++		MVEE_PREOP(ATOMIC_OR_VAL, mem, 1);					\
++		__result = orig_atomic_or_val(mem);					\
++		MVEE_POSTOP();										\
++		__result;											\
++	})
++
++#define atomic_forced_read(x)						\
++	({												\
++		typeof(x) ____result;						\
++		MVEE_PREOP(ATOMIC_FORCED_READ, &x, 0);		\
++		____result = orig_atomic_forced_read(x);	\
++		MVEE_POSTOP();								\
++		____result;									\
++	})
++
++#define catomic_compare_and_exchange_val_acq(mem, newval, oldval)		\
++	({																	\
++		typeof(*mem) ____result;										\
++		MVEE_PREOP(ATOMIC_COMPARE_AND_EXCHANGE_VAL, mem, 1);			\
++		____result = orig_catomic_compare_and_exchange_val_acq(mem, newval, oldval); \
++		MVEE_POSTOP();													\
++		____result;														\
++	})
++
++#define catomic_compare_and_exchange_val_rel(mem, newval, oldval)		\
++	({																	\
++		typeof(*mem) ____result;										\
++		MVEE_PREOP(ATOMIC_COMPARE_AND_EXCHANGE_VAL, mem, 1);			\
++		____result = orig_catomic_compare_and_exchange_val_rel(mem, newval, oldval); \
++		MVEE_POSTOP();													\
++		____result;														\
++	})
++
++#define catomic_compare_and_exchange_bool_acq(mem, newval, oldval)		\
++	({																	\
++		bool ____result;												\
++		MVEE_PREOP(ATOMIC_COMPARE_AND_EXCHANGE_BOOL, mem, 1);			\
++		____result = orig_catomic_compare_and_exchange_bool_acq(mem, newval, oldval); \
++		MVEE_POSTOP();													\
++		____result;														\
++	})
++
++#define catomic_compare_and_exchange_bool_rel(mem, newval, oldval)		\
++	({																	\
++		bool ____result;												\
++		MVEE_PREOP(ATOMIC_COMPARE_AND_EXCHANGE_BOOL, mem, 1);			\
++		____result = orig_catomic_compare_and_exchange_bool_rel(mem, newval, oldval); \
++		MVEE_POSTOP();													\
++		____result;														\
++	})
++
++#define catomic_exchange_and_add(mem, value)					\
++	({															\
++		typeof(*mem) ____result;								\
++		MVEE_PREOP(CATOMIC_EXCHANGE_AND_ADD, mem, 1);			\
++		____result = orig_catomic_exchange_and_add(mem, value);	\
++		MVEE_POSTOP();											\
++		____result;												\
++	})
++
++#define catomic_add(mem, value)					\
++	({											\
++		MVEE_PREOP(CATOMIC_ADD, mem, 1);		\
++		orig_catomic_add(mem, value);			\
++		MVEE_POSTOP();							\
++	})
++
++#define catomic_increment(mem)					\
++	({											\
++		MVEE_PREOP(CATOMIC_INCREMENT, mem, 1);	\
++		orig_catomic_increment(mem);			\
++		MVEE_POSTOP();							\
++	})
++
++#define catomic_increment_val(mem)						\
++	({													\
++		typeof(*mem) ____result;						\
++		MVEE_PREOP(CATOMIC_INCREMENT, mem, 1);			\
++		____result = orig_catomic_increment_val(mem);	\
++		MVEE_POSTOP();									\
++		____result;										\
++	})
++
++#define catomic_decrement(mem)					\
++	({											\
++		MVEE_PREOP(CATOMIC_DECREMENT, mem, 1);	\
++		orig_catomic_decrement(mem);			\
++		MVEE_POSTOP();							\
++	})
++
++#define catomic_decrement_val(mem)						\
++	({													\
++		typeof(*mem) ____result;						\
++		MVEE_PREOP(CATOMIC_DECREMENT, mem, 1);			\
++		____result = orig_catomic_decrement_val(mem);	\
++		MVEE_POSTOP();									\
++		____result;										\
++	})
++
++
++#define catomic_and(mem, mask)					\
++	({											\
++		MVEE_PREOP(CATOMIC_AND, mem, 1);		\
++		orig_catomic_and(mem, mask);			\
++		MVEE_POSTOP();							\
++	})
++
++#define catomic_or(mem, mask)					\
++	({											\
++		MVEE_PREOP(CATOMIC_OR, mem, 1);			\
++		orig_catomic_or(mem, mask);				\
++		MVEE_POSTOP();							\
++	})
++
++#define catomic_max(mem, value)					\
++	({											\
++		MVEE_PREOP(CATOMIC_MAX, mem, 1);		\
++		orig_catomic_max(mem, value);			\
++		MVEE_POSTOP();							\
++	})
++
++
++//
++// generic C11-style atomics (include/atomic.h)
++//
++#define atomic_load_relaxed(mem)					\
++	({												\
++		__typeof(*mem) ____result;					\
++		MVEE_PREOP(ATOMIC_LOAD, mem, 0);			\
++		____result = orig_atomic_load_relaxed(mem);	\
++		MVEE_POSTOP();								\
++		____result;									\
++	})
++
++#define atomic_load_acquire(mem)					\
++	({												\
++		__typeof(*mem) ____result;					\
++		MVEE_PREOP(ATOMIC_LOAD, mem, 0);			\
++		____result = orig_atomic_load_acquire(mem);	\
++		MVEE_POSTOP();								\
++		____result;									\
++	})
++
++#define atomic_store_relaxed(mem, val)			\
++	(void)({									\
++		MVEE_PREOP(ATOMIC_STORE, mem, 1);		\
++		orig_atomic_store_relaxed(mem, val);	\
++		MVEE_POSTOP();							\
++	})
++
++#define atomic_store_release(mem, val)			\
++	(void)({									\
++		MVEE_PREOP(ATOMIC_STORE, mem, 1);		\
++		orig_atomic_store_release(mem, val);	\
++		MVEE_POSTOP();							\
++	})
++
++#define atomic_compare_exchange_weak_relaxed(mem, expected, desired)	\
++	({																	\
++		bool __result;													\
++		MVEE_PREOP(ATOMIC_COMPARE_AND_EXCHANGE_BOOL, mem, 1);			\
++		__result = orig_atomic_compare_exchange_weak_relaxed(mem, expected, desired); \
++		MVEE_POSTOP();													\
++		__result;														\
++	})
++
++#define atomic_compare_exchange_weak_acquire(mem, expected, desired)	\
++	({																	\
++		bool __result;													\
++		MVEE_PREOP(ATOMIC_COMPARE_AND_EXCHANGE_BOOL, mem, 1);			\
++		__result = orig_atomic_compare_exchange_weak_acquire(mem, expected, desired); \
++		MVEE_POSTOP();													\
++		__result;														\
++	})
++
++#define atomic_compare_exchange_weak_release(mem, expected, desired)	\
++	({																	\
++		bool __result;													\
++		MVEE_PREOP(ATOMIC_COMPARE_AND_EXCHANGE_BOOL, mem, 1);			\
++		__result = orig_atomic_compare_exchange_weak_release(mem, expected, desired); \
++		MVEE_POSTOP();													\
++		__result;														\
++	})
++
++#define atomic_exchange_relaxed(mem, desired)						\
++	({																\
++		typeof(*mem) ____result;									\
++		MVEE_PREOP(ATOMIC_EXCHANGE, mem, 1);						\
++		____result = orig_atomic_exchange_relaxed(mem, desired);	\
++		MVEE_POSTOP();												\
++		____result;													\
++	})
++
++#define atomic_exchange_acquire(mem, desired)						\
++	({																\
++		typeof(*mem) ____result;									\
++		MVEE_PREOP(ATOMIC_EXCHANGE, mem, 1);						\
++		____result = orig_atomic_exchange_acquire(mem, desired);	\
++		MVEE_POSTOP();												\
++		____result;													\
++	})
++
++#define atomic_exchange_release(mem, desired)						\
++	({																\
++		typeof(*mem) ____result;									\
++		MVEE_PREOP(ATOMIC_EXCHANGE, mem, 1);						\
++		____result = orig_atomic_exchange_release(mem, desired);	\
++		MVEE_POSTOP();												\
++		____result;													\
++	})
++
++#define atomic_fetch_add_relaxed(mem, operand)						\
++	({																\
++		typeof(*mem) ____result;									\
++		MVEE_PREOP(ATOMIC_FETCH_ADD, mem, 1);						\
++		____result = orig_atomic_fetch_add_relaxed(mem, operand);	\
++		MVEE_POSTOP();												\
++		____result;													\
++	})
++
++#define atomic_fetch_add_acquire(mem, operand)						\
++	({																\
++		typeof(*mem) ____result;									\
++		MVEE_PREOP(ATOMIC_FETCH_ADD, mem, 1);						\
++		____result = orig_atomic_fetch_add_acquire(mem, operand);	\
++		MVEE_POSTOP();												\
++		____result;													\
++	})
++
++#define atomic_fetch_add_release(mem, operand)						\
++	({																\
++		typeof(*mem) ____result;									\
++		MVEE_PREOP(ATOMIC_FETCH_ADD, mem, 1);						\
++		____result = orig_atomic_fetch_add_release(mem, operand);	\
++		MVEE_POSTOP();												\
++		____result;													\
++	})
++
++#define atomic_fetch_add_acq_rel(mem, operand)						\
++	({																\
++		typeof(*mem) ____result;									\
++		MVEE_PREOP(ATOMIC_FETCH_ADD, mem, 1);						\
++		____result = orig_atomic_fetch_add_acq_rel(mem, operand);	\
++		MVEE_POSTOP();												\
++		____result;													\
++	})
++
++#define atomic_fetch_and_relaxed(mem, operand)						\
++	({																\
++		typeof(*mem) ____result;									\
++		MVEE_PREOP(ATOMIC_FETCH_AND, mem, 1);						\
++		____result = orig_atomic_fetch_and_relaxed(mem, operand);	\
++		MVEE_POSTOP();												\
++		____result;													\
++	})
++
++#define atomic_fetch_and_acquire(mem, operand)						\
++	({																\
++		typeof(*mem) ____result;									\
++		MVEE_PREOP(ATOMIC_FETCH_AND, mem, 1);						\
++		____result = orig_atomic_fetch_and_acquire(mem, operand);	\
++		MVEE_POSTOP();												\
++		____result;													\
++	})
++
++#define atomic_fetch_and_release(mem, operand)						\
++	({																\
++		typeof(*mem) ____result;									\
++		MVEE_PREOP(ATOMIC_FETCH_AND, mem, 1);						\
++		____result = orig_atomic_fetch_and_release(mem, operand);	\
++		MVEE_POSTOP();												\
++		____result;													\
++	})
++
++
++#define atomic_fetch_or_relaxed(mem, operand)						\
++	({																\
++		typeof(*mem) ____result;									\
++		MVEE_PREOP(ATOMIC_FETCH_OR, mem, 1);						\
++		____result = orig_atomic_fetch_or_relaxed(mem, operand);	\
++		MVEE_POSTOP();												\
++		____result;													\
++	})
++
++#define atomic_fetch_or_acquire(mem, operand)						\
++	({																\
++		typeof(*mem) ____result;									\
++		MVEE_PREOP(ATOMIC_FETCH_OR, mem, 1);						\
++		____result = orig_atomic_fetch_or_acquire(mem, operand);	\
++		MVEE_POSTOP();												\
++		____result;													\
++	})
++
++#define atomic_fetch_or_release(mem, operand)						\
++	({																\
++		typeof(*mem) ____result;									\
++		MVEE_PREOP(ATOMIC_FETCH_OR, mem, 1);						\
++		____result = orig_atomic_fetch_or_release(mem, operand);	\
++		MVEE_POSTOP();												\
++		____result;													\
++	})
++
++#define atomic_fetch_xor_release(mem, operand)						\
++	({																\
++		typeof(*mem) ____result;									\
++		MVEE_PREOP(ATOMIC_FETCH_XOR, mem, 1);						\
++		____result = orig_atomic_fetch_xor_release(mem, operand);	\
++		MVEE_POSTOP();												\
++		____result;													\
++	})
++
++//
++// TLS atomics (tls.h)
++//
++// stijn: ARM doesn't have these
++/*
++#define THREAD_ATOMIC_CMPXCHG_VAL(descr, member, newval, oldval)		\
++	({																	\
++		__typeof(descr->member) ____result;								\
++		MVEE_PREOP(__THREAD_ATOMIC_CMPXCHG_VAL, &descr->member, 1);		\
++		____result = orig_THREAD_ATOMIC_CMPXCHG_VAL(descr, member, newval, oldval); \
++		MVEE_POSTOP();													\
++		____result;														\
++	})
++
++
++#define THREAD_ATOMIC_AND(descr, member, val)					\
++	(void)({													\
++			MVEE_PREOP(__THREAD_ATOMIC_AND, &descr->member, 1);	\
++			orig_THREAD_ATOMIC_AND(descr, member, val);			\
++			MVEE_POSTOP();										\
++		})
++
++
++#define THREAD_ATOMIC_BIT_SET(descr, member, bit)					\
++	(void)({														\
++			MVEE_PREOP(__THREAD_ATOMIC_BIT_SET, &descr->member, 1);	\
++			orig_THREAD_ATOMIC_BIT_SET(descr, member, bit);			\
++			MVEE_POSTOP();											\
++		})
++*/
++
++//
++// MVEE additions
++//
++#define atomic_load(var)						\
++	({											\
++		__typeof(var+0) ____result;				\
++		MVEE_PREOP(ATOMIC_LOAD, (void*)&var, 0);	\
++		____result = var;						\
++		MVEE_POSTOP();							\
++		____result;								\
++	})
++
++#define atomic_store(var, val)					\
++	(void)({									\
++		MVEE_PREOP(ATOMIC_STORE, &var, 1);		\
++		var = val;								\
++		MVEE_POSTOP();							\
++	})
++
++#define THREAD_ATOMIC_GETMEM(descr, member)			\
++	({												\
++		__typeof(descr->member) ____result;			\
++		MVEE_PREOP(ATOMIC_LOAD, &descr->member, 1);	\
++		____result = THREAD_GETMEM(descr, member);	\
++		MVEE_POSTOP();								\
++		____result;									\
++	})
++
++#define THREAD_ATOMIC_SETMEM(descr, member, val)			\
++	(void)({												\
++			MVEE_PREOP(ATOMIC_STORE, &descr->member, 1);	\
++			THREAD_SETMEM(descr, member, val);				\
++			MVEE_POSTOP();									\
++		})
++
++//
++// sys_futex with FUTEX_WAKE_OP usually overwrites the value of the futex.
++// We have to make sure that we include the futex write in our sync buf ordering
++//
++#define lll_futex_wake_unlock(futexp, nr_wake, nr_wake2, futexp2, private) \
++	({																	\
++		INTERNAL_SYSCALL_DECL (__err);									\
++		long int __ret;													\
++		MVEE_PREOP(___UNKNOWN_LOCK_TYPE___, futexp2, 1);				\
++		__ret = INTERNAL_SYSCALL (futex, __err, 6, (futexp),			\
++								  __lll_private_flag (FUTEX_WAKE_OP, private), \
++								  (nr_wake), (nr_wake2), (futexp2),		\
++								  FUTEX_OP_CLEAR_WAKE_IF_GT_ONE);		\
++		if (mvee_should_futex_unlock())									\
++		{																\
++			*futexp2 = 0;												\
++		}																\
++		MVEE_POSTOP();													\
++		INTERNAL_SYSCALL_ERROR_P (__ret, __err);						\
++	})
++
++#define arch_cpu_relax() __asm__ __volatile__("mov\tr0,r0\t@ nop\n\t");
++
++#endif // !IS_IN (rtld)
+diff -N -r --unified glibc-2.25.orig/sysdeps/arm/mvee-totalpartial-agent.h glibc-2.25/sysdeps/arm/mvee-totalpartial-agent.h
+--- glibc-2.25.orig/sysdeps/arm/mvee-totalpartial-agent.h	1970-01-01 00:00:00.000000000 +0000
++++ glibc-2.25/sysdeps/arm/mvee-totalpartial-agent.h	2017-09-13 19:55:55.983745398 +0000
+@@ -0,0 +1,134 @@
++//
++// MVEE_PARTIAL_ORDER_REPLICATION: when defined, slaves will use
++// queue projection to replay synchronization operations in
++// partial order rather than total order. In other words,
++// the slaves will only respect the order in which the master
++// has performed its synchronization operations on a per-word
++// basis
++//
++#define MVEE_PARTIAL_ORDER_REPLICATION
++//
++// MVEE_EXTENDED_QUEUE: when defined, the locking operation and
++// mutex pointer are also logged in the queue.
++//
++#define MVEE_EXTENDED_QUEUE
++//
++// MVEE_LOG_EIPS: when defined, libc logs return addresses for
++// all locking operations into a seperate queue
++//
++// WARNING: enabling EIP logging _CAN_ trigger crashes! We're
++// using __builtin_return_address(2) to fetch the eip of the 
++// caller of the locking function. Unfortunately, libc uses inline
++// __libc_lock_* operations every now and then. When it does, 
++// the __builtin_... call will return the wrong caller and in some
++// cases (e.g. in do_system) it might try to fetch the eip beyond
++// the end of the stack!
++//
++#define MVEE_LOG_EIPS
++#define MVEE_STACK_DEPTH 5
++//
++// MVEE_CHECK_LOCK_TYPE: if this is defined, the slave will check
++// whether or not it's replaying a lock of the same type
++// (only works with the extended queue)
++//
++#define MVEE_CHECK_LOCK_TYPE
++//
++// MVEE_DEBUG_MALLOC: if this is defined, the slaves will check whether
++// their malloc behavior is synced with the master
++//
++// #define MVEE_DEBUG_MALLOC
++//
++// MVEE_MALLOC_IGNORE_ASLR: if this is defined, the malloc debugger will
++// only compare allocation types, messages and chunk sizes
++// arena and chunk pointers are ignored.
++// #define MVEE_MALLOC_IGNORE_ASLR
++
++#define DEFINE_MVEE_QUEUE(name, has_eip_queue)				\
++  static unsigned long             mvee_##name##_buffer_data_start  = 0; \
++  static volatile unsigned int*    mvee_##name##_buffer_pos         = 0; \
++  static volatile unsigned int*    mvee_##name##_buffer_lock        = 0; \
++  static volatile unsigned int*    mvee_##name##_buffer_flush_cnt   = 0; \
++  static volatile unsigned char*   mvee_##name##_buffer_flushing    = 0; \
++  static unsigned long             mvee_##name##_buffer_slots       = 0; \
++  static void*                     mvee_##name##_eip_buffer         = NULL; \
++  static unsigned char             mvee_##name##_buffer_log_eips    = has_eip_queue;
++
++// this is extremely wasteful but required to prevent false sharing in the producer...
++#ifdef MVEE_PARTIAL_ORDER_REPLICATION
++# ifdef MVEE_EXTENDED_QUEUE
++      #define MVEE_LOCK_QUEUE_SLOT_SIZE (sizeof(long) + sizeof(short) * (mvee_num_childs + 1))
++# else
++      #define MVEE_LOCK_QUEUE_SLOT_SIZE (sizeof(long) + sizeof(short) + (mvee_num_childs - 1))
++# endif
++#else
++# ifdef MVEE_EXTENDED_QUEUE
++      #define MVEE_LOCK_QUEUE_SLOT_SIZE (3*sizeof(long))
++# else
++      #define MVEE_LOCK_QUEUE_SLOT_SIZE sizeof(short)
++# endif
++#endif
++#define mvee_lock_buffer_slot_size 64
++#define mvee_malloc_buffer_slot_size 64
++
++// In the new queue layout, we want each replica's lock, position, 
++// flush_cnt and flushing word on one and the same cache line
++// Therefore, we round up the buffer ptr to a multiple of 64 for the master replica.
++// Each subsequent replica has its variables aligned on the next cache line boundary
++
++#define INIT_MVEE_QUEUE(name, slot_size, queue_ident)			\
++  if (!mvee_##name##_buffer_data_start)					\
++    {									\
++      long tmp_id = syscall(MVEE_GET_SHARED_BUFFER, 0, queue_ident, &mvee_##name##_buffer_slots, MVEE_LOCK_QUEUE_SLOT_SIZE); \
++      mvee_##name##_buffer_slots      = (mvee_##name##_buffer_slots - mvee_num_childs * 64) / mvee_##name##_buffer_slot_size - 2; \
++      void* tmp_buffer                = (void*)syscall(__NR_shmat, tmp_id, NULL, 0); \
++      mvee_##name##_buffer_lock       = (volatile unsigned int*)  (MVEE_ROUND_UP((unsigned long)tmp_buffer, 64) + mvee_child_num * 64); \
++      mvee_##name##_buffer_pos        = (volatile unsigned int*)  (MVEE_ROUND_UP((unsigned long)tmp_buffer, 64) + mvee_child_num * 64 + sizeof(int)); \
++      mvee_##name##_buffer_flush_cnt  = (volatile unsigned int*)  (MVEE_ROUND_UP((unsigned long)tmp_buffer, 64) + mvee_child_num * 64 + sizeof(int) * 2); \
++      mvee_##name##_buffer_flushing   = (volatile unsigned char*) (MVEE_ROUND_UP((unsigned long)tmp_buffer, 64) + mvee_child_num * 64 + sizeof(int) * 3); \
++     *mvee_##name##_buffer_lock       = 1; \
++      mvee_##name##_buffer_data_start = MVEE_ROUND_UP((unsigned long)tmp_buffer, 64) + mvee_num_childs * 64; \
++      if (mvee_##name##_buffer_log_eips)				\
++	{								\
++	  long eip_buffer_id = syscall(MVEE_GET_SHARED_BUFFER, 1,	\
++				      queue_ident, NULL, mvee_num_childs * sizeof(long) * MVEE_STACK_DEPTH, MVEE_STACK_DEPTH); \
++	  mvee_##name##_eip_buffer = (void*)syscall(__NR_shmat, eip_buffer_id, NULL, 0); \
++	}								\
++    }									
++
++#define MVEE_LOG_QUEUE_DATA(name, pos, offset, data)			\
++  *(typeof(data)*)(mvee_##name##_buffer_data_start + mvee_##name##_buffer_slot_size * (pos) + offset) = data;
++
++#define MVEE_READ_QUEUE_DATA(name, pos, offset, result)			\
++  result = *(typeof(result)*)(mvee_##name##_buffer_data_start + mvee_##name##_buffer_slot_size * pos + offset);
++
++#define MVEE_LOG_STACK(name, start_depth, pos)				\
++  mvee_log_stack(mvee_##name##_eip_buffer, sizeof(long) * mvee_num_childs * MVEE_STACK_DEPTH, pos, start_depth);
++
++#ifdef MVEE_DEBUG_MALLOC
++extern void mvee_malloc_hook(int alloc_type, int msg, long chunksize, void* ar_ptr, void* chunk_ptr);
++#define MVEE_MALLOC_HOOK(type, msg, sz, ar_ptr, chunk_ptr)		\
++  mvee_malloc_hook(type, msg, sz, ar_ptr, chunk_ptr)
++#else
++#define MVEE_MALLOC_HOOK(type, msg, sz, ar_ptr, chunk_ptr)
++#endif // !MVEE_DEBUG_MALLOC
++
++extern void mvee_invalidate_buffer      (void);
++extern void mvee_atomic_postop_internal (unsigned char preop_result);
++extern int  mvee_should_sync_tid        (void);
++extern int  mvee_all_heaps_aligned      (char* heap, unsigned long alloc_size); 
++extern void mvee_malloc_hook(int alloc_type, int msg, long chunksize, void* ar_ptr, void* chunk_ptr);
++extern void mvee_write_malloc_info(int alloc_type, int msg, long chunksize, void* ar_ptr, void* chunk_ptr);
++extern void mvee_verify_malloc_info(int alloc_type, int msg, long chunksize, void* ar_ptr, void* chunk_ptr);
++
++#define MVEE_POSTOP() \
++  mvee_atomic_postop_internal(__tmp_mvee_preop);
++
++#ifdef MVEE_EXTENDED_QUEUE
++ extern unsigned char     mvee_atomic_preop_internal             (unsigned char is_store, void* word_ptr, unsigned short op_type);
++# define MVEE_PREOP(op_type, mem, is_store)					\
++	register unsigned char __tmp_mvee_preop = mvee_atomic_preop_internal(is_store, (void*)mem, op_type);
++#else
++ extern unsigned char     mvee_atomic_preop_internal            (unsigned char is_store, void* word_ptr);
++# define MVEE_PREOP(op_type, mem, is_store) \
++	register unsigned char __tmp_mvee_preop = mvee_atomic_preop_internal(is_store, (void*)mem);
++#endif // !MVEE_EXTENDED_QUEUE
+diff -N -r --unified glibc-2.25.orig/sysdeps/arm/mvee-woc-agent.h glibc-2.25/sysdeps/arm/mvee-woc-agent.h
+--- glibc-2.25.orig/sysdeps/arm/mvee-woc-agent.h	1970-01-01 00:00:00.000000000 +0000
++++ glibc-2.25/sysdeps/arm/mvee-woc-agent.h	2017-09-13 19:55:55.985745541 +0000
+@@ -0,0 +1,16 @@
++#define MVEE_MAX_COUNTERS 65536
++
++#define MVEE_MALLOC_HOOK(type, msg, sz, ar_ptr, chunk_ptr)
++
++extern void          mvee_atomic_postop_internal (unsigned char preop_result);
++extern unsigned char mvee_atomic_preop_internal  (volatile void* word_ptr);
++extern int           mvee_should_sync_tid        (void);
++extern int           mvee_all_heaps_aligned      (char* heap, unsigned long alloc_size); 
++extern void          mvee_invalidate_buffer      (void);
++extern unsigned char mvee_should_futex_unlock    (void);
++
++#define MVEE_POSTOP()								\
++	mvee_atomic_postop_internal(__tmp_mvee_preop);
++
++#define MVEE_PREOP(op_type, mem, is_store)								\
++	register unsigned char  __tmp_mvee_preop = mvee_atomic_preop_internal(mem);
 diff -N -r --unified glibc-2.25.orig/sysdeps/nptl/fork.c glibc-2.25/sysdeps/nptl/fork.c
---- glibc-2.25.orig/sysdeps/nptl/fork.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/nptl/fork.c	2017-05-08 18:12:28.824655168 -0700
+--- glibc-2.25.orig/sysdeps/nptl/fork.c	2017-09-11 17:15:12.163419229 +0000
++++ glibc-2.25/sysdeps/nptl/fork.c	2017-09-13 19:55:55.988745755 +0000
 @@ -63,12 +63,12 @@
    /* Run all the registered preparation handlers.  In reverse order.
       While doing this we build up a list of all the entries.  */
@@ -1875,9 +4158,34 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/nptl/fork.c glibc-2.25/sysdeps/nptl
  	}
      }
  
+diff -N -r --unified glibc-2.25.orig/sysdeps/nptl/lowlevellock.h glibc-2.25/sysdeps/nptl/lowlevellock.h
+--- glibc-2.25.orig/sysdeps/nptl/lowlevellock.h	2017-09-11 17:15:12.166419443 +0000
++++ glibc-2.25/sysdeps/nptl/lowlevellock.h	2017-09-13 19:55:55.991745970 +0000
+@@ -184,8 +184,10 @@
+ #define lll_wait_tid(tid) \
+   do {					\
+     __typeof (tid) __tid;		\
+-    while ((__tid = (tid)) != 0)	\
+-      lll_futex_wait (&(tid), __tid, LLL_SHARED);\
++    while ((__tid = (tid)) != 0 || mvee_should_sync_tid()) {	\
++		lll_futex_syscall(4, &(tid), __lll_private_flag(mvee_should_sync_tid() ? MVEE_FUTEX_WAIT_TID : FUTEX_WAIT, LLL_SHARED), __tid, NULL); \
++				   if (tid == 0) break; \
++	}\
+   } while (0)
+ 
+ extern int __lll_timedwait_tid (int *, const struct timespec *)
+@@ -196,7 +198,7 @@
+ #define lll_timedwait_tid(tid, abstime) \
+   ({							\
+     int __res = 0;					\
+-    if ((tid) != 0)					\
++    if ((tid) != 0 || mvee_should_sync_tid())			\
+       __res = __lll_timedwait_tid (&(tid), (abstime));	\
+     __res;						\
+   })
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/check_pf.c glibc-2.25/sysdeps/unix/sysv/linux/check_pf.c
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/check_pf.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/check_pf.c	2017-05-08 16:30:53.623764322 -0700
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/check_pf.c	2017-09-11 17:15:13.642525033 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/check_pf.c	2017-09-13 19:55:55.994746184 +0000
 @@ -269,7 +269,7 @@
    if (seen_ipv6 && result != NULL)
      {
@@ -1906,8 +4214,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/check_pf.c glibc-2.
  	    free (data);
  
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/lowlevellock-futex.h glibc-2.25/sysdeps/unix/sysv/linux/lowlevellock-futex.h
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/lowlevellock-futex.h	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/lowlevellock-futex.h	2017-07-03 11:06:10.403466694 -0700
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/lowlevellock-futex.h	2017-09-11 17:15:13.937546137 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/lowlevellock-futex.h	2017-09-13 19:55:55.997746398 +0000
 @@ -115,7 +115,7 @@
  		     nr_wake, nr_move, mutex, val)
  
@@ -1918,8 +4226,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/lowlevellock-futex.
  		     __lll_private_flag (FUTEX_WAKE_OP, private),       \
  		     nr_wake, nr_wake2, futexp2,                        \
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86/elision-lock.c glibc-2.25/sysdeps/unix/sysv/linux/x86/elision-lock.c
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86/elision-lock.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/x86/elision-lock.c	2017-07-03 17:55:26.687026938 -0700
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86/elision-lock.c	2017-09-11 17:15:15.722673832 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/x86/elision-lock.c	2017-09-13 19:55:55.999746541 +0000
 @@ -99,7 +99,7 @@
        /* Use a normal lock until the threshold counter runs out.
  	 Lost updates possible.  */
@@ -1930,8 +4238,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86/elision-lock.c 
  
    /* Use a normal lock here.  */
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86/elision-trylock.c glibc-2.25/sysdeps/unix/sysv/linux/x86/elision-trylock.c
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86/elision-trylock.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/x86/elision-trylock.c	2017-07-03 17:56:05.379026245 -0700
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86/elision-trylock.c	2017-09-11 17:15:15.723673904 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/x86/elision-trylock.c	2017-09-13 19:55:56.001746684 +0000
 @@ -68,7 +68,7 @@
      {
        /* Lost updates are possible but harmless (see above).  */
@@ -1942,8 +4250,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86/elision-trylock
  
    return lll_trylock (*futex);
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86/elision-unlock.c glibc-2.25/sysdeps/unix/sysv/linux/x86/elision-unlock.c
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86/elision-unlock.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/x86/elision-unlock.c	2017-07-03 18:01:05.768020866 -0700
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86/elision-unlock.c	2017-09-11 17:15:15.724673975 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/x86/elision-unlock.c	2017-09-13 19:55:56.003746827 +0000
 @@ -25,7 +25,7 @@
  {
    /* When the lock was free we're in a transaction.
@@ -1954,8 +4262,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86/elision-unlock.
    else
      lll_unlock ((*lock), private);
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/cancellation.S glibc-2.25/sysdeps/unix/sysv/linux/x86_64/cancellation.S
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/cancellation.S	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/cancellation.S	1969-12-31 16:00:00.000000000 -0800
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/cancellation.S	2017-09-11 17:15:15.746675549 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/cancellation.S	1970-01-01 00:00:00.000000000 +0000
 @@ -1,115 +0,0 @@
 -/* Copyright (C) 2009-2017 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -2073,8 +4381,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/cancellation
 -	jmp	3b
 -END(__pthread_disable_asynccancel)
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/libc-cancellation.S glibc-2.25/sysdeps/unix/sysv/linux/x86_64/libc-cancellation.S
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/libc-cancellation.S	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/libc-cancellation.S	1969-12-31 16:00:00.000000000 -0800
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/libc-cancellation.S	2017-09-11 17:15:15.753676050 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/libc-cancellation.S	1970-01-01 00:00:00.000000000 +0000
 @@ -1,21 +0,0 @@
 -/* Copyright (C) 2009-2017 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -2098,8 +4406,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/libc-cancell
 -#define __pthread_disable_asynccancel __libc_disable_asynccancel
 -#include "cancellation.S"
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S glibc-2.25/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S	1969-12-31 16:00:00.000000000 -0800
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S	2017-09-11 17:15:15.753676050 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/libc-lowlevellock.S	1970-01-01 00:00:00.000000000 +0000
 @@ -1,19 +0,0 @@
 -/* Copyright (C) 2002-2017 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -2121,8 +4429,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/libc-lowleve
 -
 -#include "lowlevellock.S"
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/librt-cancellation.S glibc-2.25/sysdeps/unix/sysv/linux/x86_64/librt-cancellation.S
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/librt-cancellation.S	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/librt-cancellation.S	1969-12-31 16:00:00.000000000 -0800
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/librt-cancellation.S	2017-09-11 17:15:15.754676121 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/librt-cancellation.S	1970-01-01 00:00:00.000000000 +0000
 @@ -1,21 +0,0 @@
 -/* Copyright (C) 2009-2017 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -2146,128 +4454,20 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/librt-cancel
 -#define __pthread_disable_asynccancel __librt_disable_asynccancel
 -#include "cancellation.S"
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lll_timedlock_wait.c glibc-2.25/sysdeps/unix/sysv/linux/x86_64/lll_timedlock_wait.c
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lll_timedlock_wait.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/lll_timedlock_wait.c	2017-05-08 14:37:48.129885837 -0700
-@@ -1 +1,60 @@
- /* __lll_timedlock_wait is in lowlevellock.S.  */
-+/* Timed low level locking for pthread library.  Generic futex-using version.
-+   Copyright (C) 2003-2017 Free Software Foundation, Inc.
-+   This file is part of the GNU C Library.
-+   Contributed by Paul Mackerras <paulus@au.ibm.com>, 2003.
-+
-+   The GNU C Library is free software; you can redistribute it and/or
-+   modify it under the terms of the GNU Lesser General Public
-+   License as published by the Free Software Foundation; either
-+   version 2.1 of the License, or (at your option) any later version.
-+
-+   The GNU C Library is distributed in the hope that it will be useful,
-+   but WITHOUT ANY WARRANTY; without even the implied warranty of
-+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-+   Lesser General Public License for more details.
-+
-+   You should have received a copy of the GNU Lesser General Public
-+   License along with the GNU C Library; if not, see
-+   <http://www.gnu.org/licenses/>.  */
-+
-+#include <atomic.h>
-+#include <errno.h>
-+#include <lowlevellock.h>
-+#include <sys/time.h>
-+
-+
-+int
-+__lll_timedlock_wait (int *futex, const struct timespec *abstime, int private)
-+{
-+  /* Reject invalid timeouts.  */
-+  if (abstime->tv_nsec < 0 || abstime->tv_nsec >= 1000000000)
-+    return EINVAL;
-+
-+  /* Try locking.  */
-+  while (atomic_exchange_acq (futex, 2) != 0)
-+    {
-+      struct timeval tv;
-+
-+      /* Get the current time.  */
-+      (void) __gettimeofday (&tv, NULL);
-+
-+      /* Compute relative timeout.  */
-+      struct timespec rt;
-+      rt.tv_sec = abstime->tv_sec - tv.tv_sec;
-+      rt.tv_nsec = abstime->tv_nsec - tv.tv_usec * 1000;
-+      if (rt.tv_nsec < 0)
-+        {
-+          rt.tv_nsec += 1000000000;
-+          --rt.tv_sec;
-+        }
-+
-+      if (rt.tv_sec < 0)
-+        return ETIMEDOUT;
-+
-+      /* If *futex == 2, wait until woken or timeout.  */
-+      lll_futex_timed_wait (futex, 2, &rt, private);
-+    }
-+
-+  return 0;
-+}
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lll_timedlock_wait.c	2017-09-11 17:15:15.755676193 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/lll_timedlock_wait.c	2017-09-13 19:55:56.013747542 +0000
+@@ -1 +1 @@
+-/* __lll_timedlock_wait is in lowlevellock.S.  */
++#include "../../../../../nptl/lll_timedlock_wait.c"
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lll_timedwait_tid.c glibc-2.25/sysdeps/unix/sysv/linux/x86_64/lll_timedwait_tid.c
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lll_timedwait_tid.c	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/lll_timedwait_tid.c	2017-05-08 14:37:17.351886388 -0700
-@@ -1 +1,52 @@
- /* __lll_timedwait_tid is in lowlevellock.S.  */
-+#include <atomic.h>
-+#include <errno.h>
-+#include <lowlevellock.h>
-+#include <sys/time.h>
-+
-+
-+/* The kernel notifies a process which uses CLONE_CHILD_CLEARTID via futex
-+   wake-up when the clone terminates.  The memory location contains the
-+   thread ID while the clone is running and is reset to zero by the kernel
-+   afterwards.  The kernel up to version 3.16.3 does not use the private futex
-+   operations for futex wake-up when the clone terminates.  */
-+int
-+__lll_timedwait_tid (int *tidp, const struct timespec *abstime)
-+{
-+  int tid;
-+
-+  if (abstime->tv_nsec < 0 || abstime->tv_nsec >= 1000000000)
-+    return EINVAL;
-+
-+  /* Repeat until thread terminated.  */
-+  while ((tid = *tidp) != 0)
-+    {
-+      struct timeval tv;
-+      struct timespec rt;
-+
-+      /* Get the current time.  */
-+      (void) __gettimeofday (&tv, NULL);
-+
-+      /* Compute relative timeout.  */
-+      rt.tv_sec = abstime->tv_sec - tv.tv_sec;
-+      rt.tv_nsec = abstime->tv_nsec - tv.tv_usec * 1000;
-+      if (rt.tv_nsec < 0)
-+        {
-+          rt.tv_nsec += 1000000000;
-+          --rt.tv_sec;
-+        }
-+
-+      /* Already timed out?  */
-+      if (rt.tv_sec < 0)
-+        return ETIMEDOUT;
-+
-+      /* If *tidp == tid, wait until thread terminates or the wait times out.
-+         The kernel up to version 3.16.3 does not use the private futex
-+         operations for futex wake-up when the clone terminates.
-+      */
-+      if (lll_futex_timed_wait (tidp, tid, &rt, LLL_SHARED) == -ETIMEDOUT)
-+        return ETIMEDOUT;
-+    }
-+
-+  return 0;
-+}
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lll_timedwait_tid.c	2017-09-11 17:15:15.755676193 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/lll_timedwait_tid.c	2017-09-13 19:55:56.015747685 +0000
+@@ -1 +1 @@
+-/* __lll_timedwait_tid is in lowlevellock.S.  */
++#include "../../../../../nptl/lll_timedwait_tid.c"
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h glibc-2.25/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h	2017-05-08 14:29:14.610895033 -0700
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h	2017-09-11 17:15:15.841682345 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/lowlevellock.h	2017-09-13 19:55:56.025748399 +0000
 @@ -1,6 +1,6 @@
 -/* Copyright (C) 2002-2017 Free Software Foundation, Inc.
 +/* Low-level lock implementation.  Generic futex-based version.
@@ -2648,8 +4848,16 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lowlevellock
  
  
  /* The kernel notifies a process which uses CLONE_CHILD_CLEARTID via futex
-@@ -238,41 +193,20 @@
-       lll_futex_wait (&(tid), __tid, LLL_SHARED);\
+@@ -234,45 +189,26 @@
+ #define lll_wait_tid(tid) \
+   do {					\
+     __typeof (tid) __tid;		\
+-    while ((__tid = (tid)) != 0)	\
+-      lll_futex_wait (&(tid), __tid, LLL_SHARED);\
++    while ((__tid = (tid)) != 0 || mvee_should_sync_tid())	{			\
++		lll_futex_syscall (4, &(tid), __lll_private_flag(mvee_should_sync_tid() ? MVEE_FUTEX_WAIT_TID : FUTEX_WAIT, LLL_SHARED), __tid, NULL); \
++				   if ((tid) == 0) break; \
++	}\
    } while (0)
  
 +#ifndef __ASSEMBLER__
@@ -2691,7 +4899,7 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lowlevellock
 -  __lll_trylock_elision (&(futex), &(adapt_count))
 +  ({							\
 +    int __res = 0;					\
-+    if ((tid) != 0)					\
++    if ((tid) != 0 || mvee_should_sync_tid())				\
 +      __res = __lll_timedwait_tid (&(tid), (abstime));	\
 +    __res;						\
 +  })
@@ -2700,8 +4908,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lowlevellock
  
  #endif	/* lowlevellock.h */
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S glibc-2.25/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S	1969-12-31 16:00:00.000000000 -0800
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S	2017-09-11 17:15:15.756676264 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/lowlevellock.S	1970-01-01 00:00:00.000000000 +0000
 @@ -1,463 +0,0 @@
 -/* Copyright (C) 2002-2017 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -3167,8 +5375,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/lowlevellock
 -	.size	__lll_timedwait_tid,.-__lll_timedwait_tid
 -#endif
 diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/sysdep-cancel.h glibc-2.25/sysdeps/unix/sysv/linux/x86_64/sysdep-cancel.h
---- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/sysdep-cancel.h	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/sysdep-cancel.h	2017-07-03 15:57:14.816153940 -0700
+--- glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/sysdep-cancel.h	2017-09-11 17:15:15.859683633 +0000
++++ glibc-2.25/sysdeps/unix/sysv/linux/x86_64/sysdep-cancel.h	2017-09-13 19:55:56.034749042 +0000
 @@ -28,6 +28,18 @@
     functions are special.  They don't modify registers other than %rax
     and %r11 if they return.  Therefore we don't have to preserve other
@@ -3232,8 +5440,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/unix/sysv/linux/x86_64/sysdep-cance
      addq $8,%rsp; cfi_adjust_cfa_offset (-8);				      \
      cmpq $-4095, %rax;							      \
 diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/atomic-machine.h glibc-2.25/sysdeps/x86_64/atomic-machine.h
---- glibc-2.25.orig/sysdeps/x86_64/atomic-machine.h	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/x86_64/atomic-machine.h	2017-07-03 16:05:05.525145510 -0700
+--- glibc-2.25.orig/sysdeps/x86_64/atomic-machine.h	2017-09-11 17:15:16.105701231 +0000
++++ glibc-2.25/sysdeps/x86_64/atomic-machine.h	2017-09-13 19:55:56.054750472 +0000
 @@ -58,13 +58,13 @@
  #define __HAVE_64B_ATOMICS 1
  #define USE_ATOMIC_COMPILER_BUILTINS 1
@@ -3465,7 +5673,7 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/atomic-machine.h glibc-2.25/
  
  /* We don't use mfence because it is supposedly slower due to having to
     provide stronger guarantees (e.g., regarding self-modifying code).  */
-@@ -475,3 +475,865 @@
+@@ -475,3 +475,904 @@
      __asm __volatile (LOCK_PREFIX "orl $0, (%%rsp)" ::: "memory")
  #define atomic_read_barrier() __asm ("" ::: "memory")
  #define atomic_write_barrier() __asm ("" ::: "memory")
@@ -3474,7 +5682,6 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/atomic-machine.h glibc-2.25/
 +                                  MVEE PATCHES
 +--------------------------------------------------------------------------------*/
 +#define USE_MVEE_LIBC
-+#define MVEE_MAX_COUNTERS 65536
 +
 +#ifdef USE_MVEE_LIBC
 +#define MVEE_FAKE_SYSCALL_BASE          0x6FFFFFFF
@@ -3488,31 +5695,33 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/atomic-machine.h glibc-2.25/
 +#define MVEE_GET_THREAD_NUM             MVEE_FAKE_SYSCALL_BASE + 10
 +#define MVEE_SET_SYNC_PRIMITIVES_PTR    MVEE_FAKE_SYSCALL_BASE + 12
 +#define MVEE_ALL_HEAPS_ALIGNED          MVEE_FAKE_SYSCALL_BASE + 13
++#define MVEE_GET_VIRTUALIZED_ARGV0      MVEE_FAKE_SYSCALL_BASE + 17
 +#define MVEE_LIBC_LOCK_BUFFER           3
 +#define MVEE_LIBC_MALLOC_DEBUG_BUFFER   11
 +#define MVEE_LIBC_ATOMIC_BUFFER         13
++#define MVEE_LIBC_LOCK_BUFFER_PARTIAL   16
 +#define MVEE_FUTEX_WAIT_TID             30
 +
 +enum mvee_alloc_types
-+{
-+	LIBC_MALLOC,
-+	LIBC_FREE,
-+	LIBC_REALLOC,
-+	LIBC_MEMALIGN,
-+	LIBC_CALLOC,
-+	MALLOC_TRIM,
-+	HEAP_TRIM,
-+	MALLOC_CONSOLIDATE,
-+	ARENA_GET2,
-+	_INT_MALLOC,
-+	_INT_FREE,
-+	_INT_REALLOC
-+};
++  {
++  LIBC_MALLOC,
++  LIBC_FREE,
++  LIBC_REALLOC,
++  LIBC_MEMALIGN,
++  LIBC_CALLOC,
++  MALLOC_TRIM,
++  HEAP_TRIM,
++  MALLOC_CONSOLIDATE,
++  ARENA_GET2,
++  _INT_MALLOC,
++  _INT_FREE,
++  _INT_REALLOC
++  };
 +
 +//
 +// Atomic operations list. Keep this in sync with MVEE/Inc/MVEE_shm.h
 +//
-+enum mvee_atomics
++enum mvee_base_atomics
 +{
 +    // LOAD OPERATIONS FIRST!!! DO NOT CHANGE THIS CONVENTION
 +    ATOMIC_FORCED_READ,
@@ -3556,29 +5765,68 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/atomic-machine.h glibc-2.25/
 +    __THREAD_ATOMIC_AND,
 +    __THREAD_ATOMIC_BIT_SET,
 +    ___UNKNOWN_LOCK_TYPE___,
-+    __MVEE_ATOMICS_MAX__
++    __MVEE_BASE_ATOMICS_MAX__
 +};
 +
-+#define MVEE_ROUND_UP(x, multiple)				\
-+	((x + (multiple - 1)) & ~(multiple -1))
++enum mvee_extended_atomics {
++  mvee_atomic_load_n,
++  mvee_atomic_load,
++  mvee_atomic_store_n,
++  mvee_atomic_store,
++  mvee_atomic_exchange_n,
++  mvee_atomic_exchange,
++  mvee_atomic_compare_exchange_n,
++  mvee_atomic_compare_exchange,
++  mvee_atomic_add_fetch,
++  mvee_atomic_sub_fetch,
++  mvee_atomic_and_fetch,
++  mvee_atomic_xor_fetch,
++  mvee_atomic_or_fetch,
++  mvee_atomic_nand_fetch,
++  mvee_atomic_fetch_add,
++  mvee_atomic_fetch_sub,
++  mvee_atomic_fetch_and,
++  mvee_atomic_fetch_xor,
++  mvee_atomic_fetch_or,
++  mvee_atomic_fetch_nand,
++  mvee_atomic_test_and_set,
++  mvee_atomic_clear,
++  mvee_atomic_always_lock_free,
++  mvee_atomic_is_lock_free,
++  mvee_sync_fetch_and_add,
++  mvee_sync_fetch_and_sub,
++  mvee_sync_fetch_and_or,
++  mvee_sync_fetch_and_and,
++  mvee_sync_fetch_and_xor,
++  mvee_sync_fetch_and_nand,
++  mvee_sync_add_and_fetch,
++  mvee_sync_sub_and_fetch,
++  mvee_sync_or_and_fetch,
++  mvee_sync_and_and_fetch,
++  mvee_sync_xor_and_fetch,
++  mvee_sync_nand_and_fetch,
++  mvee_sync_bool_compare_and_swap,
++  mvee_sync_val_compare_and_swap,
++  mvee_sync_lock_test_and_set,
++  mvee_sync_lock_release,
++  mvee_atomic_ops_max
++};
++
++#define MVEE_ROUND_UP(x, multiple)		\
++  ((x + (multiple - 1)) & ~(multiple -1))
++
 +#define MVEE_MIN(a, b) ((a > b) ? (b) : (a))
-+#define MVEE_MALLOC_HOOK(type, msg, sz, ar_ptr, chunk_ptr)
 +
-+extern void          mvee_atomic_postop_internal (unsigned char preop_result);
-+extern unsigned char mvee_atomic_preop_internal  (volatile void* word_ptr);
-+extern int           mvee_should_sync_tid        (void);
-+extern int           mvee_all_heaps_aligned      (char* heap, unsigned long alloc_size); 
-+extern void          mvee_invalidate_buffer      (void);
-+extern unsigned char mvee_should_futex_unlock    (void);
++# ifdef MVEE_USE_TOTALPARTIAL_AGENT
++#  include "mvee-totalpartial-agent.h"
++# else
++#  include "mvee-woc-agent.h"
++# endif
 +
-+#define MVEE_POSTOP()								\
-+	mvee_atomic_postop_internal(__tmp_mvee_preop);
-+
-+#define MVEE_PREOP(op_type, mem, is_store)								\
-+	register unsigned char  __tmp_mvee_preop = mvee_atomic_preop_internal(mem);
++#endif
 +
 +// We don't use our sync agent in the dynamic loader so just use the original atomics everywhere
-+#if IS_IN (rtld)
++#if IS_IN (rtld) || !defined USE_MVEE_LIBC
 +
 +//
 +// generic atomics (include/atomic.h and sysdeps/arch/atomic-machine.h)
@@ -4329,11 +6577,168 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/atomic-machine.h glibc-2.25/
 +
 +#endif // !IS_IN (rtld)
 +
-+#endif // !USE_MVEE_LIBC
 +
+diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/mvee-totalpartial-agent.h glibc-2.25/sysdeps/x86_64/mvee-totalpartial-agent.h
+--- glibc-2.25.orig/sysdeps/x86_64/mvee-totalpartial-agent.h	1970-01-01 00:00:00.000000000 +0000
++++ glibc-2.25/sysdeps/x86_64/mvee-totalpartial-agent.h	2017-09-13 19:55:56.058750758 +0000
+@@ -0,0 +1,134 @@
++//
++// MVEE_PARTIAL_ORDER_REPLICATION: when defined, slaves will use
++// queue projection to replay synchronization operations in
++// partial order rather than total order. In other words,
++// the slaves will only respect the order in which the master
++// has performed its synchronization operations on a per-word
++// basis
++//
++#define MVEE_PARTIAL_ORDER_REPLICATION
++//
++// MVEE_EXTENDED_QUEUE: when defined, the locking operation and
++// mutex pointer are also logged in the queue.
++//
++#define MVEE_EXTENDED_QUEUE
++//
++// MVEE_LOG_EIPS: when defined, libc logs return addresses for
++// all locking operations into a seperate queue
++//
++// WARNING: enabling EIP logging _CAN_ trigger crashes! We're
++// using __builtin_return_address(2) to fetch the eip of the 
++// caller of the locking function. Unfortunately, libc uses inline
++// __libc_lock_* operations every now and then. When it does, 
++// the __builtin_... call will return the wrong caller and in some
++// cases (e.g. in do_system) it might try to fetch the eip beyond
++// the end of the stack!
++//
++#define MVEE_LOG_EIPS
++#define MVEE_STACK_DEPTH 5
++//
++// MVEE_CHECK_LOCK_TYPE: if this is defined, the slave will check
++// whether or not it's replaying a lock of the same type
++// (only works with the extended queue)
++//
++#define MVEE_CHECK_LOCK_TYPE
++//
++// MVEE_DEBUG_MALLOC: if this is defined, the slaves will check whether
++// their malloc behavior is synced with the master
++//
++// #define MVEE_DEBUG_MALLOC
++//
++// MVEE_MALLOC_IGNORE_ASLR: if this is defined, the malloc debugger will
++// only compare allocation types, messages and chunk sizes
++// arena and chunk pointers are ignored.
++// #define MVEE_MALLOC_IGNORE_ASLR
++
++#define DEFINE_MVEE_QUEUE(name, has_eip_queue)				\
++  static unsigned long             mvee_##name##_buffer_data_start  = 0; \
++  static volatile unsigned int*    mvee_##name##_buffer_pos         = 0; \
++  static volatile unsigned int*    mvee_##name##_buffer_lock        = 0; \
++  static volatile unsigned int*    mvee_##name##_buffer_flush_cnt   = 0; \
++  static volatile unsigned char*   mvee_##name##_buffer_flushing    = 0; \
++  static unsigned long             mvee_##name##_buffer_slots       = 0; \
++  static void*                     mvee_##name##_eip_buffer         = NULL; \
++  static unsigned char             mvee_##name##_buffer_log_eips    = has_eip_queue;
++
++// this is extremely wasteful but required to prevent false sharing in the producer...
++#ifdef MVEE_PARTIAL_ORDER_REPLICATION
++# ifdef MVEE_EXTENDED_QUEUE
++      #define MVEE_LOCK_QUEUE_SLOT_SIZE (sizeof(long) + sizeof(short) * (mvee_num_childs + 1))
++# else
++      #define MVEE_LOCK_QUEUE_SLOT_SIZE (sizeof(long) + sizeof(short) + (mvee_num_childs - 1))
++# endif
++#else
++# ifdef MVEE_EXTENDED_QUEUE
++      #define MVEE_LOCK_QUEUE_SLOT_SIZE (3*sizeof(long))
++# else
++      #define MVEE_LOCK_QUEUE_SLOT_SIZE sizeof(short)
++# endif
++#endif
++#define mvee_lock_buffer_slot_size 64
++#define mvee_malloc_buffer_slot_size 64
++
++// In the new queue layout, we want each replica's lock, position, 
++// flush_cnt and flushing word on one and the same cache line
++// Therefore, we round up the buffer ptr to a multiple of 64 for the master replica.
++// Each subsequent replica has its variables aligned on the next cache line boundary
++
++#define INIT_MVEE_QUEUE(name, slot_size, queue_ident)			\
++  if (!mvee_##name##_buffer_data_start)					\
++    {									\
++      long tmp_id = syscall(MVEE_GET_SHARED_BUFFER, 0, queue_ident, &mvee_##name##_buffer_slots, MVEE_LOCK_QUEUE_SLOT_SIZE); \
++      mvee_##name##_buffer_slots      = (mvee_##name##_buffer_slots - mvee_num_childs * 64) / mvee_##name##_buffer_slot_size - 2; \
++      void* tmp_buffer                = (void*)syscall(__NR_shmat, tmp_id, NULL, 0); \
++      mvee_##name##_buffer_lock       = (volatile unsigned int*)  (MVEE_ROUND_UP((unsigned long)tmp_buffer, 64) + mvee_child_num * 64); \
++      mvee_##name##_buffer_pos        = (volatile unsigned int*)  (MVEE_ROUND_UP((unsigned long)tmp_buffer, 64) + mvee_child_num * 64 + sizeof(int)); \
++      mvee_##name##_buffer_flush_cnt  = (volatile unsigned int*)  (MVEE_ROUND_UP((unsigned long)tmp_buffer, 64) + mvee_child_num * 64 + sizeof(int) * 2); \
++      mvee_##name##_buffer_flushing   = (volatile unsigned char*) (MVEE_ROUND_UP((unsigned long)tmp_buffer, 64) + mvee_child_num * 64 + sizeof(int) * 3); \
++     *mvee_##name##_buffer_lock       = 1; \
++      mvee_##name##_buffer_data_start = MVEE_ROUND_UP((unsigned long)tmp_buffer, 64) + mvee_num_childs * 64; \
++      if (mvee_##name##_buffer_log_eips)				\
++	{								\
++	  long eip_buffer_id = syscall(MVEE_GET_SHARED_BUFFER, 1,	\
++				      queue_ident, NULL, mvee_num_childs * sizeof(long) * MVEE_STACK_DEPTH, MVEE_STACK_DEPTH); \
++	  mvee_##name##_eip_buffer = (void*)syscall(__NR_shmat, eip_buffer_id, NULL, 0); \
++	}								\
++    }									
++
++#define MVEE_LOG_QUEUE_DATA(name, pos, offset, data)			\
++  *(typeof(data)*)(mvee_##name##_buffer_data_start + mvee_##name##_buffer_slot_size * (pos) + offset) = data;
++
++#define MVEE_READ_QUEUE_DATA(name, pos, offset, result)			\
++  result = *(typeof(result)*)(mvee_##name##_buffer_data_start + mvee_##name##_buffer_slot_size * pos + offset);
++
++#define MVEE_LOG_STACK(name, start_depth, pos)				\
++  mvee_log_stack(mvee_##name##_eip_buffer, sizeof(long) * mvee_num_childs * MVEE_STACK_DEPTH, pos, start_depth);
++
++#ifdef MVEE_DEBUG_MALLOC
++extern void mvee_malloc_hook(int alloc_type, int msg, long chunksize, void* ar_ptr, void* chunk_ptr);
++#define MVEE_MALLOC_HOOK(type, msg, sz, ar_ptr, chunk_ptr)		\
++  mvee_malloc_hook(type, msg, sz, ar_ptr, chunk_ptr)
++#else
++#define MVEE_MALLOC_HOOK(type, msg, sz, ar_ptr, chunk_ptr)
++#endif // !MVEE_DEBUG_MALLOC
++
++extern void mvee_invalidate_buffer      (void);
++extern void mvee_atomic_postop_internal (unsigned char preop_result);
++extern int  mvee_should_sync_tid        (void);
++extern int  mvee_all_heaps_aligned      (char* heap, unsigned long alloc_size); 
++extern void mvee_malloc_hook(int alloc_type, int msg, long chunksize, void* ar_ptr, void* chunk_ptr);
++extern void mvee_write_malloc_info(int alloc_type, int msg, long chunksize, void* ar_ptr, void* chunk_ptr);
++extern void mvee_verify_malloc_info(int alloc_type, int msg, long chunksize, void* ar_ptr, void* chunk_ptr);
++
++#define MVEE_POSTOP() \
++  mvee_atomic_postop_internal(__tmp_mvee_preop);
++
++#ifdef MVEE_EXTENDED_QUEUE
++ extern unsigned char     mvee_atomic_preop_internal             (unsigned char is_store, void* word_ptr, unsigned short op_type);
++# define MVEE_PREOP(op_type, mem, is_store)					\
++	register unsigned char __tmp_mvee_preop = mvee_atomic_preop_internal(is_store, (void*)mem, op_type);
++#else
++ extern unsigned char     mvee_atomic_preop_internal            (unsigned char is_store, void* word_ptr);
++# define MVEE_PREOP(op_type, mem, is_store) \
++	register unsigned char __tmp_mvee_preop = mvee_atomic_preop_internal(is_store, (void*)mem);
++#endif // !MVEE_EXTENDED_QUEUE
+diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/mvee-woc-agent.h glibc-2.25/sysdeps/x86_64/mvee-woc-agent.h
+--- glibc-2.25.orig/sysdeps/x86_64/mvee-woc-agent.h	1970-01-01 00:00:00.000000000 +0000
++++ glibc-2.25/sysdeps/x86_64/mvee-woc-agent.h	2017-09-13 19:55:56.060750900 +0000
+@@ -0,0 +1,16 @@
++#define MVEE_MAX_COUNTERS 65536
++
++#define MVEE_MALLOC_HOOK(type, msg, sz, ar_ptr, chunk_ptr)
++
++extern void          mvee_atomic_postop_internal (unsigned char preop_result);
++extern unsigned char mvee_atomic_preop_internal  (volatile void* word_ptr);
++extern int           mvee_should_sync_tid        (void);
++extern int           mvee_all_heaps_aligned      (char* heap, unsigned long alloc_size); 
++extern void          mvee_invalidate_buffer      (void);
++extern unsigned char mvee_should_futex_unlock    (void);
++
++#define MVEE_POSTOP()								\
++	mvee_atomic_postop_internal(__tmp_mvee_preop);
++
++#define MVEE_PREOP(op_type, mem, is_store)								\
++	register unsigned char  __tmp_mvee_preop = mvee_atomic_preop_internal(mem);
 diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/nptl/pthread_spin_lock.S glibc-2.25/sysdeps/x86_64/nptl/pthread_spin_lock.S
---- glibc-2.25.orig/sysdeps/x86_64/nptl/pthread_spin_lock.S	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/x86_64/nptl/pthread_spin_lock.S	1969-12-31 16:00:00.000000000 -0800
+--- glibc-2.25.orig/sysdeps/x86_64/nptl/pthread_spin_lock.S	2017-09-11 17:15:16.647740005 +0000
++++ glibc-2.25/sysdeps/x86_64/nptl/pthread_spin_lock.S	1970-01-01 00:00:00.000000000 +0000
 @@ -1,34 +0,0 @@
 -/* Copyright (C) 2012-2017 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -4370,8 +6775,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/nptl/pthread_spin_lock.S gli
 -	jmp	2b
 -END(pthread_spin_lock)
 diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/nptl/pthread_spin_trylock.S glibc-2.25/sysdeps/x86_64/nptl/pthread_spin_trylock.S
---- glibc-2.25.orig/sysdeps/x86_64/nptl/pthread_spin_trylock.S	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/x86_64/nptl/pthread_spin_trylock.S	1969-12-31 16:00:00.000000000 -0800
+--- glibc-2.25.orig/sysdeps/x86_64/nptl/pthread_spin_trylock.S	2017-09-11 17:15:16.647740005 +0000
++++ glibc-2.25/sysdeps/x86_64/nptl/pthread_spin_trylock.S	1970-01-01 00:00:00.000000000 +0000
 @@ -1,37 +0,0 @@
 -/* Copyright (C) 2002-2017 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -4411,8 +6816,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/nptl/pthread_spin_trylock.S 
 -	retq
 -END(pthread_spin_trylock)
 diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/nptl/pthread_spin_unlock.S glibc-2.25/sysdeps/x86_64/nptl/pthread_spin_unlock.S
---- glibc-2.25.orig/sysdeps/x86_64/nptl/pthread_spin_unlock.S	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/x86_64/nptl/pthread_spin_unlock.S	1969-12-31 16:00:00.000000000 -0800
+--- glibc-2.25.orig/sysdeps/x86_64/nptl/pthread_spin_unlock.S	2017-09-11 17:15:16.647740005 +0000
++++ glibc-2.25/sysdeps/x86_64/nptl/pthread_spin_unlock.S	1970-01-01 00:00:00.000000000 +0000
 @@ -1,29 +0,0 @@
 -/* Copyright (C) 2002-2017 Free Software Foundation, Inc.
 -   This file is part of the GNU C Library.
@@ -4444,8 +6849,8 @@ diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/nptl/pthread_spin_unlock.S g
 -	.globl	pthread_spin_init
 -pthread_spin_init = pthread_spin_unlock
 diff -N -r --unified glibc-2.25.orig/sysdeps/x86_64/nptl/tls.h glibc-2.25/sysdeps/x86_64/nptl/tls.h
---- glibc-2.25.orig/sysdeps/x86_64/nptl/tls.h	2017-02-05 07:28:43.000000000 -0800
-+++ glibc-2.25/sysdeps/x86_64/nptl/tls.h	2017-06-29 15:25:03.449377565 -0700
+--- glibc-2.25.orig/sysdeps/x86_64/nptl/tls.h	2017-09-11 17:15:16.648740076 +0000
++++ glibc-2.25/sysdeps/x86_64/nptl/tls.h	2017-09-13 19:55:56.069751544 +0000
 @@ -290,7 +290,7 @@
  
  

@@ -10,7 +10,7 @@ require 'pty'
 @runs      = 1
 
 def get_bench_name(benchnum)
-  _benchname=`grep "REGISTER.*(#{benchnum}," ../../Src/MVEE_demos.cpp`.split('"')[1]
+  _benchname=`grep "REGISTER.*(#{benchnum}," ../../Src/MVEE_config.cpp`.split('"')[1]
   return _benchname if _benchname
   "dunno"
 end
