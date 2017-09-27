@@ -3352,12 +3352,30 @@ void* monitor::thread(void* param)
             return NULL;
         }
 
+		// Standard blocking wait for all of our variants
 		if (interaction::wait(-1, status))
             mon->handle_event(status);
         else
             debugf("wait failed - error: %s - status: %s\n", 
 				   getTextualErrno(errno),
 				   getTextualMVEEWaitStatus(status).c_str());
+
+		// Don't go back into a blocking wait right away... first
+		// see if we already have a pending variant.
+		if (interaction::wait(-1, status, false, true) &&
+			status.reason != STOP_NOTSTOPPED)
+		{
+			mon->handle_event(status);
+
+			// We had a pending variant... which means there might be others.
+			// Try them one by one.
+			for (int i = 0; i < mvee::numvariants; ++i)
+			{
+				if (interaction::wait(mon->variants[i].variantpid, status, true, true) &&
+					status.reason != STOP_NOTSTOPPED)
+					mon->handle_event(status);									
+			}
+		}			
     }
 
     mon->shutdown(true);
