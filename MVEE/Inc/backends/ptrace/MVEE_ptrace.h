@@ -17,6 +17,7 @@
 #include <sys/wait.h>
 #include <asm/unistd.h>
 #include <unistd.h>
+#include <string.h>
 #include "MVEE_build_config.h"
 #include "MVEE_private_arch.h"
 
@@ -380,8 +381,8 @@ namespace interaction
 
         ssize_t nread = process_vm_readv(variantpid, local, 1, remote, 1, 0);
         if (nread != data_len)
-            warnf("interaction::read_memory failed. tried to read %ld bytes - actually read %zd bytes\n", 
-				  data_len, nread);
+            warnf("interaction::read_memory failed. tried to read %ld bytes - actually read %zd bytes - errno: %d (%s)\n", 
+				  data_len, nread, errno, strerror(errno));
 
 #ifdef MVEE_GENERATE_EXTRA_STATS
         if (!mvee::in_logging_handler)
@@ -406,8 +407,8 @@ namespace interaction
 
         ssize_t nwritten = process_vm_writev(variantpid, local, 1, remote, 1, 0);
         if (nwritten != data_len)
-            warnf("interaction::write_memory failed. tried to write %ld bytes - actually wrote %zd bytes\n", 
-				  data_len, nwritten);
+            warnf("interaction::write_memory failed. tried to write %ld bytes - actually wrote %zd bytes - errno: %d (%s)\n", 
+				  data_len, nwritten, errno, strerror(errno));
 
 #ifdef MVEE_GENERATE_EXTRA_STATS
         if (!mvee::in_logging_handler)
