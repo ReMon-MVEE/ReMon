@@ -1340,7 +1340,7 @@ POSTCALL(execve)
 			{
 				variants[i].fast_forwarding = true;				
 				debugf("%s - Variant will start with cross-checks DISABLED\n", 
-					   call_get_variant_pidstr(variantnum).c_str());
+					   call_get_variant_pidstr(i).c_str());
 			}
 		}
     }
