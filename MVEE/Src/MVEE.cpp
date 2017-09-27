@@ -1662,7 +1662,7 @@ void mvee::start_monitored()
 			fprintf(stderr, "Couldn't accept tracing\n");
 
         // Stop the variant so we can detach the main monitor thread.
-        raise(SIGSTOP);
+        kill(getpid(), SIGSTOP);
 
 		// Wait in a busy loop while we wait for the designated monitor
 		// thread to attach
