@@ -224,6 +224,7 @@ public:
 	// shutting down.
 	// 
     static bool                                 get_should_generate_backtraces();
+	static void                                 set_should_generate_backtraces();
 
 	// 
 	// Tell all monitors to check if their variants are multithreaded.

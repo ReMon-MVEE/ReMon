@@ -1006,45 +1006,6 @@ void mvee::unlock()
 }
 
 /*-----------------------------------------------------------------------------
-    open_signal_file - we open a file in tmp. An external
-    process can write to this file to communicate with the monitor and request
-    backtraces
------------------------------------------------------------------------------*/
-char* mvee::open_signal_file()
-{
-    char*       signal_file = NULL;
-
-#if !defined(MVEE_BENCHMARK) || defined(MVEE_FORCE_ENABLE_BACKTRACING)
-    int         fd          = open("/tmp/MVEE_signal_file.tmp", O_RDWR | O_CREAT | O_TRUNC, S_IRWXU | S_IRWXG | S_IRWXO);
-
-    if (fd == -1)
-    {
-        warnf("couldn't open signal file. Error = %d (%s)\n", errno, getTextualErrno(errno));
-        return NULL;
-    }
-
-    const char* init_buf    = "000";
-    int         numwritten  = write(fd, init_buf, 3);
-    if (numwritten != 3)
-    {
-        warnf("couldn't write to signal file. Error = %d (%s)\n", errno, getTextualErrno(errno));
-        return NULL;
-    }
-    signal_file = (char*)mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
-    if (signal_file == (char*)-1)
-    {
-        warnf("couldn't map signal file. Error = %d (%s)\n", errno, getTextualErrno(errno));
-        return signal_file;
-    }
-
-    memset(signal_file, 48, 4096);
-    close(fd);
-#endif
-
-    return signal_file;
-}
-
-/*-----------------------------------------------------------------------------
     request_shutdown -
 -----------------------------------------------------------------------------*/
 void mvee::request_shutdown(bool should_backtrace)
@@ -1227,12 +1188,21 @@ int mvee::get_next_monitorid()
 }
 
 /*-----------------------------------------------------------------------------
-    get_next_monitorid
+    get_should_generate_backtraces
 -----------------------------------------------------------------------------*/
 bool mvee::get_should_generate_backtraces()
 {
     MutexLock lock(&mvee::global_lock);
     return mvee::shutdown_should_generate_backtraces;
+}
+
+/*-----------------------------------------------------------------------------
+    set_should_generate_backtraces
+-----------------------------------------------------------------------------*/
+void mvee::set_should_generate_backtraces()
+{
+    mvee::shutdown_should_generate_backtraces = true;
+	__sync_synchronize();
 }
 
 /*-----------------------------------------------------------------------------
@@ -1370,6 +1340,16 @@ void mvee::unregister_monitor(monitor* mon)
 
     if (should_shutdown)
         mvee::request_shutdown(false);
+}
+
+/*-----------------------------------------------------------------------------
+    mvee_mon_external_backtrace_request - request backtraces when we shut down
+    the monitor
+-----------------------------------------------------------------------------*/
+void mvee_mon_external_backtrace_request(int sig)
+{
+	mvee::set_should_generate_backtraces();
+	mvee_mon_external_termination_request(sig);
 }
 
 /*-----------------------------------------------------------------------------
@@ -1565,8 +1545,18 @@ void mvee::start_monitored()
         mvee::active_monitor = new monitor(procs);
 
         // Install signal handlers for SIGINT and SIGQUIT so we can shut down safely after CTRL+C
-        signal(SIGINT,  mvee_mon_external_termination_request);
-        signal(SIGQUIT, mvee_mon_external_termination_request);
+		struct sigaction sigact;
+		sigact.sa_handler = mvee_mon_external_termination_request;
+		sigemptyset(&set);
+		sigact.sa_mask    = set;
+		sigact.sa_flags   = 0;
+		
+		sigaction(SIGINT, &sigact, nullptr);
+		sigaction(SIGQUIT, &sigact, nullptr);
+		
+		// Same thing but with backtraces
+		sigact.sa_handler = mvee_mon_external_backtrace_request;
+		sigaction(SIGUSR2, &sigact, nullptr);
 
         for (int i = 0; i < mvee::numvariants; ++i)
         {
@@ -1610,7 +1600,6 @@ void mvee::start_monitored()
         // everything is set up and ready to go...
         mvee::active_monitor   = NULL;
         mvee::active_monitorid = -1;
-        char*     signal_file = mvee::open_signal_file();
         while (true)
         {
             bool should_gc = false;
@@ -1618,11 +1607,6 @@ void mvee::start_monitored()
             mvee::lock();
             if (mvee::shutdown_signal)
             {
-                if (signal_file && signal_file[0] == '1')
-				{
-					warnf("Shutdown requested by MVEE_backtrace\n");
-                    mvee::shutdown_should_generate_backtraces = true;
-				}
                 mvee::unlock();
                 mvee::shutdown(mvee::shutdown_signal,
                                mvee::shutdown_should_generate_backtraces ? 1 : 0);
