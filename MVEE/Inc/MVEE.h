@@ -196,6 +196,12 @@ public:
     //
     static void                                 unregister_monitor          (monitor* mon, bool move_to_dead_monitors=true);
 
+	//
+	// Returns true if a variant in the specified thread group is still in the
+	// detach list OR is still being monitored by an active monitor
+	//
+	static bool                                 is_monitored_tgid           (pid_t tgid);
+
 	// 
 	// Returns true if the MVEE is monitoring variants that consist of multiple
 	// processes (i.e. tasks that have different tgids.

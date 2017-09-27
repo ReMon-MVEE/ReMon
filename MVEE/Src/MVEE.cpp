@@ -1015,7 +1015,7 @@ void mvee::request_shutdown(bool should_backtrace)
     mvee::shutdown_signal            = SIGINT;
     mvee::should_generate_backtraces = should_backtrace;
     mvee::unlock();
-    pthread_cond_signal(&mvee::global_cond);
+    pthread_cond_broadcast(&mvee::global_cond);
 }
 
 /*-----------------------------------------------------------------------------
@@ -1209,6 +1209,7 @@ detachedvariant* mvee::remove_detached_variant(pid_t variantpid)
         {
             detachedvariant* variant = *it;
             mvee::detachlist.erase(it);
+			pthread_cond_broadcast(&mvee::global_cond);
             return variant;
         }
     }
@@ -1326,7 +1327,7 @@ void mvee::unregister_monitor(monitor* mon, bool move_to_dead_monitors)
         if (active_monitors.size() <= 0)
             should_shutdown = true;
 
-        pthread_cond_signal(&mvee::global_cond);
+        pthread_cond_broadcast(&mvee::global_cond);
 
         if (mon == mvee::active_monitor)
             mvee::active_monitor = NULL;
@@ -1335,6 +1336,29 @@ void mvee::unregister_monitor(monitor* mon, bool move_to_dead_monitors)
     if (should_shutdown)
         mvee::request_shutdown(false);
 }
+
+/*-----------------------------------------------------------------------------
+    is_monitored_tgid - caller needs the global lock!
+-----------------------------------------------------------------------------*/
+bool mvee::is_monitored_tgid(pid_t tgid)
+{
+	// never shut down if we still have detached variants
+	if (detachlist.size() > 0)
+		return true;
+
+	for (auto it : active_monitors)
+	{
+		for (int i = 0; i < mvee::numvariants; ++i)
+		{
+			if (it->variants[i].varianttgid == tgid &&
+				!it->variants[i].variant_terminated)
+				return true;
+		}
+	}
+
+	return false;
+}
+
 
 /*-----------------------------------------------------------------------------
     mvee_mon_external_backtrace_request - request backtraces when we shut down

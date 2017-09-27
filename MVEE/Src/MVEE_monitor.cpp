@@ -954,7 +954,31 @@ nobacktrace:
 			pthread_cond_wait(&monitor_cond, &monitor_lock);
         pthread_mutex_unlock(&monitor_lock);
 
-		// kill all remaining variants
+		// Don't kill off our variants until every monitor
+		// that's monitoring variants in the same thread group has
+		// had a chance to backtrace
+		if (mvee::get_should_generate_backtraces())
+		{
+			while (true)
+			{
+				mvee::lock();
+				bool have_monitored_variants = false;
+				for (int i = 0; i < mvee::numvariants; ++i)
+				{
+					if (mvee::is_monitored_tgid(variants[i].varianttgid))
+					{
+						have_monitored_variants = true;
+						pthread_cond_wait(&mvee::global_cond, &mvee::global_lock);
+					}
+				}
+				mvee::unlock();												  
+
+				if (!have_monitored_variants)
+					break;
+			}
+		}
+
+		// Kill off our variants now
 		for (int i = 0; i < mvee::numvariants; ++i)
 			if (!variants[i].variant_terminated)
 				kill(variants[i].variantpid, SIGKILL);
@@ -3363,28 +3387,30 @@ void* monitor::thread(void* param)
 
 		// Standard blocking wait for all of our variants
 		if (interaction::wait(-1, status))
+		{
             mon->handle_event(status);
+
+			// Don't go back into a blocking wait right away... first
+			// see if we already have a pending variant.
+			if (interaction::wait(-1, status, true, true) &&
+				status.reason != STOP_NOTSTOPPED)
+			{
+				mon->handle_event(status);
+
+				// We had a pending variant... which means there might be others.
+				// Try them one by one.
+				for (int i = 0; i < mvee::numvariants; ++i)
+				{
+					if (interaction::wait(mon->variants[i].variantpid, status, true, true) &&
+						status.reason != STOP_NOTSTOPPED)
+						mon->handle_event(status);									
+				}
+			}			
+		}
         else
             debugf("wait failed - error: %s - status: %s\n", 
 				   getTextualErrno(errno),
 				   getTextualMVEEWaitStatus(status).c_str());
-
-		// Don't go back into a blocking wait right away... first
-		// see if we already have a pending variant.
-		if (interaction::wait(-1, status, true, true) &&
-			status.reason != STOP_NOTSTOPPED)
-		{
-			mon->handle_event(status);
-
-			// We had a pending variant... which means there might be others.
-			// Try them one by one.
-			for (int i = 0; i < mvee::numvariants; ++i)
-			{
-				if (interaction::wait(mon->variants[i].variantpid, status, true, true) &&
-					status.reason != STOP_NOTSTOPPED)
-					mon->handle_event(status);									
-			}
-		}			
     }
 
     mon->shutdown(true);
