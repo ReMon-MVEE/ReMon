@@ -60,7 +60,9 @@ std::map<std::string, std::weak_ptr<dwarf_info> >
                                        mvee::dwarf_cache;
 std::map<std::string, std::string>     mvee::unstripped_binaries_cache;
 bool                                   mvee::should_garbage_collect              = false;
-std::vector<monitor*>                  mvee::monitor_gclist;
+std::vector<monitor*>                  mvee::dead_monitors;
+std::vector<monitor*>                  mvee::active_monitors;
+std::vector<monitor*>                  mvee::inactive_monitors;
 std::map<pid_t, std::vector<pid_t> >   mvee::variant_pid_mapping;
 std::map<int, monitor*>                mvee::monitor_id_mapping;
 int                                    mvee::next_monitorid                      = 0;
@@ -73,8 +75,7 @@ int                                    mvee::num_physical_cpus                  
 pid_t                                  mvee::process_pid                         = 0;
 __thread pid_t                         mvee::thread_pid                          = 0;
 std::map<std::string, std::string>     mvee::interp_map;
-std::vector<pid_t>                     mvee::shutdown_kill_list;
-bool                                   mvee::shutdown_should_generate_backtraces = false;
+bool                                   mvee::should_generate_backtraces          = false;
 volatile unsigned long                 mvee::can_run                             = 0;
 std::string                            mvee::config_file_name                    = "";
 bool                                   mvee::config_show                         = false;
@@ -1010,10 +1011,9 @@ void mvee::unlock()
 -----------------------------------------------------------------------------*/
 void mvee::request_shutdown(bool should_backtrace)
 {
-//	warnf("Shutdown requested - should backtrace: %d\n", should_backtrace);
     mvee::lock();
-    mvee::shutdown_signal                     = SIGINT;
-    mvee::shutdown_should_generate_backtraces = should_backtrace;
+    mvee::shutdown_signal            = SIGINT;
+    mvee::should_generate_backtraces = should_backtrace;
     mvee::unlock();
     pthread_cond_signal(&mvee::global_cond);
 }
@@ -1031,12 +1031,6 @@ void mvee::request_shutdown(bool should_backtrace)
 void mvee::shutdown(int sig, int should_backtrace)
 {
     /*
-      warnf("monitor closing.\n");
-      warnf("shutdown sig: %d (%s)\n", sig, getTextualSig(sig));
-      warnf("should backtrace: %d\n",  should_backtrace);
-    */
-
-    /*
     retarded hack here. We have no way
     to unblock monitors that are waitpid'ing UNLESS we trigger an event that
     causes the waitpid to return
@@ -1044,19 +1038,25 @@ void mvee::shutdown(int sig, int should_backtrace)
     => we send a SIGALRM to one of the variants
      */
     mvee::lock();
-    for (std::map<int, monitor*>::iterator it
-             = mvee::monitor_id_mapping.begin(); it != mvee::monitor_id_mapping.end(); ++it)
-        it->second->signal_shutdown();
+    for (auto it : mvee::active_monitors)
+	{
+        it->signal_shutdown();
+	}
+    for (auto it : mvee::inactive_monitors)
+	{
+        // no need to send SIGUSR1. This monitor is already waiting to be shut down
+		it->monitor_tid = 0; 
+        it->signal_shutdown();
+	}
     mvee::unlock();
 
     // wait for all monitors to terminate
     while (1)
     {
-        //        mvee::garbage_collect();
         mvee::lock();
-        if (mvee::monitor_id_mapping.size() <= 0)
+        if (mvee::active_monitors.size() == 0 &&
+			mvee::inactive_monitors.size() == 0)
         {
-            //            warnf("all monitors have unregistered. Closing!\n");
             mvee::unlock();
             break;
         }
@@ -1066,26 +1066,7 @@ void mvee::shutdown(int sig, int should_backtrace)
 
     printf("all monitors terminated\n");
     mvee::log_fini(true);
-
-    mvee::lock();
-    while (!mvee::shutdown_kill_list.empty())
-    {
-        //printf("killing proc: %d\n", mvee_shutdown_kill_list.back());
-        kill(mvee::shutdown_kill_list.back(), SIGKILL);
-        mvee::shutdown_kill_list.pop_back();
-    }
-    mvee::unlock();
-
     exit(0);
-}
-
-/*-----------------------------------------------------------------------------
-    shutdown_add_to_kill_list -
------------------------------------------------------------------------------*/
-void mvee::shutdown_add_to_kill_list   (pid_t kill_pid)
-{
-    MutexLock lock(&mvee::global_lock);
-    mvee::shutdown_kill_list.push_back(kill_pid);
 }
 
 /*-----------------------------------------------------------------------------
@@ -1099,23 +1080,25 @@ void mvee::garbage_collect()
 
         mvee::should_garbage_collect = false;
 
-        // copy all dead monitors to a local gclist first and then clean
-        // them up without locking the global state...
-        while (mvee::monitor_gclist.size() > 0)
+        // copy all dead monitors to a local gclist first and then clean them up
+        // without locking the global state...
+        while (mvee::dead_monitors.size() > 0)
         {
-            monitor* mon = mvee::monitor_gclist.back();
+            auto mon = mvee::dead_monitors.back();
             local_gclist.push_back(mon);
-            mvee::monitor_gclist.pop_back();
-        }}
+            mvee::dead_monitors.pop_back();
+        }
+	}
 
     while (local_gclist.size() > 0)
     {
-        monitor* mon = local_gclist.back();
+        auto mon = local_gclist.back();
 
         if (mvee::shutdown_signal == 0)
             mon->join_thread();
 
-        logf("garbage collected monitor: %d\n", mon->monitorid);
+        logf("garbage collected monitor: %d\n", 
+			 mon->monitorid);
         SAFEDELETE(mon);
         local_gclist.pop_back();
     }
@@ -1130,11 +1113,10 @@ bool mvee::is_multiprocess()
     int       num_tgids = 0;
 
     MutexLock lock(&mvee::global_lock);
-    for (std::map<int, monitor*>::iterator it
-             = mvee::monitor_id_mapping.begin(); it != mvee::monitor_id_mapping.end(); ++it)
+    for (auto it : mvee::active_monitors)
     {
         pid_t tgid;
-        if ((tgid = it->second->get_mastertgid()) != prev_tgid)
+        if ((tgid = it->get_mastertgid()) != prev_tgid)
         {
             if (num_tgids++)
                 return true;
@@ -1155,21 +1137,20 @@ std::set<int> mvee::get_unavailable_cores(int* most_recent_core)
 
     MutexLock lock(&mvee::global_lock);
 
-    for (std::map<int, monitor*>::iterator it
-             = mvee::monitor_id_mapping.begin(); it != mvee::monitor_id_mapping.end(); ++it)
+    for (auto it : mvee::monitor_id_mapping)
 	{
-		int core = it->second->get_master_core();
+		int core = it.second->get_master_core();
 
 		if (core != -1)
 		{
 			debugf("cores [%d, %d] are currently in use by monitor %d\n",
 						core,
 						core + mvee::numvariants - 1,
-						it->second->monitorid);
+						it.second->monitorid);
 
 			result.insert(core);
 
-			if (it->first == mvee::active_monitorid - 1
+			if (it.first == mvee::active_monitorid - 1
 				&& most_recent_core)
 				*most_recent_core = core;
 		}
@@ -1193,7 +1174,7 @@ int mvee::get_next_monitorid()
 bool mvee::get_should_generate_backtraces()
 {
     MutexLock lock(&mvee::global_lock);
-    return mvee::shutdown_should_generate_backtraces;
+    return mvee::should_generate_backtraces;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1201,7 +1182,7 @@ bool mvee::get_should_generate_backtraces()
 -----------------------------------------------------------------------------*/
 void mvee::set_should_generate_backtraces()
 {
-    mvee::shutdown_should_generate_backtraces = true;
+    mvee::should_generate_backtraces = true;
 	__sync_synchronize();
 }
 
@@ -1278,9 +1259,8 @@ int mvee::have_pending_variants(monitor* mon)
 -----------------------------------------------------------------------------*/
 void mvee::set_should_check_multithread_state(int monitorid)
 {
-    MutexLock                         lock(&mvee::global_lock);
-    std::map<int, monitor*>::iterator it
-        = mvee::monitor_id_mapping.find(monitorid);
+    MutexLock lock(&mvee::global_lock);
+    auto it = mvee::monitor_id_mapping.find(monitorid);
     if (it != mvee::monitor_id_mapping.end())
         it->second->set_should_check_multithread_state();
 }
@@ -1307,6 +1287,7 @@ void mvee::register_monitor(monitor* mon)
     {
 		MutexLock lock(&mvee::global_lock);
         mvee::monitor_id_mapping.insert(std::pair<int, monitor*>(mon->monitorid, mon));
+		mvee::active_monitors.push_back(mon);
 	}
 
     mon->signal_registration();
@@ -1315,23 +1296,36 @@ void mvee::register_monitor(monitor* mon)
 /*-----------------------------------------------------------------------------
     unregister_monitor
 -----------------------------------------------------------------------------*/
-void mvee::unregister_monitor(monitor* mon)
+void mvee::unregister_monitor(monitor* mon, bool move_to_dead_monitors)
 {
-    std::map<int, monitor*>::iterator it;
-    bool                              should_shutdown = false;
+    bool should_shutdown = false;
 
     {
 		MutexLock lock(&mvee::global_lock);
-        it                           = monitor_id_mapping.find(mon->monitorid);
+        auto it = monitor_id_mapping.find(mon->monitorid);
         if (it != monitor_id_mapping.end())
             monitor_id_mapping.erase(it);
+		auto it2 = std::find(active_monitors.begin(), active_monitors.end(), mon);
+		if (it2 != active_monitors.end())
+			active_monitors.erase(it2);
 
-        monitor_gclist.push_back(mon);
+		if (move_to_dead_monitors)
+		{
+			auto it3 = std::find(inactive_monitors.begin(), inactive_monitors.end(), mon);
+			if (it3 != inactive_monitors.end())
+				inactive_monitors.erase(it3);
 
-        if (mvee::monitor_id_mapping.size() <= 0)
+			dead_monitors.push_back(mon);
+			should_garbage_collect = true;
+		}
+		else
+		{
+			inactive_monitors.push_back(mon);
+		}
+
+        if (active_monitors.size() <= 0)
             should_shutdown = true;
 
-        mvee::should_garbage_collect = true;
         pthread_cond_signal(&mvee::global_cond);
 
         if (mon == mvee::active_monitor)
@@ -1361,10 +1355,7 @@ void mvee_mon_external_termination_request(int sig)
     {
         printf("EXTERNAL TERMINATION REQUEST - MONITORID: %d\n", mvee::active_monitorid);
         if (!mvee::shutdown_signal)
-        {
-            mvee::shutdown_signal = sig;
-            pthread_cond_signal(&mvee::global_cond);
-        }
+			mvee::request_shutdown(mvee::should_generate_backtraces);
         else
             exit(0);
     }
@@ -1609,7 +1600,7 @@ void mvee::start_monitored()
             {
                 mvee::unlock();
                 mvee::shutdown(mvee::shutdown_signal,
-                               mvee::shutdown_should_generate_backtraces ? 1 : 0);
+                               mvee::should_generate_backtraces ? 1 : 0);
                 return;
             }
 
