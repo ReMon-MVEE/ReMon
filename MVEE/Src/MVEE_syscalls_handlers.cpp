@@ -7108,9 +7108,13 @@ LOG_RETURN(fstat)
 	debugf("Blocks allocated:         %lld\n",
 		   (long long) sb.st_blocks);
 
-	debugf("Last status change:       %s", ctime(&sb.st_ctime));
-	debugf("Last file access:         %s", ctime(&sb.st_atime));
-	debugf("Last file modification:   %s", ctime(&sb.st_mtime));
+	char timestr[30];
+	ctime_r(&sb.st_ctime, timestr);
+	debugf("Last status change:       %s", timestr);
+	ctime_r(&sb.st_atime, timestr);
+	debugf("Last file access:         %s", timestr);
+	ctime_r(&sb.st_mtime, timestr);
+	debugf("Last file modification:   %s", timestr);
 }
 
 POSTCALL(fstat)
@@ -7193,9 +7197,13 @@ LOG_RETURN(fstat64)
 	debugf("Blocks allocated:         %lld\n",
 		   (long long) sb.st_blocks);
 
-	debugf("Last status change:       %s", ctime(&sb.st_ctime));
-	debugf("Last file access:         %s", ctime(&sb.st_atime));
-	debugf("Last file modification:   %s", ctime(&sb.st_mtime));
+	char timestr[30];
+	ctime_r(&sb.st_ctime, timestr);
+	debugf("Last status change:       %s", timestr);
+	ctime_r(&sb.st_atime, timestr);
+	debugf("Last file access:         %s", timestr);
+	ctime_r(&sb.st_mtime, timestr);
+	debugf("Last file modification:   %s", timestr);
 }
 
 POSTCALL(fstat64)
@@ -8919,9 +8927,13 @@ LOG_RETURN(fstatat64)
 	debugf("Blocks allocated:         %lld\n",
 		   (long long) sb.st_blocks);
 
-	debugf("Last status change:       %s", ctime(&sb.st_ctime));
-	debugf("Last file access:         %s", ctime(&sb.st_atime));
-	debugf("Last file modification:   %s", ctime(&sb.st_mtime));
+	char timestr[30];
+	ctime_r(&sb.st_ctime, timestr);
+	debugf("Last status change:       %s", timestr);
+	ctime_r(&sb.st_atime, timestr);
+	debugf("Last file access:         %s", timestr);
+	ctime_r(&sb.st_mtime, timestr);
+	debugf("Last file modification:   %s", timestr);
 }
 
 POSTCALL(fstatat64)
