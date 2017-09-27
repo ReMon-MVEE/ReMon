@@ -115,9 +115,6 @@ struct rbuf* rbuf_init(size_t capacity, int variants)
 	}
 	else
 	{
-		// if we started with cross-checks disabled, enable them now
-		syscall(MVEE_ENABLE_XCHECKS, NULL);
-
 		variants = syscall(MVEE_GET_THREAD_NUM, NULL);
 		buf_sz = capacity;
 

@@ -54,6 +54,8 @@ __attribute__((constructor))
 static void rb_init()
 #endif
 {
+	// if we started with cross-checks disabled, enable them now
+	syscall(MVEE_ENABLE_XCHECKS, NULL);
 	buf = rbuf_init<CrossCheck>(4096, 0);
 	syscall(MVEE_GET_THREAD_NUM, &my_variant_num);
 	// we only wanted cross-checks for rbuf_init(),
