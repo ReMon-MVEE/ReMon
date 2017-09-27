@@ -1149,12 +1149,14 @@ PRECALL(execve)
 
 CALL(execve)
 {
+#if 0
 	if IS_UNSYNCED_CALL
 	{
 		warnf("unsynced execve dispatch - was this intentional?\n");
 		variants[variantnum].entry_point_bp_set = false;
 		return MVEE_CALL_ALLOW;
 	}
+#endif
 
 	// check if the file exists first
 	for (int i = 0; i < mvee::numvariants; ++i)
@@ -1219,7 +1221,7 @@ CALL(execve)
 	for (int i = 0; i < mvee::numvariants; ++i)
 	{
 		rewrite_execve_args(i, true, false);
-		variants[i].entry_point_bp_set = false;
+//		variants[i].entry_point_bp_set = false;
 	}
 
     return MVEE_CALL_ALLOW;
@@ -1332,13 +1334,15 @@ POSTCALL(execve)
 #endif
 
 		// enable fast forwarding?
-		/*for (int i = 0; i < mvee::numvariants; ++i)
+		if (!(*mvee::config_variant_global)["xchecks_initially_enabled"].asBool())
 		{
-			variants[i].entry_point_address = 
-				mvee::os_get_entry_point_address(...);
-			
-			variants[i].fast_forward_to_entry_point = true;				
-		 }*/
+			for (int i = 0; i < mvee::numvariants; ++i)
+			{
+				variants[i].fast_forwarding = true;				
+				debugf("%s - Variant will start with cross-checks DISABLED\n", 
+					   call_get_variant_pidstr(variantnum).c_str());
+			}
+		}
     }
 	else
 	{		
@@ -2603,6 +2607,13 @@ PRECALL(fcntl)
 
 POSTCALL(fcntl)
 {
+	if IS_UNSYNCED_CALL
+	{
+		if (ARG2(variantnum) == F_GETFD)
+			return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+		return 0;
+	}
+
     if (call_succeeded)
     {
         if (ARG2(0) == F_GETLK || ARG2(0) == F_GETLK64) // locking operations
@@ -2637,7 +2648,7 @@ POSTCALL(fcntl)
                     REPLICATEFDRESULT();
                 }
 
-                fd_info*                   fd_info = set_fd_table->get_fd_info(ARG1(0));
+                fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0));
                 if (!fd_info)
                     return 0;
 
@@ -3286,7 +3297,7 @@ CALL(readlink)
 POSTCALL(readlink)
 {
     REPLICATEBUFFER(2);
-    return 0;
+    return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -3297,6 +3308,10 @@ POSTCALL(readlink)
 -----------------------------------------------------------------------------*/
 GET_CALL_TYPE(munmap)
 {
+	// munmap xchecks can be relaxed regardless of the target region
+	if ((*mvee::config_variant_global)["relaxed_mman_xchecks"].asBool())
+		return MVEE_CALL_TYPE_UNSYNCED;
+
     // We do NOT want to sync on the munmap of the lower region
     if (in_new_heap_allocation)
     {
@@ -5200,6 +5215,18 @@ POSTCALL(clone)
   protection flags. This behaviour CAN cause problems if we do not sync
   mprotect.
 -----------------------------------------------------------------------------*/
+GET_CALL_TYPE(mprotect)
+{
+	// Unless we're making something PROT_EXEC, we can always relax this xcheck
+	if ((*mvee::config_variant_global)["relaxed_mman_xchecks"].asBool() &&
+		!(ARG3(variantnum) & PROT_EXEC))
+	{
+		return MVEE_CALL_TYPE_UNSYNCED;
+	}
+
+	return MVEE_CALL_TYPE_NORMAL;
+}
+
 LOG_ARGS(mprotect)
 {
 	debugf("%s - SYS_MPROTECT(0x" PTRSTR ", %zd, " PTRSTR " = %s)\n",
@@ -5396,6 +5423,9 @@ POSTCALL(mprotect)
 	}
 	else
 	{
+		if (call_succeeded)
+			set_mmap_table->mprotect_range(variantnum, ARG1(variantnum), ARG2(variantnum), ARG3(variantnum));
+
 		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 	}
 
@@ -5815,6 +5845,28 @@ GET_CALL_TYPE(nanosleep)
   kernel: (unsigned long old_addr, unsigned long old_len, unsigned long new_len,
   unsigned long flags, unsigned long new_addr)
 -----------------------------------------------------------------------------*/
+GET_CALL_TYPE(mremap)
+{
+	// This one can be relaxed if the new region has MAP_ANONYMOUS and not PROT_EXEC
+	if ((*mvee::config_variant_global)["relaxed_mman_xchecks"].asBool())
+	{
+		bool has_prot_exec = false;
+		mmap_region_info* old_region = set_mmap_table->get_region_info(variantnum, ARG1(variantnum), ARG2(variantnum));
+
+		if (old_region && 
+			(old_region->region_prot_flags & PROT_EXEC))
+		{
+			has_prot_exec = true;
+		}
+
+		if (!has_prot_exec &&
+			(ARG4(variantnum) & MAP_ANONYMOUS))
+			return MVEE_CALL_TYPE_UNSYNCED;
+	}
+
+	return MVEE_CALL_TYPE_NORMAL;
+}
+
 LOG_ARGS(mremap)
 {
 	debugf("%s - SYS_MREMAP(0x" PTRSTR ", %lu, %lu, 0x" PTRSTR ", 0x" PTRSTR ")\n",
@@ -6354,6 +6406,19 @@ PRECALL(getcwd)
   kernel mmap2: (unsigned long addr, unsigned long len, unsigned long prot,
   unsigned long flags, unsigned long fd, unsigned long pgoff)
 -----------------------------------------------------------------------------*/
+GET_CALL_TYPE(mmap)
+{
+	// mman xchecks can be relaxed for non-executable heap allocations
+	if ((*mvee::config_variant_global)["relaxed_mman_xchecks"].asBool() &&
+		(ARG4(variantnum) & MAP_ANONYMOUS) &&
+		!(ARG3(variantnum) & PROT_EXEC))
+	{
+		return MVEE_CALL_TYPE_UNSYNCED;
+	}
+
+	return MVEE_CALL_TYPE_NORMAL;
+}
+
 LOG_ARGS(mmap)
 {
 	debugf("%s - SYS_MMAP(0x" PTRSTR ", %lu, %s, %s, %d, %lu)\n",
@@ -6713,8 +6778,10 @@ POSTCALL(mmap)
 		set_mmap_table->map_range(variantnum, result, ARG2(variantnum), ARG4(variantnum), ARG3(variantnum), info, actual_offset);
 		set_mmap_table->verify_mman_table(variantnum, variants[variantnum].variantpid);
 
+// old code that did fast forwarding to the entry point
+#if 0
 		// Check if we mapped the main binary
-		/*if (info &&
+		if (info &&
 			variants[variantnum].fast_forward_to_entry_point &&
 			!variants[variantnum].entry_point_bp_set)
 		{
@@ -6725,11 +6792,11 @@ POSTCALL(mmap)
 //			warnf("Mapping %s\n", info->path.c_str());
 
 			if ((ARG3(variantnum) & PROT_EXEC) &&
-				info->path.compare(program_image) == 0)
+				info->paths[variantnum].compare(program_image) == 0)
 			{
 				// see if we can get a handle to the executable region that
 				// contains the entry point
-				unsigned long region_base = set_mmap_table->find_image_base(variantnum, info->path);
+				unsigned long region_base = set_mmap_table->find_image_base(variantnum, info->paths[variantnum]);
 
 				if (region_base)
 				{
@@ -6751,7 +6818,8 @@ POSTCALL(mmap)
 					}
 				}
 			}
-			}*/
+		}
+#endif
 
 		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 	}
@@ -7896,9 +7964,16 @@ LOG_ARGS(set_tid_address)
 
 POSTCALL(set_tid_address)
 {
-	// Always returns the caller's thread ID
-	for (int i = 0; i < mvee::numvariants; ++i)
-		call_postcall_set_variant_result(i, variants[0].variantpid);
+	if IS_UNSYNCED_CALL
+	{
+		call_postcall_set_variant_result(variantnum, variants[0].variantpid);
+	}
+	else
+	{
+		// Always returns the caller's thread ID
+		for (int i = 0; i < mvee::numvariants; ++i)
+			call_postcall_set_variant_result(i, variants[0].variantpid);
+	}
     return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
 

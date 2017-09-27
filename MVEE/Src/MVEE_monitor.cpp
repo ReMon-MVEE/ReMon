@@ -71,8 +71,7 @@ variantstate::variantstate()
     , variant_attached (false)
     , variant_resumed (false)
     , current_signal_ready (false)
-	, fast_forward_to_entry_point (false)
-	, entry_point_bp_set (false)
+	, fast_forwarding (false)
     , have_overwritten_args (false)
 	, syscall_checking_disabled(false)
 	, max_unchecked_syscalls (0)
@@ -81,7 +80,6 @@ variantstate::variantstate()
     , last_upper_region_start (0)
     , last_upper_region_size (0)
     , last_mmap_result (0)
-	, entry_point_address (0)
 	, ipmon_region (NULL)
     , varianttgid (0)
     , pendingpid (0)
@@ -484,7 +482,11 @@ void monitor::rewrite_execve_args(int variantnum, bool write_to_stack, bool rewr
 #ifdef MVEE_ARCH_HAS_VDSO
 			(*mvee::config_variant_global)["hide_vdso"].asBool() ||
 #endif
-			(*mvee::config_variant_global)["non_overlapping_mmaps"].asInt())
+			(*mvee::config_variant_global)["non_overlapping_mmaps"].asInt() 
+#ifdef MVEE_ARCH_ALWAYS_USE_LD_LOADER
+			|| true
+#endif
+			)
 		{
 			argv.push_front(mvee::strdup(MVEE_LD_LOADER_NAME));
 			image = mvee::os_get_mvee_ld_loader();
@@ -1162,7 +1164,7 @@ bool monitor::handle_rdtsc_event(int variantnum)
             debugf("%s - Trapped rdtsc instruction\n",
 				   call_get_variant_pidstr(variantnum).c_str());
 
-			if (variants[variantnum].fast_forward_to_entry_point)
+			if (variants[variantnum].fast_forwarding)
 			{
 				debugf("%s - Variant is fast forwarding. Allowing rdtsc\n",
 					   call_get_variant_pidstr(variantnum).c_str());
@@ -1632,6 +1634,8 @@ void monitor::handle_trap_event(int index)
     if (interaction::get_signal_info(variants[index].variantpid, &siginfo) &&
 		siginfo.si_code == MVEE_TRAP_HWBKPT)
 	{
+// old code for fast forwarding to entrypoint
+#if 0
 		if (variants[index].fast_forward_to_entry_point)
 		{
 #ifdef MVEE_ARCH_HAS_X86_HWBP
@@ -1668,8 +1672,11 @@ void monitor::handle_trap_event(int index)
 		}
 		else
 		{
+#endif
 			log_hw_bp_event(index, &siginfo);
+#if 0
 		}
+#endif
 	}
 
 	call_resume(index);

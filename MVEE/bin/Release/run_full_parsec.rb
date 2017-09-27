@@ -8,10 +8,10 @@ require 'pty'
 @workers   = [4]
 @variants  = [2]
 @parsec    = (30..42)
-@runs      = 1
+@runs      = 10
 
 def get_bench_name(benchnum)
-  _benchname=`grep "REGISTER.*(#{benchnum}," ../../Src/MVEE_demos.cpp`.split('"')[3]
+  _benchname=`grep "REGISTER.*(#{benchnum}," ../../Src/MVEE_config.cpp`.split('"')[3]
   return _benchname if _benchname
   "dunno"
 end
@@ -27,7 +27,7 @@ def run_bench(benchnum, variants, threads, input, results, native)
     return
   end
     
-  PTY.spawn("./MVEE #{benchnum} #{variants} #{threads} #{input} #{'-n' if native} 2>&1") do |stdout, stdin, pid|
+  PTY.spawn("./MVEE #{benchnum} -N #{variants} #{threads} #{input} #{'-n' if native} 2>&1") do |stdout, stdin, pid|
     begin
       stdout.each { |ln|
         if ln.match(/real\t/)

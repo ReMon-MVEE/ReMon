@@ -4,6 +4,7 @@
 #include <sys/shm.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <asm/unistd.h>
 #include <unistd.h>
 #include <errno.h>
 
@@ -12,7 +13,10 @@
 #define MVEE_FAKE_SYSCALL_BASE 0x6FFFFFFF
 #define MVEE_GET_THREAD_NUM MVEE_FAKE_SYSCALL_BASE + 10
 #define MVEE_GET_SHARED_BUFFER MVEE_FAKE_SYSCALL_BASE + 4
+#define MVEE_ENABLE_XCHECKS MVEE_FAKE_SYSCALL_BASE + 18
+#define MVEE_DISABLE_XCHECKS MVEE_FAKE_SYSCALL_BASE + 19
 #define MVEE_RING_BUFFER 22
+#define MAX_WAIT_CYCLES 10000
 
 // get the rollover bit from a copy of the head field
 // then mask out the bit in the copy
@@ -82,7 +86,7 @@ struct rbuf* rbuf_init(size_t capacity, int variants)
 	int buf_id, buf_sz;
 	struct rbuf* buf = nullptr;
 
-	// not in the MVEE
+	// Not in the MVEE. This is just for native benchmarking.
 	if (variants != 0)
 	{
 		buf_sz = ROUND_UP(64 * (variants + 1) + capacity * sizeof(T), 4096);		
@@ -100,8 +104,6 @@ struct rbuf* rbuf_init(size_t capacity, int variants)
 				return nullptr;
 			}
 
-			printf("attached\n");
-
 			struct shmid_ds buf_ds;
 			if (shmctl(buf_id, IPC_STAT, &buf_ds) || 
 				shmctl(buf_id, IPC_RMID, &buf_ds))
@@ -113,6 +115,9 @@ struct rbuf* rbuf_init(size_t capacity, int variants)
 	}
 	else
 	{
+		// if we started with cross-checks disabled, enable them now
+		syscall(MVEE_ENABLE_XCHECKS, NULL);
+
 		variants = syscall(MVEE_GET_THREAD_NUM, NULL);
 		buf_sz = capacity;
 
@@ -135,6 +140,10 @@ struct rbuf* rbuf_init(size_t capacity, int variants)
 			fprintf(stderr, "failed to attach to ring buffer\n");
 			return nullptr;
 		}
+
+		// we only wanted cross-checks for MVEE_GET_SHARED_BUFFER,
+		// disable them now
+		syscall(MVEE_DISABLE_XCHECKS, NULL);
 	}
 
 	// buf->elems will most likely differ from capacity because we 
@@ -145,10 +154,6 @@ struct rbuf* rbuf_init(size_t capacity, int variants)
 		buf->elem_size = sizeof(T);
 		buf->data_offset = 64 * (variants + 1);
 		buf->slaves = variants - 1;
-/*
-		printf("Attached to rbuf - effective size: %d (bytes) - effective capacity: %lu (items)\n",
-			   buf_sz, buf->elems);
-*/
 	}
 
 	return buf;
@@ -159,6 +164,7 @@ void rbuf_push (struct rbuf* buf, T& elem)
 {
 	// tail = position of last non-consumed elem (that we know of)
 	register unsigned long tail = buf->pos[0].tail, head, rollover;	
+	unsigned wait = 0;
 	
 	// fetch the head value and rollover bit
 	GET_WITH_ROLLOVER(buf->pos[0].head, head, rollover);
@@ -212,7 +218,15 @@ void rbuf_push (struct rbuf* buf, T& elem)
 				}
 				
 				// there's one aligned with our tail. we have to wait.
-				cpu_relax();
+				if (wait++ >= MAX_WAIT_CYCLES)
+				{
+					syscall(__NR_sched_yield);
+					wait = 0;
+				}
+				else
+				{
+					cpu_relax();
+				}
 				continue;
 			}
 
@@ -253,6 +267,7 @@ void rbuf_peek (struct rbuf* buf, int slave_num, T& elem)
 {
 	register unsigned long slave_head, slave_rollover, master_rollover;
 	register unsigned long last_seen_master_head = buf->pos[slave_num + 1].tail;
+	unsigned wait = 0;
 
 	GET_WITH_ROLLOVER(buf->pos[slave_num + 1].head, 
 					  slave_head, 
@@ -270,7 +285,15 @@ void rbuf_peek (struct rbuf* buf, int slave_num, T& elem)
 		if (master_rollover != slave_rollover)
 			break;
 		
-		cpu_relax();
+		if (wait++ >= MAX_WAIT_CYCLES)
+		{
+			syscall(__NR_sched_yield);
+			wait = 0;
+		}
+		else
+		{
+			cpu_relax();
+		}
 	}
 
 	// if the master and slave heads are not equal, there's data in the buffer

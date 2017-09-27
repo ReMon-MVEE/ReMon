@@ -76,6 +76,14 @@
 #define MVEE_ARCH_USE_LIBUNWIND
 
 //
+// MVEE_ARCH_ALWAYS_USE_LD_LOADER: this is defined if we always want to load
+// variants indirectly using the LD Loader. Normally, the LD Loader is
+// only used if we want to hide the VDSO or if we want to apply Disjoint
+// Code Layouts.
+//
+#define MVEE_ARCH_ALWAYS_USE_LD_LOADER
+
+//
 // PAGE_SIZE: This is here because the ARM system headers do not define the
 // default page size.
 //

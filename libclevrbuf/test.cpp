@@ -1,7 +1,7 @@
 #include "librbuf.h"
 
 #define ITEMS 1000000
-#define SLAVES 40
+#define SLAVES 8
 
 unsigned short my_variant = 0;
 
