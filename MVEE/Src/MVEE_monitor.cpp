@@ -3362,7 +3362,7 @@ void* monitor::thread(void* param)
 
 		// Don't go back into a blocking wait right away... first
 		// see if we already have a pending variant.
-		if (interaction::wait(-1, status, false, true) &&
+		if (interaction::wait(-1, status, true, true) &&
 			status.reason != STOP_NOTSTOPPED)
 		{
 			mon->handle_event(status);
