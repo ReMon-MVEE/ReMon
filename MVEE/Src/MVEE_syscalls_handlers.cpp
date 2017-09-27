@@ -1120,16 +1120,15 @@ LOG_ARGS(execve)
 
 PRECALL(execve)
 {
-	handle_execve_get_args(0);
+	for (int i = 0; i < mvee::numvariants; ++i)
+        handle_execve_get_args(i);
 
 	// This is the default, but we might set it to true if
 	// sys_execve mismatches on the first arg
-	set_mmap_table->have_diversified_variants = false;
+	set_mmap_table->have_diversified_variants = false;	
 
     for (int i = 1; i < mvee::numvariants; ++i)
     {
-        handle_execve_get_args(i);
-		
         if (set_mmap_table->mmap_startup_info[i].image.compare(
 				set_mmap_table->mmap_startup_info[0].image))
         {
@@ -1164,13 +1163,13 @@ CALL(execve)
 		std::string alias = mvee::get_alias(i, set_mmap_table->mmap_startup_info[i].image);
 		if (alias == "" && access(set_mmap_table->mmap_startup_info[i].image.c_str(), F_OK) == -1)
 		{
-			debugf("variant %d is trying to launch a non-existing program: %s\n", 
+			warnf("variant %d is trying to launch a non-existing program: %s\n", 
 				   i, set_mmap_table->mmap_startup_info[i].image.c_str());
 			return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOENT);
 		}
 		else if (alias != "" && access(alias.c_str(), F_OK) == -1)
 		{
-			debugf("variant %d is trying to launch a non-existing program alias: %s\n", 
+			warnf("variant %d is trying to launch a non-existing program alias: %s\n", 
 				   i, alias.c_str());
 			return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOENT);
 		}					
@@ -7109,9 +7108,13 @@ LOG_RETURN(fstat)
 	debugf("Blocks allocated:         %lld\n",
 		   (long long) sb.st_blocks);
 
-	debugf("Last status change:       %s", ctime(&sb.st_ctime));
-	debugf("Last file access:         %s", ctime(&sb.st_atime));
-	debugf("Last file modification:   %s", ctime(&sb.st_mtime));
+	char timestr[30];
+	ctime_r(&sb.st_ctime, timestr);
+	debugf("Last status change:       %s", timestr);
+	ctime_r(&sb.st_atime, timestr);
+	debugf("Last file access:         %s", timestr);
+	ctime_r(&sb.st_mtime, timestr);
+	debugf("Last file modification:   %s", timestr);
 }
 
 POSTCALL(fstat)
@@ -7194,9 +7197,13 @@ LOG_RETURN(fstat64)
 	debugf("Blocks allocated:         %lld\n",
 		   (long long) sb.st_blocks);
 
-	debugf("Last status change:       %s", ctime(&sb.st_ctime));
-	debugf("Last file access:         %s", ctime(&sb.st_atime));
-	debugf("Last file modification:   %s", ctime(&sb.st_mtime));
+	char timestr[30];
+	ctime_r(&sb.st_ctime, timestr);
+	debugf("Last status change:       %s", timestr);
+	ctime_r(&sb.st_atime, timestr);
+	debugf("Last file access:         %s", timestr);
+	ctime_r(&sb.st_mtime, timestr);
+	debugf("Last file modification:   %s", timestr);
 }
 
 POSTCALL(fstat64)
@@ -8920,9 +8927,13 @@ LOG_RETURN(fstatat64)
 	debugf("Blocks allocated:         %lld\n",
 		   (long long) sb.st_blocks);
 
-	debugf("Last status change:       %s", ctime(&sb.st_ctime));
-	debugf("Last file access:         %s", ctime(&sb.st_atime));
-	debugf("Last file modification:   %s", ctime(&sb.st_mtime));
+	char timestr[30];
+	ctime_r(&sb.st_ctime, timestr);
+	debugf("Last status change:       %s", timestr);
+	ctime_r(&sb.st_atime, timestr);
+	debugf("Last file access:         %s", timestr);
+	ctime_r(&sb.st_mtime, timestr);
+	debugf("Last file modification:   %s", timestr);
 }
 
 POSTCALL(fstatat64)

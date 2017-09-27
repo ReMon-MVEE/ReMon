@@ -71,6 +71,8 @@ namespace rw
 				SAFEDELETEARRAY(buf);
 				return -1;
 			}
+
+			SAFEDELETEARRAY(buf);
 		}
 
 		return len;

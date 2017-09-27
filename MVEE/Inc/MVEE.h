@@ -150,12 +150,6 @@ public:
     static void start_unmonitored           ();
 
 	// 
-	// Adds a variant to a list of processes that may need to be forcibly killed
-	// upon MVEE shutdown
-	// 
-    static void shutdown_add_to_kill_list   (pid_t kill_pid);
-
-	// 
 	// Reads the MVEE configuration from MVEE.ini, possibly creating the file in
 	// the process.
     //
@@ -200,7 +194,13 @@ public:
 	// This function also shuts down the MVEE when the last running monitor
 	// unregisters.
     //
-    static void                                 unregister_monitor          (monitor* mon);
+    static void                                 unregister_monitor          (monitor* mon, bool move_to_dead_monitors=true);
+
+	//
+	// Returns true if a variant in the specified thread group is still in the
+	// detach list OR is still being monitored by an active monitor
+	//
+	static bool                                 is_monitored_tgid           (pid_t tgid);
 
 	// 
 	// Returns true if the MVEE is monitoring variants that consist of multiple
@@ -225,6 +225,7 @@ public:
 	// 
     static bool                                 get_should_generate_backtraces();
 	static void                                 set_should_generate_backtraces();
+    static bool                                 should_generate_backtraces;
 
 	// 
 	// Tell all monitors to check if their variants are multithreaded.
@@ -510,9 +511,9 @@ public:
 	static Json::Value*             config_variant_exec;
 	static Json::Value*             config_monitor;
 
-    // monitor object and id of the monitor we're running in this thread
-    // we used to use this for almost everything but nowadays it's really just here
-    // for logging...
+    // monitor object and id of the monitor we're running in this thread we used
+    // to use this for almost everything but nowadays it's really just here for
+    // logging...
     static __thread monitor*        active_monitor;
     static __thread int             active_monitorid;
 
@@ -644,7 +645,16 @@ private:
     static bool                                 should_garbage_collect;
 
     // list of monitors to be garbage collected
-    static std::vector<monitor*>                monitor_gclist;
+    static std::vector<monitor*>                dead_monitors;
+
+	// list of active monitors
+	static std::vector<monitor*>                active_monitors;
+
+	// list of inactive monitors
+	// We move monitors into this list if the variants they're monitoring
+	// are suspended indefinitely (e.g., because they triggered a divergence),
+	// but we don't want to kill these variants just yet.
+	static std::vector<monitor*>                inactive_monitors;
 
     // maps every variant pid onto the set of pids it's part of
     // i.e. this would contain M[A] -> {M[A], S[A]} and also S[A] -> {M[A], S[A]}
@@ -670,12 +680,6 @@ private:
     static pid_t                                process_pid;
     static __thread pid_t                       thread_pid;
     static std::map<std::string, std::string>   interp_map;
-
-    //
-    // Shutdown coordination
-    //
-    static std::vector<pid_t>                   shutdown_kill_list;
-    static bool                                 shutdown_should_generate_backtraces;
 
     //
     // Logging Vars
