@@ -7356,7 +7356,7 @@ LOG_ARGS(gettid)
 		{
 			debugf("[PID:%05d] - [UNKNOWN_DEBUG_EVENT:%d]\n",
 				   variants[variantnum].variantpid, (int)ARG3(variantnum));
-			log_variant_backtrace(variantnum);
+			//log_variant_backtrace(variantnum);
 		}
 	}
 	else
