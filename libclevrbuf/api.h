@@ -3,4 +3,7 @@
 #ifdef EXPLICIT_RB_INIT
 extern "C" void rb_init();
 #endif
+#ifdef EXPLICIT_RB_FINI
+extern "C" void rb_fini();
+#endif
 extern "C" void rb_xcheck(unsigned long item);

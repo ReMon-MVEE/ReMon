@@ -4,7 +4,10 @@ set -e
 ORIG_PWD=$(pwd)
 
 # Install the necessary ubuntu packages
-sudo apt-get install ruby gcc g++ libselinux-dev musl-tools libelf-dev libdwarf-dev libgmp-dev libmpfr-dev libmpc-dev libisl-dev libcloog-isl-dev libconfig-dev libcap-dev cmake bison flex git texinfo texi2html zlib1g-dev libunwind8 libunwind8-dev liblzma5 liblzma-dev
+if [ -e /usr/bin/apt-get ]
+then
+    sudo apt-get install ruby gcc g++ libselinux-dev musl-tools libelf-dev libdwarf-dev libgmp-dev libmpfr-dev libmpc-dev libisl-dev libcloog-isl-dev libconfig-dev libcap-dev cmake bison flex git texinfo texi2html zlib1g-dev libunwind8 libunwind8-dev liblzma5 liblzma-dev
+fi
 
 # Download & Install binutils
 if [ ! -e deps/binutils ]

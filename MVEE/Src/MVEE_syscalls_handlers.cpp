@@ -74,6 +74,7 @@
 /*-----------------------------------------------------------------------------
   Includes
 -----------------------------------------------------------------------------*/
+#include <errno.h>
 #include <stdio.h>
 #include <sys/ioctl.h>
 #include <sys/ipc.h>
@@ -95,7 +96,6 @@
 #include <utime.h>
 #include <termios.h>
 #include <sys/quota.h>
-#include <errno.h>
 #include <sys/prctl.h>
 #include <linux/futex.h>
 #include <linux/sysinfo.h>

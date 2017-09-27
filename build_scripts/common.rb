@@ -11,10 +11,10 @@
 @bits = `getconf LONG_BIT`.chop
 
 # find out which file has the syscall numbers
-if File.exist? "/usr/include/#{@target}/asm/unistd_#{@bits}.h"
-  @unistd="/usr/include/#{@target}/asm/unistd_#{@bits}.h"
+if File.exist? "/usr/include/asm/unistd_#{@bits}.h"
+  @unistd="/usr/include/asm/unistd_#{@bits}.h"
 else
-  @unistd="/usr/include/#{@target}/asm/unistd.h"
+  @unistd="/usr/include/asm/unistd.h"
 end
 
 # Get GHUMVEE arch

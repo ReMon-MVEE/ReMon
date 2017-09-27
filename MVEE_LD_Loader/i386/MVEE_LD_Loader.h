@@ -5,7 +5,7 @@
  * found in GHUMVEELICENSE.txt.
  */
 
-#include "/usr/include/i386-linux-gnu/asm/unistd_32.h"
+#include "/usr/include/asm/unistd_32.h"
 
 #define INTERP              "/lib/ld-linux.so.2"
 #define INTERP_SHORT        "MVEE Variant %d >"
