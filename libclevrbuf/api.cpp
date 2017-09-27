@@ -56,6 +56,9 @@ static void rb_init()
 {
 	buf = rbuf_init<CrossCheck>(4096, 0);
 	syscall(MVEE_GET_THREAD_NUM, &my_variant_num);
+	// we only wanted cross-checks for rbuf_init(),
+	// disable them now
+	syscall(MVEE_DISABLE_XCHECKS, NULL);
 }
 
 #ifdef EXPLICIT_RB_FINI

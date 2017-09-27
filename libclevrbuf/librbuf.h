@@ -140,10 +140,6 @@ struct rbuf* rbuf_init(size_t capacity, int variants)
 			fprintf(stderr, "failed to attach to ring buffer\n");
 			return nullptr;
 		}
-
-		// we only wanted cross-checks for MVEE_GET_SHARED_BUFFER,
-		// disable them now
-		syscall(MVEE_DISABLE_XCHECKS, NULL);
 	}
 
 	// buf->elems will most likely differ from capacity because we 
