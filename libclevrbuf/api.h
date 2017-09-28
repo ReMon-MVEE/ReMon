@@ -6,4 +6,4 @@ extern "C" void rb_init();
 #ifdef EXPLICIT_RB_FINI
 extern "C" void rb_fini();
 #endif
-extern "C" void rb_xcheck(unsigned long item);
+extern "C" void rb_xcheck(unsigned char tag, unsigned long val);

@@ -1,10 +1,15 @@
 #include "librbuf.h"
 #include "api.h"
 
-enum class CrossCheckType : char
+#include <cstddef>
+#include <cstdint>
+
+enum CrossCheckType : uint8_t
 {
-	ITEM,
 	TERMINATOR,
+
+	// For client-provided tags, add their tag value to this
+	FIRST_CLIENT_TAG
 };
 
 #pragma pack(push, 1)
@@ -12,7 +17,7 @@ struct CrossCheck
 {
 	// FIXME: this structure takes 9 bytes
 	// do we want the size aligned to 8 bytes (for a total of 16)???
-	unsigned long item;
+	uint64_t item;
 	CrossCheckType type;
 
 	bool operator==(const CrossCheck &other) const
@@ -75,8 +80,9 @@ static void rb_fini()
 	xcheck_internal(xcheck);
 }
 
-extern "C" void rb_xcheck(unsigned long item)
+extern "C" void rb_xcheck(uint8_t tag, uint64_t val)
 {
-	CrossCheck xcheck = { item, CrossCheckType::ITEM };
+	auto xcheck_tag = static_cast<CrossCheckType>(CrossCheckType::FIRST_CLIENT_TAG + tag);
+	CrossCheck xcheck{ val, xcheck_tag };
 	xcheck_internal(xcheck);
 }
