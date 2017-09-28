@@ -15,7 +15,7 @@ lib: $(LIB_OBJS)
 	$(CXX) -shared -fPIC -o libclevrbuf.so $(LIB_OBJS)
 
 test: $(TEST_OBJS)
-	$(CXX) -ggdb -o test $(TEST_OBJS)
+	$(CXX) -ggdb -o test $(TEST_OBJS) -Wl,-rpath,$(CURDIR) -L$(CURDIR) -lclevrbuf
 
 clean:
 	rm -rf test libclevrbuf.so $(TEST_OBJS) $(LIB_OBJS)
