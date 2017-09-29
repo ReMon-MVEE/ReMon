@@ -98,6 +98,14 @@
 #define MVEE_ARCH_LITTLE_ENDIAN
 
 //
+// MVEE_ARCH_ALWAYS_USE_LD_LOADER: this is defined if we always want to load
+// variants indirectly using the LD Loader. Normally, the LD Loader is
+// only used if we want to hide the VDSO or if we want to apply Disjoint
+// Code Layouts.
+//
+#define MVEE_ARCH_ALWAYS_USE_LD_LOADER
+
+//
 // the base constant from which all fake syscall numbers used by the monitor
 // are derived
 //
