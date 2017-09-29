@@ -15,6 +15,8 @@ if File.exist? "/usr/include/asm/unistd_#{@bits}.h"
   @unistd="/usr/include/asm/unistd_#{@bits}.h"
 elsif File.exist? "/usr/include/asm/unistd.h"
   @unistd="/usr/include/asm/unistd.h"
+elsif File.exist? "/usr/include/#{@target}/asm/unistd_#{@bits}.h"
+  @unistd="/usr/include/#{@target}/asm/unistd_#{@bits}.h"
 else
   @unistd="/usr/include/arm-linux-gnueabihf/asm/unistd.h"
 end
