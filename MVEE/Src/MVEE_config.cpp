@@ -218,12 +218,12 @@ void mvee::set_builtin_config(int builtin)
 		REGISTER_PARSEC(31, 2, "gcc-pthreads", "bodytrack"     );
 		REGISTER_PARSEC(32, 2, "gcc-pthreads", "canneal"       );
 		REGISTER_PARSEC(33, 2, "gcc-pthreads", "dedup"         );
-		REGISTER_PARSEC(34, 2, "gcc-pthreads", "facesim"       );
+		REGISTER_PARSEC(34, 3, "gcc-pthreads", "facesim"       );
 		REGISTER_PARSEC(35, 2, "gcc-pthreads", "ferret"        );
 		REGISTER_PARSEC(36, 2, "gcc-pthreads", "fluidanimate"  );
 		REGISTER_PARSEC(37, 2, "gcc-openmp"  , "freqmine"      );
 		REGISTER_PARSEC(38, 2, "gcc-pthreads", "raytrace"      );
-		REGISTER_PARSEC(39, 2, "gcc-pthreads", "streamcluster" );
+		REGISTER_PARSEC(39, 3, "gcc-pthreads", "streamcluster" );
 		REGISTER_PARSEC(40, 2, "gcc-pthreads", "swaptions"     );
 		REGISTER_PARSEC(41, 2, "gcc-pthreads", "vips"          );
 		REGISTER_PARSEC(42, 2, "gcc-pthreads", "x264"          );
