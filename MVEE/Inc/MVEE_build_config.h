@@ -99,6 +99,11 @@
 // caches every time they get marked PROT_EXEC
 // #define MVEE_DUMP_JIT_CACHES
 
+// MVEE_VERIFY_ATOMIC_INSTRUMENTATION: when a new executable gets mmapped, check if 
+// its executable code has synchronization operations that are not wrapped in an 
+// mvee_atomic_preop/mvee_atomic_postop pair
+#define MVEE_VERIFY_ATOMIC_INSTRUMENTATION
+
 /*-----------------------------------------------------------------------------
   Constants
 -----------------------------------------------------------------------------*/

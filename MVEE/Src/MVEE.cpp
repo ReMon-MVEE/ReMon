@@ -425,6 +425,65 @@ std::string mvee::os_get_unstripped_binary(const std::string& file)
 }
 
 /*-----------------------------------------------------------------------------
+    os_has_noninstrumented_atomics
+-----------------------------------------------------------------------------*/
+bool mvee::os_has_noninstrumented_atomics (const std::string& file)
+{
+	static std::map<std::string, bool> has_noninstrumented_atomics;
+   
+	// check if it's already in the map
+	{
+		MutexLock lock(&mvee::global_lock);
+		auto it = has_noninstrumented_atomics.find(file);
+
+		if (it != has_noninstrumented_atomics.end())
+			return it->second;
+	}
+
+	if (file.find("/patched_binaries/") == std::string::npos)
+	{
+		// not in the map yet, disassemble and check
+		std::stringstream cmd;
+		cmd << "objdump --disassemble " << file << " | " << MVEE_ARCH_FIND_ATOMIC_OPS_STRING;
+		std::stringstream instructions(mvee::log_read_from_proc_pipe(cmd.str().c_str(), NULL));
+		std::string instruction, prev_instruction;
+
+		while (std::getline(instructions, instruction))
+		{
+			// the filtered disassembly includes only atomic operations and calls to the sync agent
+			// Thus, if this line is nog a call to the sync agent, it must be an atomic op
+			if (instruction.find("mvee_atomic") == std::string::npos)
+			{
+				// check if the previous instruction was a call to the preop function
+				// if it was, then this atomic op is wrapped
+				if (prev_instruction.find("mvee_atomic_preop") == std::string::npos)
+				{
+					MutexLock lock(&mvee::global_lock);
+					auto it = has_noninstrumented_atomics.find(file);
+				
+					if (it == has_noninstrumented_atomics.end())
+						has_noninstrumented_atomics.insert(std::make_pair(file, true));
+					return true;				
+				}
+			}
+
+			prev_instruction = instruction;
+		}
+	}
+
+	// no non-instrumented ops found
+	{
+		MutexLock lock(&mvee::global_lock);
+		auto it = has_noninstrumented_atomics.find(file);
+		
+		if (it == has_noninstrumented_atomics.end())
+			has_noninstrumented_atomics.insert(std::make_pair(file, false));
+	}
+
+	return false;	
+}
+
+/*-----------------------------------------------------------------------------
     os_get_orig_working_dir
 -----------------------------------------------------------------------------*/
 std::string mvee::os_get_orig_working_dir()

@@ -6455,6 +6455,29 @@ PRECALL(mmap)
         CHECKARG(6);
 
     MAPFDS(5);
+
+#if defined(MVEE_VERIFY_ATOMIC_INSTRUMENTATION) && !defined(MVEE_BENCHMARK)
+	if ((ARG3(0) & PROT_EXEC) && 
+		ARG5(0) && (int)ARG5(0) != -1)
+	{
+		fd_info* info = set_fd_table->get_fd_info(ARG5(0));
+		
+		if (info)
+		{
+			if (mvee::os_has_noninstrumented_atomics(info->paths[0]))
+			{
+				warnf("The variants are loading a binary with non-instrumented atomic operations.\n");
+				warnf("Binary name: %s\n", info->paths[0].c_str());
+				warnf("If this is a multi-threaded program, you will probably see divergences because of this.\n");
+				warnf("Please refer to our EuroSys 2017 paper for more details:\n");
+				warnf("\tTaming Parallelism in a Multi-Variant Execution Environment\n");
+				warnf("\tStijn Volckaert, Bart Coppens, Bjorn De Sutter, Koen De Bosschere, Per Larsen, and Michael Franz.\n");
+				warnf("\tIn 12th European Conference on Computer Systems (EuroSys'17). ACM, 2017.\n");				
+				warnf("\n");
+			}
+		}		
+	}
+#endif
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 

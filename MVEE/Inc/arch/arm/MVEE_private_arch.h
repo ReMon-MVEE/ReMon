@@ -131,6 +131,7 @@
 #define LONGRESULTSTR              "%08ld"
 #define OBJDUMP_ARCH               "arm"
 #define OBJDUMP_SUBARCH            "arm"
+#define MVEE_ARCH_FIND_ATOMIC_OPS_STRING "egrep \"THISISNOTSUPPORTEDONARMYET\""
 
 /*-----------------------------------------------------------------------------
   DWARF Constants

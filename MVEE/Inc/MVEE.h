@@ -427,6 +427,12 @@ public:
 	static std::string   os_get_build_id             (const std::string& file);
 	static std::string   os_get_unstripped_binary    (const std::string& file);
 
+	//
+	// Check if the specified ELF file has non-instrumented atomic operations 
+	// in its executable code sections
+	//
+	static bool          os_has_noninstrumented_atomics (const std::string& file);
+
     // *************************************************************************
     // Miscellaneous Support Functions
     // *************************************************************************

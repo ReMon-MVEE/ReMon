@@ -150,6 +150,7 @@
 #define LONGRESULTSTR              "%016ld"
 #define OBJDUMP_ARCH               "i386"
 #define OBJDUMP_SUBARCH            "x86-64"
+#define MVEE_ARCH_FIND_ATOMIC_OPS_STRING "egrep \"lock |xchg|mvee\\_atomic\" | grep -v \"xchg *%[a-z0-9]*,%[a-z0-9]*$\""
 
 /*-----------------------------------------------------------------------------
   DWARF Constants
