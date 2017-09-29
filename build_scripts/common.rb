@@ -13,8 +13,10 @@
 # find out which file has the syscall numbers
 if File.exist? "/usr/include/asm/unistd_#{@bits}.h"
   @unistd="/usr/include/asm/unistd_#{@bits}.h"
-else
+elsif File.exist? "/usr/include/asm/unistd.h"
   @unistd="/usr/include/asm/unistd.h"
+else
+  @unistd="/usr/include/arm-linux-gnueabihf/asm/unistd.h"
 end
 
 # Get GHUMVEE arch
