@@ -1265,12 +1265,9 @@ char* mmap_table::get_normalized_maps_output (int variantnum, pid_t variantpid)
 -----------------------------------------------------------------------------*/
 void mmap_table::verify_mman_table (int variantnum, pid_t variantpid)
 {
-//#if 0
-
     if (mmap_startup_info[0].image.length() == 0)
         return;
 
-//#ifdef MVEE_MMAN_DEBUG
 #if 0
     char*       maps            = get_normalized_maps_output(variantnum, variantpid);
     std::string normalized_dump = get_normalized_map_dump(variantnum);
@@ -1285,8 +1282,6 @@ void mmap_table::verify_mman_table (int variantnum, pid_t variantpid)
                 variantpid);
         std::string smaps = mvee::log_read_from_proc_pipe(cmd, NULL);
         warnf("smaps output:\n%s\n", smaps.c_str());
-
-        mvee::request_shutdown(false);
     }
 
     SAFEDELETEARRAY(maps);

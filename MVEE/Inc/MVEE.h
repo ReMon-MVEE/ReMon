@@ -545,6 +545,21 @@ public:
     // Lock/Cond that protects the variables below
     //
     static pthread_mutex_t          global_lock;
+
+	//
+	// This cond var is used to coordinate the safe shutdown of the MVEE.
+	// There are two types of threads that can wait on this cond var:
+	//
+	// 1) The "management thread" (aka the main thread of the MVEE process)
+	// waits for this cond var and gets woken up whenever:
+	// * a monitor moves from the active to the inactive list
+	// * a monitor moves from the inactive to the dead list
+	// * an external user or process requests a full MVEE shutdown 
+	// by sending a signal to the MVEE process
+	// 
+	// 2) Monitor threads wait for this cond var when they're shutting down
+	// and they're waiting for other monitors in the same thread group to
+	// shut down
     static pthread_cond_t           global_cond;
 
     //

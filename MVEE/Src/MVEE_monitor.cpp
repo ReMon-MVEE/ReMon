@@ -318,12 +318,7 @@ bool monitor::restart_variant(int variantnum)
 
     // First of all, we have to wait until we reach the next syscall entry
 	if (!interaction::resume_until_syscall(pid))
-	{
-		warnf("%s - Couldn't resume variant\n",
-			  call_get_variant_pidstr(variantnum).c_str());
-		shutdown(false);
-		return false;
-	}
+		throw ResumeFailure(variantnum, "variant restart");
 
     while (true)
     {
@@ -336,12 +331,7 @@ bool monitor::restart_variant(int variantnum)
 		if (!interaction::wait(pid, status, false, false, false) ||
 			status.reason != STOP_SYSCALL)
 		{
-			warnf("%s - Wait failed during restart - error: %s - status: %s\n",
-				  call_get_variant_pidstr(variantnum).c_str(), 
-				  getTextualErrno(errno),
-				  getTextualMVEEWaitStatus(status).c_str());
-			shutdown(true);
-			return false;
+			throw WaitFailure(variantnum, "variant restart", status);
 		}
 		else
 		{
@@ -358,24 +348,14 @@ bool monitor::restart_variant(int variantnum)
 		   call_get_variant_pidstr(variantnum).c_str());
 
 	if (!interaction::resume_until_syscall(pid))
-	{
-		warnf("%s - Couldn't resume variant\n",
-			  call_get_variant_pidstr(variantnum).c_str());
-		shutdown(false);
-		return false;
-	}
+		throw ResumeFailure(variantnum, "variant restart");
 
     while (true)
     {
 		if (!interaction::wait(pid, status, false, false, false) ||
 			(status.reason != STOP_SYSCALL && status.reason != STOP_EXECVE))
 		{
-			warnf("%s - Wait failed during restart - error: %s - status: %s\n",
-				  call_get_variant_pidstr(variantnum).c_str(), 
-				  getTextualErrno(errno),
-				  getTextualMVEEWaitStatus(status).c_str());
-			shutdown(true);
-			return false;
+			throw WaitFailure(variantnum, "variant restart", status);
 		}
 		else
 		{
@@ -391,12 +371,7 @@ bool monitor::restart_variant(int variantnum)
 					   call_get_variant_pidstr(variantnum).c_str());
 
 				if (!interaction::resume_until_syscall(pid))
-				{
-					warnf("%s - Couldn't resume variant\n",
-						  call_get_variant_pidstr(variantnum).c_str());
-					shutdown(false);
-					return false;
-				}
+					throw ResumeFailure(variantnum, "variant restart");
 			}
 		}
     }
@@ -574,10 +549,7 @@ void monitor::rewrite_execve_args(int variantnum, bool write_to_stack, bool rewr
         || rw::copy_data(mvee::os_gettid(), (void*)serialized_argv, pid, (void*)argv_target_address, argv_len) == -1
         || (rewrite_envp && rw::copy_data(mvee::os_gettid(), (void*)serialized_envp, pid, (void*)envp_target_address, envp_len) == -1))
     {
-        warnf("%s - Couldn't copy execve arguments to address space this variant\n", 
-			  call_get_variant_pidstr(variantnum).c_str());
-        shutdown(false);
-        return;
+		throw RwMemFailure(variantnum, "execve arguments copy");
     }
 
     // set the registers
@@ -590,12 +562,7 @@ void monitor::rewrite_execve_args(int variantnum, bool write_to_stack, bool rewr
 	SYSCALL_NO(variantnum) = __NR_execve;
 
 	if (!interaction::write_all_regs(variants[variantnum].variantpid, &variants[variantnum].regs))
-	{
-		warnf("%s - couldn't write new execve args\n",
-			  call_get_variant_pidstr(variantnum).c_str());
-		shutdown(false);
-		return;
-	}
+		throw RwRegsFailure(variantnum, "execve arguments rewrite");
 
     SAFEDELETEARRAY(serialized_argv);
     SAFEDELETEARRAY(serialized_envp);
@@ -825,18 +792,18 @@ void monitor::shutdown(bool success)
         if (!have_other_processes)
         {
             debugf("GHUMVEE is only monitoring one process group => we're shutting everything down\n");
-            if (!set_mmap_table->thread_group_shutting_down)
-                mvee::request_shutdown(true);
+			mvee::set_should_generate_backtraces();
         }
         else
         {
             // just kill this group
             debugf("GHUMVEE is monitoring multiple process groups => we're only shutting this group down\n");
-			debugf("set_mmap_table->thread_group_shutting_down = %d\n", set_mmap_table->thread_group_shutting_down);
+			debugf("set_mmap_table->thread_group_shutting_down = %d\n", 
+				   set_mmap_table->thread_group_shutting_down.load());
 
-			if (!set_mmap_table->thread_group_shutting_down)
+			if (!set_mmap_table->thread_group_shutting_down.exchange(true))
 			{
-				set_mmap_table->thread_group_shutting_down = 1;
+				// only log if the group was not shutting down already
 #ifndef MVEE_BENCHMARK
 				should_log = true;
 #endif
@@ -866,17 +833,13 @@ void monitor::shutdown(bool success)
 			if (set_mmap_table)
 				set_mmap_table->release_lock();
 
-
-            // TODO: should we only do this if we shut down the last thread in the group???
-            //if (!is_program_multithreaded())
-            //{
             goto nobacktrace;
-            //}
         }
     }
 
 	debugf("Backtrace check - Should generate backtraces: %d - Thread group shutting down: %d\n",
-		 mvee::get_should_generate_backtraces(), set_mmap_table->thread_group_shutting_down);
+		   mvee::get_should_generate_backtraces(), 
+		   set_mmap_table->thread_group_shutting_down.load());
 
     if (mvee::get_should_generate_backtraces() &&
 		!set_mmap_table->thread_group_shutting_down)
@@ -892,7 +855,8 @@ nobacktrace:
     set_fd_table->full_release_lock();
     set_shm_table->full_release_lock();
 
-    // We explicitly reset the shared pointers here so all of the tables get deleted if we were the last monitor referring to them
+    // We explicitly reset the shared pointers here so all of the tables get
+    // deleted if we were the last monitor referring to them
     set_fd_table.reset();
     if (set_shm_table.use_count() == 1)
     {
@@ -905,10 +869,12 @@ nobacktrace:
 #endif
     }
     set_shm_table.reset();
-    // if we're the second to last one holding a ref to this mmap table then let the main thread know that we're possible singlethreaded again
+    // if we're the second to last one holding a ref to this mmap table then let
+    // the main thread know that we're possible singlethreaded again
     if (set_mmap_table.use_count() == 2)
         mvee::set_should_check_multithread_state(set_mmap_table->mmap_execve_id);
-    set_mmap_table.reset(); // must be freed AFTER the shm table
+    // must be freed AFTER the shm table
+    set_mmap_table.reset(); 
     set_sighand_table.reset();
 
     if (atomic_buffer)
@@ -1185,13 +1151,11 @@ bool monitor::handle_rdtsc_event(int variantnum)
 		long current_opcode;
 
         // read current opcode
-		if (!interaction::fetch_ip(variants[variantnum].variantpid, eip) ||
-			!rw::read_primitive<long>(variants[variantnum].variantpid, (void*) eip, current_opcode))
-		{
-			warnf("%s - Couldn't read trapping instruction\n",
-				  call_get_variant_pidstr(variantnum).c_str());
-			return false;
-		}
+		if (!interaction::fetch_ip(variants[variantnum].variantpid, eip))
+			throw RwRegsFailure(variantnum, "RDTSC signal check");
+
+		if (!rw::read_primitive<long>(variants[variantnum].variantpid, (void*) eip, current_opcode))
+			throw RwMemFailure(variantnum, "RDTSC signal check");
 
         // rdtsc opcode should be in lower 2 bytes
         if ((short int)(current_opcode & 0x0000FFFF) == 0x310F)
@@ -1210,13 +1174,14 @@ bool monitor::handle_rdtsc_event(int variantnum)
 				// write back result
 				if (!interaction::write_specific_reg(variants[variantnum].variantpid, RDTSC_LOW_REG_OFFSET, lower) ||
 					!interaction::write_specific_reg(variants[variantnum].variantpid, RDTSC_HIGH_REG_OFFSET, upper) ||
-					!interaction::write_ip(variants[variantnum].variantpid, eip + 2) ||
-					!interaction::resume_until_syscall(variants[variantnum].variantpid))
+					!interaction::write_ip(variants[variantnum].variantpid, eip + 2))
 				{
-					warnf("%s - Couldn't emulate rdtsc instruction\n",
-						  call_get_variant_pidstr(variantnum).c_str());
-					return false;
+					throw RwRegsFailure(variantnum, "writing RDTSC result");
 				}
+				
+				if (!interaction::resume_until_syscall(variants[variantnum].variantpid))
+					throw ResumeFailure(variantnum, "RDTSC resume");
+
 				return true;
 			}
 
@@ -1264,13 +1229,13 @@ bool monitor::handle_rdtsc_event(int variantnum)
 					if (!interaction::write_specific_reg(variants[i].variantpid, RDTSC_LOW_REG_OFFSET, lower) ||
 						!interaction::write_specific_reg(variants[i].variantpid, RDTSC_HIGH_REG_OFFSET, upper) ||
 						!interaction::fetch_ip(variants[i].variantpid, eip) ||
-						!interaction::write_ip(variants[i].variantpid, eip + 2) ||
-						!interaction::resume_until_syscall(variants[i].variantpid))
+						!interaction::write_ip(variants[i].variantpid, eip + 2))
 					{
-						warnf("%s - Couldn't emulate rdtsc instruction\n",
-							  call_get_variant_pidstr(i).c_str());
-						return false;
+						throw RwRegsFailure(i, "writing RDTSC result");
 					}
+
+					if (!interaction::resume_until_syscall(variants[i].variantpid))
+						throw RwRegsFailure(i, "RDTSC resume");
 
                     variants[i].callnum = NO_CALL;
                 }
@@ -1292,12 +1257,7 @@ void monitor::handle_attach_event(int index)
     variants[index].variant_attached = 1;
 
 	if (!interaction::attach(variants[index].variantpid))
-	{
-		warnf("%s - Couldn't attach to variant\n",
-			  call_get_variant_pidstr(index).c_str());
-		shutdown(false);
-		return;
-	}
+		throw AttachFailure(index);
 
     debugf("%s - Attached to variant\n", 
 		   call_get_variant_pidstr(index).c_str());
@@ -1335,7 +1295,7 @@ void monitor::handle_detach_event(pid_t variantpid)
     {
         warnf("It seems that you are trying to run a multi-threaded or multi-process application.\n");
         warnf("For these applications, GHUMVEE currently requires a GHUMVEE-enabled\n");
-        warnf("version of eglibc. The GHUMVEE eglibc contains a small infinite loop to\n");
+        warnf("version of (e)glibc. The GHUMVEE (e)glibc contains a small infinite loop to\n");
         warnf("which we transfer the control while detaching a monitor from a variant\n");
         warnf("thread. By the time the new monitor attaches to this thread, the thread\n");
         warnf("will still be in this infinite loop (duh).\n");
@@ -1349,12 +1309,7 @@ void monitor::handle_detach_event(pid_t variantpid)
     }
 
 	if (!interaction::read_all_regs(new_variant->variantpid, &new_variant->original_regs))
-	{
-		warnf("failed to read regs of variant we're detaching from (PID: %d)\n",
-			  new_variant->variantpid);
-		shutdown(false);
-		return;
-	}
+		throw RwRegsFailure(-new_variant->variantpid, "pre-detach read");
 
 	PTRACE_REGS tmp;
 	memcpy(&tmp, &new_variant->original_regs, sizeof(PTRACE_REGS));
@@ -1362,20 +1317,10 @@ void monitor::handle_detach_event(pid_t variantpid)
 	IP_IN_REGS(tmp) = (unsigned long)new_variant->transfer_func;
 
 	if (!interaction::write_all_regs(new_variant->variantpid, &tmp))
-	{
-		warnf("failed to write regs of variant we're detaching from (PID: %d)\n",
-			  new_variant->variantpid);
-		shutdown(false);
-		return;
-	}
+		throw RwRegsFailure(-new_variant->variantpid, "pre-detach write");
 
 	if (!interaction::detach(new_variant->variantpid))
-	{
-		warnf("Failed to detach from newly created variant (PID: %d)\n",
-			  new_variant->variantpid);
-		shutdown(false);
-		return;
-	}
+		throw DetachFailure(-new_variant->variantpid, "pre-transfer");
 
     debugf("Detached from variant (PID: %d) => set ip to: " PTRSTR "\n",
 		   new_variant->variantpid, new_variant->transfer_func);
@@ -1424,11 +1369,7 @@ void monitor::handle_resume_event(int index)
 {
     variants[index].variant_resumed = true;
 	if (!interaction::setoptions(variants[index].variantpid))
-	{
-		warnf("%s - Couldn't set tracing options\n", call_get_variant_pidstr(index).c_str());
-		shutdown(false);
-		return;
-	}
+		throw RwInfoFailure(index, "post-attach");
 
     // before we resume the variant, we have to look for it in the global detachlist
     if (monitorid)
@@ -1448,12 +1389,7 @@ void monitor::handle_resume_event(int index)
         variants[index].tid_address[1]    = attached_variant->tid_address[1];
 
 		if (!interaction::write_all_regs(variants[index].variantpid, &attached_variant->original_regs))
-		{
-			warnf("%s - failed to write regs while resuming\n",
-				  call_get_variant_pidstr(index).c_str());
-			shutdown(false);
-			return;
-		}
+			throw RwRegsFailure(index, "post-attach");
 
         delete attached_variant;
     }
@@ -1491,9 +1427,10 @@ void monitor::handle_resume_event(int index)
                         debugf("%s - setting master tid for variant\n", 
 							   call_get_variant_pidstr(i).c_str());
 						
-						rw::write_primitive<int>(variants[i].variantpid, 
-										  variants[i].tid_address[j], 
-										  variants[0].variantpid);
+						if (!rw::write_primitive<int>(variants[i].variantpid, 
+													  variants[i].tid_address[j], 
+													  variants[0].variantpid))
+							throw RwMemFailure(i, "couldn't replicate master tids post-attach");
                     }
                 }
             }
@@ -1677,12 +1614,7 @@ void monitor::handle_trap_event(int index)
 			if (!interaction::read_specific_reg(variants[index].variantpid, 
 									   offsetof(user, u_debugreg) + 6*sizeof(long), 
 									   dr6))
-			{
-				warnf("%s - Couldn't read dr6 register\n",
-					  call_get_variant_pidstr(index).c_str());
-				shutdown(false);
-				return;
-			}
+				throw RwRegsFailure(index, "hwbp dr6");
 
 			for (int i = 0; i < 4; ++i)
 			{
@@ -1858,15 +1790,8 @@ void monitor::handle_syscall_entrance_event(int index)
 		if (state == STATE_IN_MASTERCALL)
 		{
 			for (i = 1; i < mvee::numvariants; ++i)
-			{
 				if (!interaction::write_syscall_no(variants[i].variantpid, __NR_getpid))
-				{
-					warnf("%s - call is a mastercall, but GHUMVEE couldn't set the syscall number to sys_getpid\n",
-						  call_get_variant_pidstr(i).c_str());
-					shutdown(false);
-					return;
-				}
-			}
+					throw RwRegsFailure(i, "set slave fake call num at mastercall entrance");
 		}
 
 		call_resume_all();
@@ -2008,15 +1933,8 @@ void monitor::handle_syscall_exit_event(int index)
 
 			// Replicate return value
             for (i = 1; i < mvee::numvariants; ++i)
-			{
 				if (!interaction::write_syscall_return(variants[i].variantpid, variants[0].return_value))
-				{
-					warnf("%s - call was a mastercall, but GHUMVEE couldn't set the syscall return value\n",
-						  call_get_variant_pidstr(i).c_str());
-					shutdown(false);
-					return;
-				}
-			}
+					throw RwRegsFailure(i, "replicate mastercall result");
 
 			// Call return logger
 			call_postcall_log_return(0);
@@ -2179,8 +2097,7 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
     if (status.reason == STOP_KILLED)
     {
         variants[variantnum].variant_terminated = true;
-		if (!set_mmap_table || 
-			!set_mmap_table->thread_group_shutting_down)
+		if (!is_group_shutting_down())
 		{
 			warnf("%s - terminated by an unhandled %s signal.\n",
 				  call_get_variant_pidstr(variantnum).c_str(), 
@@ -2201,48 +2118,14 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
 				   call_get_variant_pidstr(variantnum).c_str(), should_shutdown);
 
 		if (!interaction::get_signal_info(variants[variantnum].variantpid, &siginfo))
-		{
-			warnf("%s - couldn't get signal info\n",
-				  call_get_variant_pidstr(variantnum).c_str());
-			shutdown(false);
-			return;
-		}
+			throw RwInfoFailure(variantnum, "get signal info");
 
         if (signal == SIGSEGV)
         {            
-#ifdef MVEE_ENABLE_VALGRIND_HACKS
-			if (!ip) 
-			{
-				if (!interaction::fetch_ip(variants[variantnum].variantpid, ip))
-				{
-					warnf("%s - couldn't read instruction pointer\n",
-						  call_get_variant_pidstr(variantnum).c_str());
-					shutdown(false);
-					return;
-				}
-			}
-			mmap_region_info* region      = set_mmap_table->get_region_info(variantnum, ip, 0);
-			if (!region || 
-				(region && region->region_backing_file_fd == MVEE_ANONYMOUS_FD 
-				 && (region->region_prot_flags & PROT_EXEC)))
-			{
-				warnf("%s - intercepted segv from valgrind\n",
-					  call_get_variant_pidstr(variantnum).c_str());
-				goto dont_resolve_segv_origin;
-			}
-#endif
-
 #ifndef MVEE_BENCHMARK
-			if (!ip) 
-			{
-				if (!interaction::fetch_ip(variants[variantnum].variantpid, ip))
-				{
-					warnf("%s - couldn't read instruction pointer\n",
-						  call_get_variant_pidstr(variantnum).c_str());
-					shutdown(false);
-					return;
-				}
-			}
+			if (!ip && !interaction::fetch_ip(variants[variantnum].variantpid, ip))
+				throw RwRegsFailure(variantnum, "get trap location");
+			
 			std::string caller_info = set_mmap_table->get_caller_info(variantnum, variants[variantnum].variantpid, ip, 0);
 			debugf("%s - variant crashed - trapping ins: %s\n", 
 				   call_get_variant_pidstr(variantnum).c_str(), caller_info.c_str());
@@ -2251,9 +2134,6 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
 #endif
         }
 
-#ifdef MVEE_ENABLE_VALGRIND_HACKS
-dont_resolve_segv_origin:
-#endif
         debugf("%s - Received signal %s (%d)\n", call_get_variant_pidstr(variantnum).c_str(), getTextualSig(signal), signal);
 
 #ifndef MVEE_BENCHMARK
@@ -2261,12 +2141,7 @@ dont_resolve_segv_origin:
 		{
 			unsigned long instr[2];			
 			if (!rw::read_struct(variants[variantnum].variantpid, (void*) ip, sizeof(unsigned long) * 2, instr))
-			{
-				warnf("%s - couldn't skip SEGV\n", 
-					  call_get_variant_pidstr(variantnum).c_str());
-				shutdown(false);
-				return;
-			}		
+				throw RwMemFailure(variantnum, "read trap instruction");
 
 # ifdef MVEE_ARCH_SUPPORTS_DISASSEMBLY
 			HDE_INS(disas_ins);
@@ -2278,12 +2153,8 @@ dont_resolve_segv_origin:
 			if (disas_ins_len > 0)
 			{
 				if (!interaction::write_ip(variants[variantnum].variantpid, ip + disas_ins_len))
-				{
-					warnf("%s - couldn't write instruction pointer\n",
-						  call_get_variant_pidstr(variantnum).c_str());
-					shutdown(false);
-					return;
-				}
+					throw RwRegsFailure(variantnum, "skip trap instruction");
+
 				call_resume(variantnum);
 				debugf("%s - skipped SIGSEGV\n", call_get_variant_pidstr(variantnum).c_str());
 				return;
@@ -2291,25 +2162,16 @@ dont_resolve_segv_origin:
 		}
 		else
 		{
-			if (!ip) 
-			{
-				if (!interaction::fetch_ip(variants[variantnum].variantpid, ip))
-				{
-					warnf("%s - couldn't read instruction pointer\n",
-						  call_get_variant_pidstr(variantnum).c_str());
-					shutdown(false);
-					return;
-				}
-			}
+			if (!ip && !interaction::fetch_ip(variants[variantnum].variantpid, ip))
+				throw RwRegsFailure(variantnum, "get trap location");
+
 			std::string caller_info = set_mmap_table->get_caller_info(variantnum, variants[variantnum].variantpid, ip, 0);
-			debugf("%s - signal arrived while variant was executing ins: %s\n", call_get_variant_pidstr(variantnum).c_str(), caller_info.c_str());
+			debugf("%s - signal arrived while variant was executing ins: %s\n", 
+				   call_get_variant_pidstr(variantnum).c_str(), caller_info.c_str());
+
 			if (!interaction::fetch_syscall_return(variants[variantnum].variantpid, ret))
-			{
-				warnf("%s - couldn't read syscall return value\n",
-					  call_get_variant_pidstr(variantnum).c_str());
-				shutdown(false);
-				return;
-			}
+				throw RwRegsFailure(variantnum, "read syscall num/return at trap location");
+
 			debugf("%s - ret is currently: %ld\n", call_get_variant_pidstr(variantnum).c_str(), ret);
 		}
 #endif
@@ -2340,26 +2202,12 @@ dont_resolve_segv_origin:
             // normal control flow
             debugf("%s Delivering control flow signal %s to variant.\n", call_get_variant_pidstr(variantnum).c_str(), getTextualSig(signal));
 
-#if 0 // MVEE_ENABLE_VALGRIND_HACKS
-            if (siginfo.si_pid == variants[variantnum].variantpid &&
-				variantnum != 0)
-            {
-                siginfo.si_pid = variants[0].variantpid;
-				if (!interaction::set_signal_info(variants[variantnum].variantpid, siginfo))
-				{
-					warnf("%s - couldn't set signal info for valgrind\n",
-						  call_get_variant_pidstr(variantnum).c_str());
-				}
-            }
-#endif
+			if (set_sighand_table->will_cause_termination(signal))
+				set_mmap_table->thread_group_shutting_down = true;
+
             // deliver control flow signal
 			if (!interaction::resume_until_syscall(variants[variantnum].variantpid, signal))
-			{
-				warnf("%s - failed to deliver signal %s\n",
-					  call_get_variant_pidstr(variantnum).c_str(), getTextualSig(signal));
-				shutdown(false);
-				return;
-			}
+				throw ResumeFailure(variantnum, "resume after signal injection");
         }
 		// if the MVEE is injecting the signal, then the monitor
 		// will be the sender in siginfo.si_pid
@@ -2375,12 +2223,7 @@ dont_resolve_segv_origin:
                 siginfo.si_pid  = current_signal_info->si_pid;
 
 				if (!interaction::set_signal_info(variants[variantnum].variantpid, &siginfo))
-				{
-					warnf("%s - couldn't restore original signal info during signal injection\n",
-						  call_get_variant_pidstr(variantnum).c_str());
-					shutdown(false);
-					return;
-				}
+					throw RwInfoFailure(variantnum, "set original signal info");
 
                 // if we're in a restarted sigsuspend, we will see the exit
 				// site of the call before the actual sighandler is invoked
@@ -2412,19 +2255,26 @@ dont_resolve_segv_origin:
 						   variants[0].callnumbackup, 
 						   getTextualSyscall(variants[0].callnumbackup));
 
+					if (set_sighand_table->will_cause_termination(signal))
+						set_mmap_table->thread_group_shutting_down = true;
+
                     // thread sanitizer might complain about this! 
 					// We should probably figure out at which point we injected the signal
-                    call_release_syslocks(-1, variants[0].callnumbackup, MVEE_SYSLOCK_FULL | MVEE_SYSLOCK_PRECALL | MVEE_SYSLOCK_POSTCALL);
+					/*
+					bool was_in_call         =
+						(state == STATE_IN_MASTERCALL
+						 || state == STATE_IN_SYSCALL
+						 || state == STATE_IN_FORKCALL);
+
+					if (was_in_call)
+						call_release_syslocks(-1, variants[0].callnumbackup, MVEE_SYSLOCK_FULL);
+					else
+						call_release_syslocks(-1, variants[0].callnumbackup, MVEE_SYSLOCK_PRECALL);
+					*/
+
                     for (int i = 0; i < mvee::numvariants; ++i)
-					{
 						if (!interaction::resume_until_syscall(variants[i].variantpid, signal))
-						{
-							warnf("%s - failed to resume variant after signal injection: %s\n",
-								  call_get_variant_pidstr(i).c_str(), getTextualSig(signal));
-							shutdown(false);
-							return;
-						}
-					}
+							throw ResumeFailure(i, "resume after signal injection");
                 }
             }
             else
@@ -2478,16 +2328,8 @@ dont_resolve_segv_origin:
 
 			if (variantnum == 0 && (*mvee::config_variant_global)["use_ipmon"].asBool())
 			{
-				if (!ip) 
-				{
-					if (!interaction::fetch_ip(variants[variantnum].variantpid, ip))
-					{
-						warnf("%s - couldn't read instruction pointer\n",
-							  call_get_variant_pidstr(variantnum).c_str());
-						shutdown(false);
-						return;
-					}
-				}
+				if (!ip && !interaction::fetch_ip(variants[variantnum].variantpid, ip))
+					throw RwRegsFailure(variantnum, "get trap location");
 
 				if (in_ipmon(0, ip))
 				{
@@ -2495,12 +2337,7 @@ dont_resolve_segv_origin:
 					{
 						// force the syscall to return to user-space
 						if (!interaction::fetch_syscall_return(variants[0].variantpid, ret))
-						{
-							warnf("%s - couldn't read syscall return value\n",
-								  call_get_variant_pidstr(0).c_str());
-							shutdown(false);
-							return;
-						}
+							throw RwRegsFailure(0, "get syscall return for trap inside IP-MON");
 
 						// Check if this syscall would restart automatically
 						// if we resumed it as-is
@@ -2513,12 +2350,7 @@ dont_resolve_segv_origin:
 							// the kernel will just bail out (in arch/x86/kernel/signal.c)
 							// and return the ERESTART error to user-space
 							if (!interaction::write_syscall_return(variants[0].variantpid, (unsigned long) -1))
-							{
-								warnf("%s - couldn't write syscall return value\n",
-									  call_get_variant_pidstr(0).c_str());
-								shutdown(false);
-								return;
-							}
+								throw RwRegsFailure(0, "force syscall return inside IP-MON");
 						}
 					}
 				}
@@ -2658,12 +2490,7 @@ bool monitor::sig_handle_sigchld_race(std::vector<mvee_pending_signal>::iterator
 					(status.reason != STOP_SYSCALL &&
 					 status.reason != STOP_SIGNAL))
 				{
-					if (!should_shutdown)
-						warnf("%s - waiting error while handling sigchld race in variant: %s - status: %s\n",
-							  call_get_variant_pidstr(i).c_str(),
-							  getTextualErrno(errno),
-							  getTextualMVEEWaitStatus(status).c_str());
-					return false;
+					throw WaitFailure(i, "handling SIGCHLD race", status);
 				}
 
 				if (status.reason == STOP_SYSCALL)
@@ -2677,10 +2504,7 @@ bool monitor::sig_handle_sigchld_race(std::vector<mvee_pending_signal>::iterator
 						if (!interaction::write_ip(variants[i].variantpid, IP_IN_REGS(variants[i].regs) - SYSCALL_INS_LEN) ||
 							!interaction::write_next_syscall_no(variants[i].variantpid, __NR_getpid))
 						{
-							warnf("%s - couldn't rewind syscall\n",
-								  call_get_variant_pidstr(i).c_str());
-							shutdown(false);
-							return false;
+							throw RwRegsFailure(i, "rewinding syscall during SIGCHLD race");
 						}
 
 						at_syscall_entry[i] = 0;
@@ -2721,16 +2545,11 @@ bool monitor::sig_handle_sigchld_race(std::vector<mvee_pending_signal>::iterator
 				(status.reason != STOP_SYSCALL &&
 				 status.reason != STOP_SIGNAL))
 			{
-				warnf("%s - error syncing variant at syscall entry - error: %s - stop status: %s\n",
-					  call_get_variant_pidstr(i).c_str(), 
-					  getTextualErrno(errno), 
-					  getTextualMVEEWaitStatus(status).c_str());
+				throw WaitFailure(i, "sync at syscall entrance during SIGCHLD race", status);
 			}
-			else
-			{
-				debugf("%s - variant is back at the syscall entry - ready to deliver signal\n", 
-					   call_get_variant_pidstr(i).c_str());
-			}
+
+			debugf("%s - variant is back at the syscall entry - ready to deliver signal\n", 
+				   call_get_variant_pidstr(i).c_str());
 		}
 	}
 
@@ -2869,15 +2688,12 @@ bool monitor::sig_prepare_delivery ()
             for (int i = 0; i < mvee::numvariants; ++i)
             {
                 variants[i].current_signal_ready = false;
-
+				
                 if (!interaction::signal(variants[i].variantpid,
 										 variants[i].varianttgid,
 										 current_signal))
                 {
-                    warnf("%s - signal delivery failed. sig: %s - error: %s\n",
-						  call_get_variant_pidstr(i).c_str(),
-						  getTextualSig(current_signal),
-						  getTextualErrno(errno));
+					throw SignalFailure(i, current_signal);
                 }
 
                 // If we're at the entry of a sigsuspend that hasn't been restarted yet, we will call the precall handler next
@@ -2919,26 +2735,18 @@ void monitor::sig_finish_delivery ()
 		memcpy(&tmp, &variants[i].regs, sizeof(PTRACE_REGS));
 		IP_IN_REGS(tmp) = (unsigned long) variants[i].infinite_loop_ptr;
 
-		if (!interaction::write_all_regs(variants[i].variantpid, &tmp) ||
-			!interaction::resume(variants[i].variantpid))
-		{
-			warnf("%s - failed to resume variant during sig delivery\n",
-				  call_get_variant_pidstr(i).c_str());
-			shutdown(false);
-			return;
-		}
+		if (!interaction::write_all_regs(variants[i].variantpid, &tmp))
+			throw RwRegsFailure(i, "jump to infinite loop");
+
+		if (!interaction::resume(variants[i].variantpid))
+			throw ResumeFailure(i, "resume in infinite loop");
 
         variants[i].current_signal_ready = false;
 
         if (!interaction::signal(variants[i].variantpid,
 								 variants[i].varianttgid,
 								 current_signal))
-        {
-            warnf("%s - signal delivery failed. sig: %s - error: %s\n",
-				  call_get_variant_pidstr(i).c_str(),
-				  getTextualSig(current_signal),
-				  getTextualErrno(errno));
-        }
+			throw SignalFailure(i, current_signal);
     }
 
     current_signal_sent = true;
@@ -2990,12 +2798,8 @@ void monitor::sig_return_from_sighandler ()
             IP_IN_REGS(variants[i].regsbackup) -= SYSCALL_INS_LEN;
 			NEXT_SYSCALL_NO_IN_REGS(variants[i].regsbackup) = variants[i].callnumbackup;
 			if (!interaction::write_all_regs(variants[i].variantpid, &variants[i].regsbackup))
-			{
-				warnf("%s - couldn't restore original register context while returning from signal handler\n",
-					  call_get_variant_pidstr(i).c_str());
-				shutdown(false);
-				return;
-			}
+				throw RwRegsFailure(i, "post-signal context restore");
+
 			call_resume(i);
         }
 
@@ -3057,12 +2861,7 @@ void monitor::sig_restart_syscall(int variantnum)
 						{
 							if (!interaction::wait(variants[i].variantpid, status, false, false, false) || 
 								status.reason != STOP_SYSCALL)
-							{
-								warnf("%s - FIXME: Possible error while restarting variant - error: %s - stop status: %s\n", 
-									  call_get_variant_pidstr(i).c_str(),
-									  getTextualErrno(errno),
-									  getTextualMVEEWaitStatus(status).c_str());
-							}
+								throw WaitFailure(i, "post signal-restart during master call", status);
 						}
 					}					                    
                 }
@@ -3078,12 +2877,8 @@ void monitor::sig_restart_syscall(int variantnum)
             variants[i].restarted_syscall  = false;
 
 			if (!interaction::write_all_regs(variants[i].variantpid, &variants[i].regs))
-			{
-				warnf("%s - couldn't restore original register context while restarting syscall\n",
-					  call_get_variant_pidstr(i).c_str());
-				shutdown(false);
-				return;
-			}
+				throw RwRegsFailure(i, "restoring original register context during syscall restart");
+
 			call_resume(i);
 			IP_IN_REGS(variants[i].regs) += SYSCALL_INS_LEN;
 
@@ -3118,12 +2913,7 @@ void monitor::hwbp_refresh_regs(int variantnum)
 			if (!interaction::write_specific_reg(variants[variantnum].variantpid,
 												 offsetof(user, u_debugreg) + i*sizeof(unsigned long), 
 												 variants[variantnum].hw_bps[i]))
-			{
-				warnf("%s - Couldn't set debug reg %d\n",
-					  call_get_variant_pidstr(variantnum).c_str(), i);
-				shutdown(false);
-				return;				
-			}
+				throw RwRegsFailure(variantnum, "hwbp set debug reg");
         }
     }
 
@@ -3154,12 +2944,7 @@ void monitor::hwbp_refresh_regs(int variantnum)
 	if (!interaction::write_specific_reg(variants[variantnum].variantpid,
 										 offsetof(user, u_debugreg) + 7*sizeof(long), 
 										 dr7))
-	{
-		warnf("%s - Couldn't set control debug reg\n",
-			  call_get_variant_pidstr(variantnum).c_str());
-		shutdown(false);
-		return;				
-	}
+		throw RwRegsFailure(variantnum, "hwbp set dr7");
 
 #else
 	warnf("%s - hardware breakpoints are not supported on this architecture\n",
@@ -3377,41 +3162,57 @@ void* monitor::thread(void* param)
 	mon->schedule_threads();
 #endif
 
-    while (1)
-    {
-        if (mon->should_shutdown)
-        {
-            mon->shutdown(true);
-            return NULL;
-        }
-
-		// Standard blocking wait for all of our variants
-		if (interaction::wait(-1, status))
+	try
+	{
+		while (1)
 		{
-            mon->handle_event(status);
+			if (mon->should_shutdown)
+			{
+				mon->shutdown(true);
+				return NULL;
+			}
 
-			// Don't go back into a blocking wait right away... first
-			// see if we already have a pending variant.
-			if (interaction::wait(-1, status, true, true) &&
-				status.reason != STOP_NOTSTOPPED)
+			// Standard blocking wait for all of our variants
+			if (interaction::wait(-1, status))
 			{
 				mon->handle_event(status);
 
-				// We had a pending variant... which means there might be others.
-				// Try them one by one.
-				for (int i = 0; i < mvee::numvariants; ++i)
+				// Don't go back into a blocking wait right away... first
+				// see if we already have a pending variant.
+				if (interaction::wait(-1, status, true, true) &&
+					status.reason != STOP_NOTSTOPPED)
 				{
-					if (interaction::wait(mon->variants[i].variantpid, status, true, true) &&
-						status.reason != STOP_NOTSTOPPED)
-						mon->handle_event(status);									
-				}
-			}			
+					mon->handle_event(status);
+
+					// We had a pending variant... which means there might be others.
+					// Try them one by one.
+					for (int i = 0; i < mvee::numvariants; ++i)
+					{
+						if (interaction::wait(mon->variants[i].variantpid, status, true, true) &&
+							status.reason != STOP_NOTSTOPPED)
+							mon->handle_event(status);									
+					}
+				}			
+			}
+			else
+				debugf("wait failed - error: %s - status: %s\n", 
+					   getTextualErrno(errno),
+					   getTextualMVEEWaitStatus(status).c_str());
 		}
-        else
-            debugf("wait failed - error: %s - status: %s\n", 
-				   getTextualErrno(errno),
-				   getTextualMVEEWaitStatus(status).c_str());
-    }
+	}
+	catch (MVEEBaseException& e)
+	{
+		if (mon->set_mmap_table && !mon->set_mmap_table->thread_group_shutting_down)
+		{
+			warnf("caught fatal monitor exception: %s\n", e.what());
+		}
+		else
+		{
+			debugf("caught monitor exception during shutdown: %s\n", e.what());
+		}
+		mon->shutdown(false);
+		return NULL;
+	}
 
     mon->shutdown(true);
     return NULL;

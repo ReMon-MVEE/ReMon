@@ -489,11 +489,6 @@ PRECALL(read)
     CHECKFD(1);
     CHECKPOINTER(2);
 
-#ifdef MVEE_ENABLE_VALGRIND_HACKS
-    if (ARG1(0) > 1024)
-        return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
-#endif
-
     if (set_fd_table->is_fd_unsynced(ARG1(0)))
     {
         MAPFDS(1);
@@ -862,14 +857,7 @@ PRECALL(close)
 
     fd_info* info = set_fd_table->get_fd_info(ARG1(0));
     if (!info)
-    {
-#ifdef MVEE_ENABLE_VALGRIND_HACKS
-        if (ARG1(0) > 1024)
-            return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
-#endif
-
         return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
-    }
 
     if (info->master_file)
         return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
@@ -960,16 +948,6 @@ PRECALL(link)
 /*-----------------------------------------------------------------------------
   sys_unlink - (const char *pathname)
 -----------------------------------------------------------------------------*/
-GET_CALL_TYPE(unlink)
-{
-#ifdef MVEE_ENABLE_VALGRIND_HACKS
-    auto unlink_fd = rw::read_string(variants[variantnum].variantpid, ARG1(variantnum));
-    if (unlink_fd.find("/tmp/vgdb-pipe-") == 0)
-        return MVEE_CALL_TYPE_UNSYNCED;
-#endif
-    return MVEE_CALL_TYPE_NORMAL;
-}
-
 LOG_ARGS(unlink)
 {
 	auto unlink_fd = rw::read_string(variants[variantnum].variantpid, (void*) ARG1(variantnum));
@@ -1003,21 +981,6 @@ POSTCALL(unlink)
 		}		
 	}
 
-#ifdef MVEE_ENABLE_VALGRIND_HACKS
-    if IS_UNSYNCED_CALL
-    {
-        auto unlink_fd = rw::read_string(variants[variantnum].variantpid, ARG1(variantnum));
-        if (unlink_fd.find("/tmp/vgdb-pipe") == 0)
-		{
-			if (!interaction::write_syscall_return(variants[variantnum].variantpid, 0))
-			{
-				warnf("%s - failed to replicate syscall return\n",
-					  call_get_variant_pidstr(variantnum).c_str());
-			}			
-		}
-		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
-    }
-#endif
 #ifndef MVEE_FD_DEBUG
 	set_fd_table->verify_fd_table(getpids());
 #endif
@@ -1543,10 +1506,7 @@ LOG_ARGS(setitimer)
 	if (ARG2(variantnum))
 	{
 		if (!rw::read_struct(variants[variantnum].variantpid, (void*) ARG2(variantnum), 2 * sizeof(struct timeval), new_value))
-		{
-			warnf("couldn't read new itimer value\n");
-			return;
-		}
+			throw RwMemFailure(variantnum, "read itimer value in sys_setitimer");
 
 		timestr << "INTERVAL DURATION: " << new_value[1].tv_sec << "." << std::setw(6) << std::setfill('0') << new_value[1].tv_usec << std::setw(0) << " s"
 				<< ", RESET VALUE: " << new_value[0].tv_sec << "." << std::setw(6) << std::setfill('0') << new_value[0].tv_usec << " s";
@@ -1589,22 +1549,9 @@ LOG_ARGS(getpid)
 		   call_get_variant_pidstr(variantnum).c_str());
 }
 
-POSTCALL(getpid)
+PRECALL(getpid)
 {
-	if IS_UNSYNCED_CALL
-		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
-
-    for (int i = 1; i < mvee::numvariants; ++i)
-	{
-		if (!interaction::write_syscall_return(variants[i].variantpid, variants[0].varianttgid))
-		{
-			warnf("%s - failed to replicate syscall return\n",
-				  call_get_variant_pidstr(i).c_str());
-			return 0;
-		}
-	}
-	
-	return 0;
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1761,7 +1708,8 @@ LOG_ARGS(utime)
 	if (ARG2(variantnum))
 	{
 		if (!rw::read<struct utimbuf>(variants[variantnum].variantpid, (void*) ARG2(variantnum), times))
-			return;
+			throw RwMemFailure(variantnum, "read utimbuf in sys_utime");
+
 		timestr << "ACTIME: " << times.actime << ", MODTIME: " << times.modtime;
 	}
 	else
@@ -2112,10 +2060,7 @@ POSTCALL(pipe)
 		std::vector<std::string> paths(mvee::numvariants);
 
         if (!rw::read_struct(variants[0].variantpid, (void*)ARG1(0), 2 * sizeof(int), fildes))
-        {
-            warnf("couldn't read fds\n");
-            return 0;
-        }
+			throw RwMemFailure(0, "read fds in sys_pipe");
 
         std::fill(read_fds.begin(),  read_fds.end(),  fildes[0]);
         std::fill(write_fds.begin(), write_fds.end(), fildes[1]);
@@ -2379,6 +2324,14 @@ PRECALL(signal)
     CHECKARG(1);
     CHECKSIGHAND(2);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+}
+
+CALL(signal)
+{
+	// prohibit call if the variant set is shutting down
+	if (set_mmap_table->thread_group_shutting_down)
+		return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EINVAL);
+	return MVEE_CALL_ALLOW;
 }
 
 POSTCALL(signal)
@@ -2914,16 +2867,17 @@ LOG_RETURN(getgroups)
 	if (ARG2(variantnum))
 	{
 		gid_t* grouplist = new(std::nothrow) gid_t[result];
-		if (!grouplist || !rw::read_struct(variants[variantnum].variantpid, (void*)ARG2(variantnum), sizeof(gid_t) * result, grouplist))
+		if (!grouplist || 
+			!rw::read_struct(variants[variantnum].variantpid, (void*)ARG2(variantnum), sizeof(gid_t) * result, grouplist))
 		{
-			warnf("couldn't read grouplist\n");
 			SAFEDELETEARRAY(grouplist);
-			return;
+			throw RwMemFailure(variantnum, "read grouplist in sys_getgroups");
 		}
 
 		debugf("%s - SYS_GETGROUPS return: %s\n", 
 			   call_get_variant_pidstr(variantnum).c_str(),
 			   getTextualGroups(result, grouplist).c_str());
+
 		SAFEDELETEARRAY(grouplist);
 	}
 	else
@@ -2942,19 +2896,21 @@ LOG_ARGS(setgroups)
 	if (ARG1(variantnum) && ARG2(variantnum))
 	{
 		gid_t* grouplist = new(std::nothrow) gid_t[ARG1(variantnum)];
+
 		if (grouplist)
 			memset(grouplist, 0, sizeof(gid_t) * ARG1(variantnum));
+
 		if (!grouplist || 
 			!rw::read_struct(variants[variantnum].variantpid, (void*) ARG2(variantnum), sizeof(gid_t) * ARG1(variantnum), grouplist))
 		{
-			warnf("couldn't read grouplist\n");
 			SAFEDELETEARRAY(grouplist);
-			return;
+			throw RwMemFailure(variantnum, "read grouplist in sys_setgroups");
 		}
 
 		debugf("%s - SYS_SETGROUPS (%s)\n", 
 			   call_get_variant_pidstr(variantnum).c_str(),
 			   getTextualGroups(ARG1(variantnum), grouplist).c_str());
+
 		SAFEDELETEARRAY(grouplist);
 	}
 	else
@@ -3040,6 +2996,14 @@ PRECALL(rt_sigaction)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
+CALL(rt_sigaction)
+{
+	// prohibit call if the variant set is shutting down
+	if (set_mmap_table->thread_group_shutting_down)
+		return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EINVAL);
+	return MVEE_CALL_ALLOW;
+}
+
 POSTCALL(rt_sigaction)
 {
 	// TODO/FIXME - stijn: We might see mismatches by not tracking sigactions
@@ -3099,10 +3063,7 @@ LOG_ARGS(setrlimit)
 {
 	struct rlimit  rlim;
 	if (!rw::read<struct rlimit>(variants[variantnum].variantpid, (void*) ARG2(variantnum), rlim))
-	{
-		warnf("couldn't read rlimit\n");
-		return;
-	}
+		throw RwMemFailure(variantnum, "read rlimit in sys_setrlimit");
 	
 	debugf("%s - SYS_SETRLIMIT(%s, CUR: %lu, MAX: %lu)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
@@ -4027,8 +3988,7 @@ LOG_RETURN(socketpair)
 	if (!rw::read_primitive<int>(variants[variantnum].variantpid, (void*) ARG4(variantnum), fd1) ||
 		!rw::read_primitive<int>(variants[variantnum].variantpid, (void*) (ARG4(variantnum) + sizeof(int)), fd2))
 	{
-		warnf("Couldn't read socketpair return values\n");
-		return;
+		throw RwMemFailure(variantnum, "read fds in sys_socketpair");
 	}
 
 	debugf("%s - SYS_SOCKETPAIR return: [%d, %d]\n", 
@@ -4049,8 +4009,7 @@ POSTCALL(socketpair)
 		if (!rw::read_primitive<int>(variants[0].variantpid, (void*) ARG4(0), fd1) ||
 			!rw::read_primitive<int>(variants[0].variantpid, (void*) (ARG4(0) + sizeof(int)), fd2))
 		{
-			warnf("Couldn't read socketpair return values\n");
-			return 0;
+			throw RwMemFailure(0, "read syscall result in sys_socketpair");
 		}
 
         std::fill(fds.begin(),  fds.end(),  fd1);
@@ -4088,8 +4047,7 @@ POSTCALL(socketpair)
 			if (!rw::write_primitive<int>(variants[i].variantpid, (void*) ARG4(i), fds[0]) ||
 				!rw::write_primitive<int>(variants[i].variantpid, (void*) (ARG4(i) + sizeof(int)), fds2[0]))
 			{
-				warnf("Couldn't replicate socketpair return values\n");
-				return 0;
+				throw RwMemFailure(0, "replicate syscall result in sys_socketpair");
 			}
         }
     }
@@ -4172,10 +4130,7 @@ LOG_ARGS(recvfrom)
 	int len; 
 	
 	if (!rw::read_primitive(variants[variantnum].variantpid, (void*) ARG6(variantnum), len))
-	{
-		warnf("Couldn't read recvfrom len\n");
-		return;
-	}
+		throw RwMemFailure(variantnum, "read len in sys_recvfrom");
 
 	debugf("%s - SYS_RECVFROM(%d, " PTRSTR ", %zd, %u = %s, 0x" PTRSTR ", %d)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
@@ -4298,10 +4253,7 @@ LOG_ARGS(sendmsg)
 {
 	struct msghdr msg;
 	if (!rw::read<struct msghdr>(variants[variantnum].variantpid, (void*) ARG2(variantnum), msg))
-	{
-		warnf("couldn't read msghdr\n");
-		return;
-	}
+		throw RwMemFailure(variantnum, "read msghdr in sys_sendmsg");
 
 	auto msg_str = call_serialize_msgvector(variantnum, &msg);
 
@@ -4384,10 +4336,7 @@ LOG_RETURN(recvmsg)
 {
 	struct msghdr msg;
 	if (!rw::read<struct msghdr>(variants[variantnum].variantpid, (void*) ARG2(variantnum), msg))
-	{
-		warnf("couldn't read msghdr\n");
-		return;
-	}
+		throw RwMemFailure(variantnum, "read msghdr in sys_recvmsg");
 
 	auto _msg = call_serialize_msgvector(variantnum, &msg);
 	debugf("%s - SYS_RECVMSG return: %ld - %s\n", 
@@ -4414,11 +4363,7 @@ LOG_ARGS(recvmmsg)
 	if (ARG5(variantnum))
 	{
 		if (!rw::read_struct(variants[variantnum].variantpid, (void*) ARG5(variantnum), sizeof(struct timespec), &timeout))
-		{
-			warnf("%s - couldn't read timeout\n",
-				  call_get_variant_pidstr(variantnum).c_str());
-			return;
-		}
+			throw RwMemFailure(variantnum, "read timeout in sys_recvmmsg");
 
 		timestr << "TIMEOUT: " << timeout.tv_sec << std::setw(9) << std::setfill('0') << timeout.tv_nsec << std::setw(0) << " s";
 	}
@@ -4698,10 +4643,7 @@ GET_CALL_TYPE(socketcall)
     unsigned long real_args[6];
     memset(real_args, 0, sizeof(unsigned long)*6);
     if (!rw::read_struct(variants[variantnum].variantpid, ARG2(variantnum), nargs * sizeof(unsigned long), real_args))
-    {
-        warnf("couldn't read real_args\n");
-        return 0;
-    }
+		throw RwMemFailure(variantnum, "read args struct in sys_socketcall");
 
     ORIGARG1(variantnum) = ARG1(variantnum);
     ARG1(variantnum)     = real_args[0];
@@ -5735,11 +5677,7 @@ LOG_ARGS(writev)
 
 	if (!vec || 
 		!rw::read_struct(variants[variantnum].variantpid, (void*) ARG2(variantnum), sizeof(struct iovec) * ARG3(variantnum), vec))
-	{
-		warnf("couldn't read iovec\n");
-		SAFEDELETEARRAY(vec);
-		return;
-	}
+		throw RwMemFailure(variantnum, "read iovec in sys_writev");
 
 	auto str = call_serialize_io_vector(variantnum, vec, ARG3(variantnum));
 	debugf("    => \n%s\n", str.c_str());
@@ -5813,11 +5751,7 @@ LOG_ARGS(nanosleep)
 	if (ARG2(variantnum))
 	{
 		if (!rw::read_struct(variants[variantnum].variantpid, (void*) ARG2(variantnum), sizeof(struct timespec), &req))
-		{
-			warnf("%s - couldn't read req\n",
-				  call_get_variant_pidstr(variantnum).c_str());
-			return;
-		}
+			throw RwMemFailure(variantnum, "read req in sys_nanosleep");
 
 		timestr << "REQ: " << req.tv_sec << std::setw(9) << std::setfill('0') << req.tv_nsec << std::setw(0) << " s";
 	}
@@ -5972,10 +5906,7 @@ LOG_RETURN(poll)
 	{
 		struct pollfd fds;
 		if (!rw::read<struct pollfd>(variants[variantnum].variantpid, (struct pollfd*)ARG1(variantnum) + j, fds))
-		{
-			warnf("couldn't read pollfd\n");
-			return;
-		}
+			throw RwMemFailure(variantnum, "read pollfd in sys_poll");
 			
 		debugf("> fd: %d - events: %s - revents: %s\n",
 			   fds.fd,
@@ -6101,11 +6032,8 @@ POSTCALL(prctl)
 			unsigned long ip;
 
 			if (!interaction::fetch_ip(variants[i].variantpid, ip))
-			{
-				warnf("%s - Couldn't read instruction pointer\n", 
-					  call_get_variant_pidstr(i).c_str());
-				return 0;
-			}
+				throw RwRegsFailure(i, "fetch IP-MON registration site");
+
 			variants[i].ipmon_region = set_mmap_table->get_region_info(i, ip, 0);
 			debugf("Initializing IP-MON - IP: 0x" PTRSTR "\n", ip);
 			if (variants[i].ipmon_region)
@@ -6430,21 +6358,8 @@ LOG_ARGS(mmap)
 		   (unsigned long)ARG6(variantnum));
 }
 
-#ifdef MVEE_ENABLE_VALGRIND_HACKS
-static int first_mmap2_call = 1;
-#endif
-
 PRECALL(mmap)
 {
-#ifdef MVEE_ENABLE_VALGRIND_HACKS
-    if (first_mmap2_call)
-    {
-        first_mmap2_call = 0;
-        for (int i = 0; i < mvee::numvariants; ++i)
-			set_mmap_table->refresh_variant_maps(i, variants[i].variantpid);
-    }
-#endif
-
     CHECKARG(2);
     CHECKARG(3);
     CHECKARG(4);
@@ -7095,10 +7010,7 @@ LOG_RETURN(fstat)
 {
 	struct stat sb;
 	if (!rw::read<struct stat>(variants[variantnum].variantpid, (void*) ARG2(variantnum), sb))
-	{
-		warnf("Couldn't read stat\n");
-		return;
-	}
+		throw RwMemFailure(variantnum, "read stat in sys_fstat");
 
 	debugf("%s - SYS_FSTAT64 return\n", 
 		   call_get_variant_pidstr(variantnum).c_str());
@@ -7185,10 +7097,8 @@ LOG_RETURN(fstat64)
 {
 	struct stat64 sb;
 	if (!rw::read<struct stat64>(variants[variantnum].variantpid, (void*) ARG2(variantnum), sb))
-	{
-		warnf("Couldn't read stat64\n");
-		return;
-	}
+		throw RwMemFailure(variantnum, "read stat64 in sys_fstat64");
+
 	debugf("%s - SYS_FSTAT64 return\n", 
 		   call_get_variant_pidstr(variantnum).c_str());
 
@@ -7450,10 +7360,6 @@ CALL(gettid)
     }
 #endif
 
-#ifdef MVEE_ENABLE_VALGRIND_HACKS
-	return MVEE_CALL_ALLOW;
-#endif
-
     return MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(variants[0].variantpid);
 }
 
@@ -7704,10 +7610,11 @@ POSTCALL(futex)
 		{
 			pid_t master_pid;
 			if (!rw::read_primitive<int>(variants[0].variantpid, (void*) ARG1(0), master_pid))
-				warnf("Failed to replicate pids\n");
+				throw RwMemFailure(0, "read master pid in sys_futex(FUTEX_WAIT_TID)");
+
 			for (int i = 1; i < mvee::numvariants; ++i)
 				if (!rw::write_primitive<int>(variants[i].variantpid, (void*) ARG1(i), master_pid))
-					warnf("Failed to replicate pids\n");
+					throw RwMemFailure(i, "replicate master pid in sys_futex(FUTEX_WAIT_TID)");
 		}
 	}
 #endif
@@ -7727,10 +7634,7 @@ LOG_ARGS(sched_setaffinity)
 
 	if (ARG2(variantnum) > sizeof(cpu_set_t) ||
 		!rw::read_struct(variants[variantnum].variantpid, (void*) ARG3(variantnum), ARG2(variantnum), &mask))
-	{
-		warnf("couldn't read cpu_set_t\n");
-		return;
-	}
+		throw RwMemFailure(variantnum, "read cpu_set_t in sys_sched_setaffinity");
 
 	debugf("%s - SYS_SCHED_SETAFFINITY(%d, %zd, %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
@@ -7760,10 +7664,7 @@ PRECALL(sched_setaffinity)
 
 				if (ARG2(i) > sizeof(cpu_set_t) ||
 					!rw::read_struct(variants[i].variantpid, (void*) ARG3(i), ARG2(i), &available_cores))
-				{
-					warnf("couldn't read cpu_set_t\n");
-					return 0;
-				}
+					throw RwMemFailure(i, "read cpu_set_t in sys_sched_setaffinity");
 
 				for (int j = 0; j < (int)ARG2(i) * 8; ++j)
 				{
@@ -7784,7 +7685,7 @@ PRECALL(sched_setaffinity)
 						   i, getTextualCPUSet(&available_cores).c_str());
 #endif
 					if (!rw::write_data(variants[i].variantpid, (void*) ARG3(i), ARG2(i), &available_cores))
-						warnf("Couldn't write cpu_set_t\n");
+						throw RwMemFailure(i, "write cpu_set_t in sys_sched_setaffinity");
 				}
 			}
 		}
@@ -7838,10 +7739,7 @@ POSTCALL(sched_getaffinity)
 
         if (ARG2(variantnum) > sizeof(cpu_set_t) ||
 			!rw::read_struct(variants[variantnum].variantpid, (void*) ARG3(variantnum), ARG2(variantnum), &available_cores))
-        {
-            warnf("couldn't read cpu_set_t\n");
-            return 0;
-        }
+			throw RwMemFailure(variantnum, "read cpu_set_t in sys_sched_getaffinity");
 
         for (unsigned int i = 0; i < ARG2(variantnum) * 8; ++i)
         {
@@ -7854,10 +7752,8 @@ POSTCALL(sched_getaffinity)
         }
 
         if (modified_mask)
-		{
             if (!rw::write_data(variants[variantnum].variantpid, (void*) ARG3(variantnum), ARG2(variantnum), &available_cores))
-				warnf("Failed to write cpu_set_t\n");
-		}
+				throw RwMemFailure(variantnum, "write cpu_set_t in sys_sched_setaffinity");
     }
 
 
@@ -7978,7 +7874,7 @@ CALL(exit_group)
     // This can cause mismatches in those other threads because some variants might still perform syscalls while the others are dead
 //	warnf("thread group shutting down\n");
 
-    set_mmap_table->thread_group_shutting_down = 1;
+    set_mmap_table->thread_group_shutting_down = true;
     return MVEE_CALL_ALLOW;
 }
 
@@ -8303,11 +8199,7 @@ LOG_RETURN(epoll_wait)
 		struct epoll_event* events = new(std::nothrow) struct epoll_event[result];
 		if (!events || 
 			!rw::read_struct(variants[variantnum].variantpid, (void*) ARG2(variantnum), sizeof(struct epoll_event) * result, events))
-		{
-			warnf("couldn't read epoll_event\n");
-			SAFEDELETEARRAY(events);
-			return;
-		}
+			throw RwMemFailure(variantnum, "read epoll_events in sys_epoll_wait");
 
 		for (long j = 0; j < result; ++j)
 			debugf("%s - > SYS_EPOLL_WAIT fd ready: 0x" PTRSTR " - events: %s\n",
@@ -8329,11 +8221,7 @@ POSTCALL(epoll_wait)
             struct epoll_event* master_events = new(std::nothrow) struct epoll_event[master_result];
             if (!master_events ||
 				!rw::read_struct(variants[0].variantpid, (void*) ARG2(0), sizeof(struct epoll_event) * master_result, master_events))
-            {
-                warnf("couldn't replicate epoll_events\n");
-				SAFEDELETEARRAY(master_events);
-                return 0;
-            }
+				throw RwMemFailure(0, "read master epoll_events in sys_epoll_wait");
 
             for (int j = 1; j < mvee::numvariants; ++j)
             {
@@ -8363,7 +8251,8 @@ POSTCALL(epoll_wait)
                 }
 
                 if (!rw::write_data(variants[j].variantpid, (void*) ARG2(j), sizeof(epoll_event) * master_result, (unsigned char*)slave_events))
-                    warnf("failed to replicate epoll_events to slave variant %d\n", j);
+					throw RwMemFailure(j, "replicate epoll_events in sys_epoll_wait");
+
                 SAFEDELETEARRAY(slave_events);
             }
 
@@ -8385,10 +8274,8 @@ LOG_ARGS(epoll_ctl)
 	if (ARG4(variantnum))
 	{
 		if (!rw::read<struct epoll_event>(variants[variantnum].variantpid, (void*) ARG4(variantnum), event))
-		{
-			warnf("couldn't read epoll_event\n");
-			return;
-		}
+			throw RwMemFailure(variantnum, "read epoll_event in sys_epoll_ctl");
+
 		events = getTextualEpollEvents(event.events);
 	}
 
@@ -8424,10 +8311,8 @@ POSTCALL(epoll_ctl)
                 struct epoll_event event;
                 memset(&event, 0, sizeof(struct epoll_event));
                 if (!rw::read<struct epoll_event>(variants[i].variantpid, (void*) ARG4(i), event))
-                {
-                    warnf("couldn't read epoll_event\n");
-                    return 0;
-                }
+					throw RwMemFailure(i, "read epoll_event in sys_epoll_ctl");
+
                 ids[i] = (unsigned long)event.data.ptr;
             }
 
@@ -8489,10 +8374,7 @@ LOG_ARGS(utimes)
 	if (ARG2(variantnum))
 	{
 		if (!rw::read_struct(variants[variantnum].variantpid, (void*) ARG2(variantnum), 2 * sizeof(struct timeval), utimes))
-		{
-			warnf("couldn't read utimes\n");
-			return;
-		}
+			throw RwMemFailure(variantnum, "read utimes in sys_utimes");
 
 		timestr << "ACTIME: " << utimes[0].tv_sec << "." << std::setw(6) << std::setfill('0') << utimes[0].tv_usec << std::setw(0)
 				<< ", MODTIME: " << utimes[1].tv_sec << "." << std::setw(6) << std::setfill('0') << utimes[1].tv_usec;
@@ -8916,10 +8798,8 @@ LOG_RETURN(fstatat64)
 {
 	struct stat64 sb;
 	if (!rw::read<struct stat64>(variants[variantnum].variantpid, (void*) ARG3(variantnum), sb))
-	{
-		warnf("Couldn't read stat64\n");
-		return;
-	}
+		throw RwMemFailure(variantnum, "read stat64 in sys_fstatat64");
+
 	debugf("%s - SYS_FSTATAT64 return\n", 
 		   call_get_variant_pidstr(variantnum).c_str());
 
@@ -9305,11 +9185,7 @@ LOG_ARGS(utimensat)
 	if (ARG3(variantnum))
 	{
 		if (!rw::read_struct(variants[variantnum].variantpid, (void*) ARG3(variantnum), 2 * sizeof(struct timespec), times))
-		{
-			warnf("%s - couldn't read timespec\n",
-				  call_get_variant_pidstr(variantnum).c_str());
-			return;
-		}
+			throw RwMemFailure(variantnum, "read timespec in sys_utimensat");
 
 		timestr << "ACTIME: " << times[0].tv_sec << std::setw(9) << std::setfill('0') << times[0].tv_nsec << std::setw(0)
 				<< ", MODTIME: " << times[1].tv_sec << std::setw(9) << std::setfill('0') << times[1].tv_nsec;
@@ -9646,10 +9522,7 @@ POSTCALL(pipe2)
 		std::vector<std::string> paths(mvee::numvariants);
 
         if (!rw::read_struct(variants[0].variantpid, (void*)ARG1(0), 2 * sizeof(int), fildes))
-        {
-            warnf("couldn't read master fds\n");
-            return 0;
-        }
+			throw RwMemFailure(0, "read master fds in sys_pipe2");
 
 		std::fill(read_fds.begin(),  read_fds.end(),  fildes[0]);
 		std::fill(write_fds.begin(), write_fds.end(), fildes[1]);
@@ -9915,7 +9788,7 @@ void mvee::init_syslocks()
     DONTNEED PRECALL(getresgid)
     DONTNEED PRECALL(madvise)
     DONTNEED PRECALL(set_thread_area)
-    DONTNEED PRECALL(exit_group)
+	DONTNEED PRECALL(exit_group)
     DONTNEED PRECALL(set_tid_address)
     DONTNEED PRECALL(clock_getres)
     DONTNEED PRECALL(set_robust_list)
@@ -9923,7 +9796,6 @@ void mvee::init_syslocks()
     DONTNEED PRECALL(fadvise64)
     DONTNEED PRECALL(sched_getaffinity)
     DONTNEED PRECALL(rt_sigreturn)
-    DONTNEED PRECALL(getpid)
     DONTNEED PRECALL(prlimit64)
     DONTNEED PRECALL(sigaltstack)
     DONTNEED PRECALL(shmdt)

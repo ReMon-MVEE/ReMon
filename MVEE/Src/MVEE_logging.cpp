@@ -457,15 +457,6 @@ void monitor::log_variant_backtrace(int variantnum, int max_depth, int calculate
 
 	set_mmap_table->grab_lock();
 
-/*
-	if (set_mmap_table->thread_group_shutting_down)
-	{
-		logfunc("This thread group is shutting down - not backtracing\n");
-		set_mmap_table->release_lock();
-		return;
-	}
-*/
-
 #if defined(MVEE_BENCHMARK) && defined(MVEE_FORCE_ENABLE_BACKTRACING)
     logfunc = mvee::warnf;
 #endif
@@ -1217,7 +1208,7 @@ void monitor::log_segfault(int variantnum)
 		  siginfo.si_code, siginfo.si_errno);
 //    log_registers(variantnum, mvee::logf);
 //    set_mmap_table->print_mmap_table(mvee::logf);
-#if !defined(MVEE_ENABLE_VALGRIND_HACKS) && (!defined(MVEE_BENCHMARK) || defined(MVEE_FORCE_ENABLE_BACKTRACING))
+#if !defined(MVEE_BENCHMARK) || defined(MVEE_FORCE_ENABLE_BACKTRACING)
     log_variant_backtrace(variantnum, 0, 1, 1);
 #endif
 

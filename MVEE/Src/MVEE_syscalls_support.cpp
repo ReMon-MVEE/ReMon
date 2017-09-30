@@ -32,11 +32,8 @@ void monitor::call_check_regs (int variantnum)
     {
         if (!interaction::read_all_regs(variants[variantnum].variantpid, 
 										&variants[variantnum].regs))
-		{
-			warnf("%s - couldn't read regs\n", 
-				  call_get_variant_pidstr(variantnum).c_str());
-			return;
-		}
+			throw RwRegsFailure(variantnum, "refresh syscall args");
+
 		variants[variantnum].regs_valid = true;
     }
 }
@@ -92,14 +89,11 @@ long monitor::call_postcall_get_variant_result(int variantnum)
     if (!variants[variantnum].return_valid)
     {
 		unsigned long tmp;
-		if (interaction::fetch_syscall_return(variants[variantnum].variantpid, tmp))
-		{
-			variants[variantnum].return_valid = 1;
-			variants[variantnum].return_value = (long) tmp;
-		}
-		else
-			warnf("%s - couldn't read syscall result\n",
-				  call_get_variant_pidstr(variantnum).c_str());
+		if (!interaction::fetch_syscall_return(variants[variantnum].variantpid, tmp))
+			throw RwRegsFailure(variantnum, "read syscall result");
+		
+		variants[variantnum].return_valid = 1;
+		variants[variantnum].return_value = (long) tmp;
     }
     return variants[variantnum].return_value;
 }
@@ -112,8 +106,7 @@ void monitor::call_postcall_set_variant_result(int variantnum, unsigned long res
     variants[variantnum].return_valid = 1;
     variants[variantnum].return_value = result;
 	if (!interaction::write_syscall_return(variants[variantnum].variantpid, result))
-		warnf("%s - couldn't write syscall result\n",
-			  call_get_variant_pidstr(variantnum).c_str());
+		throw RwRegsFailure(variantnum, "write syscall result");
 }
 
 /*-----------------------------------------------------------------------------
@@ -200,12 +193,12 @@ bool monitor::call_compare_variant_buffers(std::vector<const unsigned char*>& bu
             buf1 = rw::read_data(variants[i].variantpid, (void*) bufferptrs[i], size);
         buf2 = rw::read_data(variants[i+1].variantpid, (void*) bufferptrs[i + 1], size);
 
-        if (!buf1 || !buf2)
-        {
-            match = false;
-            break;
-        }
-        else if (memcmp(buf1, buf2, size) != 0)
+		if (!buf1)
+			throw RwMemFailure(i, "compare variant buffers");
+		if (!buf2)
+			throw RwMemFailure(i+1, "compare variant buffers");
+
+		if (memcmp(buf1, buf2, size) != 0)
         {
             match = false;
             break;
@@ -354,10 +347,7 @@ bool monitor::call_compare_io_vectors(std::vector<struct iovec*>& addresses, siz
     struct iovec*               master_vec = (struct iovec*)rw::read_data(variants[0].variantpid, addresses[0], sizeof(struct iovec) * len);
 
     if (!master_vec)
-    {
-        warnf("couldn't read master I/O vector\n");
-        return false;
-    }
+		throw RwMemFailure(0, "read master iovec");
 
     // get the contents of the master vector first
     std::vector<unsigned char*> master_io(len);
@@ -375,11 +365,7 @@ bool monitor::call_compare_io_vectors(std::vector<struct iovec*>& addresses, siz
     {
         slave_vec = (struct iovec*)rw::read_data(variants[i].variantpid, addresses[i], sizeof(struct iovec) * len);
         if (!slave_vec)
-        {
-            warnf("couldn't read slave I/O vector\n");
-            result = false;
-            goto out;
-        }
+			throw RwMemFailure(i, "read slave iovec");
 
         for (size_t j = 0; j < len; ++j)
         {
@@ -405,14 +391,8 @@ bool monitor::call_compare_io_vectors(std::vector<struct iovec*>& addresses, siz
                 if (slave_vec[j].iov_base)
                 {
                     unsigned char* io = rw::read_data(variants[i].variantpid, slave_vec[j].iov_base, slave_vec[j].iov_len);
-                    if ((!io || !master_io[j])
-                        && (io || master_io[j]))
-                    {
-                        warnf("couldn't read I/O vector data - iov_base @ 0x" PTRSTR " - len: %zu - j: %zu\n", 
-							  (unsigned long)slave_vec[j].iov_base, len, j);
-                        result = false;
-                        goto out;
-                    }
+                    if ((!io || !master_io[j]) && (io || master_io[j]))
+						throw RwMemFailure(i, "read iovec data");
 
                     if (memcmp(io, master_io[j], slave_vec[j].iov_len) != 0)
                     {
@@ -453,10 +433,7 @@ bool monitor::call_compare_msgvectors(std::vector<struct msghdr*>& addresses, bo
     memset(&msg,        0, sizeof(struct msghdr));
 
     if (!rw::read_struct(variants[0].variantpid, addresses[0], sizeof(struct msghdr), &master_msg))
-    {
-        warnf("couldn't read master msgvector\n");
-        return false;
-    }
+		throw RwMemFailure(0, "read master msghdr");
 
     iovecs[0]                   = master_msg.msg_iov;
     variants[0].orig_controllen = master_msg.msg_controllen;
@@ -468,32 +445,20 @@ bool monitor::call_compare_msgvectors(std::vector<struct msghdr*>& addresses, bo
         {
             master_msg.msg_control = (void*)rw::read_data(variants[0].variantpid, master_msg.msg_control, master_msg.msg_controllen);
             if (!master_msg.msg_control)
-            {
-                warnf("couldn't read msgvector control data - possible fuzzing?\n");
-                shutdown(false);
-                return false;
-            }
+				throw RwMemFailure(0, "read master msgvector control data");
         }
         if (master_msg.msg_namelen)
         {
             master_msg.msg_name = (void*)rw::read_data(variants[0].variantpid, master_msg.msg_name, master_msg.msg_namelen);
             if (!master_msg.msg_name)
-            {
-                warnf("couldn't read msgvector name data - possible fuzzing?\n");
-                shutdown(false);
-                return false;
-            }
+				throw RwMemFailure(0, "read master msgvector msg name");
         }
     }
 
     for (int i = 1; i < mvee::numvariants; ++i)
     {
         if (!rw::read_struct(variants[i].variantpid, addresses[i], sizeof(struct msghdr), &msg))
-        {
-            warnf("couldn't read slave msgvector\n");
-            result = false;
-            goto out;
-        }
+			throw RwMemFailure(i, "read slave msghdr");
 
         if (msg.msg_iovlen != master_msg.msg_iovlen)
         {
@@ -530,21 +495,13 @@ bool monitor::call_compare_msgvectors(std::vector<struct msghdr*>& addresses, bo
             {
                 msg.msg_control = (void*)rw::read_data(variants[i].variantpid, msg.msg_control, msg.msg_controllen);
                 if (!msg.msg_control)
-                {
-                    warnf("couldn't read msgvector control data - possible fuzzing?\n");
-                    shutdown(false);
-                    return false;
-                }
+					throw RwMemFailure(i, "read slave msgvector control data");
             }
             if (msg.msg_namelen)
             {
                 msg.msg_name = (void*)rw::read_data(variants[i].variantpid, msg.msg_name, msg.msg_namelen);
                 if (!msg.msg_name)
-                {
-                    warnf("couldn't read msgvector name data - possible fuzzing?\n");
-                    shutdown(false);
-                    return false;
-                }
+					throw RwMemFailure(i, "read slave msgvector msg name");
             }
 
             if (COMPARE_NULL(msg.msg_name, master_msg.msg_name)
@@ -657,13 +614,8 @@ bool monitor::call_compare_fd_sets(std::vector<fd_set*>& addresses, int nfds)
     std::vector<fd_set> sets(mvee::numvariants);
 
     for (int i = 0; i < mvee::numvariants; ++i)
-    {
         if (!rw::read_struct(variants[i].variantpid, addresses[i], sizeof(fd_set), &sets[i]))
-        {
-            warnf("couldn't read fd_set for variant %d\n", i);
-            return false;
-        }
-    }
+			throw RwMemFailure(i, "read fd_set");
 
     if (nfds % 8)
     {
@@ -698,10 +650,7 @@ void monitor::call_replicate_io_vector(std::vector<struct iovec*>& addresses, lo
     {
         struct iovec master_vec;
         if (!rw::read_struct(variants[0].variantpid, addresses[0] + i, sizeof(struct iovec), &master_vec))
-        {
-            warnf("couldn't read master I/O vector\n");
-            return;
-        }
+			throw RwMemFailure(0, "read master iovec");
 
         long         to_copy = ((unsigned long)bytes_remaining > master_vec.iov_len) ? (long)master_vec.iov_len : bytes_remaining;
 
@@ -709,18 +658,13 @@ void monitor::call_replicate_io_vector(std::vector<struct iovec*>& addresses, lo
         {
             struct iovec variant_vec;
             if (!rw::read_struct(variants[j].variantpid, addresses[j] + i, sizeof(struct iovec), &variant_vec))
-            {
-                warnf("couldn't read slave I/O vector\n");
-                return;
-            }
+				throw RwMemFailure(j, "read slave iovec");
 
-            long         copied = rw::copy_data(variants[0].variantpid, master_vec.iov_base,
-                                                    variants[j].variantpid, variant_vec.iov_base, to_copy);
+            long copied = rw::copy_data(variants[0].variantpid, master_vec.iov_base,
+										variants[j].variantpid, variant_vec.iov_base, to_copy);
 
             if (copied != to_copy)
-            {
-                warnf("Failed to replicate io vector. tried to replicate %ld bytes - actually replicated %ld bytes - errno: %s\n", to_copy, copied, getTextualErrno(errno));
-            }
+				throw RwMemFailure(j, "copy iovec data");
         }
 
         bytes_remaining -= to_copy;
@@ -736,71 +680,47 @@ void monitor::call_replicate_msgvector(std::vector<struct msghdr*>& addresses, l
     std::vector<struct msghdr> hdrs(mvee::numvariants);
 	
     for (int i = 0; i < mvee::numvariants; ++i)
-    {
         if (!rw::read_struct(variants[i].variantpid, addresses[i], sizeof(struct msghdr), &hdrs[i]))
-        {
-            warnf("couldn't read msgvector %d\n", i);
-            return;
-        }
-    }
+			throw RwMemFailure(i, "read msghdr");
 
     // replicate name and namelen
     if (hdrs[0].msg_namelen && hdrs[0].msg_name)
     {
         unsigned char* master_name = rw::read_data(variants[0].variantpid, hdrs[0].msg_name, hdrs[0].msg_namelen);
         if (!master_name)
-        {
-            warnf("couldn't read name from master msgvector\n");
-            return;
-        }
+			throw RwMemFailure(0, "read master msg name");
+
         for (i = 1; i < mvee::numvariants; ++i)
         {
             if (!rw::write_data(variants[i].variantpid, hdrs[i].msg_name, hdrs[0].msg_namelen, master_name))
-            {
-                warnf("couldn't replicate name in msgvector\n");
-                return;
-            }
+				throw RwMemFailure(i, "replicate msgvector msg name");
+
             if (!rw::write_data(variants[i].variantpid, &addresses[i]->msg_namelen, sizeof(socklen_t), &hdrs[0].msg_namelen))
-            {
-                warnf("couldn't replicate namelen in msgvector\n");
-                return;
-            }
+				throw RwMemFailure(i, "replicate msgvector msg name len");
         }
         SAFEDELETEARRAY(master_name);
     }
 
     // replicate flags
     for (i = 1; i < mvee::numvariants; ++i)
-    {
         if (!rw::write_data(variants[i].variantpid, &addresses[i]->msg_flags, sizeof(int), &hdrs[0].msg_flags))
-        {
-            warnf("couldn't replicate flags in msgvector\n");
-            break;
-        }
-    }
+			throw RwMemFailure(i, "replicate msgvector flags");
 
 //	if (hdrs[0].msg_controllen)
     if (variants[0].orig_controllen)
     {
         unsigned char* master_control = rw::read_data(variants[0].variantpid, hdrs[0].msg_control, variants[0].orig_controllen);
-
         if (!master_control)
-        {
-            warnf("couldn't read control from master msgvector - msg_control: 0x" PTRSTR " - msg_controllen: %zu\n", 
-				  (unsigned long)hdrs[0].msg_control, variants[0].orig_controllen);
-        }
+			throw RwMemFailure(0, "read msgvector control data len");
 
         // replicate control data
         for (i = 1; i < mvee::numvariants; ++i)
         {
             if (!rw::write_data(variants[i].variantpid, hdrs[i].msg_control, variants[0].orig_controllen, master_control))
-            {
-                warnf("couldn't replicate name in msgvector\n");
-            }
+				throw RwMemFailure(i, "replicate msgvector control data");
+
             if (!rw::write_data(variants[i].variantpid, &((struct msghdr*)addresses[i])->msg_controllen, sizeof(size_t), &hdrs[0].msg_controllen))
-            {
-                warnf("couldn't replicate controllen in msgvector\n");
-            }
+				throw RwMemFailure(i, "replicate msgvector control data len");
         }
 
         SAFEDELETEARRAY(master_control);
@@ -825,19 +745,11 @@ void monitor::call_replicate_mmsgvector(std::vector<struct mmsghdr*>& addresses,
     while (vlen > 0)
     {
         if (!rw::read_struct(variants[0].variantpid, addresses[0], sizeof(struct mmsghdr), &master_mmsg))
-        {
-            warnf("couldn't read master message message header\n");
-            return;
-        }
+			throw RwMemFailure(0, "read master mmsghdr");
 
 		for (int i = 1; i < mvee::numvariants; ++i)
-		{
             if (!rw::write_data(variants[i].variantpid, &addresses[i]->msg_len, sizeof(master_mmsg.msg_len), &master_mmsg.msg_len))
-			{
-				warnf("couldn't write slave message message header\n");
-				return;
-			}
-		}
+				throw RwMemFailure(i, "replicate mmsghdr len");
 
         if (master_mmsg.msg_len > 0)
         {
@@ -871,35 +783,20 @@ void monitor::call_replicate_ifconfs(std::vector<struct ifconf*>& addresses)
 	std::vector<struct ifconf> real_ifconfs(mvee::numvariants);
 	
 	for (int i = 0; i < mvee::numvariants; ++i)
-	{
 		if (!rw::read_struct(variants[i].variantpid, addresses[i], sizeof(struct ifconf), &real_ifconfs[i]))
-		{
-			warnf("Couldn't read ifconf\n");
-			return;
-		}
-	}
+			throw RwMemFailure(i, "read ifconf");
 
 	struct ifreq* master_reqs = (struct ifreq*)rw::read_data(variants[0].variantpid, real_ifconfs[0].ifc_ifcu.ifcu_req, real_ifconfs[0].ifc_len);
-
 	if (!master_reqs)
-	{
-		warnf("couldn't read master ifcu_reqs\n");
-		return;
-	}
+		throw RwMemFailure(0, "read master ifconf reqs");
 
 	for (int i = 1; i < mvee::numvariants; ++i)
 	{
 		if (!rw::write_data(variants[i].variantpid, &addresses[i]->ifc_len, sizeof(int), &real_ifconfs[0].ifc_len))
-		{
-			warnf("Couldn't replicate master ifc_len\n");
-			break;
-		}
+			throw RwMemFailure(i, "replicate ifconf len");
 
 		if (!rw::write_data(variants[i].variantpid, real_ifconfs[i].ifc_ifcu.ifcu_req, real_ifconfs[0].ifc_len, master_reqs))
-		{
-			warnf("Couldn't replicate master ifcu_reqs\n");
-			break;
-		}
+			throw RwMemFailure(i, "replicate ifconf reqs");
 	}
 
 	delete[] (unsigned char*)master_reqs;
@@ -921,18 +818,12 @@ void monitor::call_replicate_mmsgvectorlens(std::vector<mmsghdr*>& addresses, in
     while (sent > 0)
     {
         if (!rw::read_struct(variants[0].variantpid, addresses[0], sizeof(struct mmsghdr), &master_mmsg))
-        {
-            warnf("couldn't read master message message header\n");
-            return;
-        }
+			throw RwMemFailure(0, "read mmsghdr");
 
         for (int i = 1; i < mvee::numvariants; ++i)
         {
             if (!rw::write_data(variants[i].variantpid, &addresses[i]->msg_len, sizeof(master_mmsg.msg_len), &master_mmsg.msg_len))
-            {
-                warnf("couldn't replicate message message length\n");
-                return;
-            }
+				throw RwMemFailure(i, "replicate mmsghdr len");
 
             addresses[i]++;;
         }
@@ -952,12 +843,8 @@ void monitor::call_replicate_buffer(std::vector<const unsigned char*>& buffers, 
         return;
 
     for (int i = 1; i < mvee::numvariants; ++i)
-    {
         if ((result = rw::copy_data(variants[0].variantpid, (void*) buffers[0], variants[i].variantpid, (void*) buffers[i], size)) != size)
-        {
-            warnf("Failed to replicate buffer. tried to replicate %d bytes - actually replicated %ld bytes - errno: %s\n", size, result, getTextualErrno(errno));
-        }
-    }
+			throw RwMemFailure(0, "replicate buffer");
 }
 
 /*-----------------------------------------------------------------------------
@@ -974,19 +861,14 @@ sigset_t monitor::call_get_sigset(int variantnum, void* sigset_ptr, bool is_old_
         {
             unsigned int __set;
             if (!rw::read_struct(variants[variantnum].variantpid, sigset_ptr, sizeof(unsigned int), &__set))
-            {
-                warnf("couldn't read sigset\n");
-                return set;
-            }
+				throw RwMemFailure(variantnum, "read sigset (old)");
+
             set = mvee::old_sigset_to_new_sigset(__set);
         }
         else
         {
             if (!rw::read_struct(variants[variantnum].variantpid, sigset_ptr, sizeof(sigset_t), &set))
-            {
-                warnf("couldn't read sigset\n");
-                return set;
-            }
+				throw RwMemFailure(variantnum, "read sigset (new)");
         }
     }
 
@@ -1008,10 +890,7 @@ struct sigaction monitor::call_get_sigaction(int variantnum, void* sigaction_ptr
             old_kernel_sigaction action;
 
             if (!rw::read_struct(variants[variantnum].variantpid, sigaction_ptr, sizeof(action), &action))
-            {
-                warnf("couldn't read sigaction\n");
-                return result;
-            }
+				throw RwMemFailure(variantnum, "read sigaction (old)");
 
             result.sa_handler  = action.k_sa_handler;
             result.sa_restorer = action.sa_restorer;
@@ -1023,10 +902,7 @@ struct sigaction monitor::call_get_sigaction(int variantnum, void* sigaction_ptr
             struct kernel_sigaction action;
 
             if (!rw::read_struct(variants[variantnum].variantpid, sigaction_ptr, sizeof(action), &action))
-            {
-                warnf("couldn't read sigaction\n");
-                return result;
-            }
+				throw RwMemFailure(variantnum, "read sigaction (new)");
 
             result.sa_handler  = action.k_sa_handler;
             result.sa_restorer = action.sa_restorer;
@@ -1066,27 +942,30 @@ std::string monitor::call_serialize_io_vector(int variantnum, struct iovec* vec,
 		size_t vec_len = (max_bytes == 0) ? vec[i].iov_len : MIN(max_bytes, vec[i].iov_len);
 		bool truncated = (vec_len - vec[i].iov_len) > 0;
 
+		if (vec_len <= 0)
+			continue;			
+
         char* elem = (char*)rw::read_data(variants[variantnum].variantpid, 
 											  vec[i].iov_base, 
 											  vec_len, 
 											  1);
 
-        if (elem)
-        {
-            if (ss.str().length() > 0)
-                ss << ", ";
-            ss << i << " => \n";
+		if (!elem)
+			throw RwMemFailure(variantnum, "read iovec data");
 
-            if (!mvee::is_printable_string(elem, vec_len))
-                ss << mvee::log_do_hex_dump(elem, vec_len);
-            else
-                ss << std::string(elem);
-			if (truncated)
-				ss << "...[TRUNCATED]";
-            ss << "\n";
+		if (ss.str().length() > 0)
+			ss << ", ";
+		ss << i << " => \n";
 
-            SAFEDELETEARRAY(elem);
-        }
+		if (!mvee::is_printable_string(elem, vec_len))
+			ss << mvee::log_do_hex_dump(elem, vec_len);
+		else
+			ss << std::string(elem);
+		if (truncated)
+			ss << "...[TRUNCATED]";
+		ss << "\n";
+
+		SAFEDELETEARRAY(elem);
     }
 
     return ss.str();
@@ -1106,11 +985,7 @@ std::string monitor::call_serialize_msgvector(int variantnum, struct msghdr* msg
             return "";
         }
         if (!rw::read_struct(variants[variantnum].variantpid, msg->msg_iov, sizeof(struct iovec) * msg->msg_iovlen, tmp))
-        {
-            warnf("failed to read msgvector I/O vector\n");
-            SAFEDELETEARRAY(tmp);
-            return "";
-        }
+			throw RwMemFailure(variantnum, "read msgvector iovecs");
 
         std::string   result = call_serialize_io_vector(variantnum, tmp, msg->msg_iovlen);
         SAFEDELETEARRAY(tmp);
@@ -1137,28 +1012,30 @@ std::string monitor::call_serialize_io_buffer(int variantnum, const unsigned cha
 
 	size_t real_buflen = (max_bytes == 0) ? buflen : MIN(buflen, max_bytes);
 	bool truncated = (real_buflen - buflen) > 0;
+	
+	if (real_buflen <= 0)
+		return "";
+	
     char* result = (char*)rw::read_data(variants[variantnum].variantpid, 
 		(void*) buf, 
 		real_buflen, 
 		1);
 
-    if (result)
-    {
-        std::string res;
+	if (!result)
+		throw RwMemFailure(variantnum, "read io buffer");
 
-        if (!mvee::is_printable_string(result, real_buflen))
-            res = mvee::log_do_hex_dump(result, real_buflen);
-        else
-            res = std::string(result);
+	std::string res;
 
-		if (truncated)
-			res += "...[TRUNCATED]";
+	if (!mvee::is_printable_string(result, real_buflen))
+		res = mvee::log_do_hex_dump(result, real_buflen);
+	else
+		res = std::string(result);
 
-        SAFEDELETEARRAY(result);
-        return res;
-    }
+	if (truncated)
+		res += "...[TRUNCATED]";
 
-    return "";
+	SAFEDELETEARRAY(result);
+	return res;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1177,11 +1054,14 @@ std::string monitor::call_get_variant_pidstr(int variantnum)
 -----------------------------------------------------------------------------*/
 struct sockaddr* monitor::call_get_sockaddr(int variantnum, struct sockaddr* ptr, socklen_t addr_len)
 {
+	if (addr_len <= 0)
+		return NULL;
+
     struct sockaddr* tmp = (struct sockaddr*)
                            rw::read_data(variants[variantnum].variantpid, ptr, addr_len);
 
     if (!tmp)
-        return NULL;
+		throw RwMemFailure(variantnum, "read sockaddr");
 
 #define CAST_TO(family, type)                                                                  \
     case family:                                                                               \
@@ -1216,7 +1096,7 @@ void monitor::call_overwrite_arg_value(int variantnum, int argnum, long new_valu
 #define SWAP(num)									\
 		case num:									\
 			old_value = ARG##num(variantnum);		\
-			SETARG##num(variantnum, new_value);	\
+			SETARG##num(variantnum, new_value);		\
 			break;
 		SWAP(1);
 		SWAP(2);
@@ -1276,14 +1156,8 @@ void monitor::call_overwrite_arg_data
 	// if the original data doesn't need to be restored,
 	// we can just try to overwrite the current data
 	if (!needs_restore && new_len <= old_len)
-	{
 		if (!rw::write_data(variants[variantnum].variantpid, (void*) old_value, new_len, data))
-		{
-			warnf("syscall overwrite failed\n");
-			shutdown(false);
-			return;
-		}
-	}
+			throw RwMemFailure(variantnum, "overwrite syscall arg");
 
 	// We have to find some region to write the new data.
 	// Check if we can use the stack
@@ -1318,12 +1192,7 @@ void monitor::call_overwrite_arg_data
 	// Lezgo
 	// TODO: Store old contents at the stack base?
 	if (!rw::write_data(variants[variantnum].variantpid, (void*)stack_info->region_base_address, new_len, data))
-	{
-		warnf("syscall overwrite failed - failed to write an arg of size %d on the stack of thread %d (TID: %d) in variant %d\n",
-			  new_len, mvee::active_monitorid, variants[variantnum].variantpid, variantnum);
-		shutdown(false);
-		return;
-	}
+		throw RwMemFailure(variantnum, "write new syscall arg data on stack");
 
 	switch(argnum)
 	{
@@ -1364,14 +1233,8 @@ void monitor::call_restore_args(int variantnum)
 	for (auto arg : variants[variantnum].overwritten_args)
 	{
 		if (arg.restore_data)
-		{
 			if (!rw::write_data(variants[variantnum].variantpid, arg.data_loc, arg.data_len,  arg.data_content))
-			{
-				warnf("Failed to restore syscall arg data %d for variant %d\n", arg.syscall_arg_num, variantnum);
-				shutdown(false);
-				return;
-			}
-		}
+				throw RwMemFailure(variantnum, "restore syscall arg data");
 		
 		switch(arg.syscall_arg_num)
 		{
