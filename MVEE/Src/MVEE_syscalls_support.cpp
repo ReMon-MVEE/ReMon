@@ -153,6 +153,7 @@ bool monitor::call_compare_variant_strings(std::vector<const char*>& stringptrs,
             str1 = rw::read_string(variants[i].variantpid, (void*) stringptrs[i], maxlength);
         str2 = rw::read_string(variants[i+1].variantpid, (void*) stringptrs[i + 1], maxlength);
 
+		// TODO: comparison of two empty strings should return true
         if (str1.length() == 0 || str2.length() == 0)
         {
             match = false;

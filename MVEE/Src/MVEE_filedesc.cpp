@@ -157,6 +157,53 @@ fd_table::~fd_table()
 }
 
 /*-----------------------------------------------------------------------------
+    should_open_in_all_variants - Normally we want to open every file in all
+	variants. There are some exceptions, though...
+
+	Specifically, we want to give each variant access to its own 
+	"/proc/self/maps" and "/proc/self/exe", but not to any of the other 
+	"/proc/self/..." files.
+
+	We also want to open "/dev/shm/..." and "/run/shm/..." everywhere, but not
+	open any of the other "/dev/..." files except in the master
+-----------------------------------------------------------------------------*/
+bool fd_table::should_open_in_all_variants(std::string& master_path, pid_t master_pid)
+{
+	if (master_path.find("/dev/shm/") == 0 ||
+		master_path.find("/run/shm/") == 0)
+	{
+		return true;
+	}
+	else if (master_path.find("/dev/") == 0 ||
+			 master_path.find("/run/") == 0)
+	{
+		return false;
+	}
+	else
+	{
+		std::stringstream resolved_proc_self;
+		std::string file;
+		resolved_proc_self << "/proc/" << master_pid << "/";
+
+		if (master_path.find("/proc/self/") == 0)
+		{
+			file = master_path.substr(strlen("/proc/self/"));
+		}
+		else if (master_path.find(resolved_proc_self.str()) == 0)
+		{
+			file = master_path.substr(resolved_proc_self.str().length());
+		}
+
+		if (file == "exe" || file == "maps")
+			return true;
+		else if (file != "")
+			return false;
+	}
+
+	return true;
+}
+
+/*-----------------------------------------------------------------------------
     add_missing_fds - Firefox 51 does something weird that I can't quite figure
     out right now. At some point, there is a thread B that opens a shared memory
     backing file, unlinks it from the file system, maps it into the address

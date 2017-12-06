@@ -704,28 +704,12 @@ PRECALL(open)
 
 	if (!ipmon_fd_handling)
 	{
-		auto orig_path = rw::read_string(variants[0].variantpid, (void*) ARG1(0));
-		if (orig_path.find("/proc/self/") == 0 &&
-			orig_path != "/proc/self/maps" &&
-			orig_path != "/proc/self/exe")
-		{
-			debugf("master sys_open for: %s\n", orig_path.c_str());
-			return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-		}
-
 		auto full_path = set_fd_table->get_full_path(0, variants[0].variantpid, AT_FDCWD, (void*)ARG1(0));
 		if (full_path == "")
 			return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
 
-		if (full_path.find("/dev/shm/") == 0 ||
-			full_path.find("/run/shm/") == 0)
-			return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
-
-		if (full_path.find("/dev/") == 0)
-		{
-			debugf("master sys_open for: %s\n", full_path.c_str());
+		if (!set_fd_table->should_open_in_all_variants(full_path, variants[0].variantpid))
 			return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-		}
 	}
 
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
@@ -8590,14 +8574,12 @@ PRECALL(openat)
         MAPFDS(1);
 
     std::string full_path = set_fd_table->get_full_path(0, variants[0].variantpid, (unsigned long)(int)ARG1(0), (void*)ARG2(0));
-//    warnf("openat: %s\n", full_path.c_str());
+    //warnf("openat: %s\n", full_path.c_str());
 
     if (full_path == "")
         return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
 
-    if (full_path.find("/proc/self/") == 0
-        && full_path != "/proc/self/maps"
-        && full_path != "/proc/self/exe")
+    if (!set_fd_table->should_open_in_all_variants(full_path, variants[0].variantpid))
         return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;

@@ -130,6 +130,11 @@ public:
     void          free_cloexec_fds    ();
 
 	//
+	//
+	//
+	bool          should_open_in_all_variants (std::string& master_path, pid_t master_pid);
+
+	//
 	// Wipe the fd table and repopulate it using /proc/<pid>/fd
     //
     bool          add_missing_fds     (std::vector<pid_t> variant_pids);
