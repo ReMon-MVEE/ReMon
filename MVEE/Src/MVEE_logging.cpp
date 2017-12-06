@@ -566,7 +566,7 @@ was_interrupted:
         mvee_syscall_logger logger;
         if (!mvee::in_logging_handler && 
 			variants[variantnum].callnum > 0 && 
-			variants[variantnum].callnum <= MAX_CALLS)
+			variants[variantnum].callnum < MAX_CALLS)
         {
             logger = monitor::syscall_logger_table[variants[variantnum].callnum][MVEE_LOG_ARGS];
 			(this->*logger)(variantnum);
