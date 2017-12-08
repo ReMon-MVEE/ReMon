@@ -3410,7 +3410,7 @@ POSTCALL(munmap)
 				if (i >= mvee::numvariants)
 				{
 					in_new_heap_allocation = false;
-					call_release_locks(MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN);
+					//call_release_locks(MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN);
 				}
 			}
 
@@ -6623,7 +6623,7 @@ POSTCALL(mmap)
 			in_new_heap_allocation = true;
 
 			// bump the lock counter for the fd/mman locks - we'll unlock when we see the munmap of the upper region
-			call_grab_locks(MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN);
+			//call_grab_locks(MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN);
 
 			unsigned long requested_alignment = last_mmap_requested_alignment;
 			unsigned long requested_size      = last_mmap_requested_size;
