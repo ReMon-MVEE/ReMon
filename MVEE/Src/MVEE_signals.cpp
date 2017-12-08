@@ -148,6 +148,58 @@ bool sighand_table::is_default_ignored_signal (int signo)
 }
 
 /*-----------------------------------------------------------------------------
+    will_cause_termination - check if the specified signal will cause the
+	variants to terminate (either by getting killed, by core dumping, or by
+	regular termination)
+-----------------------------------------------------------------------------*/
+bool sighand_table::will_cause_termination (int signo)
+{
+	switch (signo)
+	{
+		// Can't be ignored and always causes termination
+		case SIGKILL:
+		{
+			return true;
+		}
+		// Cause termination if the signal is not ignored or caught by a custom
+		// handler
+		case SIGHUP:
+		case SIGINT:
+		case SIGPIPE:
+		case SIGALRM:
+		case SIGUSR1:
+		case SIGUSR2:
+		case SIGPOLL:
+		case SIGPROF:
+		case SIGVTALRM:
+		{
+			if (action_table[signo].sa_handler == SIG_DFL)
+				return true;
+			return false;
+		}
+		// Cause a core dump if the signal is not ignored or caught by a custom
+		// handler
+		case SIGQUIT:
+		case SIGILL:
+		case SIGABRT:
+		case SIGFPE:
+		case SIGSEGV:
+		case SIGBUS:
+		case SIGSYS:
+		case SIGTRAP:
+		case SIGXCPU:
+		case SIGXFSZ:
+		{
+			if (action_table[signo].sa_handler == SIG_DFL)
+				return true;
+			return false;
+		}
+		default:
+			return false;
+	}
+}
+
+/*-----------------------------------------------------------------------------
     reset - resets dispositions of handled signals
 -----------------------------------------------------------------------------*/
 void sighand_table::reset()

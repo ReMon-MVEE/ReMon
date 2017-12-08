@@ -365,6 +365,11 @@ public:
 	void log_donthave                        (int variantnum);
 	void log_dontneed                        (int variantnum);
 
+	// 
+	// Syscall handler logging helper
+	//
+	std::string      call_get_variant_pidstr (int variantnum);
+
 	//
 	// Include an automatically generated syscall handler table. All of these
 	// handler functions are implemented in MVEE_syscalls_handlers.cpp
@@ -470,12 +475,6 @@ private:
     std::string      call_serialize_io_vector            (int variantnum, struct iovec* vec, unsigned int vecsz);
     std::string      call_serialize_msgvector            (int variantnum, struct msghdr* msg);
     std::string      call_serialize_io_buffer            (int variantnum, const unsigned char* buf, unsigned long buflen);
-
-	// 
-	// Syscall handler logging helpers
-	//
-	std::string      call_get_variant_pidstr             (int variantnum);
-
 	// 
 	// Replication functions. These accept a pointer to a data structure for
 	// each variant. The data structure is deep copied from the address space of
@@ -1314,5 +1313,7 @@ struct ipmon_buffer
 
 #define likely(x)   __builtin_expect((x), 1)
 #define unlikely(x) __builtin_expect((x), 0)
+#include "MVEE_exceptions.h"
+
 
 #endif // MVEE_PRIVATE_H_INCLUDED

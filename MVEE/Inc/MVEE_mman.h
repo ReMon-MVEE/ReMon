@@ -22,6 +22,7 @@
 #include <deque>
 #include <vector>
 #include <map>
+#include <atomic>
 #include "MVEE_build_config.h"
 #include "MVEE_private_arch.h"
 
@@ -225,7 +226,8 @@ public:
                 mmap_startup_info;                    // information about the execve call used to create this address space
 	bool        have_diversified_variants;            // Set to true if we have compile-time diversified variants
     bool        set_logging_enabled;                  // are we logging for this set
-    bool        thread_group_shutting_down;           // is this thread group shutting down asynchronously?
+	std::atomic<bool>        
+		        thread_group_shutting_down;           // is this thread group shutting down asynchronously?
     bool        enlarged_initial_stacks;              // we artificially enlarge the initial stacks to the stack limit to prevent DCL from mapping anything that might overlap with a future stack page
 
     //

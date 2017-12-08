@@ -79,10 +79,6 @@
 /*-----------------------------------------------------------------------------
   Self-Debugging Support
 -----------------------------------------------------------------------------*/
-// MVEE_ENABLE_VALGRIND_HACKS: alters the behavior of certain I/O related syscalls
-// so the MVEE can get through the valgrind initialization without any mismatches
-// #define MVEE_ENABLE_VALGRIND_HACKS
-
 // MVEE_FD_DEBUG: when defined, the monitor will log the /proc/pid/fd directory every
 // time a file descriptor is opened/closed
 // #define MVEE_FD_DEBUG

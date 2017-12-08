@@ -164,6 +164,11 @@ enum mvee_libc_alloc_types
 /*-----------------------------------------------------------------------------
     Structures
 -----------------------------------------------------------------------------*/
+
+//
+// Wall of clocks replication agent
+// Keep this in sync with glibc/sysdeps/x86_64/mvee-woc-agent.h
+//
 struct mvee_op_entry
 {
     unsigned long counter_and_idx;
@@ -174,6 +179,42 @@ struct mvee_counter
     unsigned long lock;
     unsigned long counter;
     unsigned char padding[64 - 2 * sizeof(unsigned long)];
+};
+
+//
+// Total/partial order replication agents
+// Keep this in sync with glibc/sysdeps/x86_64/mvee-totalpartial-agent.h
+//
+struct mvee_lock_buffer_info
+{
+	// The master must acquire this lock before writing into the buffer
+	volatile int lock;
+    // In the master, pos is the index of the next element we're going to write
+    // In the slave, pos is the index of the first element that hasn't been replicated yet
+	volatile unsigned int pos;
+	// How many elements fit inside the buffer?
+	// This does not include the position entries
+	unsigned int size;
+    // How many times has the buffer been flushed?
+    volatile unsigned int flush_cnt;
+    // Are we flushing the buffer right now?
+    volatile unsigned char flushing;
+	// Type of the buffer. Must be MVEE_LIBC_LOCK_BUFFER or MVEE_LIBC_LOCK_BUFFER_PARTIAL
+	unsigned char buffer_type;
+	// Pad to the next cache line boundary
+	unsigned char padding[64 - sizeof(int) * 4 - sizeof(unsigned char)];
+};
+
+struct mvee_lock_buffer_entry
+{
+	// the memory location that is being accessed atomically
+	unsigned long word_ptr;
+	// the thread id of the master variant thread that accessed the field
+	unsigned int master_thread_id;
+	// type of the operation
+	unsigned short operation_type;
+	// Pad to the next cache line boundary. We use this to write tags in the partial order buffer
+	unsigned char tags[64 - sizeof(long) - sizeof(int) - sizeof(short)];
 };
 
 /*-----------------------------------------------------------------------------

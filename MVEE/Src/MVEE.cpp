@@ -1393,7 +1393,7 @@ void mvee::unregister_monitor(monitor* mon, bool move_to_dead_monitors)
 	}
 
     if (should_shutdown)
-        mvee::request_shutdown(false);
+        mvee::request_shutdown(mvee::should_generate_backtraces);
 }
 
 /*-----------------------------------------------------------------------------

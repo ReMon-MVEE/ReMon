@@ -128,8 +128,8 @@ namespace rw
 	bool write_data (pid_t variantpid, void* addr, ssize_t datalength, void* databuf)
 	{
 		if (!interaction::write_memory(variantpid, addr, datalength, databuf))
-			return -1;
-		return datalength;
+			return false;
+		return true;
 	}
 
 /*-----------------------------------------------------------------------------
