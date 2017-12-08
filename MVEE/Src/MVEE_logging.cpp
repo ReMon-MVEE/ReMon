@@ -634,7 +634,7 @@ was_interrupted:
 void monitor::log_dump_queues(shm_table* shm_table)
 {
     unsigned int master_pos = 0, lowest;
-    long*        buffer, *eip_buffer, *data;
+    long*        buffer, *eip_buffer;
 
 //	MutexLock lock(&mvee::global_lock);
 
@@ -715,13 +715,17 @@ void monitor::log_dump_queues(shm_table* shm_table)
     {
         _shm_info* info = it.second.get();
 
+		if (it.first != MVEE_LIBC_LOCK_BUFFER && 
+			it.first != MVEE_LIBC_LOCK_BUFFER_PARTIAL)
+			continue;
+
         // check if we always need to dump or if it only needs to happen once
 #ifndef MVEE_ALWAYS_DUMP_QUEUES
         if (!info->dumpcount) // i.e. if (first_dump)
         {
-#endif
+#endif			
         buffer     = (long*)info->ptr;
-        eip_buffer = (long*)info->eip_ptr;
+		eip_buffer = (long*)info->eip_ptr;
         lowest     = 0xFFFFFFFF;
         info->dumpcount++;
 
@@ -741,7 +745,7 @@ void monitor::log_dump_queues(shm_table* shm_table)
         fprintf(logfile, "> * SYSV IPC shm id       : %d                    \n", info->id);
         fprintf(logfile, "> * SYSV IPC shm size     : %d bytes              \n", info->sz);
         fprintf(logfile, "> * Has EIP Queue?        : %d                    \n", info->have_eip_segment);
-        fprintf(logfile, "> * Buffer slot size      : %d                    \n", info->sz / ( SHARED_QUEUE_SLOTS));
+        fprintf(logfile, "> * Buffer slot size      : %d                    \n", info->sz / (SHARED_QUEUE_SLOTS));
         if (info->have_eip_segment)
         {
             fprintf(logfile, "> * EIP queue shm id      : %d                    \n", info->eip_id);
@@ -753,144 +757,46 @@ void monitor::log_dump_queues(shm_table* shm_table)
         // try to determine the last non-empty slot in this buffer
         for (int j = 0; j < mvee::numvariants; ++j)
         {
-            unsigned int tmppos = *(unsigned int*)(ROUND_UP((unsigned long)info->ptr, 64) + j * 64 + sizeof(int));
+			struct mvee_lock_buffer_info* buffer_info = (struct mvee_lock_buffer_info*) info->ptr + j;
             if (j == 0)
-                master_pos = tmppos;
-            fprintf(logfile, "> * Variant %d                                      \n", j);
-            fprintf(logfile, ">   + pid               : %d                    \n",   variants[j].variantpid);
-			fprintf(logfile, ">   + pos               : %d                    \n", tmppos);
-
-            if (it.first == MVEE_LIBC_LOCK_BUFFER_PARTIAL)
-            {
-                unsigned int tmpflush = *(unsigned int*)(ROUND_UP((unsigned long)info->ptr, 64) + j * 64 + sizeof(int) * 2);
-                fprintf(logfile, ">   + current position  : %d                    \n", tmppos);
-                fprintf(logfile, ">   + current flushcnt  : %d                    \n", tmpflush);
-            }
-            if (tmppos < lowest)
-                lowest = tmppos;
+                master_pos = buffer_info->pos;
+            fprintf(logfile, "> * Variant %d                                  \n", j);
+            fprintf(logfile, ">   + pid               : %d                    \n", variants[j].variantpid);
+			fprintf(logfile, ">   + current position  : %d                    \n", buffer_info->pos);
+			fprintf(logfile, ">   + current flushcnt  : %d                    \n", buffer_info->flush_cnt);
+            if (buffer_info->pos < lowest)
+                lowest = buffer_info->pos;
         }
         fprintf(logfile, "===============================================   \n");
 
-        for (unsigned int j = 0; j <= master_pos; ++j)
+        for (unsigned int j = 0; j <= std::min<unsigned int>(master_pos, info->sz / sizeof(struct mvee_lock_buffer_entry) - mvee::numvariants); ++j)
         {
             char tempstr[4096];
 
+			struct mvee_lock_buffer_entry* entry = (struct mvee_lock_buffer_entry*) info->ptr + mvee::numvariants;
+
+			sprintf(tempstr, "> BUFFER[%05d]: word_ptr(0x" LONGPTRSTR ") - tid(%05d) - op_type(%-40s)",
+					j, entry[j].word_ptr, entry[j].master_thread_id, getTextualAtomicType(entry[j].operation_type));
+
             if (it.first == MVEE_LIBC_LOCK_BUFFER_PARTIAL)
             {
-                // queue layout:
-                // +------------+------------+...+------------+------------+...
-                // | spinlock   | pos 0      |   | pos N      | data 0     |
-                // +------------+------------+...+------------+------------+...
-                unsigned long               word_ptr;
-                unsigned short              tid;
-                unsigned short              op_type = ___UNKNOWN_LOCK_TYPE___;
-                std::vector<unsigned short> tags(mvee::numvariants -1);
-
-                data     = (long*)((unsigned long)buffer + mvee::numvariants * 64);
-
-                word_ptr = *(unsigned long* )((unsigned long)data + j * info->actual_slot_size);
-                tid      = *(unsigned short*)((unsigned long)data + j * info->actual_slot_size + sizeof(unsigned long));
-
-                //
-                // data slot layout for normal queue:
-                // +----------------+-----------------+----------------+----------------+...+----------------+----------------+
-                // |    word ptr    | master threadid |   slave 1 tag  |   slave 2 tag  |   |   slave N tag  |     PADDING    |
-                // +----------------+-----------------+----------------+----------------+...+----------------+----------------+
-                //  <-sizeof(long)-> <-sizeof(short)-> <-sizeof(char)-> <-sizeof(char)->     <-sizeof(char)->
-                //
-                // PADDING pads to a sizeof(long) boundary
-                // word ptr          = word affected by the operation
-                // master thread id  = master thread that performed the operation
-                // slave X tag       = has slave X replicated this order yet?
-                //
-                if (info->requested_slot_size == sizeof(long) + sizeof(short) + (mvee::numvariants - 1) * sizeof(char))
-                {
-                    // normal queue
-                    for (int i = 0; i < mvee::numvariants - 1; ++i)
-                        tags[i] = *(unsigned char*)((unsigned long)data + j * info->actual_slot_size + sizeof(unsigned long) + sizeof(unsigned short) + i);
-                }
-                //
-                // data slot layout for extended queue:
-                // +----------------+-----------------+-----------------+-----------------+-----------------+...+-----------------+----------------+
-                // |    word ptr    | master threadid | op type         |   slave 1 tag   |   slave 2 tag   |   |   slave N tag   |     PADDING    |
-                // +----------------+-----------------+-----------------+-----------------+-----------------+...+-----------------+----------------+
-                //  <-sizeof(long)-> <-sizeof(short)-> <-sizeof(short)-> <-sizeof(short)-> <-sizeof(short)->     <-sizeof(short)->
-                //
-                // PADDING pads to a sizeof(long) boundary
-                // word ptr          = word affected by the operation
-                // master thread id  = master thread that performed the operation
-                // op type           = type of operation (cfr. enum mvee_call_types in Inc/MVEE_private.h)
-                // slave X tag       = logical order in which the slave has replicated this operation
-                //    !!! THIS IS ONLY USEFUL TO COMPARE THE ORDER IN WHICH OPERATIONS ON THE SAME WORD HAVE BEEN REPLICATED !!!
-                //
-                else
-                {
-                    // extended queue
-                    op_type = *(unsigned short*)((unsigned long)data + j * info->actual_slot_size + sizeof(unsigned long) + sizeof(unsigned short));
-                    for (int i = 0; i < mvee::numvariants - 1; ++i)
-                        tags[i] = *(unsigned short*)((unsigned long)data + j * info->actual_slot_size + sizeof(unsigned long) + sizeof(unsigned short) * (2 + i));
-                }
-
-                sprintf(tempstr, "> BUFFER[%05d]: word_ptr(0x" LONGPTRSTR ") - tid(%05d) - op_type(%-40s) - tags(",
-                        j, word_ptr, tid, getTextualAtomicType(op_type));
+				strcat(tempstr, " - tags(");
                 for (int i = 0; i < mvee::numvariants - 1; ++i)
                 {
                     char tag[20];
-                    sprintf(tag, "%05d", tags[i]);
+                    sprintf(tag, "%03d", entry[j].tags[i+1]);
                     if (i)
                         strcat(tempstr, "    ");
                     strcat(tempstr, tag);
                 }
                 strcat(tempstr, ")");
             }
-            else if (it.first == MVEE_LIBC_LOCK_BUFFER)
-            {
-                data = (long*)((unsigned long)buffer + mvee::numvariants * 64);
-                unsigned short tid =  *(unsigned short*)((unsigned long)data + j * info->actual_slot_size);
-
-                if (info->requested_slot_size == 3 * sizeof(long))
-                {
-                    // extended queue
-                    unsigned long word_ptr = *(unsigned long* )((unsigned long)data + j * info->actual_slot_size + sizeof(unsigned long));
-                    short         op_type  = *(unsigned short*)((unsigned long)data + j * info->actual_slot_size + sizeof(short));
-                    sprintf(tempstr, "> BUFFER[%05d]: word_ptr(0x" LONGPTRSTR ") - tid(%05d) - op_type(%-40s)",
-                            j, word_ptr, tid, getTextualAtomicType(op_type));
-                }
-                else
-                {
-                    // normal queue
-                    sprintf(tempstr, "> BUFFER[%05d]: tid(%05d)", j, tid);
-                }
-            }
-            else if (it.first == MVEE_LIBC_MALLOC_DEBUG_BUFFER)
-            {
-//                int   slot_size       = 4*sizeof(int) + 3*sizeof(long);
-                int   slot_size       = info->actual_slot_size;
-                data = (long*)((unsigned long)buffer + mvee::numvariants * 64);
-
-                int   tid             = *(int*)((unsigned long)data + j * slot_size);
-                int   alloc_type      = *(int*)((unsigned long)data + j * slot_size + 2 * sizeof(int));
-                int   alloc_msg       = *(int*)((unsigned long)data + j * slot_size + 3 * sizeof(int));
-                long  alloc_chunksize = *(long*)((unsigned long)data + j * slot_size + 4 * sizeof(int));
-                void* alloc_ar_ptr    = (void*)*(unsigned long*)((unsigned long)data + j * slot_size + 4 * sizeof(int) + sizeof(long));
-                void* alloc_chunk_ptr = (void*)*(unsigned long*)((unsigned long)data + j * slot_size + 4 * sizeof(int) + 2 * sizeof(long));
-
-                sprintf(tempstr, "> BUFFER[%05d]: tid(%05d) - alloc_type(%s) - alloc_msg(%d = %s) - alloc_size(%ld) - alloc_ar_ptr(0x" LONGPTRSTR ") - alloc_chunk_ptr(0x" LONGPTRSTR ")\n",
-                        j, tid,
-                        getTextualAllocType(alloc_type),
-                        alloc_msg,
-                        getTextualAllocResult(alloc_type, alloc_msg),
-                        alloc_chunksize,
-                        (unsigned long)alloc_ar_ptr,
-                        (unsigned long)alloc_chunk_ptr);
-
-            }
 
             if (lowest == j)
                 strcat(tempstr, " <======");
             fprintf(logfile, "%s\n", tempstr);
 
-            if (eip_buffer)
+            if (info->eip_ptr)
             {
                 for (int x = 0; x < mvee::numvariants; ++x)
                 {
