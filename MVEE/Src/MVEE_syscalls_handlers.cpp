@@ -2104,6 +2104,21 @@ POSTCALL(times)
 
 /*-----------------------------------------------------------------------------
   sys_brk - (void* addr)
+
+  The program break's initial value cannot be controlled from user-space. This
+  causes problems when we have variant.global.settings.mvee_controlled_aslr set
+  to a non-zero value. We work around this problem by essentially turning
+  sys_brk into a sys_mmap wrapper. We do this as follows:
+
+  - When the program calls sys_brk(0), which they have to do to figure out where
+  the current break is located, we call 
+  sys_mmap(0, 4096, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0) instead.
+
+  - When the program calls sys_brk(<address>), which changes the upper bound of the heap,
+  we either call:
+  >>> sys_mmap(<end of current heap>, <address - end of current heap>, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0) if address > end of current heap
+  OR
+  >>> sys_munmap(<address>, <end of current heap - address>) if address < end of current heap  
 -----------------------------------------------------------------------------*/
 LOG_ARGS(brk)
 {
@@ -2114,76 +2129,254 @@ LOG_ARGS(brk)
 
 LOG_RETURN(brk)
 {
-	debugf("%s - SYS_BRK(0x" PTRSTR ") return = 0x" PTRSTR "\n",
-		   call_get_variant_pidstr(variantnum).c_str(), 
-		   (unsigned long)ARG1(variantnum), 
-		   call_postcall_get_variant_result(variantnum));
+	if ((*mvee::config_variant_global)["mvee_controlled_aslr"].asInt() == 0)
+	{
+		debugf("%s - SYS_BRK(0x" PTRSTR ") return = 0x" PTRSTR "\n",
+			   call_get_variant_pidstr(variantnum).c_str(), 
+			   (unsigned long)ARG1(variantnum), 
+			   call_postcall_get_variant_result(variantnum));
+	}
 }
 
-POSTCALL(brk)
+PRECALL(brk)
+{
+	CHECKPOINTER(1);
+	return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+}
+
+CALL(brk)
 {	
-	if IS_SYNCED_CALL
+	if (IS_SYNCED_CALL && (*mvee::config_variant_global)["mvee_controlled_aslr"].asInt() > 0)
 	{
-		for (int i = 0; i < mvee::numvariants; ++i)
+		mmap_region_info* heap_region = set_mmap_table->get_heap_region(0);
+		unsigned long address = 0;
+		
+		// There's no heap yet. We have to allocate one
+		if (!heap_region)
 		{
-			long              result      = call_postcall_get_variant_result(i);
-			mmap_region_info* heap_region = set_mmap_table->get_heap_region(i);
-			fd_info           backing_file;
-
-			// BRK only returns the current end of the heap, not the start.
-			// consequently, if we do not have the heap region in our maps yet, we have no choice
-			// but to read it from /proc/%d/maps
-			//
-			// Do note that a heap MAY not be allocated until the first BRK call with a non-NULL arg
-			//
-			// In the old days we could've assumed that the heap started right after the last
-			// mapped region of the current program (i.e., its last bss section). Thanks
-			// to ASLR that is no longer true though.
-			//
-			// We could technically also read the __currbrk syms from the program's GOT..
-			if (!heap_region)
+			// pick a random address
+			if (ARG1(0) == 0)
 			{
-				char          cmd[512];
-				std::string   output;
-				unsigned long heap_start;
-				unsigned long heap_end;
+				// If the MVEE is controlling ASLR, then pick an address for the new heap
+				address = set_mmap_table->calculate_data_mapping_base(4096);
 
-				sprintf(cmd, "cat /proc/%d/maps | grep \"\\[heap\\]\"", variants[i].variantpid);
-				output                          = mvee::log_read_from_proc_pipe(cmd, NULL);
-
-				if (output == "" || sscanf(output.c_str(), LONGPTRSTR "-" LONGPTRSTR " %*s %*08x %*s %*s %*s", &heap_start, &heap_end) != 2)
+				// inject mmap
+				for (int i = 0; i < mvee::numvariants; ++i)
 				{
-					// There is no heap yet...
-					set_mmap_table->verify_mman_table(i, variants[i].variantpid);
-					return 0;
+					if (!interaction::write_syscall_no(variants[i].variantpid, __NR_mmap))
+						throw RwRegsFailure(variantnum, "inject mmap call for sys_brk(0)");
+						
+					call_overwrite_arg_value(i, 1, address, true);
+					call_overwrite_arg_value(i, 2, 4096, true);
+					call_overwrite_arg_value(i, 3, PROT_READ | PROT_WRITE, true);
+					call_overwrite_arg_value(i, 4, MAP_ANONYMOUS | MAP_PRIVATE, true);
+					call_overwrite_arg_value(i, 5, -1, true);
+					call_overwrite_arg_value(i, 6, 0, true);		
+
+					debugf("%s - call replaced by SYS_MMAP(0x" PTRSTR ", 4096, PROT_READ|PROT_WRITE, MAP_ANON|MAP_PRIVATE, -1, 0)\n",
+						   call_get_variant_pidstr(i).c_str(), 
+						   address);					
 				}
-
-				backing_file.fds.resize(mvee::numvariants);
-				backing_file.fds[i]             = MVEE_UNKNOWN_FD;
-				backing_file.paths[i]           = "[heap]";
-				backing_file.access_flags       = 0;
-				backing_file.original_file_size = 0;
-
-				set_mmap_table->map_range(i, heap_start, result-heap_start, MAP_ANONYMOUS | MAP_PRIVATE, PROT_READ | PROT_WRITE, &backing_file, 0);
 			}
 			else
 			{
-				// the kernel will not allow us to:
-				// a) change the base of the heap
-				// b) request a new size that would cause overlaps with existing vma's (mapped regions)
-				// it is therefore safe to just update the heap_region's size here
-				heap_region->region_size = ROUND_UP(result - heap_region->region_base_address, 4096);
+				// The program is trying to change the size of the heap, but we
+				// don't know where the heap is yet.
+				// This probably means that the program never called sys_brk(0).
+				// Just return -ENOMEM
+				return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOMEM);
+			}
+		}
+		else
+		{
+			// we already have a heap region
+			if (ARG1(0) == 0)
+			{
+				for (int i = 0; i < mvee::numvariants; ++i)
+				{
+					if (!interaction::write_syscall_no(variants[i].variantpid, __NR_getpid))
+						throw RwRegsFailure(variantnum, "inject getpid call for sys_brk(0)");					
+				}
+			}
+			else
+			{
+				// the variants are asking to adjust the limit of the current heap
+				for (int i = 0; i < mvee::numvariants; ++i)
+				{
+					mmap_region_info* heap_region = set_mmap_table->get_heap_region(i);
+
+					if (!heap_region)
+					{
+						warnf("heap region not found. This should not happen!\n");
+						shutdown(false);
+						return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOMEM);
+					}
+
+					unsigned long old_limit = heap_region->region_base_address + heap_region->region_size;
+					unsigned long new_limit = ARG1(i);
+
+					if (new_limit < old_limit)
+					{
+						// shrink the heap
+						if (!interaction::write_syscall_no(variants[i].variantpid, __NR_munmap))
+							throw RwRegsFailure(variantnum, "inject munmap call for sys_brk(notnull)");
+
+						call_overwrite_arg_value(i, 1, new_limit, true);
+						call_overwrite_arg_value(i, 2, old_limit - new_limit, true);
+
+						debugf("%s - call replaced by SYS_MUNMAP(0x" PTRSTR ", %ld)\n",
+							   call_get_variant_pidstr(i).c_str(), 
+							   old_limit, new_limit - old_limit);					
+
+						heap_region->region_size = new_limit - heap_region->region_base_address;
+					}
+					else if (new_limit == old_limit)
+					{
+						// just return the address of the current heap
+						if (!interaction::write_syscall_no(variants[i].variantpid, __NR_getpid))
+							throw RwRegsFailure(variantnum, "inject getpid call for sys_brk(notnull)");
+					}
+					else 
+					{
+						auto possibly_overlapping_region = set_mmap_table->get_region_info(i, old_limit + 1, new_limit - old_limit - 1);
+
+						if (possibly_overlapping_region)
+						{
+							debugf("%s - can't change heap bounds to 0x" PTRSTR "-0x" PTRSTR ")\n",
+								   call_get_variant_pidstr(i).c_str(), 
+								   heap_region->region_base_address, new_limit);					
+							possibly_overlapping_region->print_region_info("overlap with this region");
+
+							return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOMEM);
+						}
+
+						// grow the heap
+						if (!interaction::write_syscall_no(variants[i].variantpid, __NR_mmap))
+							throw RwRegsFailure(variantnum, "inject mmap call for sys_brk(notnull)");
+
+						call_overwrite_arg_value(i, 1, old_limit, true);
+						call_overwrite_arg_value(i, 2, new_limit - old_limit, true);
+						call_overwrite_arg_value(i, 3, PROT_READ | PROT_WRITE, true);
+						call_overwrite_arg_value(i, 4, MAP_ANONYMOUS | MAP_PRIVATE, true);
+						call_overwrite_arg_value(i, 5, -1, true);
+						call_overwrite_arg_value(i, 6, 0, true);
+
+						debugf("%s - call replaced by SYS_MMAP(0x" PTRSTR ", %ld, PROT_READ|PROT_WRITE, MAP_ANON|MAP_PRIVATE, -1, 0)\n",
+							   call_get_variant_pidstr(i).c_str(), 
+							   old_limit, new_limit - old_limit);
+
+						heap_region->region_size = new_limit - heap_region->region_base_address;
+					}
+				}
+			}
+		}
+	}
+
+    return MVEE_CALL_ALLOW;
+}
+
+POSTCALL(brk)
+{
+	if ((*mvee::config_variant_global)["mvee_controlled_aslr"].asInt() > 0)
+	{	   
+		if (IS_SYNCED_CALL && call_succeeded)
+		{
+			std::vector<unsigned long> addresses = call_postcall_get_result_vector();
+			mmap_region_info* heap_region = set_mmap_table->get_heap_region(0);
+			fd_info           backing_file;
+		
+			// This happens when we allocate the initial heap
+			if (!heap_region)
+			{
+				backing_file.fds.resize(mvee::numvariants);
+				std::fill(backing_file.fds.begin(), backing_file.fds.end(), MVEE_UNKNOWN_FD);
+				std::fill(backing_file.paths.begin(), backing_file.paths.end(), "[heap]");
+				backing_file.access_flags       = 0;
+				backing_file.original_file_size = 0;
+
+				for (int i = 0; i < mvee::numvariants; ++i)
+				{
+					set_mmap_table->map_range(i, addresses[i], 4096, MAP_ANONYMOUS | MAP_PRIVATE, PROT_READ | PROT_WRITE, &backing_file, 0);
+				}
 			}
 
-			set_mmap_table->verify_mman_table(i, variants[i].variantpid);
+			// now just return the limit of the heap for all variants
+			for (int i = 0; i < mvee::numvariants; ++i)
+			{
+				mmap_region_info* heap_region = set_mmap_table->get_heap_region(i);
+				call_postcall_set_variant_result(i, heap_region->region_base_address + heap_region->region_size);
+			}	
+		}
+
+		for (int i = 0; i < mvee::numvariants; ++i)
+		{
+			debugf("%s - SYS_BRK(0x" PTRSTR ") return = 0x" PTRSTR "\n",
+				   call_get_variant_pidstr(i).c_str(), 
+				   (unsigned long)ARG1(i), 
+				   call_postcall_get_variant_result(i));
 		}
 	}
 	else
 	{
-		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+		if IS_SYNCED_CALL
+		{
+			for (int i = 0; i < mvee::numvariants; ++i)
+			{
+				long              result      = call_postcall_get_variant_result(i);
+				mmap_region_info* heap_region = set_mmap_table->get_heap_region(i);
+				fd_info           backing_file;
+
+				// BRK only returns the current end of the heap, not the start.
+				// consequently, if we do not have the heap region in our maps yet, we have no choice
+				// but to read it from /proc/%d/maps
+				//
+				// Do note that a heap MAY not be allocated until the first BRK call with a non-NULL arg
+				//
+				// In the old days we could've assumed that the heap started right after the last
+				// mapped region of the current program (i.e., its last bss section). Thanks
+				// to ASLR that is no longer true though.
+				//
+				// We could technically also read the __currbrk syms from the program's GOT..
+				if (!heap_region)
+				{
+					char          cmd[512];
+					std::string   output;
+					unsigned long heap_start;
+					unsigned long heap_end;
+
+					sprintf(cmd, "cat /proc/%d/maps | grep \"\\[heap\\]\"", variants[i].variantpid);
+					output                          = mvee::log_read_from_proc_pipe(cmd, NULL);
+
+					if (output == "" || sscanf(output.c_str(), LONGPTRSTR "-" LONGPTRSTR " %*s %*08x %*s %*s %*s", &heap_start, &heap_end) != 2)
+					{
+						// There is no heap yet...
+						set_mmap_table->verify_mman_table(i, variants[i].variantpid);
+						return 0;
+					}
+
+					backing_file.fds.resize(mvee::numvariants);
+					backing_file.fds[i]             = MVEE_UNKNOWN_FD;
+					backing_file.paths[i]           = "[heap]";
+					backing_file.access_flags       = 0;
+					backing_file.original_file_size = 0;
+
+					set_mmap_table->map_range(i, heap_start, result-heap_start, MAP_ANONYMOUS | MAP_PRIVATE, PROT_READ | PROT_WRITE, &backing_file, 0);
+				}
+				else
+				{
+					// the kernel will not allow us to:
+					// a) change the base of the heap
+					// b) request a new size that would cause overlaps with existing vma's (mapped regions)
+					// it is therefore safe to just update the heap_region's size here
+					heap_region->region_size = ROUND_UP(result - heap_region->region_base_address, 4096);
+				}
+
+				set_mmap_table->verify_mman_table(i, variants[i].variantpid);
+			}
+		}
 	}
 
-    return 0;
+	return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -5807,6 +6000,49 @@ PRECALL(mremap)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
+CALL(mremap)
+{
+	if (IS_SYNCED_CALL && 
+		(ARG4(0) & MREMAP_MAYMOVE) &&
+		((*mvee::config_variant_global)["mvee_controlled_aslr"].asInt() > 0))
+	{
+		// if MREMAP_MAYMOVE is set, the mapping may be moved if it cannot be resized.
+		// If it moves, it must become subject to our MVEE-controlled ASLR
+		bool overlap = false;
+
+		for (int i = 0; i < mvee::numvariants; ++i)
+		{
+			auto region_info = set_mmap_table->get_region_info(i, ARG1(i), ARG3(i));
+			if (region_info)
+			{
+				overlap = true;
+				break;
+			}
+		}
+				
+		// Ok, it's going to be moved. We need to calculate a base address		
+		if (overlap)
+		{
+			unsigned long address = set_mmap_table->calculate_data_mapping_base(ARG3(0));
+
+			for (int i = 0; i < mvee::numvariants; ++i)
+			{
+				call_overwrite_arg_value(i, 1, address, true);
+
+				debugf("%s - replaced call by SYS_MREMAP(0x" PTRSTR ", %lu, %lu, 0x" PTRSTR ", 0x" PTRSTR ")\n",
+					   call_get_variant_pidstr(variantnum).c_str(), 
+					   address, 
+					   (unsigned long)ARG2(variantnum), 
+					   (unsigned long)ARG3(variantnum), 
+					   (unsigned long)ARG4(variantnum),
+					   (unsigned long)ARG5(variantnum));
+			}
+		}
+	}
+
+	return MVEE_CALL_ALLOW;
+}
+
 POSTCALL(mremap)
 {
     if (call_succeeded)
@@ -6395,7 +6631,29 @@ CALL(mmap)
     // this mapping is only shared between the calling process and its decendants
     // => this is a safe form of shared memory
     if (ARG4(0) & MAP_ANONYMOUS)
+	{
+		if (ARG1(0) == 0 && 
+			(ARG4(0) & MAP_PRIVATE) &&
+			(*mvee::config_variant_global)["mvee_controlled_aslr"].asInt() > 0)
+		{
+			unsigned long address = set_mmap_table->calculate_data_mapping_base(ARG2(0));
+
+			for (int i = 0; i < mvee::numvariants; ++i)
+			{
+				call_overwrite_arg_value(i, 1, address, true);
+
+				debugf("%s - replaced call by SYS_MMAP(0x" PTRSTR ", %lu, %s, %s, %d, %lu)\n",
+					   call_get_variant_pidstr(variantnum).c_str(), 
+					   address, 
+					   (unsigned long)ARG2(variantnum),
+					   getTextualProtectionFlags(ARG3(variantnum)).c_str(),
+					   getTextualMapType(ARG4(variantnum)).c_str(), 
+					   (int)ARG5(variantnum), 
+					   (unsigned long)ARG6(variantnum));
+			}
+		}
         return MVEE_CALL_ALLOW;
+	}
 
     // non-anonymous ==> it must have a backing file
     if (ARG5(0) && (int)ARG5(0) != -1)
@@ -9752,7 +10010,6 @@ void mvee::init_syslocks()
     /*
     These annotations get picked up by the generate_syscall_table.rb script
 	DONTNEED PRECALL(shmctl)
-    DONTNEED PRECALL(brk)
     DONTNEED PRECALL(shmget)
     DONTNEED PRECALL(uname)
     DONTNEED PRECALL(sched_getparam)

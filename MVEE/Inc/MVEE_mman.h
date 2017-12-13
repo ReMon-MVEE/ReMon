@@ -284,18 +284,27 @@ public:
     //
     // Disjoint Code Layouting support
     //
-    void calculate_disjoint_bases    (unsigned long size, std::vector<unsigned long>& bases);
-    int  check_vdso_overlap          (int variantnum);
+    void calculate_disjoint_bases                  (unsigned long size, std::vector<unsigned long>& bases);
+    int  check_vdso_overlap                        (int variantnum);
+
+	//
+	// ASLR control support
+	//
+	
+	// Calculates a random base address for a read/write mapping of <size> bytes
+	// The resulting address is available in _ALL_ variants
+	unsigned long calculate_data_mapping_base      (unsigned long size);
+	bool is_available_in_all_variants              (unsigned long base, unsigned long size);
 
     //
     // IP-MON Support
     //
-    mmap_region_info* find_writable_region        (int variantnum, unsigned long len, pid_t look_for_thread=0, bool is_main_thread=false);
+    mmap_region_info* find_writable_region         (int variantnum, unsigned long len, pid_t look_for_thread=0, bool is_main_thread=false);
 
     //
     // Logging functions
     //
-    void print_mmap_table            (void (*logfunc)(const char* format, ...)=NULL);
+    void print_mmap_table                          (void (*logfunc)(const char* format, ...)=NULL);
 
     //
     // Debugging/Backtracing Support
@@ -321,6 +330,10 @@ public:
 private:
     void init();
     pthread_mutex_t mmap_lock;
+	// If the MVEE controls ASLR (enabled through variant.global.settings.mvee_controlled_alsr), this is 
+	// the region where we will place all of our randomized mappings. This must be the base address of a 
+	// 1/256th chunk of the total available address space.
+	unsigned long   mmap_base; 
     std::vector<
         std::set<mmap_region_info*, region_sort> >
                     full_map;                         // all mapped regions - separate for each variant since their address spaces might differ due to ASLR/DCL

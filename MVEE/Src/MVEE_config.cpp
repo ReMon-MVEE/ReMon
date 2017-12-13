@@ -64,6 +64,7 @@ void mvee::init_config_set_defaults()
 	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["use_system_gnomelibs"], false);
 	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["performance_counting_enabled"], false);
 	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["have_many_threads"], false);
+	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["mvee_controlled_aslr"], 0);
 	WEAK_INIT_KEY(config["monitor"]["log_to_stdout"], false);
 	WEAK_INIT_KEY(config["monitor"]["libc_path"]["path"], "/patched_binaries/libc/");
 	WEAK_INIT_KEY(config["monitor"]["libc_path"]["is_absolute"], false);
