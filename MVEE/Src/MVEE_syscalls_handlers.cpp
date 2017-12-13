@@ -311,6 +311,48 @@ bool monitor::handle_is_known_false_positive(const char* program_name, long call
 			return false;
 		return true;
     }
+    else if (callnum == __NR_openat && MVEE_PRECALL_MISMATCHING_ARG((*precall_flags)) == 2)
+    {
+        bool true_positive = false;
+		std::vector<std::string> files(mvee::numvariants);
+
+		for (int i = 0; i < mvee::numvariants; ++i)
+			files[i] = rw::read_string(variants[i].variantpid, (void*) ARG2(i));
+
+		// Allow variants to open "> MVEE Variant <num> >" with mismatching nums
+        for (int i = 0; i < mvee::numvariants; ++i)
+        {
+            char  tmp[20];
+            sprintf(tmp, "MVEE Variant %d >", i);
+
+            if (files[i].compare(tmp) != 0)
+            {
+                true_positive = true;
+                break;
+            }
+        }
+
+        if (!true_positive)
+			return true;
+
+		// Allow MVEE_LD_Loader to open compile-time diversified variants
+		true_positive = false;
+		if (set_mmap_table->have_diversified_variants)
+		{
+			for (int i = 0; i < mvee::numvariants; ++i)
+			{
+				if (files[i].compare(set_mmap_table->mmap_startup_info[i].image) != 0)
+				{
+					true_positive = true;
+					break;
+				}
+			}
+		}		
+
+		if (true_positive)
+			return false;
+		return true;
+    }
 	else if (callnum == __NR_execve)
 	{
 		// execve might mismatch because we're starting different binaries.
@@ -6564,6 +6606,22 @@ GET_CALL_TYPE(mmap)
 		!(ARG3(variantnum) & PROT_EXEC))
 	{
 		return MVEE_CALL_TYPE_UNSYNCED;
+	}
+
+	if (set_mmap_table->have_diversified_variants &&
+		!(ARG4(variantnum) & MAP_ANONYMOUS) &&
+		(long)ARG5(variantnum) > 0)
+	{
+		fd_info* info = set_fd_table->get_fd_info(ARG5(variantnum));
+
+		if (info &&
+			info->paths[variantnum].compare(set_mmap_table->mmap_startup_info[variantnum].image) == 0)
+		{
+			debugf("%s - Dispatching as unsynced because this is an mmap of a diversified binary\n", 
+				   call_get_variant_pidstr(variantnum).c_str());
+
+			return MVEE_CALL_TYPE_UNSYNCED;
+		}
 	}
 
 	return MVEE_CALL_TYPE_NORMAL;
