@@ -393,7 +393,7 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 			//
             case MVEE_GET_THREAD_NUM:
             {
-				if (!ARG1(variantnum) ||
+				if (ARG1(variantnum) &&
 					!rw::write_primitive<unsigned short>(variants[variantnum].variantpid, (void*) ARG1(variantnum), (unsigned short) variantnum))
 					throw RwMemFailure(variantnum, "replicate variantnum in get_thread_num");
 
