@@ -89,7 +89,7 @@ To build IP-MON itself, navigate to /path/to/ReMon/IP-MON and type `./comp.sh`.
 
 ```
 cd /wherever/you/want/to/download/the/kernel
-apt-get source linux
+git clone -b linux-4.4.y git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git
 cd linux-<insert version number here>
 patch -p1 < /path/to/ReMon/patches/linux-4.4.0-full-ipmon.patch
 make menuconfig 
