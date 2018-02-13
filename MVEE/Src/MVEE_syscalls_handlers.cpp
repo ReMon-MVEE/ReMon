@@ -2205,10 +2205,17 @@ CALL(brk)
 				// inject mmap
 				for (int i = 0; i < mvee::numvariants; ++i)
 				{
-					if (!interaction::write_syscall_no(variants[i].variantpid, __NR_mmap))
-						throw RwRegsFailure(variantnum, "inject mmap call for sys_brk(0)");
-						
-					call_overwrite_arg_value(i, 1, address, true);
+                                        #ifndef __NR_mmap
+						if (!interaction::write_syscall_no(variants[i].variantpid, __NR_mmap2))
+							throw RwRegsFailure(variantnum, "inject mmap call for sys_brk(0)");
+					
+					#else
+                                                if (!interaction::write_syscall_no(variants[i].variantpid, __NR_mmap))
+							throw RwRegsFailure(variantnum, "inject mmap call for sys_brk(0)");
+					#endif
+					
+
+                                        call_overwrite_arg_value(i, 1, address, true);
 					call_overwrite_arg_value(i, 2, 4096, true);
 					call_overwrite_arg_value(i, 3, PROT_READ | PROT_WRITE, true);
 					call_overwrite_arg_value(i, 4, MAP_ANONYMOUS | MAP_PRIVATE, true);
@@ -2293,8 +2300,13 @@ CALL(brk)
 						}
 
 						// grow the heap
-						if (!interaction::write_syscall_no(variants[i].variantpid, __NR_mmap))
-							throw RwRegsFailure(variantnum, "inject mmap call for sys_brk(notnull)");
+	                                        #ifndef __NR_mmap
+        	                                        if (!interaction::write_syscall_no(variants[i].variantpid, __NR_mmap2))
+                	                                        throw RwRegsFailure(variantnum, "inject mmap call for sys_brk(notnull)");
+		                                #else
+                	                                if (!interaction::write_syscall_no(variants[i].variantpid, __NR_mmap))
+								throw RwRegsFailure(variantnum, "inject mmap call for sys_brk(notnull)");
+                                	        #endif
 
 						call_overwrite_arg_value(i, 1, old_limit, true);
 						call_overwrite_arg_value(i, 2, new_limit - old_limit, true);
