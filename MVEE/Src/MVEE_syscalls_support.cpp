@@ -153,7 +153,12 @@ bool monitor::call_compare_variant_strings(std::vector<const char*>& stringptrs,
             str1 = rw::read_string(variants[i].variantpid, (void*) stringptrs[i], maxlength);
         str2 = rw::read_string(variants[i+1].variantpid, (void*) stringptrs[i + 1], maxlength);
 
-		// TODO: comparison of two empty strings should return true
+		if (str1.length() == 0 && str2.length() == 0)
+		{
+			match = true;
+			break;
+		}
+
         if (str1.length() == 0 || str2.length() == 0)
         {
             match = false;
@@ -1135,6 +1140,8 @@ void monitor::call_overwrite_arg_data
 )
 {
 	long old_value;
+	void* overwrite_location;
+	unsigned long skip_bytes = 0;
 
 	switch(argnum)
 	{
@@ -1180,9 +1187,13 @@ void monitor::call_overwrite_arg_data
 		return;
 	}
 
+	// check how many bytes we need to skip to account for other overwritten args
+	for (auto arg : variants[variantnum].overwritten_args)
+		skip_bytes += arg.data_len;
+
 	// Got it. Check if we have enough space below the stack pointer
 	// TODO: Should we check if we've already written a new block of data here?
-	if (stack_pointer - stack_info->region_base_address < new_len)
+	if (stack_pointer - stack_info->region_base_address < new_len + skip_bytes)
 	{
 		warnf("syscall overwrite failed - not enough space on the stack to write an arg of size %d in thread %d (TID: %d) in variant %d\n",
 			  new_len, mvee::active_monitorid, variants[variantnum].variantpid, variantnum);
@@ -1192,15 +1203,16 @@ void monitor::call_overwrite_arg_data
 
 	// Lezgo
 	// TODO: Store old contents at the stack base?
-	if (!rw::write_data(variants[variantnum].variantpid, (void*)stack_info->region_base_address, new_len, data))
+	overwrite_location = (void*)(stack_info->region_base_address + skip_bytes);
+	if (!rw::write_data(variants[variantnum].variantpid, overwrite_location, new_len, data))
 		throw RwMemFailure(variantnum, "write new syscall arg data on stack");
 
 	switch(argnum)
 	{
 #define SETVAL(num)														\
 		case num:														\
-			SETARG##num(variantnum, stack_info->region_base_address);	\
-			ARG##num(variantnum) = stack_info->region_base_address;		\
+			SETARG##num(variantnum, stack_info->region_base_address + skip_bytes);	\
+			ARG##num(variantnum) = stack_info->region_base_address + skip_bytes;		\
 			break;
 		SETVAL(1);
 		SETVAL(2);
@@ -1217,6 +1229,8 @@ void monitor::call_overwrite_arg_data
 		overwritten_syscall_arg arg;
 		arg.syscall_arg_num = argnum;
 		arg.arg_old_value = old_value;
+		arg.data_len = new_len;
+		arg.data_loc = overwrite_location;
 		arg.restore_data = false;
 		variants[variantnum].overwritten_args.push_back(arg);
 	}
