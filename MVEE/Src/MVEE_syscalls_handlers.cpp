@@ -947,7 +947,7 @@ POSTCALL(waitpid)
 LOG_ARGS(link)
 {
 	auto str1 = rw::read_string(variants[variantnum].variantpid, (void*)ARG1(variantnum));
-	auto str2 = rw::read_string(variants[variantnum].variantpid, (void*)ARG1(variantnum));
+	auto str2 = rw::read_string(variants[variantnum].variantpid, (void*)ARG2(variantnum));
 
 	debugf("%s - SYS_LINK(%s, %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
