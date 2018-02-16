@@ -2840,11 +2840,15 @@ void monitor::sig_restart_syscall(int variantnum)
     // as long as our tracees are in trace-stopped.
     if (variantnum == 0 && state == STATE_IN_MASTERCALL)
     {
+		debugf("%s - This was a mastercall - we need to restart the slaves after they return from their fake syscall\n",
+		   call_get_variant_pidstr(variantnum).c_str());
+
         for (int i = 1; i < mvee::numvariants; ++i)
         {
+			// Wait for the slaves to come back from the fake syscall
             if (variants[i].callnum != NO_CALL)
             {
-				debugf("%s - Restarting syscall in variant\n", 
+				debugf("%s - Slave has not returned from the mastercall yet\n", 
 					   call_get_variant_pidstr(i).c_str());
 
                 if (interaction::wait(variants[i].variantpid, status, false, false, false))
@@ -2865,11 +2869,19 @@ void monitor::sig_restart_syscall(int variantnum)
 						}
 					}					                    
                 }
+				else
+				{
+					throw WaitFailure(i, "slave wait failure during mastercall restart", status);
+				}
+
+				debugf("%s - Slave has returned from the mastercall\n", 
+					   call_get_variant_pidstr(i).c_str());
             }
 
             // restore regs for slaves?! Some args seem to get clobbered...
 			IP_IN_REGS(variants[i].regs) -= SYSCALL_INS_LEN;
-			NEXT_SYSCALL_NO_IN_REGS(variants[i].regs) = variants[0].callnum;
+//			NEXT_SYSCALL_NO_IN_REGS(variants[i].regs) = variants[0].callnum;
+			NEXT_SYSCALL_NO_IN_REGS(variants[i].regs) = __NR_getpid;
 
             variants[i].regs_valid         = false;
             variants[i].callnum            = variants[0].callnum;
@@ -2882,7 +2894,7 @@ void monitor::sig_restart_syscall(int variantnum)
 			call_resume(i);
 			IP_IN_REGS(variants[i].regs) += SYSCALL_INS_LEN;
 
-			debugf("%s - restarted fake syscall in variant\n",
+			debugf("%s - restarted syscall in variant\n",
 				   call_get_variant_pidstr(i).c_str());
         }
     }
