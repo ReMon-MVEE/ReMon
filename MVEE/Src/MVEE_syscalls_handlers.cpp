@@ -3240,7 +3240,7 @@ PRECALL(rt_sigaction)
 CALL(rt_sigaction)
 {
 	// prohibit call if the variant set is shutting down
-	if (set_mmap_table->thread_group_shutting_down)
+	if (set_mmap_table->thread_group_shutting_down && IS_SYNCED_CALL)
 		return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EINVAL);
 	return MVEE_CALL_ALLOW;
 }
