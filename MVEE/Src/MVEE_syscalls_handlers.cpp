@@ -1411,9 +1411,16 @@ PRECALL(time)
 
 POSTCALL(time)
 {
-    if (ARG1(0))
-        REPLICATEBUFFERFIXEDLEN(1, sizeof(time_t));
-    return 0;
+	if (IS_SYNCED_CALL)
+	{
+		if (ARG1(0))
+			REPLICATEBUFFERFIXEDLEN(1, sizeof(time_t));
+		return 0;
+	}
+	else
+	{
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
 }
 
 /*-----------------------------------------------------------------------------
@@ -8955,8 +8962,11 @@ CALL(openat)
 
 POSTCALL(openat)
 {
-    if (call_succeeded)
-    {
+    if (!call_succeeded)
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
+	if (IS_SYNCED_CALL)
+	{
 		bool unsynced_access;
 		std::vector<unsigned long> fds = call_postcall_get_result_vector();
 		std::vector<std::string> resolved_paths(mvee::numvariants);
@@ -8982,12 +8992,21 @@ POSTCALL(openat)
 									 state == STATE_IN_MASTERCALL,                                 // opened by master only?
 									 unsynced_access);                                             // unsynced access to the file?
 
-        REPLICATEFDRESULT();
+		REPLICATEFDRESULT();
 #ifdef MVEE_FD_DEBUG
-        set_fd_table->verify_fd_table(getpids());
+		set_fd_table->verify_fd_table(getpids());
 #endif
 		aliased_open = false;
-    }
+	}
+	else
+	{
+		std::string path = set_fd_table->get_full_path(variantnum, variants[variantnum].variantpid, ARG1(variantnum), (void*)ARG2(variantnum));
+
+		set_fd_table->create_temporary_fd_info(variantnum, call_postcall_get_variant_result(variantnum), path, ARG3(variantnum), ARG3(variantnum) & O_CLOEXEC);
+
+		aliased_open = false;
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
 
     return 0;
 }
