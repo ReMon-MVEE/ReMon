@@ -62,7 +62,8 @@ fi
 # Download & Build libdwarf
 if [ ! -e deps/libdwarf ]
 then
-	git clone git://git.code.sf.net/p/libdwarf/code deps/libdwarf
+	#	git clone git://git.code.sf.net/p/libdwarf/code deps/libdwarf
+	git clone https://github.com/tomhughes/libdwarf.git deps/libdwarf
 	cd deps/libdwarf
 	./configure
 	make dd
