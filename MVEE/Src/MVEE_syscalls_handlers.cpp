@@ -1411,9 +1411,16 @@ PRECALL(time)
 
 POSTCALL(time)
 {
-    if (ARG1(0))
-        REPLICATEBUFFERFIXEDLEN(1, sizeof(time_t));
-    return 0;
+	if (IS_SYNCED_CALL)
+	{
+		if (ARG1(0))
+			REPLICATEBUFFERFIXEDLEN(1, sizeof(time_t));
+		return 0;
+	}
+	else
+	{
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
 }
 
 /*-----------------------------------------------------------------------------
@@ -3233,7 +3240,7 @@ PRECALL(rt_sigaction)
 CALL(rt_sigaction)
 {
 	// prohibit call if the variant set is shutting down
-	if (set_mmap_table->thread_group_shutting_down)
+	if (set_mmap_table->thread_group_shutting_down && IS_SYNCED_CALL)
 		return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EINVAL);
 	return MVEE_CALL_ALLOW;
 }
@@ -8916,13 +8923,16 @@ PRECALL(openat)
 // See comment above CALL(open) for info on what this function does
 CALL(openat)
 {
+	if (IS_UNSYNCED_CALL)
+		return MVEE_CALL_ALLOW;
+	
 	int result = MVEE_CALL_ALLOW;
 
 	// If do_alias returns true, we will have found aliases for at least
 	// one variant. In this case, we want to repeat the check_open_call + 
 	// flag stripping iteration below for each variant
 	if (call_do_alias_at<1, 2>())
-	{
+	{		
 		for (auto i = 0; i < mvee::numvariants; ++i)
 		{
 			auto file = set_fd_table->get_full_path(i, variants[i].variantpid, (unsigned long)(int)ARG1(i), (void*) ARG2(i));
@@ -8955,8 +8965,11 @@ CALL(openat)
 
 POSTCALL(openat)
 {
-    if (call_succeeded)
-    {
+    if (!call_succeeded)
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
+	if (IS_SYNCED_CALL)
+	{
 		bool unsynced_access;
 		std::vector<unsigned long> fds = call_postcall_get_result_vector();
 		std::vector<std::string> resolved_paths(mvee::numvariants);
@@ -8982,12 +8995,21 @@ POSTCALL(openat)
 									 state == STATE_IN_MASTERCALL,                                 // opened by master only?
 									 unsynced_access);                                             // unsynced access to the file?
 
-        REPLICATEFDRESULT();
+		REPLICATEFDRESULT();
 #ifdef MVEE_FD_DEBUG
-        set_fd_table->verify_fd_table(getpids());
+		set_fd_table->verify_fd_table(getpids());
 #endif
 		aliased_open = false;
-    }
+	}
+	else
+	{
+		std::string path = set_fd_table->get_full_path(variantnum, variants[variantnum].variantpid, ARG1(variantnum), (void*)ARG2(variantnum));
+
+		set_fd_table->create_temporary_fd_info(variantnum, call_postcall_get_variant_result(variantnum), path, ARG3(variantnum), ARG3(variantnum) & O_CLOEXEC);
+
+		aliased_open = false;
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
 
     return 0;
 }

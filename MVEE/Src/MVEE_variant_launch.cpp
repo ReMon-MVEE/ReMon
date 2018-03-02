@@ -26,7 +26,13 @@ static void parse_and_setenv(std::string env)
 		std::string value = env.substr(pos + 1);
 
 		if (value.length() > 0)
-			setenv(key.c_str(), value.c_str(), 1);
+		{
+			const char* oldenv = getenv(key.c_str());
+			if (oldenv)
+				setenv(key.c_str(), (value + ":" + oldenv).c_str(), 1);
+			else
+				setenv(key.c_str(), value.c_str(), 1);
+		}
 		else
 			unsetenv(key.c_str());
 	}	

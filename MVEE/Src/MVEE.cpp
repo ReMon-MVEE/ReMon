@@ -1040,7 +1040,7 @@ std::string mvee::os_normalize_path_name(std::string path)
 			return path;
 		}
 		else
-			return std::string("");
+			return path;
 	}
 	{
 		std::string result(tmp);
