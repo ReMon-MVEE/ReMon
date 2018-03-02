@@ -8923,13 +8923,16 @@ PRECALL(openat)
 // See comment above CALL(open) for info on what this function does
 CALL(openat)
 {
+	if (IS_UNSYNCED_CALL)
+		return MVEE_CALL_ALLOW;
+	
 	int result = MVEE_CALL_ALLOW;
 
 	// If do_alias returns true, we will have found aliases for at least
 	// one variant. In this case, we want to repeat the check_open_call + 
 	// flag stripping iteration below for each variant
 	if (call_do_alias_at<1, 2>())
-	{
+	{		
 		for (auto i = 0; i < mvee::numvariants; ++i)
 		{
 			auto file = set_fd_table->get_full_path(i, variants[i].variantpid, (unsigned long)(int)ARG1(i), (void*) ARG2(i));
