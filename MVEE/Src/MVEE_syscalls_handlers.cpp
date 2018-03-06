@@ -2717,20 +2717,9 @@ PRECALL(ioctl)
 
 POSTCALL(ioctl)
 {
+    // Handle the common cases between synced and unsynced calls
     switch(ARG2(0))
     {
-        case FIONREAD:
-            REPLICATEBUFFERFIXEDLEN(3, sizeof(int));
-            break;
-        case TCGETS:
-            REPLICATEBUFFERFIXEDLEN(3, sizeof(struct __kernel_termios));
-            break;
-        case TIOCGPGRP:
-            REPLICATEBUFFERFIXEDLEN(3, sizeof(pid_t));
-            break;
-        case TIOCGWINSZ:
-            REPLICATEBUFFERFIXEDLEN(3, sizeof(struct winsize));
-            break;
         // sets cloexec on the fd
         case FIOCLEX:
             if (call_succeeded)
@@ -2748,6 +2737,26 @@ POSTCALL(ioctl)
                 if (fd_info)
                     fd_info->close_on_exec = false;
             }
+            break;
+	}
+
+    if IS_UNSYNCED_CALL
+        return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
+    // Handle the synced-only cases
+    switch(ARG2(0))
+    {
+        case FIONREAD:
+            REPLICATEBUFFERFIXEDLEN(3, sizeof(int));
+            break;
+        case TCGETS:
+            REPLICATEBUFFERFIXEDLEN(3, sizeof(struct __kernel_termios));
+            break;
+        case TIOCGPGRP:
+            REPLICATEBUFFERFIXEDLEN(3, sizeof(pid_t));
+            break;
+        case TIOCGWINSZ:
+            REPLICATEBUFFERFIXEDLEN(3, sizeof(struct winsize));
             break;
 		case SIOCGIFCONF:
 			REPLICATEIFCONF(3);
@@ -3363,6 +3372,9 @@ PRECALL(sysinfo)
 
 POSTCALL(sysinfo)
 {
+    if IS_UNSYNCED_CALL
+        return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(1, sizeof(struct sysinfo));
     return 0;
 }
@@ -3387,6 +3399,9 @@ PRECALL(gettimeofday)
 
 POSTCALL(gettimeofday)
 {
+    if IS_UNSYNCED_CALL
+        return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(1, sizeof(struct timeval));
     REPLICATEBUFFERFIXEDLEN(2, sizeof(struct timezone));
     return 0;
