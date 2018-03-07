@@ -6241,10 +6241,10 @@ POSTCALL(mremap)
 {
     if (call_succeeded)
     {
+		// unmap target pages
+		std::vector<unsigned long> new_addresses = call_postcall_get_result_vector();
         for (int i = 0; i < mvee::numvariants; ++i)
         {
-            // unmap target pages
-            std::vector<unsigned long> new_addresses = call_postcall_get_result_vector();
 
             //
             mmap_region_info*          info          = set_mmap_table->get_region_info(i, ARG1(i), ARG2(i));
