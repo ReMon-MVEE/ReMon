@@ -2098,6 +2098,21 @@ PRECALL(pipe)
 
 POSTCALL(pipe)
 {
+	if IS_UNSYNCED_CALL
+	{
+		if (call_succeeded)
+		{
+			int fildes[2];
+			if (!rw::read_struct(variants[variantnum].variantpid, (void*)ARG1(variantnum), 2 * sizeof(int), fildes))
+				throw RwMemFailure(0, "read fds in sys_pipe");
+
+			// create temporary file descriptor mappings for the pipe
+			set_fd_table->create_temporary_fd_info(variantnum, fildes[0], "pipe:read",  O_RDONLY, false);
+			set_fd_table->create_temporary_fd_info(variantnum, fildes[1], "pipe:write", O_WRONLY, false);
+		}
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
+
     if (call_succeeded)
     {
         int                        fildes[2];
