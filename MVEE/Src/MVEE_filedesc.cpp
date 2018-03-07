@@ -537,7 +537,8 @@ void fd_table::create_temporary_fd_info
 	std::string path,
 	unsigned long access_flags,
 	bool close_on_exec,
-	ssize_t original_file_size
+	ssize_t original_file_size,
+	FileType type
 )
 {
 	std::vector<unsigned long> fds(mvee::numvariants);
@@ -547,7 +548,7 @@ void fd_table::create_temporary_fd_info
 	paths[variantnum] = path;
 	fds[variantnum] = fd;
 
-    fd_info info(FT_REGULAR, fds, paths, access_flags, close_on_exec, false, true, original_file_size);
+    fd_info info(type, fds, paths, access_flags, close_on_exec, false, true, original_file_size);
 
 	auto it = temporary_files[variantnum].find(fd);
     if (it != temporary_files[variantnum].end())

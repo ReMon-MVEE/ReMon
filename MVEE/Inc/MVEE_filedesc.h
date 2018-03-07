@@ -144,7 +144,7 @@ public:
 	// Temporary files management. These functions are used for unsynchronized
 	// file operations that happen during fast forwarding
 	// 
-	void          create_temporary_fd_info (int variantnum, unsigned long fd, std::string path, unsigned long access_flags, bool close_on_exec, ssize_t original_file_size=0);
+	void          create_temporary_fd_info (int variantnum, unsigned long fd, std::string path, unsigned long access_flags, bool close_on_exec, ssize_t original_file_size=0, FileType type=FT_REGULAR);
 	void          free_temporary_fd_info   (int variantnum, unsigned long fd);
 	void          flush_temporary_files    (int variantnum);
 	void          dup_temporary_fd         (int variantnum, unsigned long oldfd, unsigned long newfd, bool close_on_exec);
