@@ -600,7 +600,7 @@ void fd_table::dup_temporary_fd
 	auto it = temporary_files[variantnum].find(oldfd);
     if (it != temporary_files[variantnum].end())
     {
-		debugf("duplicating fd: %lu -> %lu\n (%s)", oldfd, newfd,
+		debugf("duplicating fd: %lu -> %lu (%s)\n", oldfd, newfd,
 			   it->second.get_path_string().c_str());
 
 		fd_info new_info = it->second;
