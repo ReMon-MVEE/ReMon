@@ -116,6 +116,9 @@ void mvee::start_variant(int variantnum)
 	if (alias.length() == 0)
 		alias = binary;
 
+	// this might be a relative path. Get the full path
+	alias = os_normalize_path_name(alias);
+
 	// push the basename of the original binary name as argv[0]
 	size_t pos = binary.rfind("/");
 	if (pos != std::string::npos)
@@ -128,6 +131,10 @@ void mvee::start_variant(int variantnum)
 	int i = 0;
 	for (auto _arg : args)
 		_args[i++] = _arg;
+
+	// change to the variant's specified working directory (if any)
+	if (variant_config && !(*variant_config)["pwd"].isNull())
+		chdir((*variant_config)["pwd"].asCString());
 
 	// this should not return
 	execv(alias.c_str(), (char* const*)_args);
