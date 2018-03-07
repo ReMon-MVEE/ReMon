@@ -2822,8 +2822,10 @@ POSTCALL(fcntl)
 	if IS_UNSYNCED_CALL
 	{
 		if (ARG2(variantnum) == F_GETFD)
+		{
 			return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
-		if (ARG2(variantnum) == F_DUPFD || ARG2(variantnum) == F_DUPFD_CLOEXEC)
+		}
+		else if (ARG2(variantnum) == F_DUPFD || ARG2(variantnum) == F_DUPFD_CLOEXEC)
 		{
 			if (call_succeeded)
 			{
@@ -2831,6 +2833,17 @@ POSTCALL(fcntl)
 				unsigned long newfd = call_postcall_get_variant_result(variantnum);
 				bool cloexec        = ARG2(variantnum) == F_DUPFD_CLOEXEC;
 				set_fd_table->dup_temporary_fd(variantnum, oldfd, newfd, cloexec);
+			}
+
+			return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+		}
+		else if (ARG2(variantnum) == F_SETFD)
+		{
+			if (ARG3(variantnum) == FD_CLOEXEC)
+			{
+				fd_info* fd_info = set_fd_table->get_fd_info(ARG1(variantnum));
+				if (fd_info)
+					fd_info->close_on_exec = true;
 			}
 
 			return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
