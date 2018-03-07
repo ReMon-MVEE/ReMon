@@ -2825,6 +2825,10 @@ POSTCALL(fcntl)
 		{
 			return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 		}
+		else if (ARG2(variantnum) == F_GETFL)
+		{
+			return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+		}
 		else if (ARG2(variantnum) == F_DUPFD || ARG2(variantnum) == F_DUPFD_CLOEXEC)
 		{
 			if (call_succeeded)
