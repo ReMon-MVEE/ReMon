@@ -1006,6 +1006,13 @@ POSTCALL(unlink)
 			set_fd_table->set_file_unlinked(unlink_file.c_str());
 		}		
 	}
+	else
+	{
+		auto unlink_file = set_fd_table->get_full_path(variantnum, variants[variantnum].variantpid, AT_FDCWD, (void*) ARG1(variantnum));
+		set_fd_table->set_file_unlinked(unlink_file.c_str());
+
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
 
 #ifndef MVEE_FD_DEBUG
 	set_fd_table->verify_fd_table(getpids());
