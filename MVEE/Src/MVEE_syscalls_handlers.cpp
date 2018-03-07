@@ -6245,9 +6245,7 @@ POSTCALL(mremap)
 		std::vector<unsigned long> new_addresses = call_postcall_get_result_vector();
         for (int i = 0; i < mvee::numvariants; ++i)
         {
-
-            //
-            mmap_region_info*          info          = set_mmap_table->get_region_info(i, ARG1(i), ARG2(i));
+            mmap_region_info* info = set_mmap_table->get_region_info(i, ARG1(i), ARG2(i));
             if (info)
             {
                 mmap_region_info* new_region = new(std::nothrow) mmap_region_info(*info);
