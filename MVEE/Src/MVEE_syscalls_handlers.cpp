@@ -6239,6 +6239,38 @@ CALL(mremap)
 
 POSTCALL(mremap)
 {
+	if IS_UNSYNCED_CALL
+	{
+	    if (call_succeeded)
+		{
+			unsigned long new_address = call_postcall_get_variant_result(variantnum);
+            mmap_region_info* info = set_mmap_table->get_region_info(variantnum, ARG1(variantnum), ARG2(variantnum));
+            if (info)
+            {
+                mmap_region_info* new_region = new(std::nothrow) mmap_region_info(*info);
+
+				if (new_region)
+				{
+					new_region->region_base_address = new_address;
+					new_region->region_size         = ARG3(variantnum);
+
+					set_mmap_table->munmap_range(variantnum, ARG1(variantnum), ARG2(variantnum));
+					set_mmap_table->munmap_range(variantnum, new_address,      ARG3(variantnum));
+
+					set_mmap_table->insert_region(variantnum, new_region);
+				}
+            }
+            else
+            {
+                warnf("remap range not found: 0x" PTRSTR "-0x" PTRSTR "\n",
+					  (unsigned long)ARG1(variantnum), (unsigned long)(ARG1(variantnum) + ARG2(variantnum)));
+                shutdown(false);
+            }
+		}
+
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
+
     if (call_succeeded)
     {
 		// unmap target pages
