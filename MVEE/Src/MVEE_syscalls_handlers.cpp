@@ -2027,6 +2027,19 @@ PRECALL(dup)
 
 POSTCALL(dup)
 {
+	if IS_UNSYNCED_CALL
+	{
+		if (call_succeeded)
+		{
+			unsigned long oldfd = ARG1(variantnum);
+			unsigned long newfd = call_postcall_get_variant_result(variantnum);
+			bool cloexec        = false;
+			set_fd_table->dup_temporary_fd(variantnum, oldfd, newfd, cloexec);
+		}
+
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
+
     std::vector<unsigned long> fds;
     bool                       master_file = false;
 
@@ -2810,6 +2823,18 @@ POSTCALL(fcntl)
 	{
 		if (ARG2(variantnum) == F_GETFD)
 			return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+		if (ARG2(variantnum) == F_DUPFD || ARG2(variantnum) == F_DUPFD_CLOEXEC)
+		{
+			if (call_succeeded)
+			{
+				unsigned long oldfd = ARG1(variantnum);
+				unsigned long newfd = call_postcall_get_variant_result(variantnum);
+				bool cloexec        = ARG2(variantnum) == F_DUPFD_CLOEXEC;
+				set_fd_table->dup_temporary_fd(variantnum, oldfd, newfd, cloexec);
+			}
+
+			return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+		}
 		return 0;
 	}
 
@@ -2972,6 +2997,19 @@ PRECALL(dup2)
 
 POSTCALL(dup2)
 {
+	if IS_UNSYNCED_CALL
+	{
+		if (call_succeeded)
+		{
+			unsigned long oldfd = ARG1(variantnum);
+			unsigned long newfd = call_postcall_get_variant_result(variantnum);
+			bool cloexec        = false;
+			set_fd_table->dup_temporary_fd(variantnum, oldfd, newfd, cloexec);
+		}
+
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
+
     std::vector<unsigned long> fds;
 
     if (state == STATE_IN_MASTERCALL)
@@ -9793,6 +9831,19 @@ PRECALL(dup3)
 
 POSTCALL(dup3)
 {
+	if IS_UNSYNCED_CALL
+	{
+		if (call_succeeded)
+		{
+			unsigned long oldfd = ARG1(variantnum);
+			unsigned long newfd = call_postcall_get_variant_result(variantnum);
+			bool cloexec        = ARG3(variantnum) & O_CLOEXEC;
+			set_fd_table->dup_temporary_fd(variantnum, oldfd, newfd, cloexec);
+		}
+
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
+
 	std::vector<unsigned long> fds;
 
     if (state == STATE_IN_MASTERCALL)

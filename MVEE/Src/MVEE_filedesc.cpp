@@ -587,6 +587,39 @@ void fd_table::flush_temporary_files (int variantnum)
 }
 
 /*-----------------------------------------------------------------------------
+    dup_temporary_fd
+-----------------------------------------------------------------------------*/
+void fd_table::dup_temporary_fd
+(
+	int variantnum,
+	unsigned long oldfd,
+	unsigned long newfd,
+	bool close_on_exec
+)
+{
+	auto it = temporary_files[variantnum].find(oldfd);
+    if (it != temporary_files[variantnum].end())
+    {
+		debugf("duplicating fd: %lu -> %lu (%s)\n", oldfd, newfd,
+			   it->second.get_path_string().c_str());
+
+		fd_info new_info = it->second;
+		new_info.fds[variantnum] = newfd;
+		if (close_on_exec)
+		{
+			new_info.close_on_exec = true;
+			new_info.access_flags |= O_CLOEXEC;
+		}
+		else
+		{
+			new_info.close_on_exec = false;
+			new_info.access_flags &= ~O_CLOEXEC;
+		}
+		temporary_files[variantnum].insert(std::make_pair(newfd, new_info));
+	}
+}
+
+/*-----------------------------------------------------------------------------
     print_fd_table
 -----------------------------------------------------------------------------*/
 void fd_table::print_fd_table ()
