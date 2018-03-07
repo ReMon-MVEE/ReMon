@@ -5108,6 +5108,9 @@ PRECALL(wait4)
 
 POSTCALL(wait4)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     // we want to replicate the master result even if the call fails
     unsigned long master_result = call_postcall_get_variant_result(0);
 
@@ -8924,6 +8927,9 @@ PRECALL(waitid)
 
 POSTCALL(waitid)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     // we want to replicate the master result even if the call fails
     unsigned long master_result = call_postcall_get_variant_result(0);
 
