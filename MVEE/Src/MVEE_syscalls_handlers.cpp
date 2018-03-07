@@ -5443,6 +5443,30 @@ PRECALL(clone)
 
 POSTCALL(clone)
 {
+	if IS_UNSYNCED_CALL
+	{
+		if (call_succeeded)
+		{
+			// update stack regions (if applicable)
+			if (ARG2(variantnum))
+			{
+				mmap_region_info* stack_info = set_mmap_table->get_region_info(variantnum, ARG2(variantnum)-1, 0);
+				int               tid        = call_postcall_get_variant_result(variantnum);
+
+				if (stack_info)
+				{
+					std::stringstream ss;
+					ss << "[stack:" << tid << "]";
+
+					stack_info->region_backing_file_path = ss.str();
+					stack_info->region_map_flags         = MAP_PRIVATE | MAP_GROWSDOWN | MAP_STACK;
+				}
+			}
+		}
+
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
+
     int i, result;
 
     if (call_succeeded)
