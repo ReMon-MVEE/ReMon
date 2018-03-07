@@ -2175,6 +2175,9 @@ PRECALL(times)
 
 POSTCALL(times)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(1, sizeof(struct tms));
     return 0;
 }
@@ -3419,6 +3422,9 @@ PRECALL(getrusage)
 
 POSTCALL(getrusage)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     if (ARG2(0))
         REPLICATEBUFFERFIXEDLEN(2, sizeof(struct rusage));
     return 0;
@@ -4254,6 +4260,9 @@ PRECALL(getsockname)
 
 POSTCALL(getsockname)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERANDLEN(2, 3, int);
     return 0;
 }
@@ -4283,6 +4292,9 @@ PRECALL(getpeername)
 
 POSTCALL(getpeername)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERANDLEN(2, 3, int);
     return 0;
 }
@@ -5735,6 +5747,9 @@ PRECALL(capget)
 
 POSTCALL(capget)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(1, sizeof(__user_cap_header_struct));
 	REPLICATEBUFFERFIXEDLEN(2, (sizeof(long) == 8 ? 2 : 1) * sizeof(__user_cap_data_struct));
     return 0;
@@ -5807,6 +5822,9 @@ PRECALL(_llseek)
 
 POSTCALL(_llseek)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(4, sizeof(loff_t));
     return 0;
 }
@@ -5841,6 +5859,9 @@ PRECALL(getdents)
 
 POSTCALL(getdents)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFER(2);
     return 0;
 }
@@ -7303,6 +7324,9 @@ PRECALL(stat64)
 
 POSTCALL(stat64)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(2, sizeof(struct stat64));
     return 0;
 }
@@ -7337,6 +7361,9 @@ PRECALL(lstat)
 
 POSTCALL(lstat)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     if (sizeof(unsigned long) == 4)
     {
         REPLICATEBUFFERFIXEDLEN(2, sizeof(struct old_kernel_stat));
@@ -7378,6 +7405,9 @@ PRECALL(lstat64)
 
 POSTCALL(lstat64)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(2, sizeof(struct stat64));
     return 0;
 }
@@ -7548,6 +7578,9 @@ LOG_RETURN(fstat64)
 
 POSTCALL(fstat64)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(2, sizeof(struct stat64));
     return 0;
 }
@@ -7626,6 +7659,9 @@ PRECALL(getdents64)
 
 POSTCALL(getdents64)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFER(2);
     return 0;
 }
@@ -7904,6 +7940,9 @@ PRECALL(getxattr)
 
 POSTCALL(getxattr)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(3, call_postcall_get_variant_result(0));
     return 0;
 }
@@ -7942,6 +7981,9 @@ PRECALL(fgetxattr)
 
 POSTCALL(fgetxattr)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(3, call_postcall_get_variant_result(0));
     return 0;
 }
@@ -8330,6 +8372,9 @@ PRECALL(clock_gettime)
 
 POSTCALL(clock_gettime)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(2, sizeof(struct timespec));
     return 0;
 }
@@ -8361,6 +8406,9 @@ PRECALL(statfs)
 
 POSTCALL(statfs)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(2, sizeof(struct statfs64));
     return 0;
 }
@@ -8398,6 +8446,9 @@ PRECALL(statfs64)
 
 POSTCALL(statfs64)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(3, sizeof(struct statfs64));
     return 0;
 }
@@ -8432,6 +8483,9 @@ PRECALL(fstatfs)
 
 POSTCALL(fstatfs)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(2, sizeof(struct statfs));
     return 0;
 }
@@ -8469,6 +8523,9 @@ PRECALL(fstatfs64)
 
 POSTCALL(fstatfs64)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(3, sizeof(struct statfs64));
     return 0;
 }
@@ -9174,6 +9231,9 @@ PRECALL(newfstatat)
 
 POSTCALL(newfstatat)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(3, sizeof(struct stat64));
     return 0;
 }
@@ -9261,6 +9321,9 @@ LOG_RETURN(fstatat64)
 
 POSTCALL(fstatat64)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(3, sizeof(struct stat64));
     return 0;
 }
@@ -9458,6 +9521,9 @@ PRECALL(readlinkat)
 
 POSTCALL(readlinkat)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFER(3);
     return 0;
 }
@@ -9822,6 +9888,9 @@ PRECALL(timerfd_gettime)
 
 POSTCALL(timerfd_gettime)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     if (ARG2(0))
         REPLICATEBUFFERFIXEDLEN(2, sizeof(struct itimerspec));
     return 0;
