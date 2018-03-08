@@ -1000,6 +1000,7 @@ unsigned long long monitor::get_clevrbuf_value(unsigned long pos)
 /*-----------------------------------------------------------------------------
     log_clevrbuf_state
 -----------------------------------------------------------------------------*/
+#define GET_NO_ROLLOVER(head) ((head << 1) >> 1)
 void monitor::log_clevrbuf_state(int variantnum)
 {
 	if (ring_buffer && ring_buffer->ptr)
@@ -1009,11 +1010,11 @@ void monitor::log_clevrbuf_state(int variantnum)
 		__sync_synchronize();
 		warnf("%s - > mismatch at position %lu\n",
 			  call_get_variant_pidstr(variantnum).c_str(),
-			  rbuf->pos[variantnum].head);
+			  GET_NO_ROLLOVER(rbuf->pos[variantnum].head) - 1);
 		
 		warnf("%s - > expected value: %llu\n",
 			  call_get_variant_pidstr(variantnum).c_str(),
-			  get_clevrbuf_value(rbuf->pos[variantnum].head));
+			  get_clevrbuf_value(GET_NO_ROLLOVER(rbuf->pos[variantnum].head) - 1));
 
 		variants[variantnum].regs_valid = false;
 		call_check_regs(variantnum);
@@ -1021,8 +1022,8 @@ void monitor::log_clevrbuf_state(int variantnum)
 			  call_get_variant_pidstr(variantnum).c_str(),
 			  NEXT_SYSCALL_NO(variantnum));
 
-		unsigned long current_master_tail = rbuf->pos[0].tail;
-		unsigned long current_master_pos = rbuf->pos[0].head;
+		unsigned long current_master_tail = GET_NO_ROLLOVER(rbuf->pos[0].tail);
+		unsigned long current_master_pos = GET_NO_ROLLOVER(rbuf->pos[0].head);
 		char clevrbuf_line[4096];
 		
 		debugf("Ring buffer dump:\n");
@@ -1037,10 +1038,10 @@ void monitor::log_clevrbuf_state(int variantnum)
 
 			for (int j = 1; j < mvee::numvariants; ++j)
 			{
-				if (rbuf->pos[j].head == i)
+				if (GET_NO_ROLLOVER(rbuf->pos[j].head) == i)
 				{
 					char variantid[1024];
-					sprintf(variantid, " <==== Variant %d", j);
+					sprintf(variantid, " <==== Next elem for Variant %d", j);
 					strcat(clevrbuf_line, variantid);
 				}
 			}
@@ -1056,10 +1057,10 @@ void monitor::log_clevrbuf_state(int variantnum)
 
 				for (int j = 1; j < mvee::numvariants; ++j)
 				{
-					if (rbuf->pos[j].head == i)
+					if (GET_NO_ROLLOVER(rbuf->pos[j].head) == i)
 					{
 						char variantid[1024];
-						sprintf(variantid, " <==== Variant %d", j);
+						sprintf(variantid, " <==== Next elem for Variant %d", j);
 						strcat(clevrbuf_line, variantid);
 					}
 				}
