@@ -95,12 +95,9 @@ class fd_table
 {
 public:
 	//
-    // Current working directory. We currently assume that all sys_chdir calls
-	// are synchronized. If this changes at some point in the future (due to
-	// fast forwarding for example), then this variable should be a vector of
-	// strings.
+    // Current working directory. 
 	//
-    std::string fd_cwd;
+	std::vector<std::string> fd_cwds;
 
 	//
     // Thread-safety: We want the locking to go through these functions for
@@ -124,7 +121,7 @@ public:
 		bool master_file,
 		bool unsynced_access=false,
 		bool unlinked=false,
-		ssize_t original_file_size=0);
+		ssize_t original_file_size=0);	
 	std::map<unsigned long, fd_info>::iterator
                   free_fd_info        (unsigned long fd);
     void          free_cloexec_fds    ();
@@ -194,7 +191,7 @@ public:
 	//
 	// Changes the current working directory. Supports relative @path names
 	// 
-    void          chdir               (const char* path);
+    void          chdir               (int variantnum, const char* path);
 
 	//
     // IP-MON file mapping. We assume that IP-MON is only used for synchronized

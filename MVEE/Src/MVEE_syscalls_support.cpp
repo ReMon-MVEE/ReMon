@@ -1342,6 +1342,11 @@ bool monitor::call_resolve_open_paths
 	{
 		for (auto i = 1; i < mvee::numvariants; ++i)
 			resolved_paths[i] = resolved_paths[0];
+
+#ifndef MVEE_BENCHMARK
+		for (auto i = 1; i < mvee::numvariants; ++i)
+			tmp_path[i] = tmp_path[0];
+#endif
 	}
 
 #ifndef MVEE_BENCHMARK

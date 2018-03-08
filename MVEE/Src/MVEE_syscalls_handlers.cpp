@@ -1377,14 +1377,7 @@ PRECALL(chdir)
 {
     CHECKPOINTER(1);
     CHECKSTRING(1);
-
-	if (call_do_alias<1>())
-	{
-		// TODO/FIXME: set_fd_table's cwd needs to be a vector
-		warnf("Aliased chdir - this is not fully supported right now\n");
-		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
-	}
-
+	call_do_alias<1>();
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
@@ -1392,9 +1385,18 @@ POSTCALL(chdir)
 {
     if (call_succeeded)
     {
-        auto str = rw::read_string(variants[0].variantpid, (void*) ARG1(0));
-        if (str.length() > 0)
-            set_fd_table->chdir(str.c_str());
+		if IS_UNSYNCED_CALL
+		{
+			auto str = rw::read_string(variants[variantnum].variantpid, (void*) ARG1(variantnum));
+			if (str.length() > 0)
+				set_fd_table->chdir(variantnum, str.c_str());
+		}
+		else
+		{
+			auto str = rw::read_string(variants[0].variantpid, (void*) ARG1(0));
+			if (str.length() > 0)
+				set_fd_table->chdir(-1, str.c_str());
+		}
     }
 
     return 0;
@@ -5813,9 +5815,18 @@ POSTCALL(fchdir)
 {
     if (call_succeeded)
     {
-        fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0));
-        if (fd_info && fd_info->paths[0] != "")
-            set_fd_table->chdir(fd_info->paths[0].c_str());
+		if IS_UNSYNCED_CALL
+		{
+			fd_info* fd_info = set_fd_table->get_fd_info(ARG1(variantnum));
+			if (fd_info && fd_info->paths[variantnum] != "")
+				set_fd_table->chdir(variantnum, fd_info->paths[variantnum].c_str());
+		}
+		else
+		{			
+			fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0));
+			if (fd_info && fd_info->paths[0] != "")
+				set_fd_table->chdir(-1, fd_info->paths[0].c_str());
+		}
     }
 
     return 0;

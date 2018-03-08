@@ -137,16 +137,14 @@ fd_table::fd_table()
 	std::fill(paths.begin(), paths.end(), "stderr");
     create_fd_info(FT_SPECIAL, fds, paths, O_WRONLY, false, false, false, true, 0);
 
-    char*                      cwd = getcwd(NULL, 0);
-    fd_cwd = std::string(cwd);
-    free(cwd);
+	fd_cwds.resize(mvee::numvariants);
 }
 
 fd_table::fd_table(const fd_table& parent)
 {
     init();
     table     = parent.table;
-    fd_cwd    = parent.fd_cwd;
+    fd_cwds   = parent.fd_cwds;
     epoll_map = parent.epoll_map;
 }
 
@@ -350,7 +348,8 @@ void fd_table::refresh_fd_table(std::vector<pid_t> variant_pids)
 	table.clear();
 	epoll_map.clear();
 	temporary_files.clear();
-	fd_cwd = "";
+	fd_cwds.clear();
+	fd_cwds.resize(mvee::numvariants);
 
     // I'm not sure if it's really a good idea to repopulate the table
     // as we generally can't figure out the mapping between master and slave
@@ -824,9 +823,9 @@ std::string fd_table::get_full_path (int variantnum, pid_t variantpid, unsigned 
     else
     {
         // relative path... fetch the base path
-        if (dirfd == (unsigned long)AT_FDCWD)
+        if ((int)dirfd == AT_FDCWD)
         {
-			if (fd_cwd == "")
+			if (fd_cwds[variantnum].length() == 0)
 			{
 				char proc_path[100];
 				char cwd_path[2048];
@@ -834,11 +833,14 @@ std::string fd_table::get_full_path (int variantnum, pid_t variantpid, unsigned 
 				memset(cwd_path, 0, 2048);
 				sprintf(proc_path, "/proc/%d/cwd", variantpid);
 				if (readlink(proc_path, cwd_path, 2048) != -1)
+				{
 					ss << cwd_path;
+					fd_cwds[variantnum] = std::string(cwd_path);
+				}
 			}
 			else
 			{
-				ss << fd_cwd;
+				ss << fd_cwds[variantnum];
 			}
         }
         else
@@ -1036,22 +1038,25 @@ void fd_table::master_fd_set_to_non_master_fd_sets(fd_set *master_fd_set, int nf
 /*-----------------------------------------------------------------------------
     chdir
 -----------------------------------------------------------------------------*/
-void fd_table::chdir(const char* path)
+void fd_table::chdir(int variantnum, const char* path)
 {
-    if (path && path[0] != '/')
-    {
-        std::string tmp = fd_cwd;
-        tmp   += "/";
-        tmp   += path;
-        fd_cwd = tmp;
-//		warnf("trying to chdir to: %s\n", tmp.c_str());
-//		return ::chdir(tmp.c_str());
-    }
-    else
-    {
-        fd_cwd = path;
-//		return ::chdir(path);
-    }
+	int start = (variantnum == -1) ? 0 : variantnum;
+	int lim = (variantnum == -1) ? mvee::numvariants : variantnum + 1;
+
+	for (int i = start; i < lim; ++i)
+	{
+		if (path && path[0] != '/')
+		{
+			std::string tmp = fd_cwds[i];
+			tmp   += "/";
+			tmp   += path;
+			fd_cwds[i] = mvee::os_normalize_path_name(tmp);
+		}
+		else
+		{
+			fd_cwds[i] = mvee::os_normalize_path_name(path);
+		}
+	}
 }
 
 /*-----------------------------------------------------------------------------
