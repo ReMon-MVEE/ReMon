@@ -48,7 +48,12 @@ static inline void xcheck_internal(CrossCheck &xcheck)
 		rbuf_peek<CrossCheck>(buf, my_variant_num - 1, master_xcheck);
 
 		if (master_xcheck != xcheck)
-			*(volatile unsigned long*) 0 = 0xDEADBEEF;
+		{
+//			*(volatile uint64_t*) 0 = xcheck.item;
+			asm volatile("mov %0, %%rax\n\t"
+						 "xor %%rbx, %%rbx\n\t"
+						 "mov %%rax, (%%rbx)" :: "g"(xcheck.item) : "rax", "rbx");
+		}
 	}
 }
 

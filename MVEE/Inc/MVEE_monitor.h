@@ -946,6 +946,12 @@ private:
 	void log_stack                       (int variantnum);
 
 	//
+	// Dump the cross-check buffer for libclevrbuf
+	//
+	unsigned long long get_clevrbuf_value(unsigned long value_pos);
+	void log_clevrbuf_state              (int variantnum);
+
+	//
 	// Write messages into the mismatch info stream.  These messages may or may
 	// not be printed to stdout/log files later, depending on whether or not the
 	// mismatch was flagged as a benign divergence

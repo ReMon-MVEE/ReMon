@@ -971,6 +971,105 @@ void monitor::log_stack(int variantnum)
 }
 
 /*-----------------------------------------------------------------------------
+    get_clevrbuf_value
+-----------------------------------------------------------------------------*/
+unsigned long long monitor::get_clevrbuf_value(unsigned long pos)
+{
+	struct rbuf* rbuf = reinterpret_cast<struct rbuf*>(ring_buffer->ptr);
+	void* value_ptr = reinterpret_cast<void*>((unsigned long) rbuf + rbuf->data_offset + rbuf->elem_size * pos);
+	unsigned long long expected_value;
+	switch (rbuf->elem_size)
+	{
+		case 1:
+			expected_value = *reinterpret_cast<unsigned char*>(value_ptr);
+			break;
+		case 2:
+			expected_value = *reinterpret_cast<unsigned short*>(value_ptr);
+			break;
+		case 4:
+			expected_value = *reinterpret_cast<unsigned int*>(value_ptr);
+			break;
+		default:
+			expected_value = *reinterpret_cast<unsigned long long*>(value_ptr);
+			break;
+	}
+
+	return expected_value;
+}
+
+/*-----------------------------------------------------------------------------
+    log_clevrbuf_state
+-----------------------------------------------------------------------------*/
+void monitor::log_clevrbuf_state(int variantnum)
+{
+	if (ring_buffer && ring_buffer->ptr)
+	{
+		struct rbuf* rbuf = reinterpret_cast<struct rbuf*>(ring_buffer->ptr);
+
+		warnf("%s - > mismatch at position %lu\n",
+			  call_get_variant_pidstr(variantnum).c_str(),
+			  rbuf->pos[variantnum].head);
+		
+		warnf("%s - > expected value: %llu\n",
+			  call_get_variant_pidstr(variantnum).c_str(),
+			  get_clevrbuf_value(rbuf->pos[variantnum].head));
+
+		variants[variantnum].regs_valid = false;
+		call_check_regs(variantnum);
+		warnf("%s - > actual value: %llu\n",
+			  call_get_variant_pidstr(variantnum).c_str(),
+			  NEXT_SYSCALL_NO(variantnum));
+
+		unsigned long current_master_tail = rbuf->pos[0].tail;
+		unsigned long current_master_pos = rbuf->pos[0].head;
+		char clevrbuf_line[4096];
+		
+		debugf("Ring buffer dump:\n");
+		debugf("> Master tail @ pos %lu\n", current_master_tail);
+		debugf("> Master head @ pos %lu\n", current_master_pos);
+		
+		for (unsigned long i = current_master_tail;
+			 i < ((current_master_pos > current_master_tail) ? current_master_pos - 1 : rbuf->elems);
+			 ++i)
+		{
+			sprintf(clevrbuf_line, "RBUF[%lu] = %llu", i, get_clevrbuf_value(i));
+
+			for (int j = 1; j < mvee::numvariants; ++j)
+			{
+				if (rbuf->pos[j].head == i)
+				{
+					char variantid[1024];
+					sprintf(variantid, " <==== Variant %d", j);
+					strcat(clevrbuf_line, variantid);
+				}
+			}
+
+			debugf("%s\n", clevrbuf_line);
+		}
+
+		if (current_master_pos < current_master_tail)
+		{
+			for (unsigned long i = 0; i < current_master_pos - 1; ++i)
+			{
+				sprintf(clevrbuf_line, "RBUF[%lu] = %llu", i, get_clevrbuf_value(i));
+
+				for (int j = 1; j < mvee::numvariants; ++j)
+				{
+					if (rbuf->pos[j].head == i)
+					{
+						char variantid[1024];
+						sprintf(variantid, " <==== Variant %d", j);
+						strcat(clevrbuf_line, variantid);
+					}
+				}
+
+				debugf("%s\n", clevrbuf_line);
+			}
+		}
+	}
+}
+
+/*-----------------------------------------------------------------------------
     log_segfault - Logs segfault (SIGSEGV) info.
 -----------------------------------------------------------------------------*/
 void monitor::log_segfault(int variantnum)

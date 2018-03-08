@@ -217,6 +217,56 @@ struct mvee_lock_buffer_entry
 	unsigned char tags[64 - sizeof(long) - sizeof(int) - sizeof(short)];
 };
 
+//
+// libclevrbuf ring buffer layout
+//
+struct buf_pos
+{
+	// for the master, the head is the position of the next
+	// element to be written.
+	// for the slaves, the head is the position of the next
+	// element to be consumed
+
+	// the upper bit of this field is toggled whenever we
+	// roll over
+	// by tracking rollovers, we can tell the difference
+	// between a slave that has caught up with the master
+	// and a slave that is a full ring buffer cycle behind
+	volatile unsigned long head; 
+
+	// for the master, this is the position of the oldest
+	// element that has not been consumed yet
+	// for the slaves, this is the position of the newest
+	// element we know of
+	unsigned long tail;
+
+	// pad to the end of the cache line
+	char pad[64 - 2 * sizeof(unsigned long)];
+};
+
+struct rbuf
+{
+	//
+	// cacheline 0: read-read sharing only
+	//
+	unsigned long elems;       // nr of data elements that can fit in the ring buffer
+	unsigned long elem_size;   // size of data elements
+	unsigned long data_offset; // where does the data start?
+	unsigned long slaves;      // nr of slaves
+	char pad[64 - sizeof(unsigned long) * 4];
+
+	//
+	// cacheline 1 - (slaves-1): position pointers
+    //
+	struct buf_pos pos[1];	
+
+	//
+	// cachelines n and up: data
+	//
+	// T data[];
+};
+
+
 /*-----------------------------------------------------------------------------
     Class Definitions
 -----------------------------------------------------------------------------*/

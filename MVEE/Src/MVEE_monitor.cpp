@@ -2121,17 +2121,27 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
 			throw RwInfoFailure(variantnum, "get signal info");
 
         if (signal == SIGSEGV)
-        {            
-#ifndef MVEE_BENCHMARK
+        {
 			if (!ip && !interaction::fetch_ip(variants[variantnum].variantpid, ip))
 				throw RwRegsFailure(variantnum, "get trap location");
 			
 			std::string caller_info = set_mmap_table->get_caller_info(variantnum, variants[variantnum].variantpid, ip, 0);
+
+#ifndef MVEE_BENCHMARK
 			debugf("%s - variant crashed - trapping ins: %s\n", 
 				   call_get_variant_pidstr(variantnum).c_str(), caller_info.c_str());
 			if (caller_info.find("mvee_log_stack at") != std::string::npos)
 				skip_segv = true;
 #endif
+			if (caller_info.find("rb_xcheck at") != std::string::npos)
+			{
+				warnf("%s - Failed ring buffer cross-check\n",
+					  call_get_variant_pidstr(variantnum).c_str());
+				log_clevrbuf_state(variantnum);
+				log_variant_backtrace(variantnum, 0, 0, 1);
+				shutdown(false);
+				return;
+			}
         }
 
         debugf("%s - Received signal %s (%d)\n", call_get_variant_pidstr(variantnum).c_str(), getTextualSig(signal), signal);
