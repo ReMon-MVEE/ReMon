@@ -50,6 +50,7 @@ static inline void xcheck_internal(CrossCheck &xcheck)
 		if (master_xcheck != xcheck)
 		{
 //			*(volatile uint64_t*) 0 = xcheck.item;
+			__sync_synchronize();
 			asm volatile("mov %0, %%rax\n\t"
 						 "xor %%rbx, %%rbx\n\t"
 						 "mov %%rax, (%%rbx)" :: "g"(xcheck.item) : "rax", "rbx");

@@ -1006,6 +1006,7 @@ void monitor::log_clevrbuf_state(int variantnum)
 	{
 		struct rbuf* rbuf = reinterpret_cast<struct rbuf*>(ring_buffer->ptr);
 
+		__sync_synchronize();
 		warnf("%s - > mismatch at position %lu\n",
 			  call_get_variant_pidstr(variantnum).c_str(),
 			  rbuf->pos[variantnum].head);
