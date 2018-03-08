@@ -45,7 +45,7 @@ static inline void xcheck_internal(CrossCheck &xcheck)
 	else
 	{
 		CrossCheck master_xcheck = xcheck;
-		rbuf_peek<CrossCheck>(buf, my_variant_num - 1, master_xcheck);
+		rbuf_peek<CrossCheck>(buf, my_variant_num - 1, master_xcheck, xcheck);
 
 		if (master_xcheck != xcheck)
 		{

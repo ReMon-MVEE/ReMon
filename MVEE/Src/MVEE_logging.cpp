@@ -1010,11 +1010,11 @@ void monitor::log_clevrbuf_state(int variantnum)
 		__sync_synchronize();
 		warnf("%s - > mismatch at position %lu\n",
 			  call_get_variant_pidstr(variantnum).c_str(),
-			  GET_NO_ROLLOVER(rbuf->pos[variantnum].head) - 1);
+			  GET_NO_ROLLOVER(rbuf->pos[variantnum].head));
 		
 		warnf("%s - > expected value: %llu\n",
 			  call_get_variant_pidstr(variantnum).c_str(),
-			  get_clevrbuf_value(GET_NO_ROLLOVER(rbuf->pos[variantnum].head) - 1));
+			  get_clevrbuf_value(GET_NO_ROLLOVER(rbuf->pos[variantnum].head)));
 
 		variants[variantnum].regs_valid = false;
 		call_check_regs(variantnum);

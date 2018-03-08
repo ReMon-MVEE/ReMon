@@ -256,7 +256,7 @@ void rbuf_push (struct rbuf* buf, T& elem)
 }
 
 template<typename T>
-void rbuf_peek (struct rbuf* buf, int slave_num, T& elem)
+void rbuf_peek (struct rbuf* buf, int slave_num, T& elem, T& expected)
 {
 	register unsigned long slave_head, slave_rollover, master_rollover;
 	register unsigned long last_seen_master_head = buf->pos[slave_num + 1].tail;
@@ -295,13 +295,16 @@ void rbuf_peek (struct rbuf* buf, int slave_num, T& elem)
 	// we must have copied the elem before we can update our position
 	__sync_synchronize();
 
-	// handle rollover
-	if (slave_head + 1 == buf->elems)		
+	if (elem == expected)
 	{
-		SET_WITH_ROLLOVER(buf->pos[slave_num + 1].head, 0, slave_rollover ^ 1);
-	}
-	else
-	{
-		SET_WITH_ROLLOVER(buf->pos[slave_num + 1].head, slave_head + 1, slave_rollover);
+		// handle rollover
+		if (slave_head + 1 == buf->elems)		
+		{
+			SET_WITH_ROLLOVER(buf->pos[slave_num + 1].head, 0, slave_rollover ^ 1);
+		}
+		else
+		{
+			SET_WITH_ROLLOVER(buf->pos[slave_num + 1].head, slave_head + 1, slave_rollover);
+		}
 	}
 }
