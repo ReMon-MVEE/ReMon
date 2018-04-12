@@ -32,7 +32,7 @@ void do_slave_test(struct rbuf* buf)
 	for (int i = 0; i < ITEMS; ++i)
 	{
 		int expected_elem = rand(), actual_elem;
-		rbuf_peek<int>(buf, my_variant - 1, actual_elem); 
+		rbuf_peek<int>(buf, my_variant - 1, actual_elem, expected_elem);
 		hash = hash ^ actual_elem;
 
 		if (expected_elem != actual_elem)
