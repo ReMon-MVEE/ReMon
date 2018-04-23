@@ -2675,9 +2675,16 @@ PRECALL(ioctl)
         case TIOCSWINSZ:
             CHECKBUFFER(3, sizeof(struct winsize));
             is_master = 1;
-            break;
+            break;			
+		//
+		//  The call ioctl(fildes, FIOCLEX, NULL) is equivalent to:
+		//  fcntl(fildes, F_SETFD, FD_CLOEXEC)
+		//  The call ioctl(fildes, FIONCLEX, NULL) is equivalent to:
+		//  fcntl(fildes, F_SETFD, 0)
+		//
         case FIOCLEX:
         case FIONCLEX:
+			is_master = set_fd_table->is_fd_master_file(ARG1(0));
             break;
 		// takes a struct ifconf *.  The ifc_buf field points to a buffer of
 		// length ifc_len bytes, into which the kernel writes a list of type
