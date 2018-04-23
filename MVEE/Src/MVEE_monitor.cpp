@@ -389,6 +389,7 @@ void monitor::rewrite_execve_args(int variantnum, bool write_to_stack, bool rewr
 	std::deque<char*> envp;
 	pid_t pid = variants[variantnum].variantpid;
 	std::string lib_path_from_env;
+	bool mveeroot_found_in_env = false;
 
 	// See if we have any LD_LIBRARY_PATH in the envp vars
 	for (auto envp : set_mmap_table->mmap_startup_info[variantnum].envp)
@@ -396,9 +397,18 @@ void monitor::rewrite_execve_args(int variantnum, bool write_to_stack, bool rewr
 		if (envp.find("LD_LIBRARY_PATH=") == 0)
 		{
 			lib_path_from_env = envp.substr(strlen("LD_LIBRARY_PATH="));
-			break;
+		}
+		else if (envp.find("MVEEROOT=") == 0)
+		{
+			mveeroot_found_in_env = true;
 		}
 	}
+
+	// our MVEE LD Loader relies on the MVEEROOT env variable to find the
+	// program interpreter. If we do not find it (e.g., in Python3), then we
+	// have to inject it manually
+	if (!mveeroot_found_in_env)
+		rewrite_envp = true;
 
 	// We might want to do this if we want to restart a variant altogether
 	if (rewrite_envp)
@@ -416,6 +426,14 @@ void monitor::rewrite_execve_args(int variantnum, bool write_to_stack, bool rewr
 			while(std::getline(ss, ln, '\n'))
 				envp.push_back(mvee::strdup(ln.c_str()));
 		}
+		
+		if (!mveeroot_found_in_env)
+		{
+			std::stringstream ss;
+			ss << "MVEEROOT=" << mvee::os_get_mvee_root_dir();
+			envp.push_back(mvee::strdup(ss.str().c_str()));
+		}
+		
 		envp.push_back(NULL);
 	}
 
