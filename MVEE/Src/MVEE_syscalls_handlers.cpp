@@ -8256,6 +8256,7 @@ LOG_ARGS(sched_getaffinity)
 
 POSTCALL(sched_getaffinity)
 {
+	/*
     // mask the return with the CPU cores we wish to make available to this variant
     int res = call_postcall_get_variant_result(variantnum);
     if (call_check_result(res) && ARG3(variantnum))
@@ -8287,7 +8288,7 @@ POSTCALL(sched_getaffinity)
             if (!rw::write_data(variants[variantnum].variantpid, (void*) ARG3(variantnum), ARG2(variantnum), &available_cores))
 				throw RwMemFailure(variantnum, "write cpu_set_t in sys_sched_setaffinity");
     }
-
+	*/
 
     return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
