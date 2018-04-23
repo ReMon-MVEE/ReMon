@@ -6194,12 +6194,12 @@ GET_CALL_TYPE(mremap)
 
 LOG_ARGS(mremap)
 {
-	debugf("%s - SYS_MREMAP(0x" PTRSTR ", %lu, %lu, 0x" PTRSTR ", 0x" PTRSTR ")\n",
+	debugf("%s - SYS_MREMAP(OLD_ADDR=0x" PTRSTR ", OLD_LEN=%lu, NEW_LEN=%lu, FLAGS=%lu (%s), NEW_ADDR=0x" PTRSTR ")\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   (unsigned long)ARG1(variantnum), 
 		   (unsigned long)ARG2(variantnum), 
 		   (unsigned long)ARG3(variantnum), 
-		   (unsigned long)ARG4(variantnum),
+		   (unsigned long)ARG4(variantnum), getTextualMremapFlags(ARG4(variantnum)),
 		   (unsigned long)ARG5(variantnum));
 }
 
@@ -6224,6 +6224,7 @@ CALL(mremap)
 
 		for (int i = 0; i < mvee::numvariants; ++i)
 		{
+			// see if there would be overlap if we extend the mapping in-place
 			auto region_info = set_mmap_table->get_region_info(i, ARG1(i), ARG3(i));
 			if (region_info)
 			{
@@ -6232,21 +6233,21 @@ CALL(mremap)
 			}
 		}
 				
-		// Ok, it's going to be moved. We need to calculate a base address		
+		// Ok, it's going to be moved. We need to calculate a base address	
 		if (overlap)
 		{
 			unsigned long address = set_mmap_table->calculate_data_mapping_base(ARG3(0));
 
 			for (int i = 0; i < mvee::numvariants; ++i)
 			{
-				call_overwrite_arg_value(i, 1, address, true);
+				call_overwrite_arg_value(i, 3, address, true);
 
-				debugf("%s - replaced call by SYS_MREMAP(0x" PTRSTR ", %lu, %lu, 0x" PTRSTR ", 0x" PTRSTR ")\n",
+				debugf("%s - replaced call by SYS_MREMAP(OLD_ADDR=0x" PTRSTR ", OLD_LEN=%lu, NEW_LEN=%lu, FLAGS=%lu (%s), NEW_ADDR=0x" PTRSTR ")\n",
 					   call_get_variant_pidstr(variantnum).c_str(), 
-					   address, 
+					   (unsigned long)ARG1(variantnum), 
 					   (unsigned long)ARG2(variantnum), 
-					   (unsigned long)ARG3(variantnum), 
-					   (unsigned long)ARG4(variantnum),
+					   address, 
+					   (unsigned long)ARG4(variantnum), getTextualMremapFlags(ARG4(variantnum)),
 					   (unsigned long)ARG5(variantnum));
 			}
 		}

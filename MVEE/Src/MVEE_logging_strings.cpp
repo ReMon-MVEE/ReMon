@@ -1487,6 +1487,22 @@ const char* getTextualInotifyFlags(int flags)
 }
 
 /*-----------------------------------------------------------------------------
+    getTextualMremapFlags
+-----------------------------------------------------------------------------*/
+const char* getTextualMremapFlags(int flags)
+{
+	const char* result = "<none>";
+
+	switch (flags)
+	{
+		DEF_CASE(MREMAP_MAYMOVE);
+		DEF_CASE(MREMAP_FIXED);
+	}
+
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
     getTextualTimerFlags
 -----------------------------------------------------------------------------*/
 std::string getTextualTimerFlags(int flags)

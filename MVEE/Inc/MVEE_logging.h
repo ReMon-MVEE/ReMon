@@ -75,6 +75,7 @@ const char* getTextualQuotactlFmt       (unsigned long fmt);
 const char* getTextualPriorityWhich     (int which);
 const char* getTextualSchedulingPolicy  (int policy);
 const char* getTextualInotifyFlags      (int flags);
+const char* getTextualMremapFlags       (int flags);
 std::string getTextualTimerFlags        (int flags);
 std::string getTextualWaitEventType     (int status);
 std::string getTextualEpollEvents       (unsigned int events);
