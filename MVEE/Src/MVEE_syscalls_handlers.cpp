@@ -4137,7 +4137,10 @@ POSTCALL(socket)
 		std::vector<std::string> paths(mvee::numvariants);
 
         std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
-		std::fill(paths.begin(), paths.end(), "sock:unnamed");
+		if (ARG1(0) == AF_UNIX || ARG1(0) == AF_LOCAL)
+			std::fill(paths.begin(), paths.end(), "domainsock:unnamed");
+		else
+			std::fill(paths.begin(), paths.end(), "sock:unnamed");
 		
 		FileType type = (ARG2(0) & SOCK_NONBLOCK) ? FT_SOCKET_NON_BLOCKING : FT_SOCKET_BLOCKING;
 		bool cloexec = (ARG2(0) & SOCK_CLOEXEC) ? true : false;
@@ -4228,7 +4231,7 @@ POSTCALL(connect)
         GETTEXTADDRDIRECT(0, text_addr, 2, ARG3(0));
         fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0), 0);
         if (fd_info && text_addr != "")
-			std::fill(fd_info->paths.begin(), fd_info->paths.end(), std::string("clientsock:") + text_addr);
+			std::fill(fd_info->paths.begin(), fd_info->paths.end(), text_addr);
     }
     return 0;
 }
@@ -4368,7 +4371,10 @@ POSTCALL(socketpair)
 
         std::fill(fds.begin(),  fds.end(),  fd1);
         std::fill(fds2.begin(), fds2.end(), fd2);
-		std::fill(paths.begin(), paths.end(), "sock:unnamed");
+		if (ARG1(0) == AF_UNIX || ARG1(0) == AF_LOCAL)
+			std::fill(paths.begin(), paths.end(), "domainsock:unnamed");
+		else
+			std::fill(paths.begin(), paths.end(), "sock:unnamed");
 
 		FileType type = (ARG2(0) & SOCK_NONBLOCK) ? FT_SOCKET_NON_BLOCKING : FT_SOCKET_BLOCKING;
 		bool cloexec = (ARG2(0) & SOCK_CLOEXEC) ? true : false;
@@ -4702,6 +4708,20 @@ LOG_RETURN(recvmsg)
 POSTCALL(recvmsg)
 {
     REPLICATEMSGVECTOR(2);
+
+	fd_info* info = set_fd_table->get_fd_info(ARG1(0));
+	if (info && info->paths[0].find("domainsock:") == 0)
+	{
+		std::set<int> fds = call_get_fd_set_from_domain_msgvector((struct msghdr*) ARG2(0));
+		for (auto fd : fds)
+		{
+			debugf("%s - SYS_RECVMSG received fd from domain socket: %d\n",
+				   call_get_variant_pidstr(0).c_str(), fd);
+
+			set_fd_table->create_master_fd_info_from_proc(fd, variants[0].variantpid);
+		}
+	}
+	
     return 0;
 }
 
@@ -4751,6 +4771,20 @@ PRECALL(recvmmsg)
 POSTCALL(recvmmsg)
 {
     REPLICATEMMSGVECTOR(2);
+
+	fd_info* info = set_fd_table->get_fd_info(ARG1(0));
+	if (info && info->paths[0].find("domainsock:") == 0)
+	{
+		std::set<int> fds = call_get_fd_set_from_domain_mmsgvector((struct mmsghdr*) ARG2(0), ARG3(0));
+		for (auto fd : fds)
+		{
+			debugf("%s - SYS_RECVMMSG received fd from domain socket: %d\n",
+				   call_get_variant_pidstr(0).c_str(), fd);
+
+			set_fd_table->create_master_fd_info_from_proc(fd, variants[0].variantpid);
+		}
+	}
+
     return 0;
 }
 
@@ -10533,8 +10567,8 @@ void mvee::init_syslocks()
     REG_LOCKS(__NR_sendmmsg,    MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL);
     REG_LOCKS(__NR_sendmsg,     MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL);
     REG_LOCKS(__NR_recvfrom,    MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL);
-    REG_LOCKS(__NR_recvmmsg,    MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL);
-    REG_LOCKS(__NR_recvmsg,     MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL);
+    REG_LOCKS(__NR_recvmmsg,    MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL | MVEE_SYSLOCK_POSTCALL);
+    REG_LOCKS(__NR_recvmsg,     MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL | MVEE_SYSLOCK_POSTCALL);
     REG_LOCKS(__NR_shutdown,    MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL);
     REG_LOCKS(__NR_fdatasync,   MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL);
     REG_LOCKS(__NR_poll,        MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL);

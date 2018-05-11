@@ -1772,23 +1772,34 @@ std::string getTextualSocketType(long int type)
 -----------------------------------------------------------------------------*/
 std::string getTextualSocketAddr(struct sockaddr* addr)
 {
+	std::stringstream ss;
     std::string result = "";
 
     switch(addr->sa_family)
     {
         case AF_INET:
+		{
+            char tmp[50];
+            inet_ntop(addr->sa_family, &((struct sockaddr_in*)addr)->sin_addr, tmp, 50);
+			ss << "clientsock:ipv4:" << std::string(tmp);
+            break;
+        }
+
         case AF_INET6:
         {
             char tmp[50];
             inet_ntop(addr->sa_family, &((struct sockaddr_in*)addr)->sin_addr, tmp, 50);
-            result = std::string(tmp);
+			ss << "clientsock:ipv6:" << std::string(tmp);
             break;
         }
-        case AF_FILE:
-        {
-            result = std::string(((struct sockaddr_un*)addr)->sun_path);
-            break;
-        }
+//      case AF_FILE:
+//		case AF_UNIX:
+		case AF_LOCAL:
+		{
+			ss << "domainsock:" << std::string(((struct sockaddr_un*)addr)->sun_path);
+			result = ss.str();
+			break;
+		}
         default:
         {
             result  = "<couldn't resolve socket addr - family: ";

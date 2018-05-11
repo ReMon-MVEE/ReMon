@@ -121,7 +121,8 @@ public:
 		bool master_file,
 		bool unsynced_access=false,
 		bool unlinked=false,
-		ssize_t original_file_size=0);	
+		ssize_t original_file_size=0);
+	void          create_master_fd_info_from_proc (int fd, pid_t master_pid);
 	std::map<unsigned long, fd_info>::iterator
                   free_fd_info        (unsigned long fd);
     void          free_cloexec_fds    ();

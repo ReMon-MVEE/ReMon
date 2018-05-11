@@ -465,7 +465,7 @@ private:
     unsigned char    call_compare_pointers               (std::vector<void*>& pointers);
     bool             call_compare_io_vectors             (std::vector<struct iovec*>& addresses, size_t len, bool layout_only=false);
     bool             call_compare_msgvectors             (std::vector<struct msghdr*>& addresses, bool layout_only=false);
-	bool             call_compare_mmsgvectors            (std::vector<struct mmsghdr*>& addresses, bool layout_only=false);
+	bool             call_compare_mmsgvectors            (std::vector<struct mmsghdr*>& addresses, int vlen, bool layout_only=false);
 	bool             call_compare_fd_sets                (std::vector<fd_set*>& addresses, int nfds);
 
 	//
@@ -494,6 +494,8 @@ private:
     sigset_t         call_get_sigset                     (int variantnum, void* sigset_ptr, bool is_old_call);
     struct sigaction call_get_sigaction                  (int variantnum, void* sigaction_ptr, bool is_old_call);
     struct sockaddr* call_get_sockaddr                   (int variantnum, struct sockaddr* ptr, __socklen_t addr_len);
+	std::set<int>    call_get_fd_set_from_domain_msgvector  (struct msghdr* address);
+	std::set<int>    call_get_fd_set_from_domain_mmsgvector (struct mmsghdr* address, int vlen);	
 
 	//
 	// Argument overwriting support. Mainly used for aliasing

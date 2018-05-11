@@ -10,6 +10,7 @@
 -----------------------------------------------------------------------------*/
 #include <algorithm>
 #include <sys/select.h>
+#include <sys/socket.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sstream>
@@ -457,6 +458,105 @@ void fd_table::create_fd_info
 
     table.insert(std::make_pair(fds[0], info));
 	file_map_set(fds[0], type);
+}
+
+/*-----------------------------------------------------------------------------
+    create_fd_info_from_proc - creates a master file whose info we read from the
+    proc interface. We need this to support file descriptor transfers over unix
+    domain sockets.
+-----------------------------------------------------------------------------*/
+void fd_table::create_master_fd_info_from_proc (int fd, pid_t master_pid)
+{
+	debugf("parsing file info from /proc/%d/fd for fd: %d\n", master_pid, fd);
+	char cmd   [500];
+	char perms [15];
+	std::string path;
+	char file  [1024];
+	int prot;
+	long flags;
+	bool found_in_fd = false;
+	bool found_in_fdinfo = false;
+	bool cloexec = false;
+	FileType type = FT_UNKNOWN;
+
+	sprintf(cmd, "ls -al /proc/%d/fd | grep \" %d \\->\" | sed 's/\\([lrwx-]*\\).*:...[0-9]* -> \\(.*\\)/\\1 \\2/'", master_pid, fd);
+	std::string line, fd_list = mvee::log_read_from_proc_pipe(cmd, NULL);
+	std::stringstream ss(fd_list);
+		
+	while(std::getline(ss, line))
+	{
+		if (sscanf(line.c_str(), "%s %s", perms, file) != 2)
+		{
+			warnf("Malformed line in create_master_fd_info_from_proc: %s\n", line.c_str());
+			continue;
+		}
+
+		if (perms[1] == 'r')
+		{
+			if (perms[2] == 'w')
+				prot = O_RDWR;
+			else
+				prot = O_RDONLY;
+		}
+		else if (perms[2] == 'w')
+		{
+			prot = O_WRONLY;
+		}
+		else
+		{
+			prot = 0;
+		}
+
+		path = std::string(file);
+		found_in_fd = true;
+		break;
+	}
+
+	if (path.find("socket:") == 0)
+		type = FT_SOCKET_NON_BLOCKING;
+	else if (path.find("pipe:") == 0)
+		type = FT_PIPE_NON_BLOCKING;
+	else if (path.find("/") != std::string::npos)
+		type = FT_REGULAR;
+
+	sprintf(cmd, "cat /proc/%d/fdinfo/%d", master_pid, fd);
+	auto fd_properties = mvee::log_read_from_proc_pipe(cmd, NULL);
+	std::stringstream props(fd_properties);
+
+	while (std::getline(props, line))
+	{
+		found_in_fdinfo = true;
+		unsigned long tmp;
+		
+		if (sscanf(line.c_str(), "pos: %ld", &tmp) == 1)
+		{
+			// I guess we don't care about this for now...
+		}
+		else if (sscanf(line.c_str(), "flags: %lo", &tmp) == 1) // octal!
+		{
+			if (((type == FT_REGULAR || type == FT_PIPE_NON_BLOCKING) && (tmp & O_CLOEXEC)) ||
+				(type == FT_SOCKET_NON_BLOCKING && (tmp & SOCK_CLOEXEC)))				
+				cloexec = true;
+			if (type == FT_SOCKET_NON_BLOCKING && !(tmp & SOCK_NONBLOCK))
+				type = FT_SOCKET_BLOCKING;
+			if (type == FT_PIPE_NON_BLOCKING && !(tmp & O_NONBLOCK))
+				type = FT_PIPE_BLOCKING;
+			flags = tmp;
+		}
+	}
+
+	if (!found_in_fd || !found_in_fdinfo)
+	{
+		warnf("error in create_master_fd_info_from_proc: file descriptor: %d not found in /proc/%d/fd or /proc/%d/fdinfo\n",
+			  fd, master_pid, master_pid);
+		return;
+	}
+
+	std::vector<unsigned long> fds(mvee::numvariants);
+	std::fill(fds.begin(), fds.end(), fd);
+	std::vector<std::string> paths(mvee::numvariants);
+	std::fill(paths.begin(), paths.end(), path);
+	create_fd_info(type, fds, paths, flags, cloexec, true, false, false);
 }
 
 /*-----------------------------------------------------------------------------
@@ -1107,4 +1207,3 @@ bool fd_table::is_fd_unlinked(unsigned long fd, int variantnum)
 		return true;
 	return false;
 }
-

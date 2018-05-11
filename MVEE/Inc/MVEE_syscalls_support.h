@@ -285,13 +285,8 @@
     {                                                                       \
         std::vector<struct mmsghdr*> addresses(mvee::numvariants);            \
         FILLARGARRAY(numarg, addresses);                                    \
-        for (unsigned int i = 0; i < (unsigned int)len; ++i)                \
-        {                                                                   \
-            if (!call_compare_mmsgvectors(addresses)) \
-                return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
-            for (int j = 0; j < mvee::numvariants; ++j)                     \
-                addresses[j]++;											\
-        }                                                                   \
+		if (!call_compare_mmsgvectors(addresses, len))					\
+			return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
     }
 
 //
@@ -302,13 +297,8 @@
     {                                                                       \
         std::vector<struct mmsghdr*> addresses(mvee::numvariants);            \
         FILLARGARRAY(numarg, addresses);                                    \
-        for (unsigned int i = 0; i < (unsigned int)len; ++i)                \
-        {                                                                   \
-            if (!call_compare_mmsgvectors(addresses, true))                  \
-                return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
-            for (int j = 0; j < mvee::numvariants; ++j)                     \
-                addresses[j]++;											\
-        }                                                                   \
+		if (!call_compare_mmsgvectors(addresses, len, true))				\
+			return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
     }
 
 //

@@ -603,13 +603,24 @@ out:
 /*-----------------------------------------------------------------------------
     call_compare_mmsgvectors
 -----------------------------------------------------------------------------*/
-bool monitor::call_compare_mmsgvectors(std::vector<struct mmsghdr*>& addresses, bool layout_only)
+bool monitor::call_compare_mmsgvectors(std::vector<struct mmsghdr*>& addresses, int vlen, bool layout_only)
 {
-	int i = 0;
-	std::vector<struct msghdr*> cast(mvee::numvariants);
-	for (auto vec : addresses)
-		cast[i++] = (struct msghdr*)vec;
-	return call_compare_msgvectors(cast, layout_only);
+	while (vlen > 0)
+	{
+		int i = 0;
+		std::vector<struct msghdr*> cast(mvee::numvariants);
+		for (auto vec : addresses)
+			cast[i++] = (struct msghdr*)vec;
+
+		if (!call_compare_msgvectors(cast, layout_only))
+			return false;
+		
+		vlen--;
+		for (int i = 0; i < mvee::numvariants; ++i)
+			addresses[i]++;
+	}
+
+	return true;
 }
 
 /*-----------------------------------------------------------------------------
@@ -675,6 +686,92 @@ void monitor::call_replicate_io_vector(std::vector<struct iovec*>& addresses, lo
 
         bytes_remaining -= to_copy;
     }
+}
+
+/*-----------------------------------------------------------------------------
+    call_get_fd_set_from_master_domain_msgvector - parses the message control
+    data received through a messagevector sent to a unix domain socket opened by
+    the master variant.
+
+	returns a set containing the file descriptors for all files received
+	through this socket.
+
+	More info on this mechanism here:
+	http://man7.org/linux/man-pages/man7/unix.7.html
+-----------------------------------------------------------------------------*/
+std::set<int> monitor::call_get_fd_set_from_domain_msgvector(struct msghdr* address)
+{
+	// we might be receiving a file descriptor here...
+	std::set<int> result;
+	struct msghdr master_msg;
+	memset(&master_msg, 0, sizeof(struct msghdr));
+
+	if (!rw::read_struct(variants[0].variantpid, address, sizeof(struct msghdr), &master_msg))
+		throw RwMemFailure(0, "read master msghdr");
+
+	if (master_msg.msg_controllen)
+	{
+		master_msg.msg_control = (void*)rw::read_data(variants[0].variantpid, master_msg.msg_control, master_msg.msg_controllen);
+		if (!master_msg.msg_control)
+			throw RwMemFailure(0, "read master msgvector control data");
+	}
+	else
+	{
+		master_msg.msg_control = nullptr;
+	}
+		
+	struct cmsghdr* master_cmsg = CMSG_FIRSTHDR(&master_msg);
+
+	while (master_cmsg)
+	{
+		if (master_cmsg->cmsg_len > 0 &&
+			CMSG_DATA(master_cmsg) &&
+			master_cmsg->cmsg_type == SCM_RIGHTS)
+		{
+//			debugf("read cmsg @ 0x" PTRSTR "\n", (unsigned long) CMSG_DATA(master_cmsg));
+			int* fds = (int*) CMSG_DATA(master_cmsg);
+			// cmsg_len includes the header and (potentially) padding
+			auto real_data_len = master_cmsg->cmsg_len -
+				((unsigned long) CMSG_DATA(master_cmsg) - (unsigned long) master_cmsg);
+			for (auto i = 0u; i < real_data_len / sizeof(int); ++i)
+				result.insert(fds[i]);
+        }
+
+		master_cmsg = CMSG_NXTHDR(&master_msg, master_cmsg);
+	}
+
+	if (master_msg.msg_control)
+	{
+		delete ((unsigned char*) master_msg.msg_control);
+		master_msg.msg_control = nullptr;
+	}
+
+	return result;		
+}
+
+// same as above but for mmsg vector
+std::set<int> monitor::call_get_fd_set_from_domain_mmsgvector(struct mmsghdr* address, int vlen)
+{
+	struct msghdr* cast;
+	struct mmsghdr master_mmsg;
+	std::set<int> result;	
+
+    while (vlen > 0)
+    {
+        if (!rw::read_struct(variants[0].variantpid, address, sizeof(struct mmsghdr), &master_mmsg))
+			throw RwMemFailure(0, "read master mmsghdr");
+
+		if (master_mmsg.msg_len == 0)
+			break;
+
+		cast = (struct msghdr*) address;			
+		auto tmp = call_get_fd_set_from_domain_msgvector(cast);
+		result.insert(tmp.begin(), tmp.end());
+		vlen--;
+		address++;
+    }
+
+	return result;
 }
 
 /*-----------------------------------------------------------------------------
@@ -757,27 +854,27 @@ void monitor::call_replicate_mmsgvector(std::vector<struct mmsghdr*>& addresses,
             if (!rw::write_data(variants[i].variantpid, &addresses[i]->msg_len, sizeof(master_mmsg.msg_len), &master_mmsg.msg_len))
 				throw RwMemFailure(i, "replicate mmsghdr len");
 
-        if (master_mmsg.msg_len > 0)
-        {
-			int i = 0;
-			std::vector<struct msghdr*> cast(mvee::numvariants);
-			for (auto vec : addresses)
-				cast[i++] = (struct msghdr*)vec;			
-			/*
-			  struct mmsghdr {
-			      struct msghdr hdr;
-                  unsigned int len;
-              }
+		if (master_mmsg.msg_len == 0)
+			break;
 
-			  => we intentionally pass a vector of mmsghdr addresses to a
-			  function that accepts vectors to msghdr addresses because the
-			  msghdr field in mmsghdr is at offset 0
-			 */
-            call_replicate_msgvector(cast, master_mmsg.msg_len);
-            vlen--;
-            for (int i = 0; i < mvee::numvariants; ++i)
-                addresses[i]++;
-        }
+		int i = 0;
+		std::vector<struct msghdr*> cast(mvee::numvariants);
+		for (auto vec : addresses)
+			cast[i++] = (struct msghdr*)vec;			
+		/*
+		  struct mmsghdr {
+		  struct msghdr hdr;
+		  unsigned int len;
+		  }
+
+		  => we intentionally pass a vector of mmsghdr addresses to a
+		  function that accepts vectors to msghdr addresses because the
+		  msghdr field in mmsghdr is at offset 0
+		*/
+		call_replicate_msgvector(cast, master_mmsg.msg_len);
+		vlen--;
+		for (int i = 0; i < mvee::numvariants; ++i)
+			addresses[i]++;
     }
 }
 
