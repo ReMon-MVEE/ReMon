@@ -9735,6 +9735,59 @@ PRECALL(faccessat)
 }
 
 /*-----------------------------------------------------------------------------
+  sys_pselect6 - like select but:
+
+  - the fifth argument is a struct timespec ptr, not a struct timeval ptr
+  - the timespec is constant for pselect. select may modify the timeval
+  - pselect sets a sigmask while inside the call. select does not have this arg
+
+
+  (int nfds, fd_set* readfds, fd_set* writefds, fd_set* exceptfds, 
+  const struct timespec* timeout, const sigset_t* sigmask)
+-----------------------------------------------------------------------------*/
+LOG_ARGS(pselect6)
+{
+	debugf("%s - SYS_PSELECT6(%d, 0x" PTRSTR ", 0x" PTRSTR ", 0x" PTRSTR ", 0x" PTRSTR ", %s)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
+		   (unsigned long)ARG3(variantnum), 
+		   (unsigned long)ARG4(variantnum), 
+		   (unsigned long)ARG5(variantnum),
+		   getTextualSigSet(call_get_sigset(variantnum, (void*) ARG6(variantnum), false)).c_str());
+}
+
+PRECALL(pselect6)
+{
+    CHECKARG(1);
+    CHECKPOINTER(5);
+    CHECKPOINTER(4);
+    CHECKPOINTER(3);
+    CHECKPOINTER(2);
+    CHECKFDSET(4, ARG1(0));
+    CHECKFDSET(3, ARG1(0));
+	CHECKSIGSET(6, false);
+
+	variants[0].last_sigset = blocked_signals[0];
+	auto _set = call_get_sigset(0, (void*) ARG6(0), false);
+	sigemptyset(&blocked_signals[0]);
+	for (int i = 1; i < SIGRTMAX+1; ++i)
+		if (sigismember(&_set, i))
+			sigaddset(&blocked_signals[0], i);
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+}
+
+POSTCALL(pselect6)
+{
+    REPLICATEBUFFERFIXEDLEN(2, ROUND_UP(ARG1(0) + 1, sizeof(unsigned long)));
+    REPLICATEBUFFERFIXEDLEN(3, ROUND_UP(ARG1(0) + 1, sizeof(unsigned long)));
+    REPLICATEBUFFERFIXEDLEN(4, ROUND_UP(ARG1(0) + 1, sizeof(unsigned long)));
+	blocked_signals[0] = variants[0].last_sigset;
+    return 0;
+}
+
+/*-----------------------------------------------------------------------------
   sys_unshare - 
 
   man(2): (int flags)
@@ -10532,6 +10585,9 @@ void mvee::init_syslocks()
     REG_LOCKS(__NR_connect,             MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL | MVEE_SYSLOCK_POSTCALL); // may block
 #ifdef __NR__newselect
     REG_LOCKS(__NR__newselect,          MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL | MVEE_SYSLOCK_POSTCALL);
+#endif
+#ifdef __NR_pselect6
+    REG_LOCKS(__NR_pselect6,            MVEE_SYSLOCK_FD | MVEE_SYSLOCK_SIG | MVEE_SYSLOCK_PRECALL | MVEE_SYSLOCK_POSTCALL); // may block
 #endif
 
     // syscalls with fd arguments
