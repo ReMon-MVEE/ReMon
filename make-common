@@ -54,30 +54,35 @@ target: $(BIN)															\
 		patched_binaries/libc/$(_ARCH)/libc.so.6						\
 		patched_binaries/libc/$(_ARCH)/libpthread.so.0					\
 		patched_binaries/libc/$(_ARCH)/librt.so.1						\
-		patched_binaries/libc/$(_ARCH)/libdl.so.2					\
-		patched_binaries/libc/$(_ARCH)/libm.so.6					\
+		patched_binaries/libc/$(_ARCH)/libdl.so.2						\
+		patched_binaries/libc/$(_ARCH)/libm.so.6						\
+		patched_binaries/libc/$(_ARCH)/libresolv.so.2					\
 		patched_binaries/libc/$(_ARCH)/libclang_rt.sync-$(_ALT_ARCH).so \
 		MVEE_LD_Loader/MVEE_LD_Loader
 
-patched_binaries/libc/$(_ARCH)/libc.so.6 : patched_binaries/libc/$(_ARCH)/libc.so
+patched_binaries/libc/$(_ARCH)/libc.so.6 : patched_binaries/libc/$(_ARCH)/libc*.so
 	@-echo "Creating symlink to GHUMVEE-ready libc"
-	ln -f -s libc.so patched_binaries/libc/$(_ARCH)/libc.so.6
+	ln -f -s libc*.so patched_binaries/libc/$(_ARCH)/libc.so.6
 
-patched_binaries/libc/$(_ARCH)/libpthread.so.0 : patched_binaries/libc/$(_ARCH)/libpthread.so
+patched_binaries/libc/$(_ARCH)/libpthread.so.0 : patched_binaries/libc/$(_ARCH)/libpthread*.so
 	@-echo "Creating symlink to GHUMVEE-ready libpthread"
-	ln -f -s libpthread.so patched_binaries/libc/$(_ARCH)/libpthread.so.0
+	ln -f -s libpthread*.so patched_binaries/libc/$(_ARCH)/libpthread.so.0
 
-patched_binaries/libc/$(_ARCH)/libdl.so.2 : patched_binaries/libc/$(_ARCH)/libdl.so
+patched_binaries/libc/$(_ARCH)/libdl.so.2 : patched_binaries/libc/$(_ARCH)/libdl*.so
 	@-echo "Creating symlink to GHUMVEE-ready libdl"
-	ln -f -s libdl.so patched_binaries/libc/$(_ARCH)/libdl.so.2
+	ln -f -s libdl*.so patched_binaries/libc/$(_ARCH)/libdl.so.2
 
-patched_binaries/libc/$(_ARCH)/librt.so.1 : patched_binaries/libc/$(_ARCH)/librt.so
+patched_binaries/libc/$(_ARCH)/librt.so.1 : patched_binaries/libc/$(_ARCH)/librt*.so
 	@-echo "Creating symlink to GHUMVEE-ready librt"
-	ln -f -s librt.so patched_binaries/libc/$(_ARCH)/librt.so.1
+	ln -f -s librt*.so patched_binaries/libc/$(_ARCH)/librt.so.1
 
-patched_binaries/libc/$(_ARCH)/libm.so.6 : patched_binaries/libc/$(_ARCH)/libm.so
+patched_binaries/libc/$(_ARCH)/libm.so.6 : patched_binaries/libc/$(_ARCH)/libm*.so
 	@-echo "Creating symlink to GHUMVEE-ready libm"
-	ln -f -s libm.so patched_binaries/libc/$(_ARCH)/libm.so.6
+	ln -f -s libm*.so patched_binaries/libc/$(_ARCH)/libm.so.6
+
+patched_binaries/libc/$(_ARCH)/libresolv.so.2 : patched_binaries/libc/$(_ARCH)/libresolv*.so
+	@-echo "Creating symlink to GHUMVEE-ready libresolv"
+	ln -f -s libresolv*.so patched_binaries/libc/$(_ARCH)/libresolv.so.2
 
 patched_binaries/libc/$(_ARCH)/libclang_rt.sync-$(_ALT_ARCH).so : libsync/libsync.cpp
 	build_scripts/compile_syncagent.rb

@@ -218,12 +218,21 @@ std::string mvee::get_alias(int variantnum, std::string path)
 	if (alias != aliases[variantnum].end())
 		return alias->second;
 
+	// built-in aliases
 	if (path.find("/dev/shm/") == 0 ||
 		path.find("/run/shm/") == 0)
 	{
 		std::stringstream ss;
 		ss << path << "_variant" << variantnum;
 		return ss.str();
+	}
+	else if (path.find("/home/stijn/glibc-build/etc/") == 0)
+	{
+		return path.replace(0, strlen("/home/stijn/glibc-build/etc/"), "/etc/");
+	}
+	else if (path.find("/home/stijn/glibc-build/") == 0)
+	{
+		return path.replace(0, strlen("/home/stijn/glibc-build/"), "/usr/");
 	}
 
 	return "";
