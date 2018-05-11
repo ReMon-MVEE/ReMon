@@ -2653,12 +2653,14 @@ PRECALL(ioctl)
     switch(ARG2(0))
     {	
         case TCGETS:     // struct termios *
+		case TCFLSH:     // int			
             is_master = set_fd_table->is_fd_master_file(ARG1(0));
             break;
         case FIONREAD:   // int*
         case TIOCGWINSZ: // struct winsize *
         case TIOCGPGRP:  // pid_t *
         case TIOCSPGRP:  // const pid_t *
+		case TIOCGPTN:   // int *
             is_master = 1;
             break;
         case TCSETS:     // const struct termios *
@@ -2667,6 +2669,7 @@ PRECALL(ioctl)
             CHECKBUFFER(3, sizeof(struct __kernel_termios));
             is_master = 1;
             break;
+		case TIOCSPTLCK: // const int*
         case FIONBIO:    // int*
         case FIOASYNC:
             is_master = 1;
@@ -2675,7 +2678,11 @@ PRECALL(ioctl)
         case TIOCSWINSZ:
             CHECKBUFFER(3, sizeof(struct winsize));
             is_master = 1;
-            break;			
+            break;
+		case TIOCSCTTY:
+			CHECKARG(3);
+			is_master = 1;
+			break;
 		//
 		//  The call ioctl(fildes, FIOCLEX, NULL) is equivalent to:
 		//  fcntl(fildes, F_SETFD, FD_CLOEXEC)
@@ -2793,6 +2800,9 @@ POSTCALL(ioctl)
     // Handle the synced-only cases
     switch(ARG2(0))
     {
+		case TIOCGPTN:
+			REPLICATEBUFFERFIXEDLEN(3, sizeof(int));
+			break;
         case FIONREAD:
             REPLICATEBUFFERFIXEDLEN(3, sizeof(int));
             break;
