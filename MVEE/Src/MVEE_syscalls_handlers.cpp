@@ -9754,7 +9754,7 @@ LOG_ARGS(pselect6)
 		   (unsigned long)ARG3(variantnum), 
 		   (unsigned long)ARG4(variantnum), 
 		   (unsigned long)ARG5(variantnum),
-		   getTextualSigSet(call_get_sigset(variantnum, (void*) ARG6(variantnum), false)).c_str());
+		   getTextualSigSet(call_get_sigset(variantnum, (void*) ARG6(variantnum), true)).c_str());
 }
 
 PRECALL(pselect6)
@@ -9766,10 +9766,10 @@ PRECALL(pselect6)
     CHECKPOINTER(2);
     CHECKFDSET(4, ARG1(0));
     CHECKFDSET(3, ARG1(0));
-	CHECKSIGSET(6, false);
+//	CHECKSIGSET(6, true);
 
 	variants[0].last_sigset = blocked_signals[0];
-	auto _set = call_get_sigset(0, (void*) ARG6(0), false);
+	auto _set = call_get_sigset(0, (void*) ARG6(0), true);
 	sigemptyset(&blocked_signals[0]);
 	for (int i = 1; i < SIGRTMAX+1; ++i)
 		if (sigismember(&_set, i))
