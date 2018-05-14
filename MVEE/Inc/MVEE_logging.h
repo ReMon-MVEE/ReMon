@@ -106,5 +106,6 @@ std::string getTextualMVEEWaitStatus    (interaction::mvee_wait_status& status);
 std::string getTextualIpcShmKey         (key_t key);
 std::string getTextualIpcShmFlags       (int shmflg);
 std::string getTextualFallocateFlags    (int mode);
+std::string getTextualRandFlags         (unsigned int mode);
 
 #endif // MVEE_LOGGING_H_INCLUDED

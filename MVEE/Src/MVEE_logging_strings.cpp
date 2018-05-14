@@ -47,6 +47,7 @@
 #ifdef MVEE_ARCH_HAS_ARCH_PRCTL
 #include <asm/prctl.h>
 #endif
+#include <sys/random.h>
 
 /*-----------------------------------------------------------------------------
     Flag Check Macro
@@ -2154,3 +2155,17 @@ std::string getTextualFallocateFlags (int mode)
 
     return result;
 }
+
+/*-----------------------------------------------------------------------------
+    getTextualRandFlags
+-----------------------------------------------------------------------------*/
+std::string getTextualRandFlags (unsigned int mode)
+{
+    std::string result;
+
+    TEST_FLAG(mode, GRND_RANDOM   , result);
+    TEST_FLAG(mode, GRND_NONBLOCK , result);
+
+    return result;
+}
+

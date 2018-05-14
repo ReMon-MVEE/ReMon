@@ -10454,6 +10454,36 @@ CALL(seccomp)
 #endif
 
 /*-----------------------------------------------------------------------------
+  sys_getrandom - 
+
+  man(2): (void* buf, size_t buflen, unsigned int flags)
+  kernel: (char* buf, size_t count, unsigned int flags)
+-----------------------------------------------------------------------------*/
+LOG_ARGS(getrandom)
+{
+	debugf("%s - SYS_GETRANDOM(0x" PTRSTR ", %lu, %u (= %s))\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned long) ARG1(variantnum), 
+		   (size_t) ARG2(variantnum), 
+		   (unsigned int) ARG3(variantnum), 
+		   getTextualRandFlags(ARG3(variantnum)).c_str());
+}
+
+PRECALL(getrandom)
+{
+	CHECKPOINTER(1);
+	CHECKARG(2);
+	CHECKARG(3);
+	return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+}
+
+POSTCALL(getrandom)
+{
+	REPLICATEBUFFER(1);
+	return 0;
+}
+
+/*-----------------------------------------------------------------------------
   handlers_setalias
 -----------------------------------------------------------------------------*/
 static void mvee_handlers_setalias(int callnum, int alias)
