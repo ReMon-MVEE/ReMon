@@ -8127,12 +8127,27 @@ POSTCALL(fgetxattr)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(futex)
 {
-	debugf("%s - SYS_FUTEX(0x" PTRSTR ", %s, %u, 0x" PTRSTR ", 0x" PTRSTR ", %u)\n",
+	struct timespec timeout;
+	std::stringstream timestr;
+
+	if (ARG4(variantnum))
+	{
+		if (!rw::read_struct(variants[variantnum].variantpid, (void*) ARG4(variantnum), sizeof(struct timespec), &timeout))
+			throw RwMemFailure(variantnum, "read timeout in sys_futex");
+
+		timestr << "TIMEOUT: " << timeout.tv_sec << std::setw(9) << std::setfill('0') << timeout.tv_nsec << std::setw(0) << " s";
+	}
+	else
+	{
+		timestr << "TIMEOUT: none";
+	}
+
+	debugf("%s - SYS_FUTEX(0x" PTRSTR ", %s, %u, %s, 0x" PTRSTR ", %u)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   (unsigned long)ARG1(variantnum),
 		   getTextualFutexOp(ARG2(variantnum)), 
 		   (unsigned int)ARG3(variantnum),
-		   (unsigned long)ARG4(variantnum), 
+		   timestr.str().c_str(),
 		   (unsigned long)ARG5(variantnum),
 		   (unsigned int)ARG6(variantnum));
 }
@@ -9747,13 +9762,28 @@ PRECALL(faccessat)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(pselect6)
 {
-	debugf("%s - SYS_PSELECT6(%d, 0x" PTRSTR ", 0x" PTRSTR ", 0x" PTRSTR ", 0x" PTRSTR ", %s)\n", 
+	struct timespec timeout;
+	std::stringstream timestr;
+
+	if (ARG5(variantnum))
+	{
+		if (!rw::read_struct(variants[variantnum].variantpid, (void*) ARG5(variantnum), sizeof(struct timespec), &timeout))
+			throw RwMemFailure(variantnum, "read timeout in sys_pselect6");
+
+		timestr << "TIMEOUT: " << timeout.tv_sec << std::setw(9) << std::setfill('0') << timeout.tv_nsec << std::setw(0) << " s";
+	}
+	else
+	{
+		timestr << "TIMEOUT: none";
+	}
+
+	debugf("%s - SYS_PSELECT6(%d, 0x" PTRSTR ", 0x" PTRSTR ", 0x" PTRSTR ", %s, %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
 		   (int)ARG1(variantnum), 
 		   (unsigned long)ARG2(variantnum), 
 		   (unsigned long)ARG3(variantnum), 
 		   (unsigned long)ARG4(variantnum), 
-		   (unsigned long)ARG5(variantnum),
+		   timestr.str().c_str(),
 		   getTextualSigSet(call_get_sigset(variantnum, (void*) ARG6(variantnum), true)).c_str());
 }
 
@@ -9767,6 +9797,7 @@ PRECALL(pselect6)
     CHECKFDSET(4, ARG1(0));
     CHECKFDSET(3, ARG1(0));
 //	CHECKSIGSET(6, true);
+	CHECKBUFFER(5, sizeof(struct timespec));
 
 	variants[0].last_sigset = blocked_signals[0];
 	auto _set = call_get_sigset(0, (void*) ARG6(0), true);
@@ -9784,6 +9815,79 @@ POSTCALL(pselect6)
     REPLICATEBUFFERFIXEDLEN(3, ROUND_UP(ARG1(0) + 1, sizeof(unsigned long)));
     REPLICATEBUFFERFIXEDLEN(4, ROUND_UP(ARG1(0) + 1, sizeof(unsigned long)));
 	blocked_signals[0] = variants[0].last_sigset;
+    return 0;
+}
+
+/*-----------------------------------------------------------------------------
+  sys_ppoll: like poll but:
+
+  - the third argument is a struct timespec ptr, not an int
+  - ppoll sets a sigmask while inside the call. poll does not have this arg
+
+  (struct pollfd* fds, nfds_t nfds, const struct timespec* tmo_p, const
+  sigset_t* sigmask)
+-----------------------------------------------------------------------------*/
+LOG_ARGS(ppoll)
+{
+	struct timespec timeout;
+	std::stringstream timestr;
+
+	if (ARG3(variantnum))
+	{
+		if (!rw::read_struct(variants[variantnum].variantpid, (void*) ARG3(variantnum), sizeof(struct timespec), &timeout))
+			throw RwMemFailure(variantnum, "read timeout in sys_ppoll");
+
+		timestr << "TIMEOUT: " << timeout.tv_sec << std::setw(9) << std::setfill('0') << timeout.tv_nsec << std::setw(0) << " s";
+	}
+	else
+	{
+		timestr << "TIMEOUT: none";
+	}
+
+	debugf("%s - SYS_PPOLL(0x" PTRSTR ", %u, %s, %s)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (unsigned long)ARG1(variantnum), 
+		   (unsigned int)ARG2(variantnum), 
+		   timestr.str().c_str(),
+		   getTextualSigSet(call_get_sigset(variantnum, (void*) ARG4(variantnum), true)).c_str());		
+}
+
+PRECALL(ppoll)
+{
+    CHECKPOINTER(1);
+    CHECKARG(2);
+    CHECKPOINTER(3);
+	CHECKPOINTER(4);
+    CHECKBUFFER(1, sizeof(struct pollfd) * ARG2(0));
+	CHECKBUFFER(3, sizeof(struct timespec));
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+}
+
+LOG_RETURN(ppoll)
+{
+	long result  = call_postcall_get_variant_result(variantnum);
+
+	debugf("%s - SYS_PPOLL return: %ld\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   result);
+
+	for (long j = 0; j < result; ++j)
+	{
+		struct pollfd fds;
+		if (!rw::read<struct pollfd>(variants[variantnum].variantpid, (struct pollfd*)ARG1(variantnum) + j, fds))
+			throw RwMemFailure(variantnum, "read pollfd in sys_ppoll");
+			
+		debugf("> fd: %d - events: %s - revents: %s\n",
+			   fds.fd,
+			   getTextualPollRequest(fds.events).c_str(),
+			   getTextualPollRequest(fds.revents).c_str());
+	}
+}
+
+POSTCALL(ppoll)
+{
+//    long result = call_postcall_get_variant_result(0);
+    REPLICATEBUFFERFIXEDLEN(1, sizeof(struct pollfd) * ARG2(0));
     return 0;
 }
 
