@@ -513,9 +513,9 @@ int main (int argc, char** argv, char** envp)
 			return -1;			
 		}
 
-		// Build <MVEE Root>/patched_binaries/ld-linux/<arch>/ld-linux.so
+		// Build <MVEE Root>/patched_binaries/libc/<arch>/ld-linux.so
 		strcpy(INTERP, mvee_root);
-		strcat(INTERP, "/patched_binaries/ld-linux/");
+		strcat(INTERP, "/patched_binaries/libc/");
 		strcat(INTERP, INTERP_ARCH);
 		strcat(INTERP, "/ld-linux.so");
 

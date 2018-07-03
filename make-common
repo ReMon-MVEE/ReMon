@@ -37,7 +37,7 @@ SRCS	 = $(SRC) $(ARCH_SRC)
 
 STD_CXXFLAGS = -D__LINUX_X86__ -Wall -Werror -Wextra -Wpedantic -Wno-unused-parameter -Wno-unused-function -Ideps/jsoncpp/include/ -Ideps/libdwarf/libdwarf
 STD_LDFLAGS  = deps/jsoncpp/build/src/lib_json/libjsoncpp.a deps/libdwarf/libdwarf/libdwarf.a deps/libelf/lib/libelf.a -ldl -lrt -lstdc++ -lpthread -lz $(ARCH_LDFLAGS)
-LIBC_VER     = 2.26.90
+LIBC_VER     = 2.27.9000
 
 #-----------------------------------------------------------------------------
 # Targets
@@ -59,6 +59,7 @@ target: $(BIN)															\
 		patched_binaries/libc/$(_ARCH)/libm.so.6						\
 		patched_binaries/libc/$(_ARCH)/libresolv.so.2					\
 		patched_binaries/libc/$(_ARCH)/libutil.so.1						\
+		patched_binaries/libc/$(_ARCH)/ld-linux.so						\
 		patched_binaries/libc/$(_ARCH)/libclang_rt.sync-$(_ALT_ARCH).so \
 		MVEE_LD_Loader/MVEE_LD_Loader
 
@@ -89,6 +90,10 @@ patched_binaries/libc/$(_ARCH)/libresolv.so.2 : patched_binaries/libc/$(_ARCH)/l
 patched_binaries/libc/$(_ARCH)/libutil.so.1 : patched_binaries/libc/$(_ARCH)/libutil-$(LIBC_VER).so
 	@-echo "Creating symlink to GHUMVEE-ready libutil"
 	ln -f -s libutil-$(LIBC_VER).so patched_binaries/libc/$(_ARCH)/libutil.so.1
+
+patched_binaries/libc/$(_ARCH)/ld-linux.so : patched_binaries/libc/$(_ARCH)/ld-$(LIBC_VER).so
+	@-echo "Creating symlink to GHUMVEE-ready ld-linux"
+	ln -f -s ld-$(LIBC_VER).so patched_binaries/libc/$(_ARCH)/ld-linux.so
 
 patched_binaries/libc/$(_ARCH)/libclang_rt.sync-$(_ALT_ARCH).so : libsync/libsync.cpp
 	build_scripts/compile_syncagent.rb
