@@ -4,11 +4,11 @@ require 'pty'
 
 @poresults = Hash.new
 @toresults = Hash.new
-@inputset  = "test"
+@inputset  = "native"
 @workers   = [4]
 @variants  = [2]
 @parsec    = (30..42)
-@runs      = 10
+@runs      = 5
 
 def get_bench_name(benchnum)
   _benchname=`grep "REGISTER.*(#{benchnum}," ../../Src/MVEE_config.cpp`.split('"')[3]
@@ -32,7 +32,7 @@ def run_bench(benchnum, variants, threads, input, results, native)
       stdout.each { |ln|
         if ln.match(/real\t/)
           time = ln.split("\t")[1].chop 
-          seconds = Float(time.split("m")[0].to_i * 60) + Float(time.split("m")[1].chop)
+          seconds = Float(time.split("m")[0].to_i * 60) + Float(time.split("m")[1].chop.gsub(',','.'))
           
           variants = 0 if native
           results[threads] = Hash.new if not results[threads]
