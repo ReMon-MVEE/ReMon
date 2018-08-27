@@ -14,5 +14,5 @@ $ patch -p1 < /path/to/ReMon/patches/parsec3-volrend.patch
 
 3) Build PARSEC
 
-$ bin/parsecmgmt -a build -c gcc-pthreads -p facesim ferret splash2x
+$ bin/parsecmgmt -a build -c gcc-pthreads -p facesim ferret splash2x streamcluster
 

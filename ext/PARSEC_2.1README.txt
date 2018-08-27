@@ -19,7 +19,7 @@ $ patch -p1 < /path/to/ReMon/patches/parsec-libxml2.patch
 
 3) Build PARSEC
 
-$ bin/parsecmgmt -a build -c gcc-pthreads -p blackscholes bodytrack canneal dedup fluidanimate raytrace streamcluster swaptions vips x264
+$ bin/parsecmgmt -a build -c gcc-pthreads -p blackscholes bodytrack canneal dedup fluidanimate raytrace swaptions vips x264
 $ bin/parsecmgmt -a build -c gcc-openmp -p freqmine
 
 
