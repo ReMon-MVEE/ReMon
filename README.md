@@ -171,36 +171,16 @@ cd gcc-<latestversion>
 tar xJf gcc-*
 cd gcc-<version>
 
-# copy the mvee_atomic.h header to the gcc sources folder
-cp /path/to/ReMon/scripts/mvee_atomic.h .
+# generate an up to date mvee_atomic.h header
+/patch/to/ReMon/scripts/generate_atomic_header_new.sh > mvee_atomic.h
 
-# patch libstdc++
+# patch libstdc++ and libgomp
 patch -p1 < /path/to/ReMon/patches/libstdc++.<yourver>.patch
-
-# patch libgomp
-cd libgomp/config
-rm -rf linux bsd mingw32 osf
-mv posix linux
-mkdir posix
-cp linux/time.c posix
-cd ../../
 patch -p1 < /path/to/ReMon/patches/libgomp.<yourver>.patch
 
 # make
-./configure --enable-languages=c,c++
+./configure --enable-languages=c,c++ --disable-multilib
 make -j 8
-
-# The build will fail, due to the unresolved references to mvee symbols. 
-# Whenever the build fails, go to the directory that contains the module that failed to link, 
-# and edit its Makefile to allow unresolved references to mvee symbols:
-sed -i 's/\(.*LDFLAGS = .*\)/\1 -Wl,--unresolved-symbols=ignore-all/' Makefile
-
-# Then resume make until the next error. This cannot be done up front 
-# because this will propagate into the sub-package's LDFLAGS that are 
-# also used when running configure (which results in configure reporting 
-# that all possible functions it checks for are available, because none 
-# of them produce a link error anymore).
-# There is probably some cleaner, more automated way, but this suffices for now.
 
 # "install" the libs
 cp <arch>-pc-linux-gnu/libgomp/.libs/libgomp.so.1.0.0 /path/to/ReMon/patched_binaries/<i386|amd64>/libgomp/
