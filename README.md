@@ -11,7 +11,7 @@ The current version of **IP-MON** takes quite a lot of manual effort to set up. 
 
 ## ReMon Prerequisites
 You will need:
-- A GNU/Linux distribution based on Debian. I **_strongly_** recommend Ubuntu 14.04 x64.
+- A GNU/Linux distribution based on Debian. I **_strongly_** recommend Ubuntu 18.04 x64.
 - Ruby
 - CMake (>= 3.4.3)
 - The ReMon toolchain, which can be installed using the `bootstrap.sh` script.
@@ -127,37 +127,24 @@ To run multi-threaded variants, we need a glibc and libpthreads that can replica
 Some people might want to build their own GHUMVEE-ready versions of glibc and libpthreads. They can do so as follows:
 
 ```
-# get the official source
-wget http://ftp.gnu.org/gnu/glibc/glibc-2.19.tar.xz
-tar xJf glibc-2.19.tar.xz
-
-# apply the latest wall of clocks patch. You need this patch to support multi-threaded programs
-cd glibc-2.19
-patch -p1 < /path/to/ReMon/MVEE/patches/glibc-2.19-official-amd64-woc.patch
-
-# apply the IP-MON patch
-patch -p1 < /path/to/ReMon/MVEE/patches/glibc-2.19-ipmon.patch
+# get the source code for GHUMVEE's glibc
+git clone https://github.com/stijn-volckaert/ReMon-glibc.git
 
 # build
+cd ReMon-glibc
 mkdir build-tree
 cd build-tree
-cp /path/to/ReMon/MVEE/scripts/stijn-configure-libc.sh .
-./stijn-configure-libc.sh
+
+# set up the makefiles. Alternatively, you can run ../configure-libc-partial-order-debug.sh here
+# to compile glibc with a synchronization agent that has self-debugging features
+../configure-libc-woc.sh
 make -j 8
 
 # install the libraries into $HOME/glibc-build
 make install
 ```
 
-The current version of ReMon will load the glibc and libpthreads in the /path/to/ReMon/MVEE/patched_binaries/libc/amd64/ folder into each of the variants' address spaces. You should set up symlinks in this folder so ReMon loads the **IP-MON**-compatible glibc/libpthreads:
-
-```
-cd /path/to/ReMon/MVEE/patched_binaries/libc/amd64/
-unlink libc.so.6
-unlink libpthread.so.0
-ln -s ~/glibc-build/lib/libc-2.19.so libc.so.6
-ln -s ~/glibc-build/lib/libpthread-2.19.so libpthread.so.0
-```
+The current version of ReMon will load the glibc and libpthreads in the /path/to/ReMon/MVEE/patched_binaries/libc/<arch>/ folder into each of the variants' address spaces. You should set up symlinks in this folder so ReMon loads the **IP-MON**-compatible glibc/libpthreads.
 
 ### Building GHUMVEE-ready versions of libstdc++ and libgomp
 
@@ -183,8 +170,8 @@ patch -p1 < /path/to/ReMon/patches/libgomp.<yourver>.patch
 make -j 8
 
 # "install" the libs
-cp <arch>-pc-linux-gnu/libgomp/.libs/libgomp.so.1.0.0 /path/to/ReMon/patched_binaries/<i386|amd64>/libgomp/
-cp <arch>-pc-linux-gnu/libstdc++-v3/src/.libs/libstdc++.so.6.0.<ver> /path/to/ReMon/patched_binaries/<i386|amd64>/libstdc++/
+cp <arch>-pc-linux-gnu/libgomp/.libs/libgomp.so.1.0.0 /path/to/ReMon/patched_binaries/<arch>/libgomp/
+cp <arch>-pc-linux-gnu/libstdc++-v3/src/.libs/libstdc++.so.6.0.<ver> /path/to/ReMon/patched_binaries/<arch>/libstdc++/
 ```
 
 ## Known Issues
