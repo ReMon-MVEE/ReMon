@@ -60,7 +60,7 @@ void monitor::cache_mismatch_info(const char* format, ...)
 -----------------------------------------------------------------------------*/
 void monitor::dump_mismatch_info()
 {
-	warnf(mismatch_info.str().c_str());
+	warnf("%s", mismatch_info.str().c_str());
 	flush_mismatch_info();
 }
 
@@ -217,7 +217,7 @@ void monitor::log_ipmon_state()
 	if (! ipmon_buffer)
 		return;
 
-	debugf("Dumping IPMON buffer " PTRSTR " ...\n", ipmon_buffer);
+	debugf("Dumping IPMON buffer " PTRSTR " ...\n", (unsigned long)ipmon_buffer);
 
 	std::vector<unsigned int> offsets(mvee::numvariants);
 	unsigned int highest = 0;
@@ -228,7 +228,7 @@ void monitor::log_ipmon_state()
 	debugf("\tnumvariants = %d\n", buffer->ipmon_numvariants);
 	debugf("\tusable_size = %d\n", buffer->ipmon_usable_size);
 	debugf("\thave_pending_signals = %ld\n", buffer->ipmon_have_pending_signals);
-	debugf("\tflush_count = %d\n", buffer->flush_count);
+	debugf("\tflush_count = %lu\n", buffer->flush_count);
 	debugf("\tpre_flush = [0x%04x,0x%04x]\n", buffer->pre_flush_barrier.u.s.seq, buffer->pre_flush_barrier.u.s.count);
 	debugf("\tpost_flush = [0x%04x,0x%04x]\n", buffer->post_flush_barrier.u.s.seq, buffer->post_flush_barrier.u.s.count);
 
@@ -267,7 +267,7 @@ void monitor::log_ipmon_state()
 			}
 		}
 		ss << "\n";
-		debugf(ss.str().c_str());
+		debugf("%s", ss.str().c_str());
 
 		if (offset + sizeof(struct ipmon_syscall_entry) > (unsigned long)buffer->ipmon_usable_size ||
 			offsets[0] == offset)
@@ -457,15 +457,6 @@ void monitor::log_variant_backtrace(int variantnum, int max_depth, int calculate
 
 	set_mmap_table->grab_lock();
 
-/*
-	if (set_mmap_table->thread_group_shutting_down)
-	{
-		logfunc("This thread group is shutting down - not backtracing\n");
-		set_mmap_table->release_lock();
-		return;
-	}
-*/
-
 #if defined(MVEE_BENCHMARK) && defined(MVEE_FORCE_ENABLE_BACKTRACING)
     logfunc = mvee::warnf;
 #endif
@@ -552,10 +543,16 @@ void monitor::log_variant_backtrace(int variantnum, int max_depth, int calculate
 							call_get_variant_pidstr(variantnum).c_str(), getTextualSig(status.data));
 					break;
 				}
+				case STOP_SYSCALL:
+				{
+					logfunc("%s - >>> Process stopped because of syscall entry/exit\n",
+							call_get_variant_pidstr(variantnum).c_str());
+					break;
+				}
 				default:
 				{
-					warnf("%s - >>> Unexpected stop reason\n",
-							call_get_variant_pidstr(variantnum).c_str());
+					warnf("%s - >>> Unexpected stop reason: %d\n",
+						  call_get_variant_pidstr(variantnum).c_str(), status.reason);
 					break;
 				}
 			}
@@ -567,25 +564,25 @@ was_interrupted:
         logfunc("%s - > variant is currently suspended\n", call_get_variant_pidstr(variantnum).c_str());
 
         mvee_syscall_logger logger;
-        if (variants[variantnum].callnum > 0 && variants[variantnum].callnum <= MAX_CALLS)
+        if (!mvee::in_logging_handler && 
+			variants[variantnum].callnum > 0 && 
+			variants[variantnum].callnum < MAX_CALLS)
         {
             logger = monitor::syscall_logger_table[variants[variantnum].callnum][MVEE_LOG_ARGS];
 			(this->*logger)(variantnum);
         }
     }
 
-    // read /proc/maps
-//    unsigned long      stack_base = set_mmap_table->get_stack_base(variantnum);
     i = 1;
 
-    // Stack walk
+	// Stack walk
+#ifndef MVEE_ARCH_USE_LIBUNWIND    
     unsigned long      prev_ip    = 0;
     mvee_dwarf_context context(variants[variantnum].variantpid);
     log_caller_info(variantnum, 0, IP_IN_REGS(context.regs), 0, logfunc);
     while (1)
     {
         if (set_mmap_table->dwarf_step(variantnum, variants[variantnum].variantpid, &context) != 1
-/*            || (unsigned long)SP_IN_REGS(context.regs) > stack_base */
 			|| (unsigned long)IP_IN_REGS(context.regs) == prev_ip)
         {
             logfunc(">>> end of stack\n");
@@ -595,6 +592,36 @@ was_interrupted:
         log_caller_info(variantnum, i++, IP_IN_REGS(context.regs), 0, logfunc);
         prev_ip = IP_IN_REGS(context.regs);
     }
+#else
+	unw_cursor_t c;
+	unw_word_t ip = 0, prev_ip = 0;
+	
+	if (!variants[variantnum].unwind_info)
+		variants[variantnum].unwind_info = (struct UPT_info*) _UPT_create(variants[variantnum].variantpid);
+	
+	int err = unw_init_remote(&c, variants[variantnum].unwind_as, variants[variantnum].unwind_info);
+
+	if (err < 0)
+	{
+		warnf("libunwind-based backtrace for variant %d failed\n", variantnum);
+	}
+	else
+	{		
+		for (i = 0; i < 128; ++i)
+		{
+			if (unw_get_reg(&c, UNW_REG_IP, &ip) < 0 || !ip || ip == prev_ip)
+				break;
+			prev_ip = ip;
+
+			log_caller_info(variantnum, i, ip, 0, logfunc);
+
+			if (unw_step(&c) < 0)
+				break;
+		}
+
+		logfunc(">>> end of stack\n");
+	}   	
+#endif
 
     log_registers(variantnum, logfunc);
 	log_stack(variantnum);
@@ -607,7 +634,7 @@ was_interrupted:
 void monitor::log_dump_queues(shm_table* shm_table)
 {
     unsigned int master_pos = 0, lowest;
-    long*        buffer, *eip_buffer, *data;
+    long*        buffer, *eip_buffer;
 
 //	MutexLock lock(&mvee::global_lock);
 
@@ -688,13 +715,17 @@ void monitor::log_dump_queues(shm_table* shm_table)
     {
         _shm_info* info = it.second.get();
 
+		if (it.first != MVEE_LIBC_LOCK_BUFFER && 
+			it.first != MVEE_LIBC_LOCK_BUFFER_PARTIAL)
+			continue;
+
         // check if we always need to dump or if it only needs to happen once
 #ifndef MVEE_ALWAYS_DUMP_QUEUES
         if (!info->dumpcount) // i.e. if (first_dump)
         {
-#endif
+#endif			
         buffer     = (long*)info->ptr;
-        eip_buffer = (long*)info->eip_ptr;
+		eip_buffer = (long*)info->eip_ptr;
         lowest     = 0xFFFFFFFF;
         info->dumpcount++;
 
@@ -706,7 +737,7 @@ void monitor::log_dump_queues(shm_table* shm_table)
         if (!logfile)
             return;
 
-        warnf("dumping queue: %s - FILE: %s (%d - %s)\n", getTextualBufferType(it.first), logname, logfile, getTextualErrno(errno));
+        warnf("dumping queue: %s - FILE: %s (%s)\n", getTextualBufferType(it.first), logname, getTextualErrno(errno));
 
         fprintf(logfile, "===============================================   \n");
         fprintf(logfile, "> Buffer Type             : %d (%s)               \n", it.first, getTextualBufferType(it.first));
@@ -714,7 +745,7 @@ void monitor::log_dump_queues(shm_table* shm_table)
         fprintf(logfile, "> * SYSV IPC shm id       : %d                    \n", info->id);
         fprintf(logfile, "> * SYSV IPC shm size     : %d bytes              \n", info->sz);
         fprintf(logfile, "> * Has EIP Queue?        : %d                    \n", info->have_eip_segment);
-        fprintf(logfile, "> * Buffer slot size      : %d                    \n", info->sz / ( SHARED_QUEUE_SLOTS));
+        fprintf(logfile, "> * Buffer slot size      : %d                    \n", info->sz / (SHARED_QUEUE_SLOTS));
         if (info->have_eip_segment)
         {
             fprintf(logfile, "> * EIP queue shm id      : %d                    \n", info->eip_id);
@@ -726,144 +757,46 @@ void monitor::log_dump_queues(shm_table* shm_table)
         // try to determine the last non-empty slot in this buffer
         for (int j = 0; j < mvee::numvariants; ++j)
         {
-            unsigned int tmppos = *(unsigned int*)(ROUND_UP((unsigned long)info->ptr, 64) + j * 64 + sizeof(int));
+			struct mvee_lock_buffer_info* buffer_info = (struct mvee_lock_buffer_info*) info->ptr + j;
             if (j == 0)
-                master_pos = tmppos;
-            fprintf(logfile, "> * Variant %d                                      \n", j);
-            fprintf(logfile, ">   + pid               : %d                    \n",   variants[j].variantpid);
-			fprintf(logfile, ">   + pos               : %d                    \n", tmppos);
-
-            if (it.first == MVEE_LIBC_LOCK_BUFFER_PARTIAL)
-            {
-                unsigned int tmpflush = *(unsigned int*)(ROUND_UP((unsigned long)info->ptr, 64) + j * 64 + sizeof(int) * 2);
-                fprintf(logfile, ">   + current position  : %d                    \n", tmppos);
-                fprintf(logfile, ">   + current flushcnt  : %d                    \n", tmpflush);
-            }
-            if (tmppos < lowest)
-                lowest = tmppos;
+                master_pos = buffer_info->pos;
+            fprintf(logfile, "> * Variant %d                                  \n", j);
+            fprintf(logfile, ">   + pid               : %d                    \n", variants[j].variantpid);
+			fprintf(logfile, ">   + current position  : %d                    \n", buffer_info->pos);
+			fprintf(logfile, ">   + current flushcnt  : %d                    \n", buffer_info->flush_cnt);
+            if (buffer_info->pos < lowest)
+                lowest = buffer_info->pos;
         }
         fprintf(logfile, "===============================================   \n");
 
-        for (unsigned int j = 0; j <= master_pos; ++j)
+        for (unsigned int j = 0; j <= std::min<unsigned int>(master_pos, info->sz / sizeof(struct mvee_lock_buffer_entry) - mvee::numvariants); ++j)
         {
             char tempstr[4096];
 
+			struct mvee_lock_buffer_entry* entry = (struct mvee_lock_buffer_entry*) info->ptr + mvee::numvariants;
+
+			sprintf(tempstr, "> BUFFER[%05d]: word_ptr(0x" LONGPTRSTR ") - tid(%05d) - op_type(%-40s)",
+					j, entry[j].word_ptr, entry[j].master_thread_id, getTextualAtomicType(entry[j].operation_type));
+
             if (it.first == MVEE_LIBC_LOCK_BUFFER_PARTIAL)
             {
-                // queue layout:
-                // +------------+------------+...+------------+------------+...
-                // | spinlock   | pos 0      |   | pos N      | data 0     |
-                // +------------+------------+...+------------+------------+...
-                unsigned long               word_ptr;
-                unsigned short              tid;
-                unsigned short              op_type = ___UNKNOWN_LOCK_TYPE___;
-                std::vector<unsigned short> tags(mvee::numvariants -1);
-
-                data     = (long*)((unsigned long)buffer + mvee::numvariants * 64);
-
-                word_ptr = *(unsigned long* )((unsigned long)data + j * info->actual_slot_size);
-                tid      = *(unsigned short*)((unsigned long)data + j * info->actual_slot_size + sizeof(unsigned long));
-
-                //
-                // data slot layout for normal queue:
-                // +----------------+-----------------+----------------+----------------+...+----------------+----------------+
-                // |    word ptr    | master threadid |   slave 1 tag  |   slave 2 tag  |   |   slave N tag  |     PADDING    |
-                // +----------------+-----------------+----------------+----------------+...+----------------+----------------+
-                //  <-sizeof(long)-> <-sizeof(short)-> <-sizeof(char)-> <-sizeof(char)->     <-sizeof(char)->
-                //
-                // PADDING pads to a sizeof(long) boundary
-                // word ptr          = word affected by the operation
-                // master thread id  = master thread that performed the operation
-                // slave X tag       = has slave X replicated this order yet?
-                //
-                if (info->requested_slot_size == sizeof(long) + sizeof(short) + (mvee::numvariants - 1) * sizeof(char))
-                {
-                    // normal queue
-                    for (int i = 0; i < mvee::numvariants - 1; ++i)
-                        tags[i] = *(unsigned char*)((unsigned long)data + j * info->actual_slot_size + sizeof(unsigned long) + sizeof(unsigned short) + i);
-                }
-                //
-                // data slot layout for extended queue:
-                // +----------------+-----------------+-----------------+-----------------+-----------------+...+-----------------+----------------+
-                // |    word ptr    | master threadid | op type         |   slave 1 tag   |   slave 2 tag   |   |   slave N tag   |     PADDING    |
-                // +----------------+-----------------+-----------------+-----------------+-----------------+...+-----------------+----------------+
-                //  <-sizeof(long)-> <-sizeof(short)-> <-sizeof(short)-> <-sizeof(short)-> <-sizeof(short)->     <-sizeof(short)->
-                //
-                // PADDING pads to a sizeof(long) boundary
-                // word ptr          = word affected by the operation
-                // master thread id  = master thread that performed the operation
-                // op type           = type of operation (cfr. enum mvee_call_types in Inc/MVEE_private.h)
-                // slave X tag       = logical order in which the slave has replicated this operation
-                //    !!! THIS IS ONLY USEFUL TO COMPARE THE ORDER IN WHICH OPERATIONS ON THE SAME WORD HAVE BEEN REPLICATED !!!
-                //
-                else
-                {
-                    // extended queue
-                    op_type = *(unsigned short*)((unsigned long)data + j * info->actual_slot_size + sizeof(unsigned long) + sizeof(unsigned short));
-                    for (int i = 0; i < mvee::numvariants - 1; ++i)
-                        tags[i] = *(unsigned short*)((unsigned long)data + j * info->actual_slot_size + sizeof(unsigned long) + sizeof(unsigned short) * (2 + i));
-                }
-
-                sprintf(tempstr, "> BUFFER[%05d]: word_ptr(0x" LONGPTRSTR ") - tid(%05d) - op_type(%-40s) - tags(",
-                        j, word_ptr, tid, getTextualAtomicType(op_type));
+				strcat(tempstr, " - tags(");
                 for (int i = 0; i < mvee::numvariants - 1; ++i)
                 {
                     char tag[20];
-                    sprintf(tag, "%05d", tags[i]);
+                    sprintf(tag, "%03d", entry[j].tags[i+1]);
                     if (i)
                         strcat(tempstr, "    ");
                     strcat(tempstr, tag);
                 }
                 strcat(tempstr, ")");
             }
-            else if (it.first == MVEE_LIBC_LOCK_BUFFER)
-            {
-                data = (long*)((unsigned long)buffer + mvee::numvariants * 64);
-                unsigned short tid =  *(unsigned short*)((unsigned long)data + j * info->actual_slot_size);
-
-                if (info->requested_slot_size == 3 * sizeof(long))
-                {
-                    // extended queue
-                    unsigned long word_ptr = *(unsigned long* )((unsigned long)data + j * info->actual_slot_size + sizeof(unsigned long));
-                    short         op_type  = *(unsigned short*)((unsigned long)data + j * info->actual_slot_size + sizeof(short));
-                    sprintf(tempstr, "> BUFFER[%05d]: word_ptr(0x" LONGPTRSTR ") - tid(%05d) - op_type(%-40s)",
-                            j, word_ptr, tid, getTextualAtomicType(op_type));
-                }
-                else
-                {
-                    // normal queue
-                    sprintf(tempstr, "> BUFFER[%05d]: tid(%05d)", j, tid);
-                }
-            }
-            else if (it.first == MVEE_LIBC_MALLOC_DEBUG_BUFFER)
-            {
-//                int   slot_size       = 4*sizeof(int) + 3*sizeof(long);
-                int   slot_size       = info->actual_slot_size;
-                data = (long*)((unsigned long)buffer + mvee::numvariants * 64);
-
-                int   tid             = *(int*)((unsigned long)data + j * slot_size);
-                int   alloc_type      = *(int*)((unsigned long)data + j * slot_size + 2 * sizeof(int));
-                int   alloc_msg       = *(int*)((unsigned long)data + j * slot_size + 3 * sizeof(int));
-                long  alloc_chunksize = *(long*)((unsigned long)data + j * slot_size + 4 * sizeof(int));
-                void* alloc_ar_ptr    = (void*)*(unsigned long*)((unsigned long)data + j * slot_size + 4 * sizeof(int) + sizeof(long));
-                void* alloc_chunk_ptr = (void*)*(unsigned long*)((unsigned long)data + j * slot_size + 4 * sizeof(int) + 2 * sizeof(long));
-
-                sprintf(tempstr, "> BUFFER[%05d]: tid(%05d) - alloc_type(%s) - alloc_msg(%d = %s) - alloc_size(%ld) - alloc_ar_ptr(0x" LONGPTRSTR ") - alloc_chunk_ptr(0x" LONGPTRSTR ")\n",
-                        j, tid,
-                        getTextualAllocType(alloc_type),
-                        alloc_msg,
-                        getTextualAllocResult(alloc_type, alloc_msg),
-                        alloc_chunksize,
-                        (unsigned long)alloc_ar_ptr,
-                        (unsigned long)alloc_chunk_ptr);
-
-            }
 
             if (lowest == j)
                 strcat(tempstr, " <======");
             fprintf(logfile, "%s\n", tempstr);
 
-            if (eip_buffer)
+            if (info->eip_ptr)
             {
                 for (int x = 0; x < mvee::numvariants; ++x)
                 {
@@ -934,7 +867,7 @@ void monitor::log_calculate_clock_spread()
 
 	SAFEDELETEARRAY(counters);
 
-	warnf("Clock stats - clocks used: %d - range: [%d, %d] - mean: %le - variance: %le\n",
+	warnf("Clock stats - clocks used: %zu - range: [%d, %d] - mean: %le - variance: %le\n",
 				cntrs.size(), lowest_clock_used, highest_clock_used, mean, variance);
 }
 
@@ -1032,9 +965,110 @@ void monitor::log_stack(int variantnum)
 											   stack_word))
 			return;
 
-		debugf("stack[rsp + %d] = " PTRSTR "\n", i*sizeof(unsigned long), stack_word);
+		debugf("stack[%ld] = " PTRSTR "\n", (long) i*sizeof(unsigned long), stack_word);
 	}
 #endif
+}
+
+/*-----------------------------------------------------------------------------
+    get_clevrbuf_value
+-----------------------------------------------------------------------------*/
+unsigned long long monitor::get_clevrbuf_value(unsigned long pos)
+{
+	struct rbuf* rbuf = reinterpret_cast<struct rbuf*>(ring_buffer->ptr);
+	void* value_ptr = reinterpret_cast<void*>((unsigned long) rbuf + rbuf->data_offset + rbuf->elem_size * pos);
+	unsigned long long expected_value;
+	switch (rbuf->elem_size)
+	{
+		case 1:
+			expected_value = *reinterpret_cast<unsigned char*>(value_ptr);
+			break;
+		case 2:
+			expected_value = *reinterpret_cast<unsigned short*>(value_ptr);
+			break;
+		case 4:
+			expected_value = *reinterpret_cast<unsigned int*>(value_ptr);
+			break;
+		default:
+			expected_value = *reinterpret_cast<unsigned long long*>(value_ptr);
+			break;
+	}
+
+	return expected_value;
+}
+
+/*-----------------------------------------------------------------------------
+    log_clevrbuf_state
+-----------------------------------------------------------------------------*/
+#define GET_NO_ROLLOVER(head) ((head << 1) >> 1)
+void monitor::log_clevrbuf_state(int variantnum)
+{
+	if (ring_buffer && ring_buffer->ptr)
+	{
+		struct rbuf* rbuf = reinterpret_cast<struct rbuf*>(ring_buffer->ptr);
+
+		__sync_synchronize();
+		warnf("%s - > mismatch at position %lu\n",
+			  call_get_variant_pidstr(variantnum).c_str(),
+			  GET_NO_ROLLOVER(rbuf->pos[variantnum].head));
+		
+		warnf("%s - > expected value: %llu\n",
+			  call_get_variant_pidstr(variantnum).c_str(),
+			  get_clevrbuf_value(GET_NO_ROLLOVER(rbuf->pos[variantnum].head)));
+
+		variants[variantnum].regs_valid = false;
+		call_check_regs(variantnum);
+		warnf("%s - > actual value: %llu\n",
+			  call_get_variant_pidstr(variantnum).c_str(),
+			  NEXT_SYSCALL_NO(variantnum));
+
+		unsigned long current_master_tail = GET_NO_ROLLOVER(rbuf->pos[0].tail);
+		unsigned long current_master_pos = GET_NO_ROLLOVER(rbuf->pos[0].head);
+		char clevrbuf_line[4096];
+		
+		debugf("Ring buffer dump:\n");
+		debugf("> Master tail @ pos %lu\n", current_master_tail);
+		debugf("> Master head @ pos %lu\n", current_master_pos);
+		
+		for (unsigned long i = current_master_tail;
+			 i < ((current_master_pos > current_master_tail) ? current_master_pos - 1 : rbuf->elems);
+			 ++i)
+		{
+			sprintf(clevrbuf_line, "RBUF[%lu] = %llu", i, get_clevrbuf_value(i));
+
+			for (int j = 1; j < mvee::numvariants; ++j)
+			{
+				if (GET_NO_ROLLOVER(rbuf->pos[j].head) == i)
+				{
+					char variantid[1024];
+					sprintf(variantid, " <==== Next elem for Variant %d", j);
+					strcat(clevrbuf_line, variantid);
+				}
+			}
+
+			debugf("%s\n", clevrbuf_line);
+		}
+
+		if (current_master_pos < current_master_tail)
+		{
+			for (unsigned long i = 0; i < current_master_pos - 1; ++i)
+			{
+				sprintf(clevrbuf_line, "RBUF[%lu] = %llu", i, get_clevrbuf_value(i));
+
+				for (int j = 1; j < mvee::numvariants; ++j)
+				{
+					if (GET_NO_ROLLOVER(rbuf->pos[j].head) == i)
+					{
+						char variantid[1024];
+						sprintf(variantid, " <==== Next elem for Variant %d", j);
+						strcat(clevrbuf_line, variantid);
+					}
+				}
+
+				debugf("%s\n", clevrbuf_line);
+			}
+		}
+	}
 }
 
 /*-----------------------------------------------------------------------------
@@ -1104,7 +1138,7 @@ void monitor::log_segfault(int variantnum)
 			
 			if (arg_no == 0)
 			{
-				warnf("> Syscall Number Mismatch (Master: %d - %s, Slave: %d - %s)\n",
+				warnf("> Syscall Number Mismatch (Master: %lu - %s, Slave: %lu - %s)\n",
 					  master_syscall_no, getTextualSyscall(master_syscall_no),
 					  slave_arg_val, getTextualSyscall(slave_arg_val));
 			}
@@ -1114,7 +1148,7 @@ void monitor::log_segfault(int variantnum)
 			}
 			else if ((char)arg_no < 0)
 			{
-				warnf("> Argument Length Mismatch (Syscall: %d - %s - Arg: %d - Slave Length: %d)\n",
+				warnf("> Argument Length Mismatch (Syscall: %lu - %s - Arg: %d - Slave Length: %lu)\n",
 					  master_syscall_no, getTextualSyscall(master_syscall_no),
 					  -arg_no-1, slave_arg_val);
 
@@ -1127,7 +1161,7 @@ void monitor::log_segfault(int variantnum)
 			}
 			else
 			{
-				warnf("> Argument Value Mismatch (Syscall: %d - %s - Arg: %d)\n",
+				warnf("> Argument Value Mismatch (Syscall: %lu - %s - Arg: %d)\n",
 					  master_syscall_no, getTextualSyscall(master_syscall_no), arg_no-1);
 
 				// dump slave contents
@@ -1177,11 +1211,11 @@ void monitor::log_segfault(int variantnum)
                 getTextualSig(siginfo.si_signo), variantnum,
                 variants[variantnum].variantpid);
     warnf("IP: " PTRSTR ", Address: " PTRSTR ", Code: %s (%d), Errno: %d\n",
-                eip, siginfo.si_addr, getTextualSEGVCode(siginfo.si_code),
-                siginfo.si_code, siginfo.si_errno);
+		  eip, (unsigned long)siginfo.si_addr, getTextualSEGVCode(siginfo.si_code),
+		  siginfo.si_code, siginfo.si_errno);
 //    log_registers(variantnum, mvee::logf);
 //    set_mmap_table->print_mmap_table(mvee::logf);
-#if !defined(MVEE_ENABLE_VALGRIND_HACKS) && (!defined(MVEE_BENCHMARK) || defined(MVEE_FORCE_ENABLE_BACKTRACING))
+#if !defined(MVEE_BENCHMARK) || defined(MVEE_FORCE_ENABLE_BACKTRACING)
     log_variant_backtrace(variantnum, 0, 1, 1);
 #endif
 
@@ -1392,13 +1426,13 @@ void mvee::log_ptrace_op(int op_type, int op_subtype, int bytes)
     if (op_type == 0)
     {
         if (mvee::ptrace_logfile)
-            fprintf(mvee::ptrace_logfile, "%d;%s\n", op_subtype, getTextualRequest(op_subtype));
+            fprintf(mvee::ptrace_logfile, "%d;%s\n", op_subtype, getTextualPtraceRequest(op_subtype));
     }
     // datatransfer operation
     else
     {
         if (mvee::datatransfer_logfile)
-            fprintf(mvee::datatransfer_logfile, "%s %d\n", getTextualRequest(op_subtype), bytes);
+            fprintf(mvee::datatransfer_logfile, "%s %d\n", getTextualPtraceRequest(op_subtype), bytes);
     }
 }
 #endif
@@ -1684,9 +1718,9 @@ void mvee::log_sigaction(struct sigaction* action)
     else if (action->sa_handler == SIG_DFL)
         handler = "SIG_DFL";
 
-    debugf("> SIGACTION sa_handler   : 0x" PTRSTR " (= %s)\n", action->sa_handler, handler);
-    debugf("> SIGACTION sa_sigaction : 0x" PTRSTR "\n",        action->sa_sigaction);
-    debugf("> SIGACTION sa_restorer  : 0x" PTRSTR "\n",        action->sa_restorer);
+    debugf("> SIGACTION sa_handler   : 0x" PTRSTR " (= %s)\n", (unsigned long)action->sa_handler, handler);
+    debugf("> SIGACTION sa_sigaction : 0x" PTRSTR "\n",        (unsigned long)action->sa_sigaction);
+    debugf("> SIGACTION sa_restorer  : 0x" PTRSTR "\n",        (unsigned long)action->sa_restorer);
     debugf("> SIGACTION sa_flags     : 0x%08x (= %s)\n",       action->sa_flags,   getTextualSigactionFlags(action->sa_flags).c_str());
     debugf("> SIGACTION sa_mask      : %s\n",                  getTextualSigSet(action->sa_mask).c_str());
 #endif

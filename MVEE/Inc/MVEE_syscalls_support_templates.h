@@ -16,9 +16,104 @@
   The ARG<n> macros are platform-specific and implemented in MVEE_private_arch.h
 -----------------------------------------------------------------------------*/
 template<int N> constexpr 
-    unsigned long long int& arg(int variantnum)
+MVEE_ARCH_REG_TYPE& arg(int variantnum)
 {
 	switch(N)
+	{
+		case 1: return ARG1(variantnum);
+		case 2: return ARG2(variantnum);
+		case 3: return ARG3(variantnum);
+		case 4: return ARG4(variantnum);
+		case 5: return ARG5(variantnum);		
+		case 6: return ARG6(variantnum);
+	}
+
+	return ARG6(variantnum);
+}
+
+/*-----------------------------------------------------------------------------
+  arg64 - calculates the value of a 64-bit argument
+-----------------------------------------------------------------------------*/
+template<int base, int aligned> constexpr
+unsigned long long arg64(int variantnum)
+{
+	unsigned long long first_half = 0, second_half = 0;
+	int real_base = base;
+	
+#ifdef MVEE_ARCH_IS_64BIT
+	switch(base)
+	{
+		case 1: return ARG1(variantnum);
+		case 2: return ARG2(variantnum);
+		case 3: return ARG3(variantnum);
+		case 4: return ARG4(variantnum);
+		case 5: return ARG5(variantnum);		
+		case 6: return ARG6(variantnum);
+	}
+#elif defined(MVEE_ARCH_REQUIRES_REG_ALIGNMENT)
+	real_base = aligned;
+#endif
+
+	switch(real_base)
+	{
+		case 1:
+		{
+			first_half = ARG1(variantnum);
+			second_half = ARG2(variantnum);
+			break;
+		}
+		case 2:
+		{
+			first_half = ARG2(variantnum);
+			second_half = ARG3(variantnum);
+			break;
+		}
+		case 3:
+		{
+			first_half = ARG3(variantnum);
+			second_half = ARG4(variantnum);
+			break;
+		}
+		case 4:
+		{
+			first_half = ARG4(variantnum);
+			second_half = ARG5(variantnum);
+			break;
+		}
+		case 5:
+		{
+			first_half = ARG5(variantnum);
+			second_half = ARG6(variantnum);
+			break;
+		}
+		default:
+		{
+			warnf("syscall arg [%d:%d] does not exist!\n",
+				  real_base, real_base + 1);
+			return 0;
+		}
+	}
+
+#ifdef MVEE_ARCH_LITTLE_ENDIAN
+	return first_half + (second_half << 32);
+#else
+	return (first_half << 32) + second_half;
+#endif
+}
+
+/*-----------------------------------------------------------------------------
+  aligned_arg
+-----------------------------------------------------------------------------*/
+template<int base, int aligned> constexpr
+MVEE_ARCH_REG_TYPE& aligned_arg(int variantnum)
+{
+	int real_base = base;
+
+#if defined(MVEE_ARCH_REQUIRES_REG_ALIGNMENT) && !defined(MVEE_ARCH_IS_64_BIT)
+	real_base = aligned;
+#endif
+	
+	switch(real_base)
 	{
 		case 1: return ARG1(variantnum);
 		case 2: return ARG2(variantnum);

@@ -67,6 +67,43 @@
     }
 
 //
+// Compare the values of the specified argument
+//
+#define CHECKARG64(basearg, alignedarg)									\
+    for (int i = 1; i < mvee::numvariants; ++i)							\
+    {																	\
+		if (arg64<basearg, alignedarg>(i) != arg64<basearg, alignedarg>(i-1)) \
+        {																\
+            cache_mismatch_info("argument %d mismatch - syscall: %ld (%s)\n", \
+								basearg, variants[0].callnum,			\
+								getTextualSyscall(variants[0].callnum)); \
+            cache_mismatch_info("ARG%d(%d) = 0x%016llx - ARG%d(%d) = 0x%016llx\n", \
+								basearg, i, arg64<basearg, alignedarg>(i), \
+								basearg, i-1, arg64<basearg, alignedarg>(i-1)); \
+            return MVEE_PRECALL_ARGS_MISMATCH(basearg) | MVEE_PRECALL_CALL_DENY;	\
+        }																\
+    }
+
+//
+// Compare the values of the specified argument
+//
+#define CHECKALIGNEDARG(basearg, alignedarg)									\
+    for (int i = 1; i < mvee::numvariants; ++i)							\
+    {																	\
+		if (aligned_arg<basearg, alignedarg>(i) != aligned_arg<basearg, alignedarg>(i-1)) \
+        {																\
+            cache_mismatch_info("argument %d mismatch - syscall: %ld (%s)\n", \
+								basearg, variants[0].callnum,			\
+								getTextualSyscall(variants[0].callnum)); \
+            cache_mismatch_info("ARG%d(%d) = 0x%016llx - ARG%d(%d) = 0x%016llx\n", \
+								basearg, i, aligned_arg<basearg, alignedarg>(i), \
+								basearg, i-1, aligned_arg<basearg, alignedarg>(i-1)); \
+            return MVEE_PRECALL_ARGS_MISMATCH(basearg) | MVEE_PRECALL_CALL_DENY;	\
+        }																\
+    }
+
+
+//
 // Compare the values of the specified sockaddr - POINTER ARGUMENT!!!
 //
 #define CHECKSOCKADDR(numarg, addrlen)                                               \
@@ -248,13 +285,8 @@
     {                                                                       \
         std::vector<struct mmsghdr*> addresses(mvee::numvariants);            \
         FILLARGARRAY(numarg, addresses);                                    \
-        for (unsigned int i = 0; i < (unsigned int)len; ++i)                \
-        {                                                                   \
-            if (!call_compare_mmsgvectors(addresses)) \
-                return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
-            for (int j = 0; j < mvee::numvariants; ++j)                     \
-                addresses[j]++;											\
-        }                                                                   \
+		if (!call_compare_mmsgvectors(addresses, len))					\
+			return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
     }
 
 //
@@ -265,13 +297,8 @@
     {                                                                       \
         std::vector<struct mmsghdr*> addresses(mvee::numvariants);            \
         FILLARGARRAY(numarg, addresses);                                    \
-        for (unsigned int i = 0; i < (unsigned int)len; ++i)                \
-        {                                                                   \
-            if (!call_compare_mmsgvectors(addresses, true))                  \
-                return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
-            for (int j = 0; j < mvee::numvariants; ++j)                     \
-                addresses[j]++;											\
-        }                                                                   \
+		if (!call_compare_mmsgvectors(addresses, len, true))				\
+			return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
     }
 
 //
@@ -550,7 +577,7 @@
             {															\
 				if (ARG ## numarg(0) != info->fds[i])					\
 				{														\
-					debugf("%s - mapped fd %lu to fd %lu\n", call_get_variant_pidstr(i).c_str(), ARG ## numarg(0), info->fds[i]); \
+					debugf("%s - mapped fd %lu to fd %lu\n", call_get_variant_pidstr(i).c_str(), (unsigned long) ARG ## numarg(0), info->fds[i]); \
 					call_overwrite_arg_value(i, numarg, info->fds[i], true); \
 				}														\
             }															\

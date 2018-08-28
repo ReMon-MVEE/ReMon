@@ -3,17 +3,13 @@
 #-----------------------------------------------------------------------------
 
 ifndef _ARCH
-  BITS := $(shell getconf LONG_BIT)
-  ifeq ($(BITS),32)
-    _ARCH := i386
-	_ALT_ARCH := i386
-  else
-    _ARCH := amd64
-	_ALT_ARCH := x86_64
-  endif
+  _ARCH := $(shell build_scripts/getmakearch.rb | grep "^ARCH" | cut -d':' -f2)
+  _ALT_ARCH := $(shell build_scripts/getmakearch.rb | grep "^ALT\_ARCH" | cut -d':' -f2)
   export _ARCH
   export _ALT_ARCH
 endif
+
+include makefile-$(_ARCH)
 
 #-----------------------------------------------------------------------------
 # Directories
@@ -40,14 +36,15 @@ SRCS	 = $(SRC) $(ARCH_SRC)
 #-----------------------------------------------------------------------------
 
 STD_CXXFLAGS = -D__LINUX_X86__ -Wall -Werror -Wextra -Wpedantic -Wno-unused-parameter -Wno-unused-function -Ideps/jsoncpp/include/ -Ideps/libdwarf/libdwarf
-STD_LDFLAGS  = deps/jsoncpp/build/src/lib_json/libjsoncpp.a deps/libdwarf/libdwarf/libdwarf.a deps/libelf/lib/libelf.a -ldl -lrt -lstdc++ -lpthread -lz 
+STD_LDFLAGS  = deps/jsoncpp/build/src/lib_json/libjsoncpp.a deps/libdwarf/libdwarf/.libs/libdwarf.a deps/libelf/lib/libelf.a -ldl -lrt -lstdc++ -lpthread -lz $(ARCH_LDFLAGS)
+LIBC_VER     = 2.27.9000
 
 #-----------------------------------------------------------------------------
 # Targets
 #-----------------------------------------------------------------------------
 
 OBJ := $(SRCS:%.cpp=$(MVEE_BUILD)/%.o)
-PRE_BUILD_TABLES := $(shell ./generate_syscall_tables.rb)
+PRE_BUILD_TABLES := $(shell build_scripts/generate_syscall_tables.rb)
 BIN = $(MVEE_OUT)/MVEE
 
 .PHONY: all clean 
@@ -57,33 +54,52 @@ all: target
 target: $(BIN)															\
 		patched_binaries/libc/$(_ARCH)/libc.so.6						\
 		patched_binaries/libc/$(_ARCH)/libpthread.so.0					\
+		patched_binaries/libc/$(_ARCH)/librt.so.1						\
+		patched_binaries/libc/$(_ARCH)/libdl.so.2						\
+		patched_binaries/libc/$(_ARCH)/libm.so.6						\
+		patched_binaries/libc/$(_ARCH)/libresolv.so.2					\
+		patched_binaries/libc/$(_ARCH)/libutil.so.1						\
+		patched_binaries/libc/$(_ARCH)/ld-linux.so						\
 		patched_binaries/libc/$(_ARCH)/libclang_rt.sync-$(_ALT_ARCH).so \
 		MVEE_LD_Loader/MVEE_LD_Loader
 
-patched_binaries/libc/amd64/libc.so.6 : patched_binaries/libc/amd64/libc.so
+patched_binaries/libc/$(_ARCH)/libc.so.6 : patched_binaries/libc/$(_ARCH)/libc-$(LIBC_VER).so
 	@-echo "Creating symlink to GHUMVEE-ready libc"
-	ln -f -s libc.so patched_binaries/libc/amd64/libc.so.6
+	ln -f -s libc-$(LIBC_VER).so patched_binaries/libc/$(_ARCH)/libc.so.6
 
-patched_binaries/libc/amd64/libpthread.so.0 : patched_binaries/libc/amd64/libpthread.so
+patched_binaries/libc/$(_ARCH)/libpthread.so.0 : patched_binaries/libc/$(_ARCH)/libpthread-$(LIBC_VER).so
 	@-echo "Creating symlink to GHUMVEE-ready libpthread"
-	ln -f -s libpthread.so patched_binaries/libc/amd64/libpthread.so.0
+	ln -f -s libpthread-$(LIBC_VER).so patched_binaries/libc/$(_ARCH)/libpthread.so.0
 
-patched_binaries/libc/i386/libc.so.6 : patched_binaries/libc/i386/libc.so
-	@-echo "Creating symlink to GHUMVEE-ready libc"
-	ln -f -s libc.so patched_binaries/libc/i386/libc.so.6
+patched_binaries/libc/$(_ARCH)/libdl.so.2 : patched_binaries/libc/$(_ARCH)/libdl-$(LIBC_VER).so
+	@-echo "Creating symlink to GHUMVEE-ready libdl"
+	ln -f -s libdl-$(LIBC_VER).so patched_binaries/libc/$(_ARCH)/libdl.so.2
 
-patched_binaries/libc/i386/libpthread.so.0 : patched_binaries/libc/i386/libpthread.so
-	@-echo "Creating symlink to GHUMVEE-ready libpthread"
-	ln -f -s libpthread.so patched_binaries/libc/i386/libpthread.so.0
+patched_binaries/libc/$(_ARCH)/librt.so.1 : patched_binaries/libc/$(_ARCH)/librt-$(LIBC_VER).so
+	@-echo "Creating symlink to GHUMVEE-ready librt"
+	ln -f -s librt-$(LIBC_VER).so patched_binaries/libc/$(_ARCH)/librt.so.1
 
-patched_binaries/libc/amd64/libclang_rt.sync-x86_64.so : libsync/libsync.cpp
-	./compile_syncagent.rb
+patched_binaries/libc/$(_ARCH)/libm.so.6 : patched_binaries/libc/$(_ARCH)/libm-$(LIBC_VER).so
+	@-echo "Creating symlink to GHUMVEE-ready libm"
+	ln -f -s libm-$(LIBC_VER).so patched_binaries/libc/$(_ARCH)/libm.so.6
 
-patched_binaries/libc/i386/libclang_rt.sync-i386.so : libsync/libsync.cpp
-	@-echo "The standalone sync agent is not supported on i386 at the moment."
+patched_binaries/libc/$(_ARCH)/libresolv.so.2 : patched_binaries/libc/$(_ARCH)/libresolv-$(LIBC_VER).so
+	@-echo "Creating symlink to GHUMVEE-ready libresolv"
+	ln -f -s libresolv-$(LIBC_VER).so patched_binaries/libc/$(_ARCH)/libresolv.so.2
+
+patched_binaries/libc/$(_ARCH)/libutil.so.1 : patched_binaries/libc/$(_ARCH)/libutil-$(LIBC_VER).so
+	@-echo "Creating symlink to GHUMVEE-ready libutil"
+	ln -f -s libutil-$(LIBC_VER).so patched_binaries/libc/$(_ARCH)/libutil.so.1
+
+patched_binaries/libc/$(_ARCH)/ld-linux.so : patched_binaries/libc/$(_ARCH)/ld-$(LIBC_VER).so
+	@-echo "Creating symlink to GHUMVEE-ready ld-linux"
+	ln -f -s ld-$(LIBC_VER).so patched_binaries/libc/$(_ARCH)/ld-linux.so
+
+patched_binaries/libc/$(_ARCH)/libclang_rt.sync-$(_ALT_ARCH).so : libsync/libsync.cpp
+	build_scripts/compile_syncagent.rb
 
 MVEE_LD_Loader/MVEE_LD_Loader : MVEE_LD_Loader/MVEE_LD_Loader.c MVEE_LD_Loader/$(_ARCH)/MVEE_LD_Loader.h
-	./compile_loader.rb
+	build_scripts/compile_loader.rb
 
 DEPS := $(OBJ:.o=.d)
 

@@ -49,6 +49,8 @@ void mvee::init_config_set_defaults()
 {
 #define WEAK_INIT_KEY(key, value) if (!key) key = value;
 
+	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["xchecks_initially_enabled"], true);
+	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["relaxed_mman_xchecks"], false);
 	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["disable_syscall_checks"], false); // also used in RAVEN
 	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["use_ipmon"], false);
 	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["hide_vdso"], true);
@@ -62,6 +64,7 @@ void mvee::init_config_set_defaults()
 	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["use_system_gnomelibs"], false);
 	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["performance_counting_enabled"], false);
 	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["have_many_threads"], false);
+	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["mvee_controlled_aslr"], 0);
 	WEAK_INIT_KEY(config["monitor"]["log_to_stdout"], false);
 	WEAK_INIT_KEY(config["monitor"]["libc_path"]["path"], "/patched_binaries/libc/");
 	WEAK_INIT_KEY(config["monitor"]["libc_path"]["is_absolute"], false);
@@ -216,12 +219,12 @@ void mvee::set_builtin_config(int builtin)
 		REGISTER_PARSEC(31, 2, "gcc-pthreads", "bodytrack"     );
 		REGISTER_PARSEC(32, 2, "gcc-pthreads", "canneal"       );
 		REGISTER_PARSEC(33, 2, "gcc-pthreads", "dedup"         );
-		REGISTER_PARSEC(34, 2, "gcc-pthreads", "facesim"       );
-		REGISTER_PARSEC(35, 2, "gcc-pthreads", "ferret"        );
+		REGISTER_PARSEC(34, 3, "gcc-pthreads", "facesim"       );
+		REGISTER_PARSEC(35, 3, "gcc-pthreads", "ferret"        );
 		REGISTER_PARSEC(36, 2, "gcc-pthreads", "fluidanimate"  );
 		REGISTER_PARSEC(37, 2, "gcc-openmp"  , "freqmine"      );
 		REGISTER_PARSEC(38, 2, "gcc-pthreads", "raytrace"      );
-		REGISTER_PARSEC(39, 2, "gcc-pthreads", "streamcluster" );
+		REGISTER_PARSEC(39, 3, "gcc-pthreads", "streamcluster" );
 		REGISTER_PARSEC(40, 2, "gcc-pthreads", "swaptions"     );
 		REGISTER_PARSEC(41, 2, "gcc-pthreads", "vips"          );
 		REGISTER_PARSEC(42, 2, "gcc-pthreads", "x264"          );

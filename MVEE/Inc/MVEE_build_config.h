@@ -79,10 +79,6 @@
 /*-----------------------------------------------------------------------------
   Self-Debugging Support
 -----------------------------------------------------------------------------*/
-// MVEE_ENABLE_VALGRIND_HACKS: alters the behavior of certain I/O related syscalls
-// so the MVEE can get through the valgrind initialization without any mismatches
-// #define MVEE_ENABLE_VALGRIND_HACKS
-
 // MVEE_FD_DEBUG: when defined, the monitor will log the /proc/pid/fd directory every
 // time a file descriptor is opened/closed
 // #define MVEE_FD_DEBUG
@@ -98,6 +94,11 @@
 // MVEE_DUMP_JIT_CACHES: disassembles, compares, and dumps the contents of JIT
 // caches every time they get marked PROT_EXEC
 // #define MVEE_DUMP_JIT_CACHES
+
+// MVEE_VERIFY_ATOMIC_INSTRUMENTATION: when a new executable gets mmapped, check if 
+// its executable code has synchronization operations that are not wrapped in an 
+// mvee_atomic_preop/mvee_atomic_postop pair
+#define MVEE_VERIFY_ATOMIC_INSTRUMENTATION
 
 /*-----------------------------------------------------------------------------
   Constants

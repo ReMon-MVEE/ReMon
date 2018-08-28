@@ -22,7 +22,9 @@
 #include <deque>
 #include <vector>
 #include <map>
+#include <atomic>
 #include "MVEE_build_config.h"
+#include "MVEE_private_arch.h"
 
 /*-----------------------------------------------------------------------------
     Enumerations
@@ -44,8 +46,8 @@ class fd_info;
 class mvee_dwarf_context
 {
 public:
-    struct user_regs_struct regs;
-    long int                cfa;
+    PTRACE_REGS regs;
+    long int    cfa;
 
     mvee_dwarf_context(pid_t variantpid);
 };
@@ -100,7 +102,7 @@ public:
     bool         info_valid;
     union
     {
-        unsigned int   dwarf_fd;              // fd to the open file
+        int            dwarf_fd;              // fd to the open file
         unsigned char* dwarf_buffer;          // pointer to the in-memory file
     }            dwarf_data;
     Elf*         dwarf_elf;                   // Elf struct for the file
@@ -112,6 +114,7 @@ public:
 
     dwarf_info(std::string& file, int variantnum, pid_t variantpid, mmap_region_info* region_info);
     ~dwarf_info();
+	void reset();
 };
 
 //
@@ -223,7 +226,8 @@ public:
                 mmap_startup_info;                    // information about the execve call used to create this address space
 	bool        have_diversified_variants;            // Set to true if we have compile-time diversified variants
     bool        set_logging_enabled;                  // are we logging for this set
-    bool        thread_group_shutting_down;           // is this thread group shutting down asynchronously?
+	std::atomic<bool>        
+		        thread_group_shutting_down;           // is this thread group shutting down asynchronously?
     bool        enlarged_initial_stacks;              // we artificially enlarge the initial stacks to the stack limit to prevent DCL from mapping anything that might overlap with a future stack page
 
     //
@@ -280,18 +284,27 @@ public:
     //
     // Disjoint Code Layouting support
     //
-    void calculate_disjoint_bases    (unsigned long size, std::vector<unsigned long>& bases);
-    int  check_vdso_overlap          (int variantnum);
+    void calculate_disjoint_bases                  (unsigned long size, std::vector<unsigned long>& bases);
+    int  check_vdso_overlap                        (int variantnum);
+
+	//
+	// ASLR control support
+	//
+	
+	// Calculates a random base address for a read/write mapping of <size> bytes
+	// The resulting address is available in _ALL_ variants
+	unsigned long calculate_data_mapping_base      (unsigned long size);
+	bool is_available_in_all_variants              (unsigned long base, unsigned long size);
 
     //
     // IP-MON Support
     //
-    mmap_region_info* find_writable_region        (int variantnum, unsigned long len, pid_t look_for_thread=0, bool is_main_thread=false);
+    mmap_region_info* find_writable_region         (int variantnum, unsigned long len, pid_t look_for_thread=0, bool is_main_thread=false);
 
     //
     // Logging functions
     //
-    void print_mmap_table            (void (*logfunc)(const char* format, ...)=NULL);
+    void print_mmap_table                          (void (*logfunc)(const char* format, ...)=NULL);
 
     //
     // Debugging/Backtracing Support
@@ -317,6 +330,10 @@ public:
 private:
     void init();
     pthread_mutex_t mmap_lock;
+	// If the MVEE controls ASLR (enabled through variant.global.settings.mvee_controlled_alsr), this is 
+	// the region where we will place all of our randomized mappings. This must be the base address of a 
+	// 1/256th chunk of the total available address space.
+	unsigned long   mmap_base; 
     std::vector<
         std::set<mmap_region_info*, region_sort> >
                     full_map;                         // all mapped regions - separate for each variant since their address spaces might differ due to ASLR/DCL

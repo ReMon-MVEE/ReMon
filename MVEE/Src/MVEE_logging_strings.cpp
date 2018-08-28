@@ -29,7 +29,9 @@
 #include <signal.h>
 #include <linux/perf_event.h>
 #include <linux/hw_breakpoint.h>
+#include <sys/ipc.h>
 #include <sys/shm.h>
+#include <linux/dqblk_xfs.h>
 #include "MVEE.h"
 #include "MVEE_monitor.h"
 #include "MVEE_logging.h"
@@ -41,6 +43,11 @@
 #include "MVEE_memory.h"
 #include "MVEE_filedesc.h"
 #include "MVEE_interaction.h"
+#include <linux/quota.h>
+#ifdef MVEE_ARCH_HAS_ARCH_PRCTL
+#include <asm/prctl.h>
+#endif
+#include <sys/random.h>
 
 /*-----------------------------------------------------------------------------
     Flag Check Macro
@@ -147,9 +154,9 @@ const char* getTextualSigHow(int how)
 }
 
 /*-----------------------------------------------------------------------------
-    getTextualRequest
+    getTextualPtraceRequest
 -----------------------------------------------------------------------------*/
-const char* getTextualRequest(unsigned int request)
+const char* getTextualPtraceRequest(unsigned int request)
 {
     const char* result = "PTRACE_UNKNOWN";
 
@@ -213,6 +220,7 @@ const char* getTextualSyscall(long int syscallnum)
             DEF_CASE(MVEE_INVOKE_LD);
 			DEF_CASE(MVEE_IPMON_INVOKE);
 			DEF_CASE(MVEE_GET_VIRTUALIZED_ARGV0);
+			DEF_CASE(MVEE_ENABLE_XCHECKS);
         }
     }
 
@@ -555,8 +563,6 @@ const char* getTextualAtomicType(int atomic_type)
         DEF_CASE(ATOMIC_FORCED_READ);
         DEF_CASE(ATOMIC_LOAD);
         DEF_CASE(ATOMIC_LOAD_MAX);
-        DEF_CASE(CATOMIC_COMPARE_AND_EXCHANGE_VAL_ACQ);
-        DEF_CASE(CATOMIC_COMPARE_AND_EXCHANGE_BOOL_ACQ);
         DEF_CASE(CATOMIC_AND);
         DEF_CASE(CATOMIC_OR);
         DEF_CASE(CATOMIC_EXCHANGE_AND_ADD);
@@ -564,27 +570,35 @@ const char* getTextualAtomicType(int atomic_type)
         DEF_CASE(CATOMIC_INCREMENT);
         DEF_CASE(CATOMIC_DECREMENT);
         DEF_CASE(CATOMIC_MAX);
-        DEF_CASE(ATOMIC_COMPARE_AND_EXCHANGE_VAL_ACQ);
-        DEF_CASE(ATOMIC_COMPARE_AND_EXCHANGE_BOOL_ACQ);
-        DEF_CASE(ATOMIC_EXCHANGE_ACQ);
+        DEF_CASE(ATOMIC_COMPARE_AND_EXCHANGE_VAL);
+        DEF_CASE(ATOMIC_COMPARE_AND_EXCHANGE_BOOL);
+        DEF_CASE(ATOMIC_EXCHANGE);
         DEF_CASE(ATOMIC_EXCHANGE_AND_ADD);
         DEF_CASE(ATOMIC_INCREMENT_AND_TEST);
         DEF_CASE(ATOMIC_DECREMENT_AND_TEST);
+		DEF_CASE(ATOMIC_ADD_NEGATIVE);
         DEF_CASE(ATOMIC_ADD_ZERO);
         DEF_CASE(ATOMIC_ADD);
+		DEF_CASE(ATOMIC_OR);
+		DEF_CASE(ATOMIC_OR_VAL);
         DEF_CASE(ATOMIC_INCREMENT);
         DEF_CASE(ATOMIC_DECREMENT);
         DEF_CASE(ATOMIC_BIT_TEST_SET);
         DEF_CASE(ATOMIC_BIT_SET);
         DEF_CASE(ATOMIC_AND);
+		DEF_CASE(ATOMIC_AND_VAL);
         DEF_CASE(ATOMIC_STORE);
+		DEF_CASE(ATOMIC_MIN);
         DEF_CASE(ATOMIC_MAX);
         DEF_CASE(ATOMIC_DECREMENT_IF_POSITIVE);
+		DEF_CASE(ATOMIC_FETCH_ADD);
+		DEF_CASE(ATOMIC_FETCH_AND);
+		DEF_CASE(ATOMIC_FETCH_OR);
+		DEF_CASE(ATOMIC_FETCH_XOR);
         DEF_CASE(__THREAD_ATOMIC_CMPXCHG_VAL);
         DEF_CASE(__THREAD_ATOMIC_AND);
         DEF_CASE(__THREAD_ATOMIC_BIT_SET);
         DEF_CASE(___UNKNOWN_LOCK_TYPE___);
-        //DEF_CASE(__MVEE_BASE_ATOMICS_MAX__);
 
         DEF_EXTENDED_ATOMIC(mvee_atomic_load_n);
         DEF_EXTENDED_ATOMIC(mvee_atomic_load);
@@ -680,6 +694,7 @@ const char* getTextualBufferType(int buffer_type)
 		DEF_CASE(MVEE_UTCB_REG_FILE_MAP);
         DEF_CASE(MVEE_IPMON_BUFFER);
         DEF_CASE(MVEE_IPMON_REG_FILE_MAP);
+		DEF_CASE(MVEE_RING_BUFFER);
     }
 
     return result;
@@ -1195,6 +1210,12 @@ const char* getTextualTimerType(int type)
     {
         DEF_CASE(CLOCK_REALTIME);
         DEF_CASE(CLOCK_MONOTONIC);
+		DEF_CASE(CLOCK_REALTIME_COARSE);
+		DEF_CASE(CLOCK_MONOTONIC_COARSE);
+		DEF_CASE(CLOCK_MONOTONIC_RAW);
+		DEF_CASE(CLOCK_BOOTTIME);
+		DEF_CASE(CLOCK_PROCESS_CPUTIME_ID);
+		DEF_CASE(CLOCK_THREAD_CPUTIME_ID);
     }
 
     return result;
@@ -1297,14 +1318,201 @@ const char* getTextualErrno(int err)
 }
 
 /*-----------------------------------------------------------------------------
+    getTextualIntervalTimerType
+-----------------------------------------------------------------------------*/
+const char* getTextualIntervalTimerType(int which)
+{
+	const char* result = "Unknown Timer Type";
+
+	switch (which)
+	{
+		DEF_CASE(ITIMER_REAL);
+		DEF_CASE(ITIMER_VIRTUAL);
+		DEF_CASE(ITIMER_PROF);
+	}
+
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualArchPrctl
+-----------------------------------------------------------------------------*/
+const char* getTextualArchPrctl(int code)
+{
+	const char* result = "UNKNOWN";
+
+#ifdef MVEE_ARCH_HAS_ARCH_PRCTL
+	switch (code)
+	{
+		DEF_CASE(ARCH_SET_FS);
+		DEF_CASE(ARCH_GET_FS);
+		DEF_CASE(ARCH_SET_GS);
+		DEF_CASE(ARCH_GET_GS);
+	}
+#endif
+
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualRusageWho
+-----------------------------------------------------------------------------*/
+const char* getTextualRusageWho(int who)
+{
+	const char* result = "UNKNOWN";
+
+	switch (who)
+	{
+		DEF_CASE(RUSAGE_SELF);
+		DEF_CASE(RUSAGE_CHILDREN);
+		DEF_CASE(RUSAGE_THREAD);
+	}
+
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualQuotactlType
+-----------------------------------------------------------------------------*/
+const char* getTextualQuotactlType(int type)
+{
+	const char* result = "UNKNOWN";
+
+	switch (type)
+	{
+		DEF_CASE(USRQUOTA);
+		DEF_CASE(GRPQUOTA);
+	}
+
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualQuotactlCmd
+-----------------------------------------------------------------------------*/
+const char* getTextualQuotactlCmd(int cmd)
+{
+	const char* result = "Q_UNKNOWN";
+
+	switch (cmd)
+	{
+		DEF_CASE(Q_QUOTAON);
+		DEF_CASE(Q_QUOTAOFF);
+		DEF_CASE(Q_GETQUOTA);
+		DEF_CASE(Q_SETQUOTA);
+		DEF_CASE(Q_GETINFO);
+		DEF_CASE(Q_SETINFO);
+		DEF_CASE(Q_GETFMT);
+		DEF_CASE(Q_SYNC);
+#ifdef Q_GETSTATS
+		DEF_CASE(Q_GETSTATS);
+#endif
+		DEF_CASE(Q_XQUOTAON);
+		DEF_CASE(Q_XQUOTAOFF);
+		DEF_CASE(Q_XGETQUOTA);
+		DEF_CASE(Q_XSETQLIM);
+		DEF_CASE(Q_XGETQSTAT);
+		DEF_CASE(Q_XQUOTARM);
+	}
+
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualQuotactlFmt
+-----------------------------------------------------------------------------*/
+const char* getTextualQuotactlFmt(unsigned long fmt)
+{
+	const char* result = "QFMT_UNKNOWN";
+
+	switch (fmt)
+	{
+		DEF_CASE(QFMT_VFS_OLD);
+		DEF_CASE(QFMT_VFS_V0);
+		DEF_CASE(QFMT_VFS_V1);
+	}
+
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualPriorityWhich
+-----------------------------------------------------------------------------*/
+const char* getTextualPriorityWhich(int which)
+{
+	const char* result = "PRIO_UNKNOWN";
+
+	switch (which)
+	{
+		DEF_CASE(PRIO_PROCESS);
+		DEF_CASE(PRIO_PGRP);
+		DEF_CASE(PRIO_USER);
+	}
+
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualSchedulingPolicy
+-----------------------------------------------------------------------------*/
+const char* getTextualSchedulingPolicy(int policy)
+{
+	const char* result = "SCHED_UNKNOWN";
+
+	switch (policy)
+	{
+		DEF_CASE(SCHED_OTHER);
+		DEF_CASE(SCHED_BATCH);
+		DEF_CASE(SCHED_IDLE);
+		DEF_CASE(SCHED_FIFO);
+		DEF_CASE(SCHED_RR);
+	}
+
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualInotifyFlags
+-----------------------------------------------------------------------------*/
+const char* getTextualInotifyFlags(int flags)
+{
+	const char* result = "IN_UNKNOWN";
+
+	switch (flags)
+	{
+		DEF_CASE(IN_NONBLOCK);
+		DEF_CASE(IN_CLOEXEC);
+	}
+
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualMremapFlags
+-----------------------------------------------------------------------------*/
+const char* getTextualMremapFlags(int flags)
+{
+	const char* result = "<none>";
+
+	switch (flags)
+	{
+		DEF_CASE(MREMAP_MAYMOVE);
+		DEF_CASE(MREMAP_FIXED);
+	}
+
+	return result;
+}
+
+/*-----------------------------------------------------------------------------
     getTextualTimerFlags
 -----------------------------------------------------------------------------*/
 std::string getTextualTimerFlags(int flags)
 {
     std::string result;
 
-    TEST_FLAG(flags, TFD_NONBLOCK, result);
-    TEST_FLAG(flags, TFD_CLOEXEC,  result);
+    TEST_FLAG(flags, TFD_NONBLOCK     , result);
+    TEST_FLAG(flags, TFD_CLOEXEC      , result);
+    TEST_FLAG(flags, TFD_TIMER_ABSTIME, result);
 
     return result;
 }
@@ -1565,23 +1773,34 @@ std::string getTextualSocketType(long int type)
 -----------------------------------------------------------------------------*/
 std::string getTextualSocketAddr(struct sockaddr* addr)
 {
+	std::stringstream ss;
     std::string result = "";
 
     switch(addr->sa_family)
     {
         case AF_INET:
+		{
+            char tmp[50];
+            inet_ntop(addr->sa_family, &((struct sockaddr_in*)addr)->sin_addr, tmp, 50);
+			ss << "clientsock:ipv4:" << std::string(tmp);
+            break;
+        }
+
         case AF_INET6:
         {
             char tmp[50];
             inet_ntop(addr->sa_family, &((struct sockaddr_in*)addr)->sin_addr, tmp, 50);
-            result = std::string(tmp);
+			ss << "clientsock:ipv6:" << std::string(tmp);
             break;
         }
-        case AF_FILE:
-        {
-            result = std::string(((struct sockaddr_un*)addr)->sun_path);
-            break;
-        }
+//      case AF_FILE:
+//		case AF_UNIX:
+		case AF_LOCAL:
+		{
+			ss << "domainsock:" << std::string(((struct sockaddr_un*)addr)->sun_path);
+			result = ss.str();
+			break;
+		}
         default:
         {
             result  = "<couldn't resolve socket addr - family: ";
@@ -1878,3 +2097,75 @@ std::string getTextualMVEEWaitStatus (interaction::mvee_wait_status& status)
 	ss << ", sig: " << getTextualSig(status.data) << "]";
 	return ss.str();
 }
+
+/*-----------------------------------------------------------------------------
+    getTextualIpcShmKey
+-----------------------------------------------------------------------------*/
+std::string getTextualIpcShmKey (key_t key)
+{
+	std::stringstream ss;
+
+	if (key == IPC_PRIVATE)
+		ss << "IPC_PRIVATE";
+	else
+		ss << key;
+
+	return ss.str();
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualIpcShmFlags
+-----------------------------------------------------------------------------*/
+std::string getTextualIpcShmFlags (int shmflg)
+{
+	// The 9 least significant bits of the shmflg argument specify a permission
+	// mode similar to the mode argument of sys_open
+    std::string result = getTextualFileMode(shmflg & 0x1FF);
+
+	// In addition to the permission mode, sys_shmget accepts these
+    TEST_FLAG(shmflg, IPC_CREAT     , result);
+    TEST_FLAG(shmflg, IPC_EXCL      , result);
+	TEST_FLAG(shmflg, SHM_HUGETLB   , result);
+	TEST_FLAG(shmflg, SHM_NORESERVE , result);
+#ifdef SHM_HUGE_2MB
+	TEST_FLAG(shmflg, SHM_HUGE_2MB  , result);
+#endif
+#ifdef SHM_HUGE_1GB
+	TEST_FLAG(shmflg, SHM_HUGE_1GB  , result);
+#endif
+
+    return result;
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualFallocateFlags
+-----------------------------------------------------------------------------*/
+std::string getTextualFallocateFlags (int mode)
+{
+    std::string result;
+
+    TEST_FLAG(mode, FALLOC_FL_KEEP_SIZE      , result);
+    TEST_FLAG(mode, FALLOC_FL_PUNCH_HOLE     , result);
+#ifdef FALLOC_FL_COLLAPSE_RANGE
+    TEST_FLAG(mode, FALLOC_FL_COLLAPSE_RANGE , result);
+#endif
+#ifdef FALLOC_FL_ZERO_RANGE
+    TEST_FLAG(mode, FALLOC_FL_ZERO_RANGE     , result);
+#endif
+
+    return result;
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualRandFlags
+-----------------------------------------------------------------------------*/
+std::string getTextualRandFlags (unsigned int mode)
+{
+    std::string result;
+
+    TEST_FLAG(mode, GRND_RANDOM   , result);
+    TEST_FLAG(mode, GRND_NONBLOCK , result);
+
+    return result;
+}
+

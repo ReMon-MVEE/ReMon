@@ -168,7 +168,6 @@ std::string mmap_addr2line_proc::read_internal(const std::string& cmd)
 std::string mmap_addr2line_proc::read_from_addr2line_pipe(const std::string& cmd, int variantnum)
 {
     std::stringstream ss;
-    size_t            size;
 
     MutexLock         lock(&addr2line_lock);
 
@@ -199,48 +198,24 @@ std::string mmap_addr2line_proc::read_from_addr2line_pipe(const std::string& cmd
             // Failed to resolve the caller. Maybe we're looking in the wrong library
             if (addr2line_status == ADDR2LINE_FILE_STATUS_UNKNOWN)
             {
-                size_t pos = addr2line_file.find_last_of('/');
+				auto unstripped_file = mvee::os_get_unstripped_binary(addr2line_file);
 
-                if (pos != std::string::npos)
-                {
-                    ss << "find /usr/lib/debug/* | grep " << addr2line_file.substr(pos + 1);
-                    std::string lib = mvee::log_read_from_proc_pipe(ss.str().c_str(), &size);
+				if (unstripped_file != "")
+				{
+					addr2line_file   = unstripped_file;
+					close_proc();
+					pipe_create(addr2line_file.c_str());
+					addr2line_status = ADDR2LINE_FILE_HAS_DEBUG_SYMS;
 
-                    ss.str(std::string());
-                    ss.clear();
-
-                    // ok, there's a debug version of this lib
-                    if (size > 0)
-                    {
-                        addr2line_file   = lib;
-                        addr2line_file.replace(addr2line_file.begin(), addr2line_file.end(), '\n', '\0');
-
-                        close_proc();
-                        pipe_create(addr2line_file.c_str());
-                        addr2line_status = ADDR2LINE_FILE_HAS_DEBUG_SYMS;
-
-                        // retry
-                        continue;
-                    }
-                    // maybe there ARE debug syms but we just couldn't resolve this specific address...
-                    else
-                    {
-                        char        cmd[500];
-                        sprintf(cmd, "readelf -a %s | grep \"debug\\_info\"", addr2line_file.c_str());
-                        std::string out = mvee::log_read_from_proc_pipe(cmd, &size);
-                        if (size > 0)
-                            addr2line_status = ADDR2LINE_FILE_HAS_DEBUG_SYMS;
-                        else
-                            addr2line_status = ADDR2LINE_FILE_NO_DEBUG_SYMS;
-                        continue;
-                    }
-                }
-                else
-                {
-                    // couldn't find the basename...
+					// retry
+					continue;
+				}
+				else
+				{
+                    // no debug syms and no unstripped binary found...
                     addr2line_status = ADDR2LINE_FILE_NO_DEBUG_SYMS;
                     continue;
-                }
+				}				
             }
             else
             {
@@ -353,83 +328,143 @@ dwarf_info::dwarf_info(std::string& file, int variantnum, pid_t variantpid, mmap
     cie_count(0),
     fde_count(0)
 {
-    Dwarf_Error de;
+	auto try_file = region_info->region_backing_file_path;
 
-    dwarf_data.dwarf_fd = 0;
+	// Try twice. Once for the original file and once for the debug version of
+	// the file (if such a debug version exists on the system)
+	for (int i = 0; i < 2; ++i)
+	{
+		dwarf_data.dwarf_fd = 0;
 
-    if (file == "[vdso]")
-        dwarf_in_memory = true;
+		if (file == "[vdso]")
+			dwarf_in_memory = true;
 
-    // In memory file => try to copy the image into a buffer
-    if (dwarf_in_memory)
-    {
-        dwarf_data.dwarf_buffer =
-            rw::read_data(variantpid, (void*)region_info->region_base_address, region_info->region_size, true);
-
-        if (dwarf_data.dwarf_buffer)
-            dwarf_elf = elf_memory((char*)dwarf_data.dwarf_buffer, region_info->region_size);
-
-        if (!dwarf_data.dwarf_buffer || !dwarf_elf)
-        {
-            warnf("libelf error: trying to open in-memory file: %s\n", region_info->region_backing_file_path.c_str());
-
-            info_valid = false;
-            return;
-        }
-    }
-    // not in memory but it is a vdso-style region => we can't handle this so we'll bail out here
-    else if (region_info->region_backing_file_path[0] == '[')
-    {
-        info_valid = false;
-        return;
-    }
-    // regular on-disk ELF file
-    else
-    {
-        elf_version(EV_CURRENT);
-
-		int fd = open(region_info->region_backing_file_path.c_str(), O_RDONLY, 0);
-
-        if (fd >= 0)
+		// In memory file => try to copy the image into a buffer
+		if (dwarf_in_memory)
 		{
-			dwarf_data.dwarf_fd = (unsigned int)fd;
-            dwarf_elf = elf_begin(dwarf_data.dwarf_fd, ELF_C_READ, NULL);
+			dwarf_data.dwarf_buffer =
+				rw::read_data(variantpid, (void*)region_info->region_base_address, region_info->region_size, true);
+
+			if (dwarf_data.dwarf_buffer)
+				dwarf_elf = elf_memory((char*)dwarf_data.dwarf_buffer, region_info->region_size);
+
+			if (!dwarf_data.dwarf_buffer || !dwarf_elf)
+			{
+				warnf("libelf error: trying to open in-memory file: %s\n", try_file.c_str());
+
+				info_valid = false;
+				return;
+			}
+		}
+		// not in memory but it is a vdso-style region => we can't handle this so we'll bail out here
+		else if (region_info->region_backing_file_path[0] == '[')
+		{
+			info_valid = false;
+			return;
+		}
+		// regular on-disk ELF file
+		else
+		{
+			elf_version(EV_CURRENT);
+
+			int fd = open(try_file.c_str(), O_RDONLY, 0);
+
+			if (fd >= 0)
+			{
+				dwarf_data.dwarf_fd = fd;
+				dwarf_elf = elf_begin(dwarf_data.dwarf_fd, ELF_C_READ, NULL);
+			}
+
+			if (dwarf_data.dwarf_fd <= 0 || !dwarf_elf)
+			{
+				warnf("libelf error: trying to open file: %s (%d 0x" PTRSTR ") - err: %s\n",
+					  try_file.c_str(), dwarf_data.dwarf_fd, (unsigned long)dwarf_elf, elf_errmsg(elf_errno()));
+
+				info_valid = false;
+				return;
+			}
 		}
 
-        if ((int)dwarf_data.dwarf_fd < 0 || !dwarf_elf)
-        {
-            warnf("libelf error: trying to open file: %s (%d 0x%08x) - err: %s\n",
-                        region_info->region_backing_file_path.c_str(), dwarf_data.dwarf_fd, dwarf_elf, elf_errmsg(elf_errno()));
+		Dwarf_Error err;
+		if (dwarf_elf_init(dwarf_elf, DW_DLC_READ, NULL, NULL, &dwarf_debug, &err) != DW_DLV_OK)
+		{
+			warnf("libdwarf error: trying to open file: %s %s\n",
+				  try_file.c_str(),
+				  dwarf_in_memory ? "(in-memory)" : "");
 
-            info_valid = false;
-            return;
-        }
-    }
+			info_valid = false;
+			return;
+		}
 
+#ifndef MVEE_ARCH_USE_LIBUNWIND
+		// try to get the fde list from the DWARF debug frame
+		int debug_frame_err, eh_frame_err;
+		Dwarf_Error de;
+		if ((debug_frame_err = dwarf_get_fde_list(dwarf_debug, &cie_list,
+												  &cie_count, &fde_list, &fde_count, &de)) != DW_DLV_OK)
+		{
+			// try again but use the GCC EH frame instead
+			if ((eh_frame_err = dwarf_get_fde_list_eh(dwarf_debug, &cie_list,
+													  &cie_count, &fde_list, &fde_count, &de)) != DW_DLV_OK)
+			{
+				if (debug_frame_err == DW_DLV_NO_ENTRY &&
+					eh_frame_err == DW_DLV_NO_ENTRY)
+				{
+					auto unstripped_file = mvee::os_get_unstripped_binary(file);
+
+					if (unstripped_file != "")
+					{
+						reset();
+						try_file = unstripped_file;
+						continue;
+					}
+				}
+				
+				warnf("DWARF: Could not find valid unwind info for file: %s\n",
+					  try_file.c_str());
+				
+				info_valid = false;
+				return;				
+			}
+		}
+#endif
+	}
+}
+
+/*-----------------------------------------------------------------------------
+  reset
+-----------------------------------------------------------------------------*/
+void dwarf_info::reset()
+{
     Dwarf_Error err;
-    if (dwarf_elf_init(dwarf_elf, DW_DLC_READ, NULL, NULL, &dwarf_debug, &err) != DW_DLV_OK)
-    {
-        warnf("libdwarf error: trying to open file: %s %s\n", region_info->region_backing_file_path.c_str(),
-                    dwarf_in_memory ? "(in-memory)" : "");
 
-        info_valid = false;
-        return;
+//	warnf("destroying dwarf info: 0x" PTRSTR "\n", this);
+
+    if (cie_count > 0 || fde_count > 0)
+	{
+        dwarf_fde_cie_list_dealloc(dwarf_debug, cie_list, cie_count, fde_list, fde_count);
+		cie_count = fde_count = 0;
+		cie_list = NULL;
+		fde_list = NULL;
+	}
+
+    if (dwarf_debug)
+	{
+        dwarf_finish(dwarf_debug, &err);
+		dwarf_debug = NULL;
+	}
+    elf_end(dwarf_elf);
+	dwarf_elf = NULL;
+
+    if (dwarf_in_memory)
+    {
+        SAFEDELETEARRAY(dwarf_data.dwarf_buffer);
+		dwarf_in_memory = false;
     }
-
-    // try to get the fde list from the DWARF debug frame
-    if (dwarf_get_fde_list(dwarf_debug, &cie_list,
-                           &cie_count, &fde_list, &fde_count, &de) != DW_DLV_OK)
+    else
     {
-        // try again but use the GCC EH frame instead
-        if (dwarf_get_fde_list_eh(dwarf_debug, &cie_list,
-                                  &cie_count, &fde_list, &fde_count, &de) != DW_DLV_OK)
-        {
-            warnf("DWARF: couldn't retrieve FDE list for region: %s\n",
-                        region_info->region_backing_file_path.c_str());
-
-            info_valid = false;
-            return;
-        }
+        close(dwarf_data.dwarf_fd);
+		dwarf_data.dwarf_fd = 0;
     }
 }
 
@@ -438,25 +473,7 @@ dwarf_info::dwarf_info(std::string& file, int variantnum, pid_t variantpid, mmap
 -----------------------------------------------------------------------------*/
 dwarf_info::~dwarf_info()
 {
-    Dwarf_Error err;
-
-//	warnf("destroying dwarf info: 0x" PTRSTR "\n", this);
-
-    if (cie_count > 0 || fde_count > 0)
-        dwarf_fde_cie_list_dealloc(dwarf_debug, cie_list, cie_count, fde_list, fde_count);
-
-    if (dwarf_debug)
-        dwarf_finish(dwarf_debug, &err);
-    elf_end(dwarf_elf);
-
-    if (dwarf_in_memory)
-    {
-        SAFEDELETEARRAY(dwarf_data.dwarf_buffer);
-    }
-    else
-    {
-        close(dwarf_data.dwarf_fd);
-    }
+	reset();
 }
 
 /*-----------------------------------------------------------------------------
@@ -613,7 +630,7 @@ int mmap_table::dwarf_step (int variantnum, pid_t variantpid, mvee_dwarf_context
     if (!found_region)
     {
         warnf("DWARF: couldn't map EIP " PTRSTR " to a known region for variant: %d (pid: %d)\n",
-                    IP_IN_REGS(context->regs), variantnum, variantpid);
+			  (unsigned long)IP_IN_REGS(context->regs), variantnum, variantpid);
         goto out;
     }
 
@@ -634,7 +651,7 @@ int mmap_table::dwarf_step (int variantnum, pid_t variantpid, mvee_dwarf_context
     if (dwarf_get_fde_at_pc(info->fde_list, pc, &fde, &low_pc, &high_pc, &de) != DW_DLV_OK)
     {
 #ifdef MVEE_DWARF_DEBUG
-        warnf("DWARF: couldn't find an FDE that covers the specified address: %08x\n", pc);
+        warnf("DWARF: couldn't find an FDE that covers the specified address: %08llx\n", pc);
 #endif
         goto out;
     }
@@ -657,7 +674,7 @@ int mmap_table::dwarf_step (int variantnum, pid_t variantpid, mvee_dwarf_context
     }
 
 #ifdef MVEE_DWARF_DEBUG
-    debugf("DWARF: Calculated regtable at pc: " PTRSTR "\n", pc);
+    debugf("DWARF: Calculated regtable at pc: %08llx\n", pc);
     mvee::log_dwarf_rule(DW_FRAME_CFA_COL3, &regtable.rt3_cfa_rule);
     for (int i = 0; i <= DWARF_RAR; ++i)
         mvee::log_dwarf_rule(i, &regtable.rt3_rules[i]);
@@ -725,8 +742,8 @@ int mmap_table::dwarf_step (int variantnum, pid_t variantpid, mvee_dwarf_context
 
 #ifdef MVEE_DWARF_DEBUG
             debugf("DWARF: found DW_EXPR_VAL_EXPRESSION. Debugging libpthreads are we?\n");
-            debugf("DWARF: block_ptr = " PTRSTR "\n", regtable.rt3_rules[i].dw_block_ptr);
-            debugf("DWARF: block_len = %d\n",         regtable.rt3_rules[i].dw_offset_or_block_len);
+            debugf("DWARF: block_ptr = " PTRSTR "\n", (unsigned long) regtable.rt3_rules[i].dw_block_ptr);
+            debugf("DWARF: block_len = %llu\n",       regtable.rt3_rules[i].dw_offset_or_block_len);
 #endif
 
             while (cur_ptr < max_ptr)
@@ -1248,12 +1265,9 @@ char* mmap_table::get_normalized_maps_output (int variantnum, pid_t variantpid)
 -----------------------------------------------------------------------------*/
 void mmap_table::verify_mman_table (int variantnum, pid_t variantpid)
 {
-//#if 0
-
     if (mmap_startup_info[0].image.length() == 0)
         return;
 
-//#ifdef MVEE_MMAN_DEBUG
 #if 0
     char*       maps            = get_normalized_maps_output(variantnum, variantpid);
     std::string normalized_dump = get_normalized_map_dump(variantnum);
@@ -1268,8 +1282,6 @@ void mmap_table::verify_mman_table (int variantnum, pid_t variantpid)
                 variantpid);
         std::string smaps = mvee::log_read_from_proc_pipe(cmd, NULL);
         warnf("smaps output:\n%s\n", smaps.c_str());
-
-        mvee::request_shutdown(false);
     }
 
     SAFEDELETEARRAY(maps);

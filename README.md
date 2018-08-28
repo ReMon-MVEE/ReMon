@@ -11,8 +11,9 @@ The current version of **IP-MON** takes quite a lot of manual effort to set up. 
 
 ## ReMon Prerequisites
 You will need:
-- A GNU/Linux distribution based on Debian. I **_strongly_** recommend Ubuntu 14.04 x64.
+- A GNU/Linux distribution based on Debian. I **_strongly_** recommend Ubuntu 18.04 x64.
 - Ruby
+- CMake (>= 3.4.3)
 - The ReMon toolchain, which can be installed using the `bootstrap.sh` script.
 
 ## GHUMVEE Instructions
@@ -88,7 +89,7 @@ To build IP-MON itself, navigate to /path/to/ReMon/IP-MON and type `./comp.sh`.
 
 ```
 cd /wherever/you/want/to/download/the/kernel
-apt-get source linux
+git clone -b linux-4.4.y git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git
 cd linux-<insert version number here>
 patch -p1 < /path/to/ReMon/patches/linux-4.4.0-full-ipmon.patch
 make menuconfig 
@@ -126,37 +127,24 @@ To run multi-threaded variants, we need a glibc and libpthreads that can replica
 Some people might want to build their own GHUMVEE-ready versions of glibc and libpthreads. They can do so as follows:
 
 ```
-# get the official source
-wget http://ftp.gnu.org/gnu/glibc/glibc-2.19.tar.xz
-tar xJf glibc-2.19.tar.xz
-
-# apply the latest wall of clocks patch. You need this patch to support multi-threaded programs
-cd glibc-2.19
-patch -p1 < /path/to/ReMon/MVEE/patches/glibc-2.19-official-amd64-woc.patch
-
-# apply the IP-MON patch
-patch -p1 < /path/to/ReMon/MVEE/patches/glibc-2.19-ipmon.patch
+# get the source code for GHUMVEE's glibc
+git clone https://github.com/stijn-volckaert/ReMon-glibc.git
 
 # build
+cd ReMon-glibc
 mkdir build-tree
 cd build-tree
-cp /path/to/ReMon/MVEE/scripts/stijn-configure-libc.sh .
-./stijn-configure-libc.sh
+
+# set up the makefiles. Alternatively, you can run ../configure-libc-partial-order-debug.sh here
+# to compile glibc with a synchronization agent that has self-debugging features
+../configure-libc-woc.sh
 make -j 8
 
 # install the libraries into $HOME/glibc-build
 make install
 ```
 
-The current version of ReMon will load the glibc and libpthreads in the /path/to/ReMon/MVEE/patched_binaries/libc/amd64/ folder into each of the variants' address spaces. You should set up symlinks in this folder so ReMon loads the **IP-MON**-compatible glibc/libpthreads:
-
-```
-cd /path/to/ReMon/MVEE/patched_binaries/libc/amd64/
-unlink libc.so.6
-unlink libpthread.so.0
-ln -s ~/glibc-build/lib/libc-2.19.so libc.so.6
-ln -s ~/glibc-build/lib/libpthread-2.19.so libpthread.so.0
-```
+The current version of ReMon will load the glibc and libpthreads in the /path/to/ReMon/MVEE/patched_binaries/libc/<arch>/ folder into each of the variants' address spaces. You should set up symlinks in this folder so ReMon loads the **IP-MON**-compatible glibc/libpthreads.
 
 ### Building GHUMVEE-ready versions of libstdc++ and libgomp
 
@@ -170,40 +158,20 @@ cd gcc-<latestversion>
 tar xJf gcc-*
 cd gcc-<version>
 
-# copy the mvee_atomic.h header to the gcc sources folder
-cp /path/to/ReMon/scripts/mvee_atomic.h .
+# generate an up to date mvee_atomic.h header
+/patch/to/ReMon/scripts/generate_atomic_header_new.sh > mvee_atomic.h
 
-# patch libstdc++
+# patch libstdc++ and libgomp
 patch -p1 < /path/to/ReMon/patches/libstdc++.<yourver>.patch
-
-# patch libgomp
-cd libgomp/config
-rm -rf linux bsd mingw32 osf
-mv posix linux
-mkdir posix
-cp linux/time.c posix
-cd ../../
 patch -p1 < /path/to/ReMon/patches/libgomp.<yourver>.patch
 
 # make
-./configure --enable-languages=c,c++
+./configure --enable-languages=c,c++ --disable-multilib
 make -j 8
 
-# The build will fail, due to the unresolved references to mvee symbols. 
-# Whenever the build fails, go to the directory that contains the module that failed to link, 
-# and edit its Makefile to allow unresolved references to mvee symbols:
-sed -i 's/\(.*LDFLAGS = .*\)/\1 -Wl,--unresolved-symbols=ignore-all/' Makefile
-
-# Then resume make until the next error. This cannot be done up front 
-# because this will propagate into the sub-package's LDFLAGS that are 
-# also used when running configure (which results in configure reporting 
-# that all possible functions it checks for are available, because none 
-# of them produce a link error anymore).
-# There is probably some cleaner, more automated way, but this suffices for now.
-
 # "install" the libs
-cp <arch>-pc-linux-gnu/libgomp/.libs/libgomp.so.1.0.0 /path/to/ReMon/patched_binaries/<i386|amd64>/libgomp/
-cp <arch>-pc-linux-gnu/libstdc++-v3/src/.libs/libstdc++.so.6.0.<ver> /path/to/ReMon/patched_binaries/<i386|amd64>/libstdc++/
+cp <arch>-pc-linux-gnu/libgomp/.libs/libgomp.so.1.0.0 /path/to/ReMon/patched_binaries/<arch>/libgomp/
+cp <arch>-pc-linux-gnu/libstdc++-v3/src/.libs/libstdc++.so.6.0.<ver> /path/to/ReMon/patched_binaries/<arch>/libstdc++/
 ```
 
 ## Known Issues
@@ -217,6 +185,8 @@ Here are some of the publications that build on or use ReMon:
 [Taming Parallelism in a Multi-Variant Execution Environment](http://www.ics.uci.edu/~stijnv/Papers/eurosys17-parallelism.pdf)
 Stijn Volckaert, Bart Coppens, Bjorn De Sutter, Koen De Bosschere, Per Larsen, and Michael Franz.
 In 12th European Conference on Computer Systems (EuroSys'17). ACM, 2017.
+
+The compiler extension presented in this paper can be found [here](https://github.com/stijn-volckaert/ReMon-llvm).
 
 [Secure and Efficient Application Monitoring and Replication](http://www.ics.uci.edu/~stijnv/Papers/atc16-remon.pdf)
 Stijn Volckaert, Bart Coppens, Alexios Voulimeneas, Andrei Homescu, Per Larsen, Bjorn De Sutter, and Michael Franz.

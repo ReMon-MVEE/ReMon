@@ -5,7 +5,7 @@
  * found in GHUMVEELICENSE.txt.
  */
 
-#include "/usr/include/x86_64-linux-gnu/asm/unistd_64.h"
+#include UNISTD_HDR
 
 #define INTERP              "/lib64/ld-linux-x86-64.so.2"
 #define INTERP_SHORT        "MVEE Variant %d >"
@@ -41,3 +41,4 @@ typedef Elf64_Off    Elf_Off;
         :: "m" (new_sp), "m" (new_entry) :); \
 
 #define FSTAT_NO            __NR_fstat
+#define MVEE_FAKE_SYSCALL_BASE 0x6FFFFFFF

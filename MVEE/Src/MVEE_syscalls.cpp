@@ -63,12 +63,7 @@ unsigned char monitor::call_is_known_false_positive(long* precall_flags)
 void monitor::call_resume(int variantnum)
 {
 	if (!interaction::resume_until_syscall(variants[variantnum].variantpid))
-	{
-		warnf("%s - failed to resume variant\n",
-			  call_get_variant_pidstr(variantnum).c_str());
-		shutdown(false);
-		return;
-	}
+		throw ResumeFailure(variantnum, "syscall resume");
 }
 
 /*-----------------------------------------------------------------------------
@@ -86,14 +81,11 @@ void monitor::call_resume_all()
 void monitor::call_resume_fake_syscall(int variantnum)
 {
 	// let the variants execute a dummy getpid syscall instead
-	if (!interaction::write_syscall_no(variants[variantnum].variantpid, __NR_getpid) ||
-		!interaction::resume_until_syscall(variants[variantnum].variantpid))
-	{
-		warnf("%s - failed to resume fake syscall\n",
-			  call_get_variant_pidstr(variantnum).c_str());
-		shutdown(false);
-		return;
-	}
+	if (!interaction::write_syscall_no(variants[variantnum].variantpid, __NR_getpid))
+		throw RwRegsFailure(variantnum, "set fake syscall no");
+
+	if (!interaction::resume_until_syscall(variants[variantnum].variantpid))
+		throw ResumeFailure(variantnum, "fake syscall resume");
 }
 
 /*-----------------------------------------------------------------------------
@@ -121,9 +113,20 @@ void monitor::log_donthave(int variantnum)
 
 	if (entry)
 	{
-		debugf("%s - %s(...)\n", 
-			   call_get_variant_pidstr(variantnum).c_str(),
-			   mvee::upcase(getTextualSyscall(variants[variantnum].callnum)).c_str());
+		const char* syscall_name = getTextualSyscall(variants[variantnum].callnum);
+		if (strcmp(syscall_name, "sys_unknown") == 0)
+		{
+			debugf("%s - SYS_UNKNOWN - CALLNO: %ld (0x" PTRSTR ")\n", 
+				   call_get_variant_pidstr(variantnum).c_str(),
+				   variants[variantnum].callnum,
+				   variants[variantnum].callnum);			
+		}
+		else
+		{			
+			debugf("%s - %s(...)\n", 
+				call_get_variant_pidstr(variantnum).c_str(),
+				mvee::upcase(syscall_name).c_str());
+		}
 	}
 	else
 	{
@@ -155,12 +158,7 @@ void monitor::call_write_denied_syscall_return(int variantnum)
 			   getTextualErrno(err));
 
 		if (!interaction::write_syscall_return(variants[variantnum].variantpid, (unsigned long) -err))
-		{
-			warnf("%s - call flags has MVEE_CALL_ERROR, but GHUMVEE couldn't set the syscall return value\n",
-				  call_get_variant_pidstr(variantnum).c_str());
-			shutdown(false);
-			return;
-		}
+			throw RwRegsFailure(variantnum, "write denied syscall error");
 	}
 	else if (variants[variantnum].call_flags & MVEE_CALL_RETURN_EXTENDED_VALUE)
 	{
@@ -170,12 +168,7 @@ void monitor::call_write_denied_syscall_return(int variantnum)
 			   variants[variantnum].extended_value);
 
 		if (!interaction::write_syscall_return(variants[variantnum].variantpid, variants[variantnum].extended_value))
-		{
-			warnf("%s - call flags has MVEE_CALL_RETURN_EXTENDED_VALUE, but GHUMVEE couldn't set the syscall return value\n",
-				  call_get_variant_pidstr(variantnum).c_str());
-			shutdown(false);
-			return;
-		}
+			throw RwRegsFailure(variantnum, "write denied syscall extended return");
 	}
 	else
 	{
@@ -185,12 +178,7 @@ void monitor::call_write_denied_syscall_return(int variantnum)
 			   err);
 
 		if (!interaction::write_syscall_return(variants[variantnum].variantpid, err))
-		{
-			warnf("%s - call flags has MVEE_CALL_RETURN_VALUE, but GHUMVEE couldn't set the syscall return value\n",
-				  call_get_variant_pidstr(variantnum).c_str());
-			shutdown(false);
-			return;
-		}
+			throw RwRegsFailure(variantnum, "write denied syscall return");
 	}
 }
 
@@ -207,9 +195,30 @@ unsigned char monitor::call_precall_get_call_type (int variantnum, long callnum)
 
     if (callnum >= 0 && callnum < MAX_CALLS)
     {
-		if (variants[variantnum].fast_forward_to_entry_point)
+		if (variants[variantnum].fast_forwarding)
 		{
 			result = MVEE_CALL_TYPE_UNSYNCED;
+		}
+		// RAVEN syscall check toggling support
+		else if (variants[variantnum].syscall_checking_disabled)
+		{
+			if (--variants[variantnum].max_unchecked_syscalls < 0)
+			{
+				warnf("%s - exceeded maximum number of allowed unchecked syscalls\n",
+					  call_get_variant_pidstr(variantnum).c_str());
+				shutdown(false);
+			}
+			else if (!SYSCALL_MASK_ISSET(variants[variantnum].unchecked_syscalls, callnum))
+			{
+				warnf("%s - syscall %ld (%s) is not in the unchecked calls list\n",
+					  call_get_variant_pidstr(variantnum).c_str(),
+					  callnum, getTextualSyscall(callnum));
+				shutdown(false);
+			}
+			else
+			{
+				result = MVEE_CALL_TYPE_UNSYNCED;
+			}
 		}
 		else
 		{
@@ -229,16 +238,35 @@ unsigned char monitor::call_precall_get_call_type (int variantnum, long callnum)
 			case MVEE_SET_SYNC_PRIMITIVES_PTR:
 			case MVEE_INVOKE_LD:
 			case MVEE_RUNS_UNDER_MVEE_CONTROL:
+			case MVEE_ENABLE_XCHECKS:
+			case MVEE_DISABLE_XCHECKS:
             {
                 result = MVEE_CALL_TYPE_UNSYNCED;
                 break;
             }
 
+			case MVEE_ALL_HEAPS_ALIGNED:
+			{
+				if ((*mvee::config_variant_global)["relaxed_mman_xchecks"].asBool())
+					result = MVEE_CALL_TYPE_UNSYNCED;
+				break;
+			}
+
+			case MVEE_GET_VIRTUALIZED_ARGV0: 
+			{
+                // TODO: Review this. We might want this to be synced even while fast forwarding
+				if (variants[variantnum].fast_forwarding)
+				{
+					result = MVEE_CALL_TYPE_UNSYNCED;
+					break;
+				}
+			}
+
 			default:
 			{
-				if (variants[variantnum].fast_forward_to_entry_point)
+				if (variants[variantnum].fast_forwarding)
 				{
-					warnf("Don't have an unsynced call handler for call: %d (%s)\n",
+					warnf("Don't have an unsynced call handler for call: %lu (%s)\n",
 						  callnum, getTextualSyscall(callnum));
 					shutdown(false);
 					break;
@@ -291,7 +319,7 @@ long monitor::call_precall ()
             result = (this->*handler)(-1);
         else if (handler == MVEE_HANDLER_DONTHAVE)
         {
-            warnf("ERROR: missing PRECALL handler for syscall: %d (%s)\n", callnum, getTextualSyscall(callnum));
+            warnf("ERROR: missing PRECALL handler for syscall: %lu (%s)\n", callnum, getTextualSyscall(callnum));
             shutdown(false);
         }
     }
@@ -302,7 +330,7 @@ long monitor::call_precall ()
 			for (int i = 0; i < mvee::numvariants; ++i)
 			{
 				debugf("%s - SYS_MVEE_ALL_HEAPS_ALIGNED(heap: 0x" PTRSTR ", requested alignment: 0x" PTRSTR ", requested size: 0x" PTRSTR")\n", 
-					   call_get_variant_pidstr(i).c_str(), ARG1(i), ARG2(i), ARG3(i));
+					   call_get_variant_pidstr(i).c_str(), (unsigned long)ARG1(i), (unsigned long)ARG2(i), (unsigned long)ARG3(i));
 
 				if (i >= 1 &&
 					(ARG2(i) != ARG2(0) ||
@@ -338,7 +366,7 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
             result = (this->*handler)(variantnum);
 #ifndef MVEE_BENCHMARK
         if (handler == MVEE_HANDLER_DONTHAVE)
-            warnf("missing CALL handler for syscall: %d (%s)\n", callnum, getTextualSyscall(callnum));
+            warnf("missing CALL handler for syscall: %lu (%s)\n", callnum, getTextualSyscall(callnum));
 #endif
     }
     else
@@ -365,7 +393,10 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 			//
             case MVEE_GET_THREAD_NUM:
             {
-				rw::write_primitive<unsigned short>(variants[variantnum].variantpid, (void*) ARG1(variantnum), (unsigned short) variantnum);
+				if (ARG1(variantnum) &&
+					!rw::write_primitive<unsigned short>(variants[variantnum].variantpid, (void*) ARG1(variantnum), (unsigned short) variantnum))
+					throw RwMemFailure(variantnum, "replicate variantnum in get_thread_num");
+
 				result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(mvee::numvariants);
                 break;
             }
@@ -404,7 +435,9 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
                 }
 
                 unsigned long ptr      = set_mmap_table->resolve_symbol(variantnum, (const char*)sym.c_str(), (const char*)lib_name.c_str());
-                rw::write_primitive<unsigned long>(variants[variantnum].variantpid, (void*) ARG3(variantnum), ptr);
+                if (!rw::write_primitive<unsigned long>(variants[variantnum].variantpid, (void*) ARG3(variantnum), ptr))
+					throw RwMemFailure(variantnum, "replicate resolved symbol address in resolve_symbol");
+
                 result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
                 break;
             }
@@ -423,12 +456,8 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 					if (!SETSYSCALLNO(variantnum, __NR_munmap) || 
 						!SETARG1(variantnum, loader_base) || 
 						!SETARG2(variantnum, loader_size))
-
 					{
-						warnf("%s - Couldn't unmap LD_Loader\n",
-							  call_get_variant_pidstr(variantnum).c_str());
-						shutdown(false);
-						return 0;
+						throw RwRegsFailure(variantnum, "unmapping LD Loader");
 					}
 
 #ifndef MVEE_BENCHMARK
@@ -460,14 +489,17 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 				variants[variantnum].should_sync_ptr   = ARG1(variantnum);
 				variants[variantnum].infinite_loop_ptr = ARG2(variantnum);
 
-				if (ARG3(variantnum))
-					rw::write_primitive<unsigned short>(variants[variantnum].variantpid, (void*) ARG3(variantnum), (unsigned short) mvee::numvariants);
+				if (ARG3(variantnum) && 
+					!rw::write_primitive<unsigned short>(variants[variantnum].variantpid, (void*) ARG3(variantnum), (unsigned short) mvee::numvariants))
+					throw RwMemFailure(variantnum, "write runs_under_mvee_control numvariants");
 
-				if (ARG4(variantnum))
-					rw::write_primitive<unsigned short>(variants[variantnum].variantpid, (void*) ARG4(variantnum), (unsigned short) variantnum);
+				if (ARG4(variantnum) &&	
+					!rw::write_primitive<unsigned short>(variants[variantnum].variantpid, (void*) ARG4(variantnum), (unsigned short) variantnum))
+					throw RwMemFailure(variantnum, "write runs_under_mvee_control variantnum");
 
-				if (variantnum == 0 && ARG5(variantnum))
-					rw::write_primitive<unsigned char>(variants[variantnum].variantpid, (void*) ARG5(variantnum), 1);
+				if (variantnum == 0 && ARG5(variantnum) && 
+					!rw::write_primitive<unsigned char>(variants[variantnum].variantpid, (void*) ARG5(variantnum), 1))
+					throw RwMemFailure(variantnum, "write runs_under_mvee_control master byte");
 
 #ifdef MVEE_DISABLE_SYNCHRONIZATION_REPLICATION
                 result = MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(1);
@@ -480,13 +512,58 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
                 break;
             }
 
+			case MVEE_GET_VIRTUALIZED_ARGV0:
+			{
+				// This is fine, though we might want to change this policy later
+				if (variants[variantnum].fast_forwarding)
+					break;
+			}
+
+			//
+			// Only works if we're fast forwarding, which only happens if 
+			// variants.global.settings.xchecks_initially_enabled is set to false at the
+			// time we see a sys_execve.
+			//
+			case MVEE_ENABLE_XCHECKS:
+			{
+				if (variants[variantnum].fast_forwarding)
+				{
+					debugf("%s - SYS_ENABLE_XCHECKS() => variant is leaving fast-forwarding state\n", 
+					   call_get_variant_pidstr(variantnum).c_str());
+					variants[variantnum].fast_forwarding = false;
+				}
+				result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
+				break;
+			}
+
+			//
+			// And turn it back on...
+			// 
+			case MVEE_DISABLE_XCHECKS:
+			{
+				if (!(*mvee::config_variant_global)["xchecks_initially_enabled"].asBool())
+				{
+					debugf("%s - SYS_DISABLE_XCHECKS() => variant is re-entering fast-forwarding state\n", 
+					   call_get_variant_pidstr(variantnum).c_str());
+					variants[variantnum].fast_forwarding = true;
+				}
+				result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
+				break;
+			}
+
+			// This is only ever dispatched as unsynced if we have enabled relaxed_mman_xchecks
+			case MVEE_ALL_HEAPS_ALIGNED:
+			{
+				result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(1);
+				break;
+			}
 
 			//
 			// 
 			//
 			default:
 			{
-				warnf("Don't have an unsynced call handler for call: %d (%s)\n",
+				warnf("Don't have an unsynced call handler for call: %lu (%s)\n",
 					  callnum, getTextualSyscall(callnum));
 				result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
 				break;
@@ -519,7 +596,7 @@ long monitor::call_call_dispatch ()
             result = (this->*handler)(-1);
 #ifndef MVEE_BENCHMARK
         if (handler == MVEE_HANDLER_DONTHAVE)
-            warnf("missing CALL handler for syscall: %d (%s)\n", callnum, getTextualSyscall(callnum));
+            warnf("missing CALL handler for syscall: %ld (%s)\n", callnum, getTextualSyscall(callnum));
 #endif
     }
     else
@@ -572,7 +649,6 @@ long monitor::call_call_dispatch ()
                     {
                         info = atomic_buffer;
                     }
-
                 }
 				else if (buffer_type == MVEE_IPMON_BUFFER)
 				{
@@ -625,6 +701,22 @@ long monitor::call_call_dispatch ()
                     result = MVEE_CALL_DENY | MVEE_CALL_RETURN_EXTENDED_VALUE;
 					break;
 				}
+				else if (buffer_type == MVEE_RING_BUFFER)
+				{
+                    if (!ring_buffer)
+                    {
+                        ring_buffer = new _shm_info();
+						
+						int requested_capacity = 4096;
+
+						if (ARG3(0) && !rw::read_primitive<int>(variants[0].variantpid, (void*) ARG3(0), requested_capacity))
+							throw RwMemFailure(0, "read ring buffer capacity");
+
+						alloc_size = requested_slot_size * requested_capacity + (mvee::numvariants + 1) * 64;
+                    }
+
+					info = ring_buffer;
+				}
                 else if (buffer_type <= MVEE_MAX_SHM_TYPES)
                 {
                     it         = set_shm_table->table.find(buffer_type);
@@ -673,8 +765,8 @@ long monitor::call_call_dispatch ()
 
                     // return size of the buffer
                     for (i = 0; i < mvee::numvariants; ++i)
-                        if (ARG3(i))
-							rw::write_primitive<unsigned int>(variants[i].variantpid, (void*) ARG3(i), (unsigned int) *size_ptr);
+                        if (ARG3(i) && !rw::write_primitive<unsigned int>(variants[i].variantpid, (void*) ARG3(i), (unsigned int) *size_ptr))
+							throw RwMemFailure(i, "write shared buffer size");
 
                     // deny the call and return id of the buffer
                     for (i = 0; i < mvee::numvariants; ++i)
@@ -703,7 +795,7 @@ long monitor::call_call_dispatch ()
                 }
                 else if (ARG1(0) == MVEE_IPMON_BUFFER)
                 {
-                    debugf("flushing ipmon_buffer: " PTRSTR "\n", ipmon_buffer);
+                    debugf("flushing ipmon_buffer: " PTRSTR "\n", (unsigned long)ipmon_buffer);
                     if (ipmon_buffer)
                     {
 #ifdef MVEE_LOG_IPMON_BUFFER_ON_FLUSH
@@ -802,16 +894,18 @@ long monitor::call_call_dispatch ()
 			{
 				std::string master_argv0 = rw::read_string(variants[0].variantpid, (void*)ARG1(0));
 
-				warnf("MASTER ARGV0: %s\n", master_argv0.c_str());
+				debugf("Returning virtualized argv[0]: %s\n",
+					 master_argv0.c_str());
 
 				// We copy the master's arg[0] value into the buffer.
 				for (int i = 0; i < mvee::numvariants; ++i)
 				{
 					if (ARG2(i) && ARG3(i) > master_argv0.length() + 1)
 					{
-						rw::write_data(variants[i].variantpid, (void*) ARG2(i), 
-									   master_argv0.length() + 1, 
-									   (void*) master_argv0.c_str());
+						if (!rw::write_data(variants[i].variantpid, (void*) ARG2(i), 
+											master_argv0.length() + 1, 
+											(void*) master_argv0.c_str()))
+							throw RwMemFailure(i, "write virtualized argv[0]");
 					}
 				}
 
@@ -849,7 +943,7 @@ void monitor::call_postcall_log_return (int variantnum)
 
 	if (!success)
 	{
-		debugf("%s - %s return: %d (%s)\n",
+		debugf("%s - %s return: %ld (%s)\n",
 			   call_get_variant_pidstr(variantnum).c_str(),
 			   mvee::upcase(getTextualSyscall(callnum)).c_str(),
 			   result,
@@ -882,14 +976,14 @@ long monitor::call_postcall_return_unsynced (int variantnum)
 
 			if (!(result & MVEE_POSTCALL_HANDLED_UNSYNCED_CALL))
 			{
-				warnf("FIXME - stijn: POSTCALL handler for syscall %d (%s) was not unsync-aware\n",
+				warnf("FIXME - stijn: POSTCALL handler for syscall %ld (%s) was not unsync-aware\n",
 					  callnum, getTextualSyscall(callnum));				
 				shutdown(false);				
 			}
 		}
 #ifndef MVEE_BENCHMARK
         else if (handler == MVEE_HANDLER_DONTHAVE)
-            warnf("missing POSTCALL handler for syscall: %d (%s)\n", callnum, getTextualSyscall(callnum));
+            warnf("missing POSTCALL handler for syscall: %ld (%s)\n", callnum, getTextualSyscall(callnum));
 #endif
     }
 	else
@@ -907,11 +1001,7 @@ long monitor::call_postcall_return_unsynced (int variantnum)
 			SP_IN_REGS(variants[variantnum].regs) = initial_stack;
 			IP_IN_REGS(variants[variantnum].regs) = ld_entry;
 			if (!interaction::write_all_regs(variants[variantnum].variantpid, &variants[variantnum].regs))
-			{
-				warnf("%s - couldn't transfer control to program interpreter\n",
-					  call_get_variant_pidstr(variantnum).c_str());
-				shutdown(false);
-			}
+				throw RwRegsFailure(variantnum, "transfer control to interpreter");
 		}
 	}
 
@@ -936,7 +1026,7 @@ long monitor::call_postcall_return ()
             result = (this->*handler)(-1);
 #ifndef MVEE_BENCHMARK
         if (handler == MVEE_HANDLER_DONTHAVE)
-            debugf("WARNING: missing POSTCALL handler for syscall: %d (%s)\n", callnum, getTextualSyscall(callnum));
+            debugf("WARNING: missing POSTCALL handler for syscall: %ld (%s)\n", callnum, getTextualSyscall(callnum));
 #endif
     }
 
@@ -1092,12 +1182,7 @@ void monitor::call_wait_all()
 		if (!interaction::wait(-1, status) ||
 			status.reason != STOP_SIGNAL || 
 			status.data != SIGSYSTRAP)
-		{
-			warnf("call_wait_all - error: %s - status: %s\n", 
-				  getTextualErrno(errno), getTextualMVEEWaitStatus(status).c_str());
-			shutdown(false);
-			return;
-		}
+			throw WaitFailure(0, "wait_all failure", status);
 
         for (int i = 0; i < mvee::numvariants; ++i)
         {
@@ -1118,7 +1203,7 @@ void monitor::call_wait_all()
 -----------------------------------------------------------------------------*/
 void monitor::call_execute_synced_call(bool at_syscall_exit, unsigned long callnum, std::vector<std::deque<unsigned long> >& call_args)
 {
-    debugf("Injecting synced syscall: %d (%s)\n", 
+    debugf("Injecting synced syscall: %lu (%s)\n", 
 		   callnum, 
 		   getTextualSyscall(callnum));
 
@@ -1128,15 +1213,8 @@ void monitor::call_execute_synced_call(bool at_syscall_exit, unsigned long calln
         debugf("We're at a syscall exit. Rewinding call...\n");
 
         for (int i = 0; i < mvee::numvariants; ++i)
-		{
             if (!interaction::write_ip(variants[i].variantpid, IP_IN_REGS(variants[i].regs) - SYSCALL_INS_LEN))
-			{
-				warnf("%s - failed to rewrite syscall\n",
-					  call_get_variant_pidstr(i).c_str());
-				shutdown(false);
-				return;
-			}
-		}
+				throw RwRegsFailure(i, "rewind syscall");
 
         call_resume_all();
         call_wait_all();
@@ -1162,12 +1240,7 @@ void monitor::call_execute_synced_call(bool at_syscall_exit, unsigned long calln
         }
 
 		if (!interaction::write_all_regs(variants[i].variantpid, &variants[i].regs))
-		{
-			warnf("%s - Couldn't overwrite regs\n",
-				  call_get_variant_pidstr(i).c_str());
-			shutdown(false);
-			return;
-		}
+			throw RwRegsFailure(i, "inject syscall args");
     }
 
     debugf("> injected arguments\n");

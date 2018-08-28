@@ -10,6 +10,7 @@
 -----------------------------------------------------------------------------*/
 #include <algorithm>
 #include <sys/select.h>
+#include <sys/socket.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sstream>
@@ -80,7 +81,7 @@ void fd_info::print_fd_info ()
     SERIALIZEVECTOR(fds, fd_vector);
     debugf("> fds          = %s\n",         fd_vector.c_str());
 	debugf("> paths        = %s\n",         get_path_string().c_str());
-    debugf("> flags        = 0x%04X, %s\n", access_flags, getTextualFileFlags(access_flags).c_str());
+    debugf("> flags        = 0x%04X, %s\n", (unsigned int)access_flags, getTextualFileFlags(access_flags).c_str());
     debugf("> cloexec      = %s\n",         close_on_exec ? "true" : "false");
     debugf("> master file  = %s\n",         master_file ? "true" : "false");
 	debugf("> unsynced     = %s\n",         unsynced_access ? "true" : "false");
@@ -137,16 +138,14 @@ fd_table::fd_table()
 	std::fill(paths.begin(), paths.end(), "stderr");
     create_fd_info(FT_SPECIAL, fds, paths, O_WRONLY, false, false, false, true, 0);
 
-    char*                      cwd = getcwd(NULL, 0);
-    fd_cwd = std::string(cwd);
-    free(cwd);
+	fd_cwds.resize(mvee::numvariants);
 }
 
 fd_table::fd_table(const fd_table& parent)
 {
     init();
     table     = parent.table;
-    fd_cwd    = parent.fd_cwd;
+    fd_cwds   = parent.fd_cwds;
     epoll_map = parent.epoll_map;
 }
 
@@ -154,6 +153,53 @@ fd_table::~fd_table()
 {
 	if (file_map)
 		delete file_map;
+}
+
+/*-----------------------------------------------------------------------------
+    should_open_in_all_variants - Normally we want to open every file in all
+	variants. There are some exceptions, though...
+
+	Specifically, we want to give each variant access to its own 
+	"/proc/self/maps" and "/proc/self/exe", but not to any of the other 
+	"/proc/self/..." files.
+
+	We also want to open "/dev/shm/..." and "/run/shm/..." everywhere, but not
+	open any of the other "/dev/..." files except in the master
+-----------------------------------------------------------------------------*/
+bool fd_table::should_open_in_all_variants(std::string& master_path, pid_t master_pid)
+{
+	if (master_path.find("/dev/shm/") == 0 ||
+		master_path.find("/run/shm/") == 0)
+	{
+		return true;
+	}
+	else if (master_path.find("/dev/") == 0 ||
+			 master_path.find("/run/") == 0)
+	{
+		return false;
+	}
+	else
+	{
+		std::stringstream resolved_proc_self;
+		std::string file;
+		resolved_proc_self << "/proc/" << master_pid << "/";
+
+		if (master_path.find("/proc/self/") == 0)
+		{
+			file = master_path.substr(strlen("/proc/self/"));
+		}
+		else if (master_path.find(resolved_proc_self.str()) == 0)
+		{
+			file = master_path.substr(resolved_proc_self.str().length());
+		}
+
+		if (file == "exe" || file == "maps")
+			return true;
+		else if (file != "")
+			return false;
+	}
+
+	return true;
 }
 
 /*-----------------------------------------------------------------------------
@@ -303,7 +349,8 @@ void fd_table::refresh_fd_table(std::vector<pid_t> variant_pids)
 	table.clear();
 	epoll_map.clear();
 	temporary_files.clear();
-	fd_cwd = "";
+	fd_cwds.clear();
+	fd_cwds.resize(mvee::numvariants);
 
     // I'm not sure if it's really a good idea to repopulate the table
     // as we generally can't figure out the mapping between master and slave
@@ -399,7 +446,7 @@ void fd_table::create_fd_info
     if (it != table.end())
     {
 		if (!(*mvee::config_variant_global)["use_ipmon"].asBool())
-			warnf("fd override!!! FIXME (unless IP-MON is managing fds, in which case you can safely ignore this warning)\n");
+			warnf("fd override!!! FIXME!!! Old fd was:\n");
         it->second.print_fd_info();
         free_fd_info(it->second.fds[0]);
     }
@@ -414,6 +461,105 @@ void fd_table::create_fd_info
 }
 
 /*-----------------------------------------------------------------------------
+    create_fd_info_from_proc - creates a master file whose info we read from the
+    proc interface. We need this to support file descriptor transfers over unix
+    domain sockets.
+-----------------------------------------------------------------------------*/
+void fd_table::create_master_fd_info_from_proc (int fd, pid_t master_pid)
+{
+	debugf("parsing file info from /proc/%d/fd for fd: %d\n", master_pid, fd);
+	char cmd   [500];
+	char perms [15];
+	std::string path;
+	char file  [1024];
+	int prot;
+	long flags;
+	bool found_in_fd = false;
+	bool found_in_fdinfo = false;
+	bool cloexec = false;
+	FileType type = FT_UNKNOWN;
+
+	sprintf(cmd, "ls -al /proc/%d/fd | grep \" %d \\->\" | sed 's/\\([lrwx-]*\\).*:...[0-9]* -> \\(.*\\)/\\1 \\2/'", master_pid, fd);
+	std::string line, fd_list = mvee::log_read_from_proc_pipe(cmd, NULL);
+	std::stringstream ss(fd_list);
+		
+	while(std::getline(ss, line))
+	{
+		if (sscanf(line.c_str(), "%s %s", perms, file) != 2)
+		{
+			warnf("Malformed line in create_master_fd_info_from_proc: %s\n", line.c_str());
+			continue;
+		}
+
+		if (perms[1] == 'r')
+		{
+			if (perms[2] == 'w')
+				prot = O_RDWR;
+			else
+				prot = O_RDONLY;
+		}
+		else if (perms[2] == 'w')
+		{
+			prot = O_WRONLY;
+		}
+		else
+		{
+			prot = 0;
+		}
+
+		path = std::string(file);
+		found_in_fd = true;
+		break;
+	}
+
+	if (path.find("socket:") == 0)
+		type = FT_SOCKET_NON_BLOCKING;
+	else if (path.find("pipe:") == 0)
+		type = FT_PIPE_NON_BLOCKING;
+	else if (path.find("/") != std::string::npos)
+		type = FT_REGULAR;
+
+	sprintf(cmd, "cat /proc/%d/fdinfo/%d", master_pid, fd);
+	auto fd_properties = mvee::log_read_from_proc_pipe(cmd, NULL);
+	std::stringstream props(fd_properties);
+
+	while (std::getline(props, line))
+	{
+		found_in_fdinfo = true;
+		unsigned long tmp;
+		
+		if (sscanf(line.c_str(), "pos: %ld", &tmp) == 1)
+		{
+			// I guess we don't care about this for now...
+		}
+		else if (sscanf(line.c_str(), "flags: %lo", &tmp) == 1) // octal!
+		{
+			if (((type == FT_REGULAR || type == FT_PIPE_NON_BLOCKING) && (tmp & O_CLOEXEC)) ||
+				(type == FT_SOCKET_NON_BLOCKING && (tmp & SOCK_CLOEXEC)))				
+				cloexec = true;
+			if (type == FT_SOCKET_NON_BLOCKING && !(tmp & SOCK_NONBLOCK))
+				type = FT_SOCKET_BLOCKING;
+			if (type == FT_PIPE_NON_BLOCKING && !(tmp & O_NONBLOCK))
+				type = FT_PIPE_BLOCKING;
+			flags = tmp;
+		}
+	}
+
+	if (!found_in_fd || !found_in_fdinfo)
+	{
+		warnf("error in create_master_fd_info_from_proc: file descriptor: %d not found in /proc/%d/fd or /proc/%d/fdinfo\n",
+			  fd, master_pid, master_pid);
+		return;
+	}
+
+	std::vector<unsigned long> fds(mvee::numvariants);
+	std::fill(fds.begin(), fds.end(), fd);
+	std::vector<std::string> paths(mvee::numvariants);
+	std::fill(paths.begin(), paths.end(), path);
+	create_fd_info(type, fds, paths, flags, cloexec, true, false, false);
+}
+
+/*-----------------------------------------------------------------------------
     free_fd_info - We cannot simply erase the file descriptors from the fd table
     since they might also be in the epoll map
 -----------------------------------------------------------------------------*/
@@ -422,7 +568,7 @@ std::map<unsigned long, fd_info>::iterator fd_table::free_fd_info (unsigned long
     auto it = table.find(fd);
     if (it != table.end())
     {
-        debugf("removed fd: %d (%s)\n", fd, it->second.get_path_string().c_str());
+        debugf("removed fd: %lu (%s)\n", fd, it->second.get_path_string().c_str());
         it = table.erase(it);
     }
 
@@ -430,7 +576,7 @@ std::map<unsigned long, fd_info>::iterator fd_table::free_fd_info (unsigned long
     auto epoll_it = epoll_map.find(fd);
     if (epoll_it != epoll_map.end())
     {
-        debugf("removed fd from epoll map: %d\n", fd);
+        debugf("removed fd from epoll map: %lu\n", fd);
         epoll_map.erase(epoll_it);
     }
 
@@ -439,7 +585,7 @@ std::map<unsigned long, fd_info>::iterator fd_table::free_fd_info (unsigned long
     {
         if (epoll_it->second.find(fd) != epoll_it->second.end())
         {
-            debugf("fd: %d was registered with epoll fd: %d\n", fd, epoll_it->first);
+            debugf("fd: %lu was registered with epoll fd: %lu\n", fd, epoll_it->first);
             epoll_it->second.erase(fd);
         }
     }
@@ -470,7 +616,7 @@ void fd_table::free_cloexec_fds ()
          */
         if (it->second.close_on_exec)
         {
-            debugf("removing cloexec fd: %d (%s)\n", it->second.fds[0], it->second.get_path_string().c_str());
+            debugf("removing cloexec fd: %lu (%s)\n", it->second.fds[0], it->second.get_path_string().c_str());
             it = free_fd_info(it->second.fds[0]);
         }
 		else
@@ -490,7 +636,8 @@ void fd_table::create_temporary_fd_info
 	std::string path,
 	unsigned long access_flags,
 	bool close_on_exec,
-	ssize_t original_file_size
+	ssize_t original_file_size,
+	FileType type
 )
 {
 	std::vector<unsigned long> fds(mvee::numvariants);
@@ -500,7 +647,7 @@ void fd_table::create_temporary_fd_info
 	paths[variantnum] = path;
 	fds[variantnum] = fd;
 
-    fd_info info(FT_REGULAR, fds, paths, access_flags, close_on_exec, false, true, original_file_size);
+    fd_info info(type, fds, paths, access_flags, close_on_exec, false, true, original_file_size);
 
 	auto it = temporary_files[variantnum].find(fd);
     if (it != temporary_files[variantnum].end())
@@ -526,7 +673,7 @@ void fd_table::free_temporary_fd_info (int variantnum, unsigned long fd)
 	auto it = temporary_files[variantnum].find(fd);
     if (it != temporary_files[variantnum].end())
     {
-        debugf("removed fd: %d (%s)\n", fd, it->second.get_path_string().c_str());
+        debugf("removed fd: %lu (%s)\n", fd, it->second.get_path_string().c_str());
         temporary_files[variantnum].erase(it);
     }
 }
@@ -537,6 +684,39 @@ void fd_table::free_temporary_fd_info (int variantnum, unsigned long fd)
 void fd_table::flush_temporary_files (int variantnum)
 {
 	temporary_files[variantnum].clear();
+}
+
+/*-----------------------------------------------------------------------------
+    dup_temporary_fd
+-----------------------------------------------------------------------------*/
+void fd_table::dup_temporary_fd
+(
+	int variantnum,
+	unsigned long oldfd,
+	unsigned long newfd,
+	bool close_on_exec
+)
+{
+	auto it = temporary_files[variantnum].find(oldfd);
+    if (it != temporary_files[variantnum].end())
+    {
+		debugf("duplicating fd: %lu -> %lu (%s)\n", oldfd, newfd,
+			   it->second.get_path_string().c_str());
+
+		fd_info new_info = it->second;
+		new_info.fds[variantnum] = newfd;
+		if (close_on_exec)
+		{
+			new_info.close_on_exec = true;
+			new_info.access_flags |= O_CLOEXEC;
+		}
+		else
+		{
+			new_info.close_on_exec = false;
+			new_info.access_flags &= ~O_CLOEXEC;
+		}
+		temporary_files[variantnum].insert(std::make_pair(newfd, new_info));
+	}
 }
 
 /*-----------------------------------------------------------------------------
@@ -743,9 +923,9 @@ std::string fd_table::get_full_path (int variantnum, pid_t variantpid, unsigned 
     else
     {
         // relative path... fetch the base path
-        if (dirfd == (unsigned long)AT_FDCWD)
+        if ((int)dirfd == AT_FDCWD)
         {
-			if (fd_cwd == "")
+			if (fd_cwds[variantnum].length() == 0)
 			{
 				char proc_path[100];
 				char cwd_path[2048];
@@ -753,11 +933,14 @@ std::string fd_table::get_full_path (int variantnum, pid_t variantpid, unsigned 
 				memset(cwd_path, 0, 2048);
 				sprintf(proc_path, "/proc/%d/cwd", variantpid);
 				if (readlink(proc_path, cwd_path, 2048) != -1)
+				{
 					ss << cwd_path;
+					fd_cwds[variantnum] = std::string(cwd_path);
+				}
 			}
 			else
 			{
-				ss << fd_cwd;
+				ss << fd_cwds[variantnum];
 			}
         }
         else
@@ -857,7 +1040,7 @@ std::vector<unsigned long> fd_table::epoll_id_map(unsigned long epfd, unsigned l
         }
     }
 
-    warnf("couldn't map master id 0x" PTRSTR " to slave ids for epoll fd: %d\n", master_id, epfd);
+    warnf("couldn't map master id 0x" PTRSTR " to slave ids for epoll fd: %lu\n", master_id, epfd);
 
     std::vector<unsigned long> result(mvee::numvariants);
     for (int i = 0; i < mvee::numvariants; ++i)
@@ -955,22 +1138,25 @@ void fd_table::master_fd_set_to_non_master_fd_sets(fd_set *master_fd_set, int nf
 /*-----------------------------------------------------------------------------
     chdir
 -----------------------------------------------------------------------------*/
-void fd_table::chdir(const char* path)
+void fd_table::chdir(int variantnum, const char* path)
 {
-    if (path && path[0] != '/')
-    {
-        std::string tmp = fd_cwd;
-        tmp   += "/";
-        tmp   += path;
-        fd_cwd = tmp;
-//		warnf("trying to chdir to: %s\n", tmp.c_str());
-//		return ::chdir(tmp.c_str());
-    }
-    else
-    {
-        fd_cwd = path;
-//		return ::chdir(path);
-    }
+	int start = (variantnum == -1) ? 0 : variantnum;
+	int lim = (variantnum == -1) ? mvee::numvariants : variantnum + 1;
+
+	for (int i = start; i < lim; ++i)
+	{
+		if (path && path[0] != '/')
+		{
+			std::string tmp = fd_cwds[i];
+			tmp   += "/";
+			tmp   += path;
+			fd_cwds[i] = mvee::os_normalize_path_name(tmp);
+		}
+		else
+		{
+			fd_cwds[i] = mvee::os_normalize_path_name(path);
+		}
+	}
 }
 
 /*-----------------------------------------------------------------------------
@@ -993,20 +1179,21 @@ void fd_table::set_fd_unlinked(unsigned long fd, int variantnum)
 -----------------------------------------------------------------------------*/
 void fd_table::set_file_unlinked(const char* path)
 {
-	char* resolved_path = realpath(path, NULL);
-
-	if (!resolved_path)
-		resolved_path = strdup(path);
+	debugf("Unlinking file: %s\n", path);
 
 	for (auto it = table.begin(); it != table.end(); ++it)
 	{
 		int bound = it->second.unsynced_access ? mvee::numvariants : 1;
 		for (int i = 0; i < bound; ++i)
-			if (!strcmp(it->second.paths[i].c_str(), resolved_path))
+		{
+			if (!strcmp(it->second.paths[i].c_str(), path))
+			{
 				it->second.unlinked = true;
+				debugf("Setting unlink flag for file:\n");
+				it->second.print_fd_info();
+			}
+		}
 	}
-
-	free(resolved_path);
 }
 
 /*-----------------------------------------------------------------------------
@@ -1020,4 +1207,3 @@ bool fd_table::is_fd_unlinked(unsigned long fd, int variantnum)
 		return true;
 	return false;
 }
-

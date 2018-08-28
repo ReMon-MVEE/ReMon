@@ -1,0 +1,1 @@
+ARCH_LDFLAGS = -static -lunwind-ptrace -lunwind-arm -llzma

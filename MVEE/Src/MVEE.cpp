@@ -58,8 +58,11 @@ std::map<std::string, std::weak_ptr<mmap_addr2line_proc> >
                                        mvee::addr2line_cache;
 std::map<std::string, std::weak_ptr<dwarf_info> >
                                        mvee::dwarf_cache;
+std::map<std::string, std::string>     mvee::unstripped_binaries_cache;
 bool                                   mvee::should_garbage_collect              = false;
-std::vector<monitor*>                  mvee::monitor_gclist;
+std::vector<monitor*>                  mvee::dead_monitors;
+std::vector<monitor*>                  mvee::active_monitors;
+std::vector<monitor*>                  mvee::inactive_monitors;
 std::map<pid_t, std::vector<pid_t> >   mvee::variant_pid_mapping;
 std::map<int, monitor*>                mvee::monitor_id_mapping;
 int                                    mvee::next_monitorid                      = 0;
@@ -72,8 +75,7 @@ int                                    mvee::num_physical_cpus                  
 pid_t                                  mvee::process_pid                         = 0;
 __thread pid_t                         mvee::thread_pid                          = 0;
 std::map<std::string, std::string>     mvee::interp_map;
-std::vector<pid_t>                     mvee::shutdown_kill_list;
-bool                                   mvee::shutdown_should_generate_backtraces = false;
+bool                                   mvee::should_generate_backtraces          = false;
 volatile unsigned long                 mvee::can_run                             = 0;
 std::string                            mvee::config_file_name                    = "";
 bool                                   mvee::config_show                         = false;
@@ -152,6 +154,44 @@ std::string mvee::upcase(const char* lower_case_string)
 }
 
 /*-----------------------------------------------------------------------------
+    mask_is_unchecked_syscall
+-----------------------------------------------------------------------------*/
+unsigned char mvee::mask_is_unchecked_syscall(unsigned char* mask, unsigned long syscall_no)
+{
+	unsigned long no_to_byte, bit_in_byte;
+
+	if (syscall_no > ROUND_UP(MAX_CALLS, 8))
+		return 0;
+
+	no_to_byte  = syscall_no / 8;
+	bit_in_byte = syscall_no % 8;
+
+	if (mask[no_to_byte] & (1 << (7 - bit_in_byte)))
+		return 1;
+	return 0;
+}
+
+/*-----------------------------------------------------------------------------
+    mask_set_unchecked_syscall
+-----------------------------------------------------------------------------*/
+void mvee::mask_set_unchecked_syscall(unsigned char* mask, unsigned long syscall_no, unsigned char unchecked)
+{
+	unsigned long no_to_byte, bit_in_byte;
+
+	if (syscall_no > ROUND_UP(MAX_CALLS, 8))
+		return;
+
+	no_to_byte  = syscall_no / 8;
+	bit_in_byte = syscall_no % 8;
+
+	if (unchecked)
+		mask[no_to_byte] |= (1 << (7 - bit_in_byte));
+	else
+		mask[no_to_byte] &= ~(1 << (7 - bit_in_byte));
+}
+
+
+/*-----------------------------------------------------------------------------
     mvee_old_sigset_to_new_sigset
 -----------------------------------------------------------------------------*/
 sigset_t mvee::old_sigset_to_new_sigset(unsigned long old_sigset)
@@ -178,12 +218,21 @@ std::string mvee::get_alias(int variantnum, std::string path)
 	if (alias != aliases[variantnum].end())
 		return alias->second;
 
+	// built-in aliases
 	if (path.find("/dev/shm/") == 0 ||
 		path.find("/run/shm/") == 0)
 	{
 		std::stringstream ss;
 		ss << path << "_variant" << variantnum;
 		return ss.str();
+	}
+	else if (path.find("/home/stijn/glibc-build/etc/") == 0)
+	{
+		return path.replace(0, strlen("/home/stijn/glibc-build/etc/"), "/etc/");
+	}
+	else if (path.find("/home/stijn/glibc-build/") == 0)
+	{
+		return path.replace(0, strlen("/home/stijn/glibc-build/"), "/usr/");
 	}
 
 	return "";
@@ -303,7 +352,7 @@ std::shared_ptr<mmap_addr2line_proc> mvee::get_addr2line_proc(const std::string&
 }
 
 /*-----------------------------------------------------------------------------
-    mvee_mman_dwarf_find_info - we store weak pointers in the dwarf cache so
+    get_dwarf_info - we store weak pointers in the dwarf cache so
     there's always a chance that a dwarf_info we find in the cache has been
     invalidated
 
@@ -323,6 +372,124 @@ std::shared_ptr<dwarf_info> mvee::get_dwarf_info(const std::string& file)
     }
 
     return result;
+}
+
+/*-----------------------------------------------------------------------------
+    os_get_build_id - get the GNU build ID from the ELF notes section
+-----------------------------------------------------------------------------*/
+std::string mvee::os_get_build_id(const std::string& file)
+{
+	std::stringstream cmd;
+	cmd << "readelf -n " << file << " | grep \"Build ID:\" | cut -d':' -f2 | tr -d ' '";
+	return mvee::log_read_from_proc_pipe(cmd.str().c_str(), NULL);
+}
+
+/*-----------------------------------------------------------------------------
+    os_get_unstripped_binary - look for the unstripped version of the specified
+	ELF binary. Return "" if no such binary can be found in /usr/lib/debug
+-----------------------------------------------------------------------------*/
+std::string mvee::os_get_unstripped_binary(const std::string& file)
+{
+	// First, see if we've already done this lookup before
+	{
+		MutexLock lock(&mvee::global_lock);
+
+		auto it = mvee::unstripped_binaries_cache.find(file);
+		if (it != mvee::unstripped_binaries_cache.end())
+			return it->second;
+	}
+
+	// Not in the cache. Let's fetch the build ID and see if we
+	// can find a binary with a matching build ID and name in /usr/lib/debug
+	auto orig_build_id = mvee::os_get_build_id(file);
+
+	// Look for other unstripped versions of the binary now...
+	auto basename = file.substr(file.find_last_of('/'));
+	std::stringstream cmd;
+	cmd << "find /usr/lib/debug/* | grep " << basename;
+	std::stringstream binaries(mvee::log_read_from_proc_pipe(cmd.str().c_str(), NULL));
+	std::string binary;
+
+	while(std::getline(binaries, binary))
+	{
+		auto build_id = mvee::os_get_build_id(binary);
+
+		if (orig_build_id == build_id)
+		{
+			MutexLock lock(&mvee::global_lock);
+
+			auto it = mvee::unstripped_binaries_cache.find(file);
+			if (it == mvee::unstripped_binaries_cache.end())
+			{
+				debugf("Found unstripped version of ELF file\n");
+				debugf("> Original (stripped) file: %s\n", file.c_str());
+				debugf("> Unstripped file: %s\n", binary.c_str());
+				mvee::unstripped_binaries_cache.insert(std::make_pair(file, binary));
+			}
+			return binary;
+		}
+	}
+
+	return "";	
+}
+
+/*-----------------------------------------------------------------------------
+    os_has_noninstrumented_atomics
+-----------------------------------------------------------------------------*/
+bool mvee::os_has_noninstrumented_atomics (const std::string& file)
+{
+	static std::map<std::string, bool> has_noninstrumented_atomics;
+   
+	// check if it's already in the map
+	{
+		MutexLock lock(&mvee::global_lock);
+		auto it = has_noninstrumented_atomics.find(file);
+
+		if (it != has_noninstrumented_atomics.end())
+			return it->second;
+	}
+
+	if (file.find("/patched_binaries/") == std::string::npos)
+	{
+		// not in the map yet, disassemble and check
+		std::stringstream cmd;
+		cmd << "objdump --disassemble " << file << " | " << MVEE_ARCH_FIND_ATOMIC_OPS_STRING;
+		std::stringstream instructions(mvee::log_read_from_proc_pipe(cmd.str().c_str(), NULL));
+		std::string instruction, prev_instruction;
+
+		while (std::getline(instructions, instruction))
+		{
+			// the filtered disassembly includes only atomic operations and calls to the sync agent
+			// Thus, if this line is nog a call to the sync agent, it must be an atomic op
+			if (instruction.find("mvee_atomic") == std::string::npos)
+			{
+				// check if the previous instruction was a call to the preop function
+				// if it was, then this atomic op is wrapped
+				if (prev_instruction.find("mvee_atomic_preop") == std::string::npos)
+				{
+					MutexLock lock(&mvee::global_lock);
+					auto it = has_noninstrumented_atomics.find(file);
+				
+					if (it == has_noninstrumented_atomics.end())
+						has_noninstrumented_atomics.insert(std::make_pair(file, true));
+					return true;				
+				}
+			}
+
+			prev_instruction = instruction;
+		}
+	}
+
+	// no non-instrumented ops found
+	{
+		MutexLock lock(&mvee::global_lock);
+		auto it = has_noninstrumented_atomics.find(file);
+		
+		if (it == has_noninstrumented_atomics.end())
+			has_noninstrumented_atomics.insert(std::make_pair(file, false));
+	}
+
+	return false;	
 }
 
 /*-----------------------------------------------------------------------------
@@ -421,7 +588,8 @@ int mvee::os_get_num_physical_cpus()
 -----------------------------------------------------------------------------*/
 void mvee::os_check_ptrace_scope()
 {
-    std::string yama = mvee::log_read_from_proc_pipe("sysctl kernel.yama.ptrace_scope", NULL);
+#ifdef MVEE_ARCH_HAS_YAMA_LSM
+    std::string yama = mvee::log_read_from_proc_pipe("/sbin/sysctl kernel.yama.ptrace_scope", NULL);
 
     // If we're not running on ubuntu, we won't get any feedback through stdout
     if (yama == "")
@@ -445,6 +613,7 @@ void mvee::os_check_ptrace_scope()
             printf("Disabled yama!\n");
         printf("============================================================================================================================\n");
     }
+#endif
 }
 
 /*-----------------------------------------------------------------------------
@@ -453,6 +622,7 @@ void mvee::os_check_ptrace_scope()
 -----------------------------------------------------------------------------*/
 void mvee::os_check_kernel_cmdline()
 {
+#ifdef MVEE_ARCH_HAS_VSYSCALL
     std::string cmdline = mvee::log_read_from_proc_pipe("cat /proc/cmdline", NULL);
 
     if (cmdline == "")
@@ -473,6 +643,7 @@ void mvee::os_check_kernel_cmdline()
         printf("GHUMVEE will now continue running but keep in mind that you will probably see mismatches until you fix the vsyscall setting!\n");
         printf("============================================================================================================================\n");
     }
+#endif
 }
 
 /*-----------------------------------------------------------------------------
@@ -488,7 +659,7 @@ bool mvee::os_try_update_shmmax()
 
 #ifndef MVEE_BENCHMARK
     unsigned long shmmax         = std::stoul(mvee::log_read_from_proc_pipe("sysctl kernel.shmmax | cut -d' ' -f3 | tr -d '\\n'", NULL));
-    debugf("current kernel.shmmax = %d\n", shmmax);
+    debugf("current kernel.shmmax = %lu\n", shmmax);
     debugf("===> trying to adjust kernel.shmmax\n");
 #endif
 
@@ -773,7 +944,7 @@ unsigned long mvee::os_get_entry_point_address(std::string& binary)
 		{
 			Elf64_Phdr* phdr = elf64_getphdr(elf);
 			size_t phdr_cnt;
-			unsigned long image_base = 0xFFFFFFFFFFFFFFFF;
+			unsigned long long image_base = 0xFFFFFFFFFFFFFFFF;
 			
 			if (!phdr || elf_getphdrnum(elf, &phdr_cnt) == -1)
 				goto error;
@@ -799,7 +970,7 @@ unsigned long mvee::os_get_entry_point_address(std::string& binary)
 		{
 			Elf32_Phdr* phdr = elf32_getphdr(elf);
 			size_t phdr_cnt;
-			unsigned long image_base = 0x00000000FFFFFFFF;
+			unsigned long long image_base = 0x00000000FFFFFFFF;
 			
 			if (!phdr || elf_getphdrnum(elf, &phdr_cnt) == -1)
 				goto error;
@@ -865,9 +1036,20 @@ std::string mvee::os_normalize_path_name(std::string path)
 	if (!tmp)
 	{
 		if (errno == ENOENT)
+		{
+			auto slash = path.rfind('/');
+			if (slash != std::string::npos)
+			{
+				auto dir_only = path.substr(0, slash);
+				auto file = path.substr(slash);
+				auto normalized_dir = os_normalize_path_name(dir_only);
+				return normalized_dir + file;
+			}
+
 			return path;
+		}
 		else
-			return std::string("");
+			return path;
 	}
 	{
 		std::string result(tmp);
@@ -893,55 +1075,15 @@ void mvee::unlock()
 }
 
 /*-----------------------------------------------------------------------------
-    open_signal_file - we open a file in tmp. An external
-    process can write to this file to communicate with the monitor and request
-    backtraces
------------------------------------------------------------------------------*/
-char* mvee::open_signal_file()
-{
-    char*       signal_file = NULL;
-
-#if !defined(MVEE_BENCHMARK) || defined(MVEE_FORCE_ENABLE_BACKTRACING)
-    int         fd          = open("/tmp/MVEE_signal_file.tmp", O_RDWR | O_CREAT | O_TRUNC, S_IRWXU | S_IRWXG | S_IRWXO);
-
-    if (fd == -1)
-    {
-        warnf("couldn't open signal file. Error = %d (%s)\n", errno, getTextualErrno(errno));
-        return NULL;
-    }
-
-    const char* init_buf    = "000";
-    int         numwritten  = write(fd, init_buf, 3);
-    if (numwritten != 3)
-    {
-        warnf("couldn't write to signal file. Error = %d (%s)\n", errno, getTextualErrno(errno));
-        return NULL;
-    }
-    signal_file = (char*)mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
-    if (signal_file == (char*)-1)
-    {
-        warnf("couldn't map signal file. Error = %d (%s)\n", errno, getTextualErrno(errno));
-        return signal_file;
-    }
-
-    memset(signal_file, 48, 4096);
-    close(fd);
-#endif
-
-    return signal_file;
-}
-
-/*-----------------------------------------------------------------------------
     request_shutdown -
 -----------------------------------------------------------------------------*/
 void mvee::request_shutdown(bool should_backtrace)
 {
-//	warnf("Shutdown requested - should backtrace: %d\n", should_backtrace);
     mvee::lock();
-    mvee::shutdown_signal                     = SIGINT;
-    mvee::shutdown_should_generate_backtraces = should_backtrace;
+    mvee::shutdown_signal            = SIGINT;
+    mvee::should_generate_backtraces = should_backtrace;
     mvee::unlock();
-    pthread_cond_signal(&mvee::global_cond);
+    pthread_cond_broadcast(&mvee::global_cond);
 }
 
 /*-----------------------------------------------------------------------------
@@ -957,12 +1099,6 @@ void mvee::request_shutdown(bool should_backtrace)
 void mvee::shutdown(int sig, int should_backtrace)
 {
     /*
-      warnf("monitor closing.\n");
-      warnf("shutdown sig: %d (%s)\n", sig, getTextualSig(sig));
-      warnf("should backtrace: %d\n",  should_backtrace);
-    */
-
-    /*
     retarded hack here. We have no way
     to unblock monitors that are waitpid'ing UNLESS we trigger an event that
     causes the waitpid to return
@@ -970,19 +1106,25 @@ void mvee::shutdown(int sig, int should_backtrace)
     => we send a SIGALRM to one of the variants
      */
     mvee::lock();
-    for (std::map<int, monitor*>::iterator it
-             = mvee::monitor_id_mapping.begin(); it != mvee::monitor_id_mapping.end(); ++it)
-        it->second->signal_shutdown();
+    for (auto it : mvee::active_monitors)
+	{
+        it->signal_shutdown();
+	}
+    for (auto it : mvee::inactive_monitors)
+	{
+        // no need to send SIGUSR1. This monitor is already waiting to be shut down
+		it->monitor_tid = 0; 
+        it->signal_shutdown();
+	}
     mvee::unlock();
 
     // wait for all monitors to terminate
     while (1)
     {
-        //        mvee::garbage_collect();
         mvee::lock();
-        if (mvee::monitor_id_mapping.size() <= 0)
+        if (mvee::active_monitors.size() == 0 &&
+			mvee::inactive_monitors.size() == 0)
         {
-            //            warnf("all monitors have unregistered. Closing!\n");
             mvee::unlock();
             break;
         }
@@ -992,26 +1134,7 @@ void mvee::shutdown(int sig, int should_backtrace)
 
     printf("all monitors terminated\n");
     mvee::log_fini(true);
-
-    mvee::lock();
-    while (!mvee::shutdown_kill_list.empty())
-    {
-        //printf("killing proc: %d\n", mvee_shutdown_kill_list.back());
-        kill(mvee::shutdown_kill_list.back(), SIGKILL);
-        mvee::shutdown_kill_list.pop_back();
-    }
-    mvee::unlock();
-
     exit(0);
-}
-
-/*-----------------------------------------------------------------------------
-    shutdown_add_to_kill_list -
------------------------------------------------------------------------------*/
-void mvee::shutdown_add_to_kill_list   (pid_t kill_pid)
-{
-    MutexLock lock(&mvee::global_lock);
-    mvee::shutdown_kill_list.push_back(kill_pid);
 }
 
 /*-----------------------------------------------------------------------------
@@ -1025,23 +1148,25 @@ void mvee::garbage_collect()
 
         mvee::should_garbage_collect = false;
 
-        // copy all dead monitors to a local gclist first and then clean
-        // them up without locking the global state...
-        while (mvee::monitor_gclist.size() > 0)
+        // copy all dead monitors to a local gclist first and then clean them up
+        // without locking the global state...
+        while (mvee::dead_monitors.size() > 0)
         {
-            monitor* mon = mvee::monitor_gclist.back();
+            auto mon = mvee::dead_monitors.back();
             local_gclist.push_back(mon);
-            mvee::monitor_gclist.pop_back();
-        }}
+            mvee::dead_monitors.pop_back();
+        }
+	}
 
     while (local_gclist.size() > 0)
     {
-        monitor* mon = local_gclist.back();
+        auto mon = local_gclist.back();
 
         if (mvee::shutdown_signal == 0)
             mon->join_thread();
 
-        logf("garbage collected monitor: %d\n", mon->monitorid);
+        logf("garbage collected monitor: %d\n", 
+			 mon->monitorid);
         SAFEDELETE(mon);
         local_gclist.pop_back();
     }
@@ -1056,11 +1181,10 @@ bool mvee::is_multiprocess()
     int       num_tgids = 0;
 
     MutexLock lock(&mvee::global_lock);
-    for (std::map<int, monitor*>::iterator it
-             = mvee::monitor_id_mapping.begin(); it != mvee::monitor_id_mapping.end(); ++it)
+    for (auto it : mvee::active_monitors)
     {
         pid_t tgid;
-        if ((tgid = it->second->get_mastertgid()) != prev_tgid)
+        if ((tgid = it->get_mastertgid()) != prev_tgid)
         {
             if (num_tgids++)
                 return true;
@@ -1081,21 +1205,20 @@ std::set<int> mvee::get_unavailable_cores(int* most_recent_core)
 
     MutexLock lock(&mvee::global_lock);
 
-    for (std::map<int, monitor*>::iterator it
-             = mvee::monitor_id_mapping.begin(); it != mvee::monitor_id_mapping.end(); ++it)
+    for (auto it : mvee::monitor_id_mapping)
 	{
-		int core = it->second->get_master_core();
+		int core = it.second->get_master_core();
 
 		if (core != -1)
 		{
 			debugf("cores [%d, %d] are currently in use by monitor %d\n",
 						core,
 						core + mvee::numvariants - 1,
-						it->second->monitorid);
+						it.second->monitorid);
 
 			result.insert(core);
 
-			if (it->first == mvee::active_monitorid - 1
+			if (it.first == mvee::active_monitorid - 1
 				&& most_recent_core)
 				*most_recent_core = core;
 		}
@@ -1114,12 +1237,21 @@ int mvee::get_next_monitorid()
 }
 
 /*-----------------------------------------------------------------------------
-    get_next_monitorid
+    get_should_generate_backtraces
 -----------------------------------------------------------------------------*/
 bool mvee::get_should_generate_backtraces()
 {
     MutexLock lock(&mvee::global_lock);
-    return mvee::shutdown_should_generate_backtraces;
+    return mvee::should_generate_backtraces;
+}
+
+/*-----------------------------------------------------------------------------
+    set_should_generate_backtraces
+-----------------------------------------------------------------------------*/
+void mvee::set_should_generate_backtraces()
+{
+    mvee::should_generate_backtraces = true;
+	__sync_synchronize();
 }
 
 /*-----------------------------------------------------------------------------
@@ -1145,6 +1277,7 @@ detachedvariant* mvee::remove_detached_variant(pid_t variantpid)
         {
             detachedvariant* variant = *it;
             mvee::detachlist.erase(it);
+			pthread_cond_broadcast(&mvee::global_cond);
             return variant;
         }
     }
@@ -1195,9 +1328,8 @@ int mvee::have_pending_variants(monitor* mon)
 -----------------------------------------------------------------------------*/
 void mvee::set_should_check_multithread_state(int monitorid)
 {
-    MutexLock                         lock(&mvee::global_lock);
-    std::map<int, monitor*>::iterator it
-        = mvee::monitor_id_mapping.find(monitorid);
+    MutexLock lock(&mvee::global_lock);
+    auto it = mvee::monitor_id_mapping.find(monitorid);
     if (it != mvee::monitor_id_mapping.end())
         it->second->set_should_check_multithread_state();
 }
@@ -1224,6 +1356,7 @@ void mvee::register_monitor(monitor* mon)
     {
 		MutexLock lock(&mvee::global_lock);
         mvee::monitor_id_mapping.insert(std::pair<int, monitor*>(mon->monitorid, mon));
+		mvee::active_monitors.push_back(mon);
 	}
 
     mon->signal_registration();
@@ -1232,31 +1365,77 @@ void mvee::register_monitor(monitor* mon)
 /*-----------------------------------------------------------------------------
     unregister_monitor
 -----------------------------------------------------------------------------*/
-void mvee::unregister_monitor(monitor* mon)
+void mvee::unregister_monitor(monitor* mon, bool move_to_dead_monitors)
 {
-    std::map<int, monitor*>::iterator it;
-    bool                              should_shutdown = false;
+    bool should_shutdown = false;
 
     {
 		MutexLock lock(&mvee::global_lock);
-        it                           = monitor_id_mapping.find(mon->monitorid);
+        auto it = monitor_id_mapping.find(mon->monitorid);
         if (it != monitor_id_mapping.end())
             monitor_id_mapping.erase(it);
+		auto it2 = std::find(active_monitors.begin(), active_monitors.end(), mon);
+		if (it2 != active_monitors.end())
+			active_monitors.erase(it2);
 
-        monitor_gclist.push_back(mon);
+		if (move_to_dead_monitors)
+		{
+			auto it3 = std::find(inactive_monitors.begin(), inactive_monitors.end(), mon);
+			if (it3 != inactive_monitors.end())
+				inactive_monitors.erase(it3);
 
-        if (mvee::monitor_id_mapping.size() <= 0)
+			dead_monitors.push_back(mon);
+			should_garbage_collect = true;
+		}
+		else
+		{
+			inactive_monitors.push_back(mon);
+		}
+
+        if (active_monitors.size() <= 0)
             should_shutdown = true;
 
-        mvee::should_garbage_collect = true;
-        pthread_cond_signal(&mvee::global_cond);
+        pthread_cond_broadcast(&mvee::global_cond);
 
         if (mon == mvee::active_monitor)
             mvee::active_monitor = NULL;
 	}
 
     if (should_shutdown)
-        mvee::request_shutdown(false);
+        mvee::request_shutdown(mvee::should_generate_backtraces);
+}
+
+/*-----------------------------------------------------------------------------
+    is_monitored_tgid - caller needs the global lock!
+-----------------------------------------------------------------------------*/
+bool mvee::is_monitored_tgid(pid_t tgid)
+{
+	// never shut down if we still have detached variants
+	if (detachlist.size() > 0)
+		return true;
+
+	for (auto it : active_monitors)
+	{
+		for (int i = 0; i < mvee::numvariants; ++i)
+		{
+			if (it->variants[i].varianttgid == tgid &&
+				!it->variants[i].variant_terminated)
+				return true;
+		}
+	}
+
+	return false;
+}
+
+
+/*-----------------------------------------------------------------------------
+    mvee_mon_external_backtrace_request - request backtraces when we shut down
+    the monitor
+-----------------------------------------------------------------------------*/
+void mvee_mon_external_backtrace_request(int sig)
+{
+	mvee::set_should_generate_backtraces();
+	mvee_mon_external_termination_request(sig);
 }
 
 /*-----------------------------------------------------------------------------
@@ -1268,10 +1447,7 @@ void mvee_mon_external_termination_request(int sig)
     {
         printf("EXTERNAL TERMINATION REQUEST - MONITORID: %d\n", mvee::active_monitorid);
         if (!mvee::shutdown_signal)
-        {
-            mvee::shutdown_signal = sig;
-            pthread_cond_signal(&mvee::global_cond);
-        }
+			mvee::request_shutdown(mvee::should_generate_backtraces);
         else
             exit(0);
     }
@@ -1452,8 +1628,18 @@ void mvee::start_monitored()
         mvee::active_monitor = new monitor(procs);
 
         // Install signal handlers for SIGINT and SIGQUIT so we can shut down safely after CTRL+C
-        signal(SIGINT,  mvee_mon_external_termination_request);
-        signal(SIGQUIT, mvee_mon_external_termination_request);
+		struct sigaction sigact;
+		sigact.sa_handler = mvee_mon_external_termination_request;
+		sigemptyset(&set);
+		sigact.sa_mask    = set;
+		sigact.sa_flags   = 0;
+		
+		sigaction(SIGINT, &sigact, nullptr);
+		sigaction(SIGQUIT, &sigact, nullptr);
+		
+		// Same thing but with backtraces
+		sigact.sa_handler = mvee_mon_external_backtrace_request;
+		sigaction(SIGUSR2, &sigact, nullptr);
 
         for (int i = 0; i < mvee::numvariants; ++i)
         {
@@ -1497,7 +1683,6 @@ void mvee::start_monitored()
         // everything is set up and ready to go...
         mvee::active_monitor   = NULL;
         mvee::active_monitorid = -1;
-        char*     signal_file = mvee::open_signal_file();
         while (true)
         {
             bool should_gc = false;
@@ -1505,14 +1690,9 @@ void mvee::start_monitored()
             mvee::lock();
             if (mvee::shutdown_signal)
             {
-                if (signal_file && signal_file[0] == '1')
-				{
-					warnf("Shutdown requested by MVEE_backtrace\n");
-                    mvee::shutdown_should_generate_backtraces = true;
-				}
                 mvee::unlock();
                 mvee::shutdown(mvee::shutdown_signal,
-                               mvee::shutdown_should_generate_backtraces ? 1 : 0);
+                               mvee::should_generate_backtraces ? 1 : 0);
                 return;
             }
 
@@ -1549,7 +1729,7 @@ void mvee::start_monitored()
 			fprintf(stderr, "Couldn't accept tracing\n");
 
         // Stop the variant so we can detach the main monitor thread.
-        raise(SIGSTOP);
+        kill(getpid(), SIGSTOP);
 
 		// Wait in a busy loop while we wait for the designated monitor
 		// thread to attach

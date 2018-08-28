@@ -21,6 +21,7 @@
 #include <deque>
 #include <set>
 #include "MVEE_build_config.h"
+#include "MVEE_macros.h"
 #include <json/json.h>
 
 /*-----------------------------------------------------------------------------
@@ -60,6 +61,15 @@ public:
 #define NO_CALL   0x01000000
 
 /*-----------------------------------------------------------------------------
+  Syscall mask macros 
+-----------------------------------------------------------------------------*/
+#define SYSCALL_MASK(mask) 				    unsigned char mask[ROUND_UP(MAX_CALLS, 8) / 8]
+#define SYSCALL_MASK_CLEAR(mask) 			memset(mask, 0, ROUND_UP(MAX_CALLS, 8) / 8)
+#define SYSCALL_MASK_SET(mask, syscall) 	mvee::mask_set_unchecked_syscall(mask, syscall, 1)
+#define SYSCALL_MASK_UNSET(mask, syscall)   mvee::mask_set_unchecked_syscall(mask, syscall, 0)
+#define SYSCALL_MASK_ISSET(mask, syscall) 	mvee::mask_is_unchecked_syscall(mask, syscall)
+
+/*-----------------------------------------------------------------------------
     Global MVEE state
 -----------------------------------------------------------------------------*/
 //
@@ -77,13 +87,13 @@ public:
     // Log a message to the log files. This function is disabled if the
     // MVEE_BENCHMARK preprocessor option is set.
 	// 
-    static void        logf                        (const char* format, ...);
+    static void        logf                        (const char* format, ...) __attribute__((format (printf, 1, 2)));
 
 	// 
 	// Log a message to stdout and to the log files. Even with MVEE_BENCHMARK
 	// enabled, the message is still printed to stdout.
     //
-    static void        warnf                       (const char* format, ...);
+    static void        warnf                       (const char* format, ...) __attribute__((format (printf, 1, 2)));
 
 	//
 	// Log the specified ptrace operation to the ptrace log file.
@@ -140,12 +150,6 @@ public:
     static void start_unmonitored           ();
 
 	// 
-	// Adds a variant to a list of processes that may need to be forcibly killed
-	// upon MVEE shutdown
-	// 
-    static void shutdown_add_to_kill_list   (pid_t kill_pid);
-
-	// 
 	// Reads the MVEE configuration from MVEE.ini, possibly creating the file in
 	// the process.
     //
@@ -190,7 +194,13 @@ public:
 	// This function also shuts down the MVEE when the last running monitor
 	// unregisters.
     //
-    static void                                 unregister_monitor          (monitor* mon);
+    static void                                 unregister_monitor          (monitor* mon, bool move_to_dead_monitors=true);
+
+	//
+	// Returns true if a variant in the specified thread group is still in the
+	// detach list OR is still being monitored by an active monitor
+	//
+	static bool                                 is_monitored_tgid           (pid_t tgid);
 
 	// 
 	// Returns true if the MVEE is monitoring variants that consist of multiple
@@ -214,6 +224,8 @@ public:
 	// shutting down.
 	// 
     static bool                                 get_should_generate_backtraces();
+	static void                                 set_should_generate_backtraces();
+    static bool                                 should_generate_backtraces;
 
 	// 
 	// Tell all monitors to check if their variants are multithreaded.
@@ -409,6 +421,18 @@ public:
 	//
 	static std::string   os_normalize_path_name      (std::string path);
 
+	//
+	// Find the unstripped version of an ELF file
+	//
+	static std::string   os_get_build_id             (const std::string& file);
+	static std::string   os_get_unstripped_binary    (const std::string& file);
+
+	//
+	// Check if the specified ELF file has non-instrumented atomic operations 
+	// in its executable code sections
+	//
+	static bool          os_has_noninstrumented_atomics (const std::string& file);
+
     // *************************************************************************
     // Miscellaneous Support Functions
     // *************************************************************************
@@ -448,8 +472,14 @@ public:
     // Access to global state - This lock protects the public variables that may
     // be modified at run-time
     //
-    static void lock                        ();
-    static void unlock                      ();
+    static void                    lock ();
+    static void                    unlock ();
+
+	// 
+	// Syscall bitmask support 
+	//
+	static unsigned char           mask_is_unchecked_syscall  (unsigned char* mask, unsigned long syscall_no);
+	static void                    mask_set_unchecked_syscall (unsigned char* mask, unsigned long syscall_no, unsigned char unchecked);
     
     // *************************************************************************
     // Monitor settings and properties. All of these are initialized during
@@ -487,9 +517,9 @@ public:
 	static Json::Value*             config_variant_exec;
 	static Json::Value*             config_monitor;
 
-    // monitor object and id of the monitor we're running in this thread
-    // we used to use this for almost everything but nowadays it's really just here
-    // for logging...
+    // monitor object and id of the monitor we're running in this thread we used
+    // to use this for almost everything but nowadays it's really just here for
+    // logging...
     static __thread monitor*        active_monitor;
     static __thread int             active_monitorid;
 
@@ -515,6 +545,21 @@ public:
     // Lock/Cond that protects the variables below
     //
     static pthread_mutex_t          global_lock;
+
+	//
+	// This cond var is used to coordinate the safe shutdown of the MVEE.
+	// There are two types of threads that can wait on this cond var:
+	//
+	// 1) The "management thread" (aka the main thread of the MVEE process)
+	// waits for this cond var and gets woken up whenever:
+	// * a monitor moves from the active to the inactive list
+	// * a monitor moves from the inactive to the dead list
+	// * an external user or process requests a full MVEE shutdown 
+	// by sending a signal to the MVEE process
+	// 
+	// 2) Monitor threads wait for this cond var when they're shutting down
+	// and they're waiting for other monitors in the same thread group to
+	// shut down
     static pthread_cond_t           global_cond;
 
     //
@@ -527,6 +572,12 @@ public:
 	//
     static std::map<std::string, std::weak_ptr<dwarf_info> >
                                     dwarf_cache;
+
+	//
+	// Cache that maps stripped ELF files onto corresponding unstripped files
+	//
+	static std::map<std::string, std::string>
+                                    unstripped_binaries_cache;
 
     //
     // We use this to coordinate the initial transfer of the variants' ptrace 
@@ -615,7 +666,16 @@ private:
     static bool                                 should_garbage_collect;
 
     // list of monitors to be garbage collected
-    static std::vector<monitor*>                monitor_gclist;
+    static std::vector<monitor*>                dead_monitors;
+
+	// list of active monitors
+	static std::vector<monitor*>                active_monitors;
+
+	// list of inactive monitors
+	// We move monitors into this list if the variants they're monitoring
+	// are suspended indefinitely (e.g., because they triggered a divergence),
+	// but we don't want to kill these variants just yet.
+	static std::vector<monitor*>                inactive_monitors;
 
     // maps every variant pid onto the set of pids it's part of
     // i.e. this would contain M[A] -> {M[A], S[A]} and also S[A] -> {M[A], S[A]}
@@ -641,12 +701,6 @@ private:
     static pid_t                                process_pid;
     static __thread pid_t                       thread_pid;
     static std::map<std::string, std::string>   interp_map;
-
-    //
-    // Shutdown coordination
-    //
-    static std::vector<pid_t>                   shutdown_kill_list;
-    static bool                                 shutdown_should_generate_backtraces;
 
     //
     // Logging Vars

@@ -17,6 +17,7 @@
 #include <sys/wait.h>
 #include <asm/unistd.h>
 #include <unistd.h>
+#include <string.h>
 #include "MVEE_build_config.h"
 #include "MVEE_private_arch.h"
 
@@ -33,6 +34,10 @@
 
 #ifndef SIGSYSTRAP
   #define SIGSYSTRAP (SIGTRAP | 0x80)
+#endif
+
+#ifndef PTRACE_SET_SYSCALL
+  #define PTRACE_SET_SYSCALL (__ptrace_request)23
 #endif
 
 /*-----------------------------------------------------------------------------
@@ -376,8 +381,8 @@ namespace interaction
 
         ssize_t nread = process_vm_readv(variantpid, local, 1, remote, 1, 0);
         if (nread != data_len)
-            warnf("interaction::read_memory failed. tried to read %d bytes - actually read %d bytes\n", 
-				  data_len, nread);
+            warnf("interaction::read_memory failed. tried to read %ld bytes - actually read %zd bytes - errno: %d (%s)\n", 
+				  data_len, nread, errno, strerror(errno));
 
 #ifdef MVEE_GENERATE_EXTRA_STATS
         if (!mvee::in_logging_handler)
@@ -402,8 +407,8 @@ namespace interaction
 
         ssize_t nwritten = process_vm_writev(variantpid, local, 1, remote, 1, 0);
         if (nwritten != data_len)
-            warnf("interaction::write_memory failed. tried to write %d bytes - actually wrote %d bytes\n", 
-				  data_len, nwritten);
+            warnf("interaction::write_memory failed. tried to write %ld bytes - actually wrote %zd bytes - errno: %d (%s)\n", 
+				  data_len, nwritten, errno, strerror(errno));
 
 #ifdef MVEE_GENERATE_EXTRA_STATS
         if (!mvee::in_logging_handler)
@@ -417,7 +422,7 @@ namespace interaction
     // Read all of the variant's general purpose registers into a
     // user_regs_struct
     //
-	static bool read_all_regs (pid_t variantpid, user_regs_struct* regs)
+	static bool read_all_regs (pid_t variantpid, PTRACE_REGS* regs)
 	{
 		if (ptrace(PTRACE_GETREGS, variantpid, 0, regs) == 0)
 			return true;
@@ -428,7 +433,7 @@ namespace interaction
     // Copy an entire user_regs_struct into the variant's general purpose
     // register context
     //
-	static bool write_all_regs (pid_t variantpid, user_regs_struct* regs)
+	static bool write_all_regs (pid_t variantpid, PTRACE_REGS* regs)
 	{
 		if (ptrace(PTRACE_SETREGS, variantpid, 0, regs) == 0)
 			return true;
@@ -480,7 +485,13 @@ namespace interaction
 	//
 	static bool write_syscall_no (pid_t variantpid, unsigned long new_syscall_no)
 	{
+#ifdef MVEE_ARCH_HAS_PTRACE_SET_SYSCALL
+		if (ptrace(PTRACE_SET_SYSCALL, variantpid, 0, (void*) new_syscall_no))
+			return false;
+		return true;
+#else
 		return write_specific_reg (variantpid, SYSCALL_NO_REG_OFFSET, new_syscall_no);
+#endif
 	}
 
 	// 

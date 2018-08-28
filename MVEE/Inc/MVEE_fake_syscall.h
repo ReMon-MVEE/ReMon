@@ -36,19 +36,14 @@ enum mvee_shared_buffer_types
 	MVEE_UTCB_REG_FILE_MAP,        /* 19 - !!!DEPRECATED in favor of MVEE_IPMON_REG_FILE_MAP!!! */
 	MVEE_IPMON_BUFFER,             /* 20 */
 	MVEE_IPMON_REG_FILE_MAP,       /* 21 */
-    MVEE_MAX_SHM_TYPES             /* 22 */
+	MVEE_RING_BUFFER,              /* 22 */
+    MVEE_MAX_SHM_TYPES             /* 23 */
 };
 #endif
 
 /*-----------------------------------------------------------------------------
  Constants
  -----------------------------------------------------------------------------*/
-
-//
-// the base constant from which all fake syscall numbers used by the monitor
-// are derived
-//
-#define MVEE_FAKE_SYSCALL_BASE   0x6FFFFFFF
 
 #define MVEE_RDTSC_FAKE_SYSCALL  MVEE_FAKE_SYSCALL_BASE + 1
 
@@ -172,6 +167,40 @@ enum mvee_shared_buffer_types
 //    - virtualized_argv0_buf_sz is the size of the aforementioned buffer
 //
 #define MVEE_GET_VIRTUALIZED_ARGV0     MVEE_FAKE_SYSCALL_BASE + 17
+
+//
+// MVEE_ENABLE_XCHECKS: re-enables crosschecking for fastforwarding variants.
+// Only works if variants.global.settings.xchecks_initially_enabled is false.
+//
+#define MVEE_ENABLE_XCHECKS            MVEE_FAKE_SYSCALL_BASE + 18
+
+//
+// MVEE_DISABLE_XCHECKS: turns crosschecking back off. Only works if
+// variants.global.settings.xchecks_initially_enabled is false.
+//
+#define MVEE_DISABLE_XCHECKS           MVEE_FAKE_SYSCALL_BASE + 19
+
+//
+// MVEE Semaphore emulation calls. One weakness of our synchronization agents is
+// that they capture synchronization operations on virtual addresses.  This does
+// not work for inter-process semaphores because one and the same semaphore can
+// be at virtual address A in one process and virtual address B in the other
+// (even though A and B would map to the same physical address).  In this case,
+// our synchronization agents would be unable to truly capture the order in
+// which operations on that semaphore happen.
+//
+// As a workaround, we have the MVEE perform semaphore operations on behalf of
+// the variants.
+//
+#define MVEE_SEM_CLOSE                 MVEE_FAKE_SYSCALL_BASE + 30
+#define MVEE_SEM_GETVALUE              MVEE_FAKE_SYSCALL_BASE + 31
+#define MVEE_SEM_INIT                  MVEE_FAKE_SYSCALL_BASE + 32
+#define MVEE_SEM_OPEN                  MVEE_FAKE_SYSCALL_BASE + 33
+#define MVEE_SEM_POST                  MVEE_FAKE_SYSCALL_BASE + 34
+#define MVEE_SEM_UNLINK                MVEE_FAKE_SYSCALL_BASE + 35
+#define MVEE_SEM_WAIT                  MVEE_FAKE_SYSCALL_BASE + 36
+#define MVEE_SEM_TIMEDWAIT             MVEE_FAKE_SYSCALL_BASE + 37
+#define MVEE_SEM_TRYWAIT               MVEE_FAKE_SYSCALL_BASE + 38
 
 //
 // MVEE_IPMON_INVOKE: This is an actual syscall we add to the kernel.

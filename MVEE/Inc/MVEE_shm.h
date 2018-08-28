@@ -42,8 +42,6 @@ enum mvee_base_atomics
     // THE FOLLOWING IS NOT AN ACTUAL ATOMIC OPERATION, IT JUST DENOTES THE END OF THE LOAD-ONLY ATOMICS!!!
     ATOMIC_LOAD_MAX,
     // STORES AFTER LOADS
-    CATOMIC_COMPARE_AND_EXCHANGE_VAL_ACQ,
-    CATOMIC_COMPARE_AND_EXCHANGE_BOOL_ACQ,
     CATOMIC_AND,
     CATOMIC_OR,
     CATOMIC_EXCHANGE_AND_ADD,
@@ -51,22 +49,31 @@ enum mvee_base_atomics
     CATOMIC_INCREMENT,
     CATOMIC_DECREMENT,
     CATOMIC_MAX,
-    ATOMIC_COMPARE_AND_EXCHANGE_VAL_ACQ,
-    ATOMIC_COMPARE_AND_EXCHANGE_BOOL_ACQ,
-    ATOMIC_EXCHANGE_ACQ,
+    ATOMIC_COMPARE_AND_EXCHANGE_VAL,
+    ATOMIC_COMPARE_AND_EXCHANGE_BOOL,
+    ATOMIC_EXCHANGE,
     ATOMIC_EXCHANGE_AND_ADD,
     ATOMIC_INCREMENT_AND_TEST,
     ATOMIC_DECREMENT_AND_TEST,
+	ATOMIC_ADD_NEGATIVE,
     ATOMIC_ADD_ZERO,
     ATOMIC_ADD,
+	ATOMIC_OR,
+	ATOMIC_OR_VAL,
     ATOMIC_INCREMENT,
     ATOMIC_DECREMENT,
     ATOMIC_BIT_TEST_SET,
     ATOMIC_BIT_SET,
     ATOMIC_AND,
+	ATOMIC_AND_VAL,
     ATOMIC_STORE,
+	ATOMIC_MIN,
     ATOMIC_MAX,
     ATOMIC_DECREMENT_IF_POSITIVE,
+	ATOMIC_FETCH_ADD,
+	ATOMIC_FETCH_AND,
+	ATOMIC_FETCH_OR,
+	ATOMIC_FETCH_XOR,
     __THREAD_ATOMIC_CMPXCHG_VAL,
     __THREAD_ATOMIC_AND,
     __THREAD_ATOMIC_BIT_SET,
@@ -157,6 +164,11 @@ enum mvee_libc_alloc_types
 /*-----------------------------------------------------------------------------
     Structures
 -----------------------------------------------------------------------------*/
+
+//
+// Wall of clocks replication agent
+// Keep this in sync with glibc/sysdeps/x86_64/mvee-woc-agent.h
+//
 struct mvee_op_entry
 {
     unsigned long counter_and_idx;
@@ -168,6 +180,92 @@ struct mvee_counter
     unsigned long counter;
     unsigned char padding[64 - 2 * sizeof(unsigned long)];
 };
+
+//
+// Total/partial order replication agents
+// Keep this in sync with glibc/sysdeps/x86_64/mvee-totalpartial-agent.h
+//
+struct mvee_lock_buffer_info
+{
+	// The master must acquire this lock before writing into the buffer
+	volatile int lock;
+    // In the master, pos is the index of the next element we're going to write
+    // In the slave, pos is the index of the first element that hasn't been replicated yet
+	volatile unsigned int pos;
+	// How many elements fit inside the buffer?
+	// This does not include the position entries
+	unsigned int size;
+    // How many times has the buffer been flushed?
+    volatile unsigned int flush_cnt;
+    // Are we flushing the buffer right now?
+    volatile unsigned char flushing;
+	// Type of the buffer. Must be MVEE_LIBC_LOCK_BUFFER or MVEE_LIBC_LOCK_BUFFER_PARTIAL
+	unsigned char buffer_type;
+	// Pad to the next cache line boundary
+	unsigned char padding[64 - sizeof(int) * 4 - sizeof(unsigned char)];
+};
+
+struct mvee_lock_buffer_entry
+{
+	// the memory location that is being accessed atomically
+	unsigned long word_ptr;
+	// the thread id of the master variant thread that accessed the field
+	unsigned int master_thread_id;
+	// type of the operation
+	unsigned short operation_type;
+	// Pad to the next cache line boundary. We use this to write tags in the partial order buffer
+	unsigned char tags[64 - sizeof(long) - sizeof(int) - sizeof(short)];
+};
+
+//
+// libclevrbuf ring buffer layout
+//
+struct buf_pos
+{
+	// for the master, the head is the position of the next
+	// element to be written.
+	// for the slaves, the head is the position of the next
+	// element to be consumed
+
+	// the upper bit of this field is toggled whenever we
+	// roll over
+	// by tracking rollovers, we can tell the difference
+	// between a slave that has caught up with the master
+	// and a slave that is a full ring buffer cycle behind
+	volatile unsigned long head; 
+
+	// for the master, this is the position of the oldest
+	// element that has not been consumed yet
+	// for the slaves, this is the position of the newest
+	// element we know of
+	unsigned long tail;
+
+	// pad to the end of the cache line
+	char pad[64 - 2 * sizeof(unsigned long)];
+};
+
+struct rbuf
+{
+	//
+	// cacheline 0: read-read sharing only
+	//
+	unsigned long elems;       // nr of data elements that can fit in the ring buffer
+	unsigned long elem_size;   // size of data elements
+	unsigned long data_offset; // where does the data start?
+	unsigned long slaves;      // nr of slaves
+	char pad[64 - sizeof(unsigned long) * 4];
+
+	//
+	// cacheline 1 - (slaves-1): position pointers
+    //
+	struct buf_pos pos[1];	
+
+	//
+	// cachelines n and up: data
+	//
+	// T data[];
+};
+
 
 /*-----------------------------------------------------------------------------
     Class Definitions

@@ -24,6 +24,10 @@
 #include "MVEE_private_arch.h"
 #include "MVEE_interaction.h"
 #include "MVEE_filedesc.h"
+#ifdef MVEE_ARCH_USE_LIBUNWIND
+#define UNW_REMOTE_ONLY
+#include "libunwind-ptrace.h"
+#endif
 
 /*-----------------------------------------------------------------------------
     Typedefs
@@ -96,6 +100,12 @@ class fd_table;
 class sighand_table;
 class writeback_info;
 
+struct raven_syscall_info
+{
+	long max_unchecked_syscalls;
+	long unchecked_syscalls[1];
+};
+
 class mvee_pending_signal
 {
 public:
@@ -132,8 +142,7 @@ public:
     long          prevcallnum;                                      // Previous system call executed by the variant. Set when the call returns.
     long          callnum;                                          // System call number being executed by this variant.
     int           call_flags;                                       // Result of the call handler
-    struct user_regs_struct
-                  regs;                                             // Arguments for the syscall are copied into the variantstate just before entering the call
+    PTRACE_REGS   regs;                                             // Arguments for the syscall are copied into the variantstate just before entering the call
     long          return_value;                                     // Return of the current syscall. 
     long          extended_value;                                   // Extended value to be returned through the EAX register.
 
@@ -148,9 +157,55 @@ public:
     bool          variant_attached;                                 // has the target monitor attached to this variant yet?
     bool          variant_resumed;                                  // variant is waiting for a resume after attach
     bool          current_signal_ready;
-	bool          fast_forward_to_entry_point;                      // Are we dispatching all syscalls as unsynced calls until we reach the entry point?
-	bool          entry_point_bp_set;                               // Have we set the breakpoint on the program entry point?
+	bool          fast_forwarding;                                  // If set to true, we are dispatching all syscalls as unsynced until the variants explicitly enable xchecks through syscall(MVEE_ENABLE_XCHECKS)
 	bool          have_overwritten_args;                            // Do we have any overwritten syscall args that need to be restored?
+
+#ifdef MVEE_ARCH_USE_LIBUNWIND
+	unw_addr_space_t unwind_as;
+	struct UPT_info* unwind_info;
+#endif
+
+	// 
+	// RAVEN syscall check toggling support.
+	//
+	// Variants can call sys_write(ESC_XCHECKS_OFF, syscall_info,
+	// syscall_info_size) to temporarily disable syscall checking for a set of
+	// syscalls specified in the @syscall_info struct.
+	//
+	// sys_write(ESC_XCHECKS_ON, NULL, 0) turns syscall checking back on.
+	//
+	// The @syscall_info struct has the following layout:
+	//
+	// struct syscall_info {
+	//    long max_unchecked_syscalls;
+	//    long unchecked_syscalls[];
+	// };
+	//
+	// The @syscall_info_size argument contains the size of the syscall_info
+	// struct (in bytes). If the syscall_info.unchecked_syscalls[] array
+	// contains 5 elements, then @syscall_info_size should be (5 + 1) *
+	// sizeof(long).
+	//
+	// After issuing this syscall, the MVEE will temporarily disable
+	// cross-checking for the issuing variant. In GHUMVEE-speak, this means that
+	// we will temporarily dispatch the issuing variant's syscalls as unsynced
+	// calls.
+	//
+	// We expect to see only the syscalls in syscall_info.unchecked_syscalls[]
+	// while checking is disabled. We also expect to see no more than
+	// syscall_info.max_unchecked_syscalls syscalls while checking is
+	// disabled.
+	//
+	// Two conditions can trigger divergence while checking is disabled: 
+	// * We see a syscall that is not in the syscall_info.unchecked_syscalls[]
+	// list.
+	// * We see more than syscall_info.max_unchecked_syscalls while checking
+	// is disabled.
+	// 
+	bool          syscall_checking_disabled;
+	long          max_unchecked_syscalls;
+	SYSCALL_MASK(unchecked_syscalls);
+	
 
     // ptmalloc2 heap allocation hacks
     //
@@ -173,9 +228,6 @@ public:
     unsigned long last_upper_region_size;
     unsigned long last_mmap_result;
 
-	// Fast forwarding support
-	unsigned long entry_point_address;                              // relative to the base address of the first PT_LOAD segment of the main program binary
-
 	// IP-MON information
 	mmap_region_info* ipmon_region;
 
@@ -188,8 +240,7 @@ public:
     unsigned long infinite_loop_ptr;                                // pointer to the sys_pause loop
     unsigned long should_sync_ptr;                                  // pointer to the should_sync flag
     long          callnumbackup;                                    // Backup of the syscall num. Made when the monitor is delivering a signal
-    struct user_regs_struct
-                  regsbackup;                                       // Backup of the registers. Made when the monitor is delivering a signal
+    PTRACE_REGS   regsbackup;                                       // Backup of the registers. Made when the monitor is delivering a signal
     unsigned long hw_bps[4];                                        // currently set hardware breakpoints
     unsigned char hw_bps_type[4];                                   // type of hw bp. 0 = exec only, 1 = write only, 2 = I/O read/write, 3 = data read/write but no instr fetches
     void*         tid_address[2];                                   // optional pointers to the thread id
@@ -208,6 +259,7 @@ public:
        	  	      overwritten_args;
 
     variantstate();
+	~variantstate();
 };
 
 //
@@ -313,6 +365,11 @@ public:
 	void log_donthave                        (int variantnum);
 	void log_dontneed                        (int variantnum);
 
+	// 
+	// Syscall handler logging helper
+	//
+	std::string      call_get_variant_pidstr (int variantnum);
+
 	//
 	// Include an automatically generated syscall handler table. All of these
 	// handler functions are implemented in MVEE_syscalls_handlers.cpp
@@ -408,7 +465,7 @@ private:
     unsigned char    call_compare_pointers               (std::vector<void*>& pointers);
     bool             call_compare_io_vectors             (std::vector<struct iovec*>& addresses, size_t len, bool layout_only=false);
     bool             call_compare_msgvectors             (std::vector<struct msghdr*>& addresses, bool layout_only=false);
-	bool             call_compare_mmsgvectors            (std::vector<struct mmsghdr*>& addresses, bool layout_only=false);
+	bool             call_compare_mmsgvectors            (std::vector<struct mmsghdr*>& addresses, int vlen, bool layout_only=false);
 	bool             call_compare_fd_sets                (std::vector<fd_set*>& addresses, int nfds);
 
 	//
@@ -418,12 +475,6 @@ private:
     std::string      call_serialize_io_vector            (int variantnum, struct iovec* vec, unsigned int vecsz);
     std::string      call_serialize_msgvector            (int variantnum, struct msghdr* msg);
     std::string      call_serialize_io_buffer            (int variantnum, const unsigned char* buf, unsigned long buflen);
-
-	// 
-	// Syscall handler logging helpers
-	//
-	std::string      call_get_variant_pidstr             (int variantnum);
-
 	// 
 	// Replication functions. These accept a pointer to a data structure for
 	// each variant. The data structure is deep copied from the address space of
@@ -443,6 +494,8 @@ private:
     sigset_t         call_get_sigset                     (int variantnum, void* sigset_ptr, bool is_old_call);
     struct sigaction call_get_sigaction                  (int variantnum, void* sigaction_ptr, bool is_old_call);
     struct sockaddr* call_get_sockaddr                   (int variantnum, struct sockaddr* ptr, __socklen_t addr_len);
+	std::set<int>    call_get_fd_set_from_domain_msgvector  (struct msghdr* address);
+	std::set<int>    call_get_fd_set_from_domain_mmsgvector (struct mmsghdr* address, int vlen);	
 
 	//
 	// Argument overwriting support. Mainly used for aliasing
@@ -656,8 +709,10 @@ private:
 	// RDTSC instruction. We disassemble the faulting instruction to verify
 	// this. If the faulting instruction is indeed RDTSC, we ensure that
 	// all variants get consistent results and return true.
-	// 
+	//
+#ifdef MVEE_ARCH_HAS_RDTSC
     bool handle_rdtsc_event                  (int index);
+#endif
 
 	// 
 	// Generic SIGTRAP handling. 
@@ -893,6 +948,12 @@ private:
 	void log_stack                       (int variantnum);
 
 	//
+	// Dump the cross-check buffer for libclevrbuf
+	//
+	unsigned long long get_clevrbuf_value(unsigned long value_pos);
+	void log_clevrbuf_state              (int variantnum);
+
+	//
 	// Write messages into the mismatch info stream.  These messages may or may
 	// not be printed to stdout/log files later, depending on whether or not the
 	// mismatch was flagged as a benign divergence
@@ -1032,6 +1093,7 @@ private:
     std::vector<void*>                atomic_queue_pos;
 
     _shm_info*                        ipmon_buffer;
+	_shm_info*                        ring_buffer;
 
     // Signal info
     unsigned short                    current_signal;         // signal no for the signal we're currently delivering
@@ -1067,8 +1129,7 @@ public:
     monitor*      new_monitor;                                // monitor the variant should be transferred to
     int           parentmonitorid;                            // id of the monitor this variant was detached from
     int           parent_has_detached;                        // set to true when the original monitor, under whose control this variant was spawned, has detached
-    struct user_regs_struct
-                  original_regs;                              // original contents of the registers
+    PTRACE_REGS   original_regs;                              // original contents of the registers
     unsigned long transfer_func;                              // pointer to the sys_pause loop
     void*         tid_address[2];                             // set if we should tell the variant what its thread id is (e.g. if the variant was created by clone(CLONE_CHILD_SETTID)
 	unsigned long should_sync_ptr;
@@ -1260,5 +1321,7 @@ struct ipmon_buffer
 
 #define likely(x)   __builtin_expect((x), 1)
 #define unlikely(x) __builtin_expect((x), 0)
+#include "MVEE_exceptions.h"
+
 
 #endif // MVEE_PRIVATE_H_INCLUDED

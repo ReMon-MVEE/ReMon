@@ -1,0 +1,63 @@
+diff --unified -r gcc-7.3.0/libstdc++-v3/config/abi/pre/gnu.ver gcc-7.3.0.patched/libstdc++-v3/config/abi/pre/gnu.ver
+--- gcc-7.3.0/libstdc++-v3/config/abi/pre/gnu.ver	2018-01-19 12:25:14.102811000 +0100
++++ gcc-7.3.0.patched/libstdc++-v3/config/abi/pre/gnu.ver	2018-08-27 17:05:49.642704942 +0200
+@@ -2275,3 +2275,7 @@
+     __cxa_tm_cleanup;
+ 
+ };
++GLIBC_2.0 {
++  global:
++    mvee_atomic_*;
++};
+\ No newline at end of file
+diff --unified -r gcc-7.3.0/libstdc++-v3/configure.host gcc-7.3.0.patched/libstdc++-v3/configure.host
+--- gcc-7.3.0/libstdc++-v3/configure.host	2017-02-02 17:24:03.760989000 +0100
++++ gcc-7.3.0.patched/libstdc++-v3/configure.host	2018-08-27 17:05:13.898727687 +0200
+@@ -108,9 +108,6 @@
+   crisv32)
+     try_cpu=cris
+     ;;
+-  i[567]86 | x86_64)
+-    try_cpu=i486
+-    ;;
+   hppa*)
+     try_cpu=hppa
+     ;;
+@@ -124,9 +121,6 @@
+     try_cpu=sparc
+     ;;
+   *)
+-    if test -d ${glibcxx_srcdir}/config/cpu/${host_cpu}; then
+-      try_cpu=${host_cpu}
+-    fi
+ esac
+ 
+ 
+diff --unified -r gcc-7.3.0/libstdc++-v3/include/bits/c++config gcc-7.3.0.patched/libstdc++-v3/include/bits/c++config
+--- gcc-7.3.0/libstdc++-v3/include/bits/c++config	2017-03-23 20:40:07.832944000 +0100
++++ gcc-7.3.0.patched/libstdc++-v3/include/bits/c++config	2018-08-27 17:37:34.821885875 +0200
+@@ -598,6 +598,8 @@
+ #undef min
+ #undef max
+ 
++#include "../../../../../mvee_atomic_new.h"
++
+ // N.B. these _GLIBCXX_USE_C99_XXX macros are defined unconditionally
+ // so they should be tested with #if not with #ifdef.
+ #if __cplusplus >= 201103L
+diff --unified -r gcc-7.3.0/libstdc++-v3/libsupc++/guard.cc gcc-7.3.0.patched/libstdc++-v3/libsupc++/guard.cc
+--- gcc-7.3.0/libstdc++-v3/libsupc++/guard.cc	2017-01-04 11:54:59.668736000 +0100
++++ gcc-7.3.0.patched/libstdc++-v3/libsupc++/guard.cc	2018-08-27 17:05:13.898727687 +0200
+@@ -36,9 +36,9 @@
+ # include <climits>
+ # include <syscall.h>
+ # include <unistd.h>
+-# define _GLIBCXX_USE_FUTEX
+-# define _GLIBCXX_FUTEX_WAIT 0
+-# define _GLIBCXX_FUTEX_WAKE 1
++//# define _GLIBCXX_USE_FUTEX
++//# define _GLIBCXX_FUTEX_WAIT 0
++//# define _GLIBCXX_FUTEX_WAKE 1
+ #endif
+ 
+ // The IA64/generic ABI uses the first byte of the guard variable.

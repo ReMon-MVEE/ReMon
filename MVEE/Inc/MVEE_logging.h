@@ -36,7 +36,7 @@
 const char* getTextualState             (unsigned int dwState);
 const char* getTextualSig               (unsigned int dwSignal);
 const char* getTextualSigHow            (int how);
-const char* getTextualRequest           (unsigned int dwRequest);
+const char* getTextualPtraceRequest     (unsigned int dwRequest);
 const char* getTextualProcmaskRequest   (int how);
 const char* getTextualSyscall           (long int syscallnum);
 const char* getTextualSocketCall        (long int sockcallnum);
@@ -66,6 +66,16 @@ const char* getTextualSyslogAction      (int action);
 const char* getTextualFileType          (int type);
 const char* getTextualRAVENCall         (int fd);
 const char* getTextualErrno             (int err);
+const char* getTextualIntervalTimerType (int which);
+const char* getTextualArchPrctl         (int code);
+const char* getTextualRusageWho         (int who);
+const char* getTextualQuotactlType      (int type);
+const char* getTextualQuotactlCmd       (int cmd);
+const char* getTextualQuotactlFmt       (unsigned long fmt);
+const char* getTextualPriorityWhich     (int which);
+const char* getTextualSchedulingPolicy  (int policy);
+const char* getTextualInotifyFlags      (int flags);
+const char* getTextualMremapFlags       (int flags);
 std::string getTextualTimerFlags        (int flags);
 std::string getTextualWaitEventType     (int status);
 std::string getTextualEpollEvents       (unsigned int events);
@@ -93,5 +103,9 @@ std::string getTextualUnlinkFlags       (int flags);
 std::string getTextualLinkFlags         (int flags);
 std::string getTextualChmodFlags        (int flags);
 std::string getTextualMVEEWaitStatus    (interaction::mvee_wait_status& status);
+std::string getTextualIpcShmKey         (key_t key);
+std::string getTextualIpcShmFlags       (int shmflg);
+std::string getTextualFallocateFlags    (int mode);
+std::string getTextualRandFlags         (unsigned int mode);
 
 #endif // MVEE_LOGGING_H_INCLUDED

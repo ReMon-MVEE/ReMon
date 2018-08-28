@@ -25,6 +25,7 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <sstream>
+#include <random>
 #include "MVEE.h"
 #include "MVEE_filedesc.h"
 #include "MVEE_logging.h"
@@ -162,12 +163,21 @@ mmap_table::mmap_table()
 	  set_logging_enabled(true),
 #endif
 	  thread_group_shutting_down(false),
-	  enlarged_initial_stacks(false)
+	  enlarged_initial_stacks(false),
+	  mmap_base(0)
 {
     init();
     full_map.resize(mvee::numvariants);
     cached_instrs.resize(mvee::numvariants);
 	mmap_startup_info.resize(mvee::numvariants);
+
+	// Pick a random 1/256th chunk of the address space as our mmap region.
+	// Excluding the lowest and top ones...
+	std::random_device rd;
+	std::mt19937_64 mt(rd());
+	std::uniform_int_distribution<> distr(1, 254);
+	mmap_base = distr(mt) * (HIGHEST_USERMODE_ADDRESS >> 8);
+//	warnf("mmap_base is 0x" PTRSTR "\n", mmap_base);
 
 #ifdef MVEE_MMAN_DEBUG
     print_mmap_table(mvee::logf);
@@ -188,6 +198,7 @@ mmap_table::mmap_table(const mmap_table& parent)
     cached_instrs              = parent.cached_instrs;
     cached_syms                = parent.cached_syms;
 	thread_group_shutting_down = false;
+	mmap_base                  = parent.mmap_base;
 
     full_map.resize(mvee::numvariants);
 
@@ -464,14 +475,12 @@ mmap_region_info* mmap_table::get_heap_region(int variantnum)
 -----------------------------------------------------------------------------*/
 bool mmap_table::get_ld_loader_bounds(int variantnum, unsigned long& loader_base, unsigned long& loader_size)
 {
-    mmap_region_info* info = NULL;
-    if (sizeof(long) == 4)
-        info = get_region_info(variantnum, 0x08048000, 0);
-    else
-        info = get_region_info(variantnum, 0x10000000, 0);
+    auto info = get_region_info(variantnum, MVEE_LD_LOADER_BASE, 0);	
 
     if (info)
     {
+		info->print_region_info("Found loader base");
+
         // also look for the data segment
         std::set<mmap_region_info*, region_sort>::iterator it =
             full_map[variantnum].find(info);
@@ -716,7 +725,7 @@ int mmap_table::foreach_region
 
         if (infos_found != mvee::numvariants)
         {
-            warnf("only found %d regions while iterating over ranges:\n");
+            warnf("only found %d regions while iterating over ranges:\n", infos_found);
             for (int i = 0; i < mvee::numvariants; ++i)
             {
                 warnf("> variant %d range: 0x" PTRSTR "-0x" PTRSTR "\n", i, addresses[i], addresses[i] + size);
@@ -1268,10 +1277,11 @@ void mmap_table::calculate_disjoint_bases (unsigned long size, std::vector<unsig
 int mmap_table::check_vdso_overlap(int variantnum)
 {
     mmap_region_info* vdso = get_vdso_region(variantnum);
-    vdso->print_region_info("Checking overlap for VDSO");
 
     if (!vdso)
         return -1;
+
+	vdso->print_region_info("Checking overlap for VDSO");
 
     for (int i = 0; i < variantnum; ++i)
     {
@@ -1286,6 +1296,106 @@ int mmap_table::check_vdso_overlap(int variantnum)
     }
 
     return -1;
+}
+
+/*-----------------------------------------------------------------------------
+    is_available_in_all_variants
+-----------------------------------------------------------------------------*/
+bool mmap_table::is_available_in_all_variants(unsigned long base, unsigned long size)
+{
+	mmap_region_info tmp_region(0, base, size, 0, NULL, 0, 0);
+	for (int i = 0; i < mvee::numvariants; ++i)
+	{
+		auto overlapping_region = full_map[i].find(&tmp_region);
+		if (overlapping_region != full_map[i].end())
+		{
+			warnf("FIXME: Found a memory region that intersects with our chosen data mapping base address.\n");
+			(*overlapping_region)->print_region_info("overlapping region", warnf);
+			warnf("Tested region: 0x" PTRSTR "-0x" PTRSTR "\n", base, base + size);
+			return false;
+		}
+	}
+
+	return true;
+}
+
+/*-----------------------------------------------------------------------------
+    calculate_data_mapping_base
+-----------------------------------------------------------------------------*/
+unsigned long mmap_table::calculate_data_mapping_base(unsigned long size)
+{
+	// We only do this for 64-bit platforms.
+	if (sizeof(long) == 4)
+		return 0;
+
+	// find the lowest used address above the mmap_base
+    mmap_region_info tmp_region(0, mmap_base, 0, 0, NULL, 0, 0);
+	auto region_iterator = full_map[0].upper_bound(&tmp_region);
+
+	// if there is no mapping above mmap base
+	if (region_iterator == full_map[0].end() ||
+		// or if the first mapping is outside of our randomized mmap region
+		(*region_iterator)->region_base_address > mmap_base + (HIGHEST_USERMODE_ADDRESS >> 8))
+	{
+		// pick any address within our randomized mmap region
+		std::random_device rd;
+		std::mt19937_64 mt(rd());
+		// we do >> 12 because we want to calculate the page number		
+		std::uniform_int_distribution<unsigned long> distr(mmap_base >> 12, (mmap_base + (HIGHEST_USERMODE_ADDRESS >> 8) - ROUND_UP(size, 4096)) >> 12);
+
+		//
+		// This calculates a random page in the range:
+		//
+		// +-----------------------------------------------------+---------------+
+		// | <---------------  viable addresses ---------------> | <--  size --> |
+		// +-----------------------------------------------------+---------------+
+		//
+		// ^                                                                     ^
+		// |                                                                     |
+		// +-----+                                        +----------------------+
+		//    mmap_base              mmap_base + 1/256th of the usable address space
+		//
+		unsigned long address = distr(mt);
+		// back to a full address
+		address <<= 12;
+
+//		warnf("No mapping found in mmap base zone - selected address: 0x" PTRSTR " - size: %ld\n", address, size);
+
+		// assert that this address is available. It should be if we implement
+		// ASLR control correctly
+		if (is_available_in_all_variants(address, ROUND_UP(size, 4096)))
+			return address;
+	}
+	else
+	{
+		unsigned long address = (*region_iterator)->region_base_address - ROUND_UP(size, 4096);
+
+		// We already have a mapping in our mmap region. See if we can extend it downwards
+		if (address > mmap_base)
+		{
+//			warnf("Mapping found above mmap base - extended downwards address address: 0x" PTRSTR "\n", address);
+
+			// yep
+			if (is_available_in_all_variants(address, ROUND_UP(size, 4096)))
+				return address;
+		}
+		else
+		{
+			// nope... See if we can squeeze this region in somewhere
+			auto prev_region = region_iterator;
+			for (region_iterator = ++region_iterator; region_iterator != full_map[0].end(); ++region_iterator)
+			{
+				// Found a hole to squeeze this region in
+				if ((*region_iterator)->region_base_address - ((*prev_region)->region_base_address + (*prev_region)->region_size) > size)
+				{
+					if (is_available_in_all_variants((*region_iterator)->region_base_address - ROUND_UP(size, 4096), ROUND_UP(size, 4096)))
+						return (*region_iterator)->region_base_address - ROUND_UP(size, 4096);
+				}
+			}
+		}
+	}
+
+	return 0;
 }
 
 /*-----------------------------------------------------------------------------

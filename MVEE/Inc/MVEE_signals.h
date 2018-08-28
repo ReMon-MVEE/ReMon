@@ -62,6 +62,8 @@ public:
 
     static bool is_control_flow_signal (int signo);
     static bool is_default_ignored_signal (int signo);
+	bool will_cause_termination (int signo);
+
 
     pthread_mutex_t  sighand_lock;
     struct sigaction action_table[_NSIG-1];           // signal disposition rules

@@ -95,12 +95,9 @@ class fd_table
 {
 public:
 	//
-    // Current working directory. We currently assume that all sys_chdir calls
-	// are synchronized. If this changes at some point in the future (due to
-	// fast forwarding for example), then this variable should be a vector of
-	// strings.
+    // Current working directory. 
 	//
-    std::string fd_cwd;
+	std::vector<std::string> fd_cwds;
 
 	//
     // Thread-safety: We want the locking to go through these functions for
@@ -125,9 +122,15 @@ public:
 		bool unsynced_access=false,
 		bool unlinked=false,
 		ssize_t original_file_size=0);
+	void          create_master_fd_info_from_proc (int fd, pid_t master_pid);
 	std::map<unsigned long, fd_info>::iterator
                   free_fd_info        (unsigned long fd);
     void          free_cloexec_fds    ();
+
+	//
+	//
+	//
+	bool          should_open_in_all_variants (std::string& master_path, pid_t master_pid);
 
 	//
 	// Wipe the fd table and repopulate it using /proc/<pid>/fd
@@ -139,9 +142,10 @@ public:
 	// Temporary files management. These functions are used for unsynchronized
 	// file operations that happen during fast forwarding
 	// 
-	void          create_temporary_fd_info (int variantnum, unsigned long fd, std::string path, unsigned long access_flags, bool close_on_exec, ssize_t original_file_size=0);
+	void          create_temporary_fd_info (int variantnum, unsigned long fd, std::string path, unsigned long access_flags, bool close_on_exec, ssize_t original_file_size=0, FileType type=FT_REGULAR);
 	void          free_temporary_fd_info   (int variantnum, unsigned long fd);
 	void          flush_temporary_files    (int variantnum);
+	void          dup_temporary_fd         (int variantnum, unsigned long oldfd, unsigned long newfd, bool close_on_exec);
 
 	//
     // Getters. These are temporary file-aware. All of these functions
@@ -188,7 +192,7 @@ public:
 	//
 	// Changes the current working directory. Supports relative @path names
 	// 
-    void          chdir               (const char* path);
+    void          chdir               (int variantnum, const char* path);
 
 	//
     // IP-MON file mapping. We assume that IP-MON is only used for synchronized

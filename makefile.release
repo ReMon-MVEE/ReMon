@@ -3,7 +3,7 @@
 #-----------------------------------------------------------------------------
 
 BUILD                = Release
-BUILD_CXXFLAGS       = -flto -O3 -ffast-math -march=corei7 -std=c++14 -static -Werror -fvisibility=hidden
+BUILD_CXXFLAGS       = -flto -O3 -ffast-math -std=c++14 -static -Werror -fvisibility=hidden
 BUILD_LDFLAGS        = -flto -O3 -static -s
 BUILD_OPT            = yes
 

@@ -1,0 +1,436 @@
+diff --unified --recursive /usr/include--original/c++/4.8/bits/basic_string.h /usr/include--mvee/c++/4.8/bits/basic_string.h
+--- /usr/include--original/c++/4.8/bits/basic_string.h	2015-05-14 20:11:42.000000000 +0200
++++ /usr/include--mvee/c++/4.8/bits/basic_string.h	2016-10-09 19:46:02.994019499 +0200
+@@ -42,6 +42,14 @@
+ #include <initializer_list>
+ #endif
+ 
++#ifndef __MVEE_SYMBOLS
++#define __MVEE_SYMBOLS
++extern "C" {
++  unsigned char __attribute__ ((noinline)) __attribute__((weak)) mvee_atomic_preop(unsigned short op_type, void* word_ptr) { __asm__ volatile (""); return 0; }
++  void __attribute__ ((noinline)) __attribute__((weak)) mvee_atomic_postop(unsigned char preop_result) {  __asm__ volatile (""); }
++}
++#endif
++
+ namespace std _GLIBCXX_VISIBILITY(default)
+ {
+ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+@@ -189,19 +197,37 @@
+ 
+         bool
+ 	_M_is_leaked() const
+-        { return this->_M_refcount < 0; }
++	{
++          unsigned char __preop_result = mvee_atomic_preop(0 /* DON'T CARE */, &(this->_M_refcount));
++          bool result = this->_M_refcount < 0;
++          mvee_atomic_postop(__preop_result);
++          return result;
++        }
+ 
+         bool
+ 	_M_is_shared() const
+-        { return this->_M_refcount > 0; }
++        {
++          unsigned char __preop_result = mvee_atomic_preop(0 /* DON'T CARE */, &(this->_M_refcount));
++          bool result = this->_M_refcount > 0;
++          mvee_atomic_postop(__preop_result);
++          return result;
++        }
+ 
+         void
+ 	_M_set_leaked()
+-        { this->_M_refcount = -1; }
++        {
++          unsigned char __preop_result = mvee_atomic_preop(0 /* DON'T CARE */, &(this->_M_refcount));
++          this->_M_refcount = -1;
++          mvee_atomic_postop(__preop_result);
++        }
+ 
+         void
+ 	_M_set_sharable()
+-        { this->_M_refcount = 0; }
++        {
++          unsigned char __preop_result = mvee_atomic_preop(0 /* DON'T CARE */, &(this->_M_refcount));
++          this->_M_refcount = 0;
++          mvee_atomic_postop(__preop_result);
++        }
+ 
+ 	void
+ 	_M_set_length_and_sharable(size_type __n)
+@@ -242,8 +268,10 @@
+ 	    {
+ 	      // Be race-detector-friendly.  For more info see bits/c++config.
+ 	      _GLIBCXX_SYNCHRONIZATION_HAPPENS_BEFORE(&this->_M_refcount);
+-	      if (__gnu_cxx::__exchange_and_add_dispatch(&this->_M_refcount,
+-							 -1) <= 0)
++              unsigned char __preop_result = mvee_atomic_preop(0 /* DON'T CARE */, &(this->_M_refcount));
++              bool result = __gnu_cxx::__exchange_and_add_dispatch(&this->_M_refcount, -1) <= 0;
++              mvee_atomic_postop(__preop_result);
++	      if (result)
+ 		{
+ 		  _GLIBCXX_SYNCHRONIZATION_HAPPENS_AFTER(&this->_M_refcount);
+ 		  _M_destroy(__a);
+@@ -258,9 +286,15 @@
+ 	_M_refcopy() throw()
+ 	{
+ #if _GLIBCXX_FULLY_DYNAMIC_STRING == 0
+-	  if (__builtin_expect(this != &_S_empty_rep(), false))
++	  if (__builtin_expect(this != &_S_empty_rep(), false)) {
+ #endif
++            unsigned char __preop_result = mvee_atomic_preop(0 /* DON'T CARE */, &(this->_M_refcount));
+             __gnu_cxx::__atomic_add_dispatch(&this->_M_refcount, 1);
++            mvee_atomic_postop(__preop_result);
++#if _GLIBCXX_FULLY_DYNAMIC_STRING == 0
++          }
++#endif
++
+ 	  return _M_refdata();
+ 	}  // XXX MT
+ 
+Only in /usr/include--mvee/c++/4.8/bits: basic_string.h~
+diff --unified --recursive /usr/include--original/c++/4.8/bits/ios_base.h /usr/include--mvee/c++/4.8/bits/ios_base.h
+--- /usr/include--original/c++/4.8/bits/ios_base.h	2015-05-14 20:11:42.000000000 +0200
++++ /usr/include--mvee/c++/4.8/bits/ios_base.h	2016-10-09 19:45:54.019019521 +0200
+@@ -40,6 +40,14 @@
+ #include <bits/localefwd.h>
+ #include <bits/locale_classes.h>
+ 
++#ifndef __MVEE_SYMBOLS
++#define __MVEE_SYMBOLS
++extern "C" {
++  unsigned char __attribute__ ((noinline)) __attribute__((weak)) mvee_atomic_preop(unsigned short op_type, void* word_ptr) { __asm__ volatile (""); return 0; }
++  void __attribute__ ((noinline)) __attribute__((weak)) mvee_atomic_postop(unsigned char preop_result) {  __asm__ volatile (""); }
++}
++#endif
++
+ namespace std _GLIBCXX_VISIBILITY(default)
+ {
+ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+@@ -463,25 +471,31 @@
+       _Callback_list*		_M_next;
+       ios_base::event_callback	_M_fn;
+       int			_M_index;
+-      _Atomic_word		_M_refcount;  // 0 means one reference.
++      _Atomic_word		_M_refcount_bart;  // 0 means one reference.
+ 
+       _Callback_list(ios_base::event_callback __fn, int __index,
+ 		     _Callback_list* __cb)
+-      : _M_next(__cb), _M_fn(__fn), _M_index(__index), _M_refcount(0) { }
++      : _M_next(__cb), _M_fn(__fn), _M_index(__index), _M_refcount_bart(0) { }
+ 
+       void
+-      _M_add_reference() { __gnu_cxx::__atomic_add_dispatch(&_M_refcount, 1); }
++      _M_add_reference() {
++        unsigned char __preop_result = mvee_atomic_preop(0 /* DON'T CARE */, _M_refcount_bart);
++        __gnu_cxx::__atomic_add_dispatch(&_M_refcount_bart, 1);
++        mvee_atomic_postop(__preop_result);
++      }
+ 
+       // 0 => OK to delete.
+       int
+       _M_remove_reference() 
+       {
+         // Be race-detector-friendly.  For more info see bits/c++config.
+-        _GLIBCXX_SYNCHRONIZATION_HAPPENS_BEFORE(&_M_refcount);
+-        int __res = __gnu_cxx::__exchange_and_add_dispatch(&_M_refcount, -1);
++        _GLIBCXX_SYNCHRONIZATION_HAPPENS_BEFORE(&_M_refcount_bart);
++        unsigned char __preop_result = mvee_atomic_preop(0 /* DON'T CARE */, _M_refcount_bart);
++        int __res = __gnu_cxx::__exchange_and_add_dispatch(&_M_refcount_bart, -1);
++        mvee_atomic_postop(__preop_result);
+         if (__res == 0)
+           {
+-            _GLIBCXX_SYNCHRONIZATION_HAPPENS_AFTER(&_M_refcount);
++            _GLIBCXX_SYNCHRONIZATION_HAPPENS_AFTER(&_M_refcount_bart);
+           }
+         return __res;
+       }
+Only in /usr/include--mvee/c++/4.8/bits: ios_base.h~
+diff --unified --recursive /usr/include--original/c++/4.8/bits/locale_classes.h /usr/include--mvee/c++/4.8/bits/locale_classes.h
+--- /usr/include--original/c++/4.8/bits/locale_classes.h	2015-05-14 20:11:42.000000000 +0200
++++ /usr/include--mvee/c++/4.8/bits/locale_classes.h	2016-10-09 19:54:38.323018214 +0200
+@@ -40,6 +40,14 @@
+ #include <string>
+ #include <ext/atomicity.h>
+ 
++#ifndef __MVEE_SYMBOLS
++#define __MVEE_SYMBOLS
++extern "C" {
++  unsigned char __attribute__ ((noinline)) __attribute__((weak)) mvee_atomic_preop(unsigned short op_type, void* word_ptr) { __asm__ volatile (""); return 0; }
++  void __attribute__ ((noinline)) __attribute__((weak)) mvee_atomic_postop(unsigned char preop_result) {  __asm__ volatile (""); }
++}
++#endif
++
+ namespace std _GLIBCXX_VISIBILITY(default)
+ {
+ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+@@ -398,14 +406,22 @@
+   private:
+     void
+     _M_add_reference() const throw()
+-    { __gnu_cxx::__atomic_add_dispatch(&_M_refcount, 1); }
++    {
++      unsigned char __preop_result = mvee_atomic_preop(0 /* DON'T CARE */, _M_refcount);
++      __gnu_cxx::__atomic_add_dispatch(&_M_refcount, 1);
++      mvee_atomic_postop(__preop_result);
++    }
+ 
+     void
+     _M_remove_reference() const throw()
+     {
+       // Be race-detector-friendly.  For more info see bits/c++config.
+       _GLIBCXX_SYNCHRONIZATION_HAPPENS_BEFORE(&_M_refcount);
+-      if (__gnu_cxx::__exchange_and_add_dispatch(&_M_refcount, -1) == 1)
++
++      unsigned char __preop_result = mvee_atomic_preop(0 /* DON'T CARE */, _M_refcount);
++      bool comparison = __gnu_cxx::__exchange_and_add_dispatch(&_M_refcount, -1) == 1;
++      mvee_atomic_postop(__preop_result);
++      if (comparison)
+ 	{
+           _GLIBCXX_SYNCHRONIZATION_HAPPENS_AFTER(&_M_refcount);
+ 	  __try
+@@ -507,14 +523,23 @@
+ 
+     void
+     _M_add_reference() throw()
+-    { __gnu_cxx::__atomic_add_dispatch(&_M_refcount, 1); }
++    {
++      unsigned char __preop_result = mvee_atomic_preop(0 /* DON'T CARE */, _M_refcount);
++      __gnu_cxx::__atomic_add_dispatch(&_M_refcount, 1);
++      mvee_atomic_postop(__preop_result);
++    }
+ 
+     void
+     _M_remove_reference() throw()
+     {
+       // Be race-detector-friendly.  For more info see bits/c++config.
+       _GLIBCXX_SYNCHRONIZATION_HAPPENS_BEFORE(&_M_refcount);
+-      if (__gnu_cxx::__exchange_and_add_dispatch(&_M_refcount, -1) == 1)
++
++      unsigned char __preop_result = mvee_atomic_preop(0 /* DON'T CARE */, _M_refcount);
++      bool comparison = __gnu_cxx::__exchange_and_add_dispatch(&_M_refcount, -1) == 1;
++      mvee_atomic_postop(__preop_result);
++
++      if (comparison)
+ 	{
+           _GLIBCXX_SYNCHRONIZATION_HAPPENS_AFTER(&_M_refcount);
+ 	  __try
+Only in /usr/include--mvee/c++/4.8/bits: locale_classes.h~
+diff --unified --recursive /usr/include--original/c++/4.8.4/bits/basic_string.h /usr/include--mvee/c++/4.8.4/bits/basic_string.h
+--- /usr/include--original/c++/4.8.4/bits/basic_string.h	2015-05-14 20:11:42.000000000 +0200
++++ /usr/include--mvee/c++/4.8.4/bits/basic_string.h	2016-10-09 19:46:02.994019499 +0200
+@@ -42,6 +42,14 @@
+ #include <initializer_list>
+ #endif
+ 
++#ifndef __MVEE_SYMBOLS
++#define __MVEE_SYMBOLS
++extern "C" {
++  unsigned char __attribute__ ((noinline)) __attribute__((weak)) mvee_atomic_preop(unsigned short op_type, void* word_ptr) { __asm__ volatile (""); return 0; }
++  void __attribute__ ((noinline)) __attribute__((weak)) mvee_atomic_postop(unsigned char preop_result) {  __asm__ volatile (""); }
++}
++#endif
++
+ namespace std _GLIBCXX_VISIBILITY(default)
+ {
+ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+@@ -189,19 +197,37 @@
+ 
+         bool
+ 	_M_is_leaked() const
+-        { return this->_M_refcount < 0; }
++	{
++          unsigned char __preop_result = mvee_atomic_preop(0 /* DON'T CARE */, &(this->_M_refcount));
++          bool result = this->_M_refcount < 0;
++          mvee_atomic_postop(__preop_result);
++          return result;
++        }
+ 
+         bool
+ 	_M_is_shared() const
+-        { return this->_M_refcount > 0; }
++        {
++          unsigned char __preop_result = mvee_atomic_preop(0 /* DON'T CARE */, &(this->_M_refcount));
++          bool result = this->_M_refcount > 0;
++          mvee_atomic_postop(__preop_result);
++          return result;
++        }
+ 
+         void
+ 	_M_set_leaked()
+-        { this->_M_refcount = -1; }
++        {
++          unsigned char __preop_result = mvee_atomic_preop(0 /* DON'T CARE */, &(this->_M_refcount));
++          this->_M_refcount = -1;
++          mvee_atomic_postop(__preop_result);
++        }
+ 
+         void
+ 	_M_set_sharable()
+-        { this->_M_refcount = 0; }
++        {
++          unsigned char __preop_result = mvee_atomic_preop(0 /* DON'T CARE */, &(this->_M_refcount));
++          this->_M_refcount = 0;
++          mvee_atomic_postop(__preop_result);
++        }
+ 
+ 	void
+ 	_M_set_length_and_sharable(size_type __n)
+@@ -242,8 +268,10 @@
+ 	    {
+ 	      // Be race-detector-friendly.  For more info see bits/c++config.
+ 	      _GLIBCXX_SYNCHRONIZATION_HAPPENS_BEFORE(&this->_M_refcount);
+-	      if (__gnu_cxx::__exchange_and_add_dispatch(&this->_M_refcount,
+-							 -1) <= 0)
++              unsigned char __preop_result = mvee_atomic_preop(0 /* DON'T CARE */, &(this->_M_refcount));
++              bool result = __gnu_cxx::__exchange_and_add_dispatch(&this->_M_refcount, -1) <= 0;
++              mvee_atomic_postop(__preop_result);
++	      if (result)
+ 		{
+ 		  _GLIBCXX_SYNCHRONIZATION_HAPPENS_AFTER(&this->_M_refcount);
+ 		  _M_destroy(__a);
+@@ -258,9 +286,15 @@
+ 	_M_refcopy() throw()
+ 	{
+ #if _GLIBCXX_FULLY_DYNAMIC_STRING == 0
+-	  if (__builtin_expect(this != &_S_empty_rep(), false))
++	  if (__builtin_expect(this != &_S_empty_rep(), false)) {
+ #endif
++            unsigned char __preop_result = mvee_atomic_preop(0 /* DON'T CARE */, &(this->_M_refcount));
+             __gnu_cxx::__atomic_add_dispatch(&this->_M_refcount, 1);
++            mvee_atomic_postop(__preop_result);
++#if _GLIBCXX_FULLY_DYNAMIC_STRING == 0
++          }
++#endif
++
+ 	  return _M_refdata();
+ 	}  // XXX MT
+ 
+Only in /usr/include--mvee/c++/4.8.4/bits: basic_string.h~
+diff --unified --recursive /usr/include--original/c++/4.8.4/bits/ios_base.h /usr/include--mvee/c++/4.8.4/bits/ios_base.h
+--- /usr/include--original/c++/4.8.4/bits/ios_base.h	2015-05-14 20:11:42.000000000 +0200
++++ /usr/include--mvee/c++/4.8.4/bits/ios_base.h	2016-10-09 19:45:54.019019521 +0200
+@@ -40,6 +40,14 @@
+ #include <bits/localefwd.h>
+ #include <bits/locale_classes.h>
+ 
++#ifndef __MVEE_SYMBOLS
++#define __MVEE_SYMBOLS
++extern "C" {
++  unsigned char __attribute__ ((noinline)) __attribute__((weak)) mvee_atomic_preop(unsigned short op_type, void* word_ptr) { __asm__ volatile (""); return 0; }
++  void __attribute__ ((noinline)) __attribute__((weak)) mvee_atomic_postop(unsigned char preop_result) {  __asm__ volatile (""); }
++}
++#endif
++
+ namespace std _GLIBCXX_VISIBILITY(default)
+ {
+ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+@@ -463,25 +471,31 @@
+       _Callback_list*		_M_next;
+       ios_base::event_callback	_M_fn;
+       int			_M_index;
+-      _Atomic_word		_M_refcount;  // 0 means one reference.
++      _Atomic_word		_M_refcount_bart;  // 0 means one reference.
+ 
+       _Callback_list(ios_base::event_callback __fn, int __index,
+ 		     _Callback_list* __cb)
+-      : _M_next(__cb), _M_fn(__fn), _M_index(__index), _M_refcount(0) { }
++      : _M_next(__cb), _M_fn(__fn), _M_index(__index), _M_refcount_bart(0) { }
+ 
+       void
+-      _M_add_reference() { __gnu_cxx::__atomic_add_dispatch(&_M_refcount, 1); }
++      _M_add_reference() {
++        unsigned char __preop_result = mvee_atomic_preop(0 /* DON'T CARE */, _M_refcount_bart);
++        __gnu_cxx::__atomic_add_dispatch(&_M_refcount_bart, 1);
++        mvee_atomic_postop(__preop_result);
++      }
+ 
+       // 0 => OK to delete.
+       int
+       _M_remove_reference() 
+       {
+         // Be race-detector-friendly.  For more info see bits/c++config.
+-        _GLIBCXX_SYNCHRONIZATION_HAPPENS_BEFORE(&_M_refcount);
+-        int __res = __gnu_cxx::__exchange_and_add_dispatch(&_M_refcount, -1);
++        _GLIBCXX_SYNCHRONIZATION_HAPPENS_BEFORE(&_M_refcount_bart);
++        unsigned char __preop_result = mvee_atomic_preop(0 /* DON'T CARE */, _M_refcount_bart);
++        int __res = __gnu_cxx::__exchange_and_add_dispatch(&_M_refcount_bart, -1);
++        mvee_atomic_postop(__preop_result);
+         if (__res == 0)
+           {
+-            _GLIBCXX_SYNCHRONIZATION_HAPPENS_AFTER(&_M_refcount);
++            _GLIBCXX_SYNCHRONIZATION_HAPPENS_AFTER(&_M_refcount_bart);
+           }
+         return __res;
+       }
+Only in /usr/include--mvee/c++/4.8.4/bits: ios_base.h~
+diff --unified --recursive /usr/include--original/c++/4.8.4/bits/locale_classes.h /usr/include--mvee/c++/4.8.4/bits/locale_classes.h
+--- /usr/include--original/c++/4.8.4/bits/locale_classes.h	2015-05-14 20:11:42.000000000 +0200
++++ /usr/include--mvee/c++/4.8.4/bits/locale_classes.h	2016-10-09 19:54:38.323018214 +0200
+@@ -40,6 +40,14 @@
+ #include <string>
+ #include <ext/atomicity.h>
+ 
++#ifndef __MVEE_SYMBOLS
++#define __MVEE_SYMBOLS
++extern "C" {
++  unsigned char __attribute__ ((noinline)) __attribute__((weak)) mvee_atomic_preop(unsigned short op_type, void* word_ptr) { __asm__ volatile (""); return 0; }
++  void __attribute__ ((noinline)) __attribute__((weak)) mvee_atomic_postop(unsigned char preop_result) {  __asm__ volatile (""); }
++}
++#endif
++
+ namespace std _GLIBCXX_VISIBILITY(default)
+ {
+ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+@@ -398,14 +406,22 @@
+   private:
+     void
+     _M_add_reference() const throw()
+-    { __gnu_cxx::__atomic_add_dispatch(&_M_refcount, 1); }
++    {
++      unsigned char __preop_result = mvee_atomic_preop(0 /* DON'T CARE */, _M_refcount);
++      __gnu_cxx::__atomic_add_dispatch(&_M_refcount, 1);
++      mvee_atomic_postop(__preop_result);
++    }
+ 
+     void
+     _M_remove_reference() const throw()
+     {
+       // Be race-detector-friendly.  For more info see bits/c++config.
+       _GLIBCXX_SYNCHRONIZATION_HAPPENS_BEFORE(&_M_refcount);
+-      if (__gnu_cxx::__exchange_and_add_dispatch(&_M_refcount, -1) == 1)
++
++      unsigned char __preop_result = mvee_atomic_preop(0 /* DON'T CARE */, _M_refcount);
++      bool comparison = __gnu_cxx::__exchange_and_add_dispatch(&_M_refcount, -1) == 1;
++      mvee_atomic_postop(__preop_result);
++      if (comparison)
+ 	{
+           _GLIBCXX_SYNCHRONIZATION_HAPPENS_AFTER(&_M_refcount);
+ 	  __try
+@@ -507,14 +523,23 @@
+ 
+     void
+     _M_add_reference() throw()
+-    { __gnu_cxx::__atomic_add_dispatch(&_M_refcount, 1); }
++    {
++      unsigned char __preop_result = mvee_atomic_preop(0 /* DON'T CARE */, _M_refcount);
++      __gnu_cxx::__atomic_add_dispatch(&_M_refcount, 1);
++      mvee_atomic_postop(__preop_result);
++    }
+ 
+     void
+     _M_remove_reference() throw()
+     {
+       // Be race-detector-friendly.  For more info see bits/c++config.
+       _GLIBCXX_SYNCHRONIZATION_HAPPENS_BEFORE(&_M_refcount);
+-      if (__gnu_cxx::__exchange_and_add_dispatch(&_M_refcount, -1) == 1)
++
++      unsigned char __preop_result = mvee_atomic_preop(0 /* DON'T CARE */, _M_refcount);
++      bool comparison = __gnu_cxx::__exchange_and_add_dispatch(&_M_refcount, -1) == 1;
++      mvee_atomic_postop(__preop_result);
++
++      if (comparison)
+ 	{
+           _GLIBCXX_SYNCHRONIZATION_HAPPENS_AFTER(&_M_refcount);
+ 	  __try
+Only in /usr/include--mvee/c++/4.8.4/bits: locale_classes.h~

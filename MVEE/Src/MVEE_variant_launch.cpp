@@ -26,7 +26,13 @@ static void parse_and_setenv(std::string env)
 		std::string value = env.substr(pos + 1);
 
 		if (value.length() > 0)
-			setenv(key.c_str(), value.c_str(), 1);
+		{
+			const char* oldenv = getenv(key.c_str());
+			if (oldenv)
+				setenv(key.c_str(), (value + ":" + oldenv).c_str(), 1);
+			else
+				setenv(key.c_str(), value.c_str(), 1);
+		}
 		else
 			unsetenv(key.c_str());
 	}	
@@ -39,14 +45,21 @@ static void parse_and_setenv(std::string env)
 -----------------------------------------------------------------------------*/
 void mvee::setup_env(int variantnum)
 {
-    if ((*mvee::config_variant_global)["use_ipmon"].asBool() &&
-		!(*mvee::config_variant_global)["disable_syscall_checks"].asBool())
-    {
-        std::string ipmon_path = os_get_mvee_root_dir();
-        ipmon_path += "/IP-MON/libipmon.so";
-        setenv("LD_PRELOAD", mvee::strdup(ipmon_path.c_str()), 1);
-    }
-
+	// Set the library path directly if we're going to run unmonitored variants
+	if ((*mvee::config_variant_global)["disable_syscall_checks"].asBool())
+	{
+		setenv("LD_LIBRARY_PATH", (*mvee::config_variant_exec)["library_path"].asCString(), 1);
+	}
+	else
+	{
+		if ((*mvee::config_variant_global)["use_ipmon"].asBool())
+		{
+			std::string ipmon_path = os_get_mvee_root_dir();
+			ipmon_path += "/IP-MON/libipmon.so";
+			setenv("LD_PRELOAD", mvee::strdup(ipmon_path.c_str()), 1);
+		}
+	}
+   
 	// needed by LD_Loader and SPEC scripts
 	setenv("MVEEROOT", os_get_mvee_root_dir().c_str(), 1);
 
@@ -103,6 +116,9 @@ void mvee::start_variant(int variantnum)
 	if (alias.length() == 0)
 		alias = binary;
 
+	// this might be a relative path. Get the full path
+	alias = os_normalize_path_name(alias);
+
 	// push the basename of the original binary name as argv[0]
 	size_t pos = binary.rfind("/");
 	if (pos != std::string::npos)
@@ -115,6 +131,10 @@ void mvee::start_variant(int variantnum)
 	int i = 0;
 	for (auto _arg : args)
 		_args[i++] = _arg;
+
+	// change to the variant's specified working directory (if any)
+	if (variant_config && !(*variant_config)["pwd"].isNull())
+		chdir((*variant_config)["pwd"].asCString());
 
 	// this should not return
 	execv(alias.c_str(), (char* const*)_args);

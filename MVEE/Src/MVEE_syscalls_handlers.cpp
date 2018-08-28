@@ -6,16 +6,75 @@
  */
 
 // *****************************************************************************
-//
 // PLEASE READ THE INSTRUCTIONS IN MVEE/INC/MVEE_SYSCALLS.H BEFORE WRITING 
 // SYSCALL HANDLERS!!!
-//
 // *****************************************************************************
 
+//
+// Section 2 (System Calls) of the man pages and the kernel itself often
+// disagree on the types of system call arguments. Whenever there is such a
+// disagreement, we should use the kernel's types, not those documented in the
+// man pages.
+// 
+// List of interesting types:
+// - mode_t    : aka unsigned int (all archs)
+// - umode_t   : aka unsigned short (all archs)
+// - dev_t     : aka unsigned long (x86), aka unsigned long long (ARM)
+// - pid_t     : aka int (all archs)
+// - time_t    : aka long (all archs)
+// - loff_t    : aka long long (all archs)
+// - off_t     : aka long (all archs)
+// - uid_t     : aka unsigned int (x86-64), aka unsigned short (x86-32, ARM)
+// - gid_t     : aka unsigned int (x86-64), aka unsigned short (x86-32, ARM)
+// - qid_t     : aka unsigned int (all archs)
+// - caddr_t   : aka char* (all archs)
+// - socklen_t : aka unsigned int (all archs)
+// - clockid_t : aka int (all archs)
+//
+// List of common disagreements:
+// - The kernel usually (not always) expects file descriptors to be of type
+// 'unsigned int', while user space uses type 'int'
+//
+// - The kernel usually expects mode flags to be of type 'umode_t' (aka unsigned
+// short), while user space uses type 'mode_t' (aka unsigned int)
+//
+// - The kernel doesn't know type 'socklen_t' (aka 'unsigned int') and expects
+// socket lengths of type 'int' instead
+//
+
+// ****************************************************************************
+// IMPORTANT NOTE ABOUT SYSCALLS WITH 64-BIT ARGUMENTS:
+//
+// Some syscalls (e.g., pread64) accept one or more 64-bit arguments EVEN ON
+// architectures 32-bit. The ABI specifies how such arguments are passed.
+//
+// On 32-bit platforms, these 64-bit arguments are split up into a lower and
+// upper half, which are passed as separate 32-bit args to the kernel.
+// Optionally, the ABI might also require that the first half of the argument
+// be aligned to an even register number. This is, for example, the case for
+// the ARM EABI.
+//
+// Consider for example sys_pwrite64(unsigned int fd, const char* buf, size_t
+// count, loff_t pos). The 4th argument, pos, is always 64-bit. It needs special
+// handling on i386 and ARM EABI.
+//
+// Depending on the architecture, we have to calculate the value of pos as
+// follows:
+//
+// AMD64: native 64-bit architecture. no special handling needed
+// -> ARG4(variantnum)
+// i386: native 32-bit architecture. ABI doesn't require register alignment
+// -> (uint64_t)ARG4 (variantnum) + (((uint64_t)ARG5(variantnum)) << 32)
+// ARM: native 32-bit architecture. ABI requires register alignment.
+// an uneven number of arguments precede the 'pos' argument, so alignment is
+// required in this case
+// -> (uint64_t)ARG5 (variantnum) + (((uint64_t)ARG6(variantnum)) << 32)
+// ****************************************************************************
 
 /*-----------------------------------------------------------------------------
   Includes
 -----------------------------------------------------------------------------*/
+#include <errno.h>
 #include <stdio.h>
 #include <sys/ioctl.h>
 #include <sys/ipc.h>
@@ -37,7 +96,6 @@
 #include <utime.h>
 #include <termios.h>
 #include <sys/quota.h>
-#include <errno.h>
 #include <sys/prctl.h>
 #include <linux/futex.h>
 #include <linux/sysinfo.h>
@@ -50,10 +108,10 @@
 #include <linux/seccomp.h>
 #include <linux/filter.h>
 #include <net/if.h>
-#include <asm/prctl.h>
 #include <sys/prctl.h>
 #include <sys/timerfd.h>
 #include <iomanip>
+#include <linux/dqblk_xfs.h>
 #include "MVEE.h"
 #include "MVEE_monitor.h"
 #include "MVEE_macros.h"
@@ -68,7 +126,12 @@
 #include "MVEE_signals.h"
 #include "MVEE_fake_syscall.h"
 #include "MVEE_interaction.h"
+#ifdef MVEE_ARCH_SUPPORTS_DISASSEMBLY
 #include "hde.h"
+#endif
+#ifdef MVEE_ARCH_HAS_ARCH_PRCTL
+#include <asm/prctl.h>
+#endif
 
 /*-----------------------------------------------------------------------------
   old_kernel_stat
@@ -248,6 +311,48 @@ bool monitor::handle_is_known_false_positive(const char* program_name, long call
 			return false;
 		return true;
     }
+    else if (callnum == __NR_openat && MVEE_PRECALL_MISMATCHING_ARG((*precall_flags)) == 2)
+    {
+        bool true_positive = false;
+		std::vector<std::string> files(mvee::numvariants);
+
+		for (int i = 0; i < mvee::numvariants; ++i)
+			files[i] = rw::read_string(variants[i].variantpid, (void*) ARG2(i));
+
+		// Allow variants to open "> MVEE Variant <num> >" with mismatching nums
+        for (int i = 0; i < mvee::numvariants; ++i)
+        {
+            char  tmp[20];
+            sprintf(tmp, "MVEE Variant %d >", i);
+
+            if (files[i].compare(tmp) != 0)
+            {
+                true_positive = true;
+                break;
+            }
+        }
+
+        if (!true_positive)
+			return true;
+
+		// Allow MVEE_LD_Loader to open compile-time diversified variants
+		true_positive = false;
+		if (set_mmap_table->have_diversified_variants)
+		{
+			for (int i = 0; i < mvee::numvariants; ++i)
+			{
+				if (files[i].compare(set_mmap_table->mmap_startup_info[i].image) != 0)
+				{
+					true_positive = true;
+					break;
+				}
+			}
+		}		
+
+		if (true_positive)
+			return false;
+		return true;
+    }
 	else if (callnum == __NR_execve)
 	{
 		// execve might mismatch because we're starting different binaries.
@@ -322,7 +427,7 @@ long monitor::handle_check_open_call(const std::string& full_path, int flags, in
 }
 
 /*-----------------------------------------------------------------------------
-  sys_restart_syscall
+  sys_restart_syscall - (void)
 -----------------------------------------------------------------------------*/
 GET_CALL_TYPE(restart_syscall)
 {
@@ -330,10 +435,19 @@ GET_CALL_TYPE(restart_syscall)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_exit - terminates the calling thread. Note that sys_exit and exit(3) have
-  different semantics. exit(3) is a wrapper around sys_exit_group, which 
-  terminates the entire thread group and not just the calling thread!
+  sys_exit - (int status)
+
+  terminates the calling thread. Note that sys_exit and exit(3) have different
+  semantics. exit(3) is a wrapper around sys_exit_group, which terminates the
+  entire thread group and not just the calling thread!
 -----------------------------------------------------------------------------*/
+LOG_ARGS(exit)
+{
+	debugf("%s - SYS_EXIT(%d)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (int)ARG1(variantnum));
+}
+
 PRECALL(exit)
 {
     update_sync_primitives();
@@ -344,8 +458,14 @@ PRECALL(exit)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fork
+  sys_fork - (void)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(fork)
+{
+	debugf("%s - SYS_FORK()\n", 
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 PRECALL(fork)
 {
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_FORK;
@@ -363,9 +483,17 @@ POSTCALL(fork)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_vfork - similar to fork but suspends the calling process until the
-  child process terminates
+  sys_vfork - (void)
+
+  similar to fork but suspends the calling process until the child process
+  terminates
 -----------------------------------------------------------------------------*/
+LOG_ARGS(vfork)
+{
+	debugf("%s - SYS_VFORK()\n", 
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 PRECALL(vfork)
 {
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_FORK;
@@ -383,15 +511,18 @@ POSTCALL(vfork)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_read - (unsigned int fd, char __user *buf, size_t count)
+  sys_read - 
+
+  man(2): (int fd, char *buf, size_t count)
+  kernel: (unsigned int fd, char* buf, size_t count)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(read)
 {
-	debugf("%s - SYS_READ(%d, 0x" PTRSTR ", %d)\n", 
+	debugf("%s - SYS_READ(%d, 0x" PTRSTR ", %zd)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum));
+		   (unsigned int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
+		   (size_t)ARG3(variantnum));
 }
 
 PRECALL(read)
@@ -399,11 +530,6 @@ PRECALL(read)
     CHECKARG(3);
     CHECKFD(1);
     CHECKPOINTER(2);
-
-#ifdef MVEE_ENABLE_VALGRIND_HACKS
-    if (ARG1(0) > 1024)
-        return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
-#endif
 
     if (set_fd_table->is_fd_unsynced(ARG1(0)))
     {
@@ -419,7 +545,7 @@ LOG_RETURN(read)
 	long result  = call_postcall_get_variant_result(variantnum);
 	auto result_str = call_serialize_io_buffer(variantnum, (const unsigned char*) ARG2(variantnum), result);
 	
-	debugf("%s - SYS_READ return: %d => %s\n", 
+	debugf("%s - SYS_READ return: %ld => %s\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   result, 
 		   result_str.c_str());
@@ -442,8 +568,19 @@ POSTCALL(read)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_write - (unsigned int fd, const char * buf, unsigned long count)
+  sys_write - 
+
+  man(2): (int fd, const void * buf, size_t count)
+  kernel: (unsigned int fd, const char* buf, size_t count)
 -----------------------------------------------------------------------------*/
+GET_CALL_TYPE(write)
+{
+	// RAVEN extended syscall support
+	if ((int)ARG1(variantnum) < 0)
+        return MVEE_CALL_TYPE_UNSYNCED;
+	return MVEE_CALL_TYPE_NORMAL;
+}
+
 LOG_ARGS(write)
 {
 	// writes to negative file descriptors are RAVEN pseudo-syscalls
@@ -451,21 +588,21 @@ LOG_ARGS(write)
 	{
 		debugf("%s - SYS_WRITE(%d (%s), %d, %d)\n",
 			   call_get_variant_pidstr(variantnum).c_str(), 
-			   ARG1(variantnum), 
+			   (int)ARG1(variantnum), 
 			   getTextualRAVENCall((int)ARG1(variantnum)),
-			   ARG2(variantnum), 
-			   ARG3(variantnum));
+			   (int)ARG2(variantnum), 
+			   (int)ARG3(variantnum));
 	}
 	else
 	{
 		auto buf_str = call_serialize_io_buffer(variantnum, (const unsigned char*) ARG2(variantnum), ARG3(variantnum));
 
-		debugf("%s - SYS_WRITE(%d, 0x" PTRSTR " (%s), %d)\n",
+		debugf("%s - SYS_WRITE(%u, 0x" PTRSTR " (%s), %zu)\n",
 			   call_get_variant_pidstr(variantnum).c_str(), 
-			   ARG1(variantnum), 
-			   ARG2(variantnum), 
+			   (unsigned int)ARG1(variantnum), 
+			   (unsigned long)ARG2(variantnum), 
 			   buf_str.c_str(), 
-			   ARG3(variantnum));
+			   (size_t)ARG3(variantnum));
 	}
 }
 
@@ -498,8 +635,90 @@ PRECALL(write)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
+CALL(write)
+{
+	if (IS_UNSYNCED_CALL && 
+		(int)ARG1(variantnum) < 0)
+	{
+		switch ((int)ARG1(variantnum))
+		{
+			case ESC_XCHECKS_OFF:
+			{
+				// Try to parse the syscall_info struct
+				if (ARG3(variantnum) > sizeof(long) &&
+					(ARG3(variantnum) % sizeof(long)) == 0)
+				{
+					unsigned char* raw_syscall_info = rw::read_data(variants[variantnum].variantpid,
+																	(void*) ARG2(variantnum),
+																	ARG3(variantnum));
+
+					if (raw_syscall_info)
+					{
+						struct raven_syscall_info* info = reinterpret_cast<struct raven_syscall_info*>(raw_syscall_info);
+						variants[variantnum].max_unchecked_syscalls = info->max_unchecked_syscalls;
+
+						debugf("%s - Requested %ld unchecked syscall invocations\n", 
+							   call_get_variant_pidstr(variantnum).c_str(), 
+							   variants[variantnum].max_unchecked_syscalls);
+
+						for (unsigned long i = 0; i < (ARG3(variantnum) - sizeof(long)) / sizeof(long); ++i)
+						{
+							debugf("%s - Unchecked syscall: %ld (%s)\n", 
+								   call_get_variant_pidstr(variantnum).c_str(), 
+								   info->unchecked_syscalls[i],
+								   getTextualSyscall(info->unchecked_syscalls[i]));
+							
+							SYSCALL_MASK_SET(variants[variantnum].unchecked_syscalls,
+											 info->unchecked_syscalls[i]);
+						}
+					}
+					else
+					{
+						warnf("%s - Malformed syscall_info struct or size arg for ESC_XCHECKS_OFF\n", 
+							  call_get_variant_pidstr(variantnum).c_str());
+
+						return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EINVAL);
+					}
+
+					SAFEDELETEARRAY(raw_syscall_info);
+					variants[variantnum].syscall_checking_disabled = true;				
+				}
+				else
+				{
+					warnf("%s - Malformed syscall_info struct or size arg for ESC_XCHECKS_OFF\n", 
+						   call_get_variant_pidstr(variantnum).c_str());
+					return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EINVAL);						
+				}
+
+				break;
+			}
+			case ESC_XCHECKS_ON:
+			{
+				variants[variantnum].syscall_checking_disabled = false;
+				SYSCALL_MASK_CLEAR(variants[variantnum].unchecked_syscalls);
+				break;
+			}
+			default:
+			{
+				warnf("%s - Unhandled write to negative file descriptor. This is probably a RAVEN extended syscall we have not implemented yet.\n", 
+					  call_get_variant_pidstr(variantnum).c_str());
+				warnf("%s - > fd: %d (%s)\n", call_get_variant_pidstr(variantnum).c_str(), 
+					  (int)ARG1(variantnum), getTextualRAVENCall((int)ARG1(variantnum)));
+				return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOSYS);
+			}
+		}
+
+		return MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
+	}
+
+	return MVEE_CALL_ALLOW;
+}
+
 /*-----------------------------------------------------------------------------
-  sys_open - (const char* filename, int flags, int mode)
+  sys_open - 
+
+  man(2): (const char* filename, int flags, mode_t mode)
+  kernel: (const char* filename, int flags, umode_t mode)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(open)
 {
@@ -508,8 +727,8 @@ LOG_ARGS(open)
 	debugf("%s - SYS_OPEN(%s, 0x%08X = %s, 0x%08X = %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
 		   str1.c_str(),
-		   ARG2(variantnum), getTextualFileFlags(ARG2(variantnum)).c_str(),
-		   ARG3(variantnum), getTextualFileMode(ARG3(variantnum) & S_FILEMODEMASK).c_str());
+		   (unsigned int)ARG2(variantnum), getTextualFileFlags(ARG2(variantnum)).c_str(),
+		   (unsigned int)ARG3(variantnum), getTextualFileMode(ARG3(variantnum) & S_FILEMODEMASK).c_str());
 }
 
 PRECALL(open)
@@ -527,28 +746,12 @@ PRECALL(open)
 
 	if (!ipmon_fd_handling)
 	{
-		auto orig_path = rw::read_string(variants[0].variantpid, (void*) ARG1(0));
-		if (orig_path.find("/proc/self/") == 0 &&
-			orig_path != "/proc/self/maps" &&
-			orig_path != "/proc/self/exe")
-		{
-			debugf("master sys_open for: %s\n", orig_path.c_str());
-			return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-		}
-
 		auto full_path = set_fd_table->get_full_path(0, variants[0].variantpid, AT_FDCWD, (void*)ARG1(0));
 		if (full_path == "")
 			return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
 
-		if (full_path.find("/dev/shm/") == 0 ||
-			full_path.find("/run/shm/") == 0)
-			return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
-
-		if (full_path.find("/dev/") == 0)
-		{
-			debugf("master sys_open for: %s\n", full_path.c_str());
+		if (!set_fd_table->should_open_in_all_variants(full_path, variants[0].variantpid))
 			return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-		}
 	}
 
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
@@ -650,9 +853,8 @@ POSTCALL(open)
 	else
 	{		
 		std::string path = set_fd_table->get_full_path(variantnum, variants[variantnum].variantpid, AT_FDCWD, (void*)ARG1(variantnum));
-		std::string resolved_path = mvee::os_normalize_path_name(path);
 
-		set_fd_table->create_temporary_fd_info(variantnum, call_postcall_get_variant_result(variantnum), resolved_path, ARG2(variantnum), ARG2(variantnum) & O_CLOEXEC);
+		set_fd_table->create_temporary_fd_info(variantnum, call_postcall_get_variant_result(variantnum), path, ARG2(variantnum), ARG2(variantnum) & O_CLOEXEC);
 
 		aliased_open = false;
 		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
@@ -663,13 +865,16 @@ POSTCALL(open)
 
 
 /*-----------------------------------------------------------------------------
-  sys_close - (int filedescriptor)
+  sys_close - 
+
+  man(2): (int fd)
+  kernel: (unsigned int fd)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(close)
 {
 	debugf("%s - SYS_CLOSE(%d)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum));
+		   (int)ARG1(variantnum));
 }
 
 PRECALL(close)
@@ -678,14 +883,7 @@ PRECALL(close)
 
     fd_info* info = set_fd_table->get_fd_info(ARG1(0));
     if (!info)
-    {
-#ifdef MVEE_ENABLE_VALGRIND_HACKS
-        if (ARG1(0) > 1024)
-            return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
-#endif
-
         return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
-    }
 
     if (info->master_file)
         return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
@@ -714,15 +912,15 @@ POSTCALL(close)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_waitpid - (pid_t pid, int __user *stat_addr, int options)
+  sys_waitpid - (pid_t pid, int *stat_addr, int options)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(waitpid)
 {
 	debugf("%s - SYS_WAITPID(%d, 0x" PTRSTR ", %d)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum));
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
+		   (int)ARG3(variantnum));
 }
 
 PRECALL(waitpid)
@@ -744,12 +942,12 @@ POSTCALL(waitpid)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_link - (const char __user *oldname, const char __user *newname)
+  sys_link - (const char *oldname, const char *newname)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(link)
 {
 	auto str1 = rw::read_string(variants[variantnum].variantpid, (void*)ARG1(variantnum));
-	auto str2 = rw::read_string(variants[variantnum].variantpid, (void*)ARG1(variantnum));
+	auto str2 = rw::read_string(variants[variantnum].variantpid, (void*)ARG2(variantnum));
 
 	debugf("%s - SYS_LINK(%s, %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
@@ -774,18 +972,8 @@ PRECALL(link)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_unlink - (const char __user *pathname)
+  sys_unlink - (const char *pathname)
 -----------------------------------------------------------------------------*/
-GET_CALL_TYPE(unlink)
-{
-#ifdef MVEE_ENABLE_VALGRIND_HACKS
-    auto unlink_fd = rw::read_string(variants[variantnum].variantpid, ARG1(variantnum));
-    if (unlink_fd.find("/tmp/vgdb-pipe-") == 0)
-        return MVEE_CALL_TYPE_UNSYNCED;
-#endif
-    return MVEE_CALL_TYPE_NORMAL;
-}
-
 LOG_ARGS(unlink)
 {
 	auto unlink_fd = rw::read_string(variants[variantnum].variantpid, (void*) ARG1(variantnum));
@@ -800,10 +988,6 @@ PRECALL(unlink)
     CHECKPOINTER(1);
     CHECKSTRING(1);
 	
-	// we do this at the precall site so we can still resolve the file name
-	auto unlink_file = rw::read_string(variants[0].variantpid, (void*)ARG1(0));
-	set_fd_table->set_file_unlinked(unlink_file.c_str());
-
 	if (call_do_alias<1>())
 		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 
@@ -812,21 +996,24 @@ PRECALL(unlink)
 
 POSTCALL(unlink)
 {
-#ifdef MVEE_ENABLE_VALGRIND_HACKS
-    if IS_UNSYNCED_CALL
-    {
-        auto unlink_fd = rw::read_string(variants[variantnum].variantpid, ARG1(variantnum));
-        if (unlink_fd.find("/tmp/vgdb-pipe") == 0)
+	if IS_SYNCED_CALL
+	{
+		for (auto i = 0;
+			 i < ((state == STATE_IN_MASTERCALL) ? 1 : mvee::numvariants);
+			 ++i)
 		{
-			if (!interaction::write_syscall_return(variants[variantnum].variantpid, 0))
-			{
-				warnf("%s - failed to replicate syscall return\n",
-					  call_get_variant_pidstr(variantnum).c_str());
-			}			
-		}
+			auto unlink_file = set_fd_table->get_full_path(i, variants[i].variantpid, AT_FDCWD, (void*) ARG1(i));
+			set_fd_table->set_file_unlinked(unlink_file.c_str());
+		}		
+	}
+	else
+	{
+		auto unlink_file = set_fd_table->get_full_path(variantnum, variants[variantnum].variantpid, AT_FDCWD, (void*) ARG1(variantnum));
+		set_fd_table->set_file_unlinked(unlink_file.c_str());
+
 		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
-    }
-#endif
+	}
+
 #ifndef MVEE_FD_DEBUG
 	set_fd_table->verify_fd_table(getpids());
 #endif
@@ -835,8 +1022,7 @@ POSTCALL(unlink)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_execve - (char __user *filename, char __user * __user *argv,
-  char __user * __user *envp);
+  sys_execve - (char* filename, char** argv, char** envp)
 -----------------------------------------------------------------------------*/
 // Fetching the execve arguments is very costly, especially without the GHUMVEE
 // ptrace extension.  it must only be done once!
@@ -901,7 +1087,7 @@ void monitor::handle_execve_get_args(int variantnum)
 		set_fd_table->refresh_fd_table(getpids());
 
     set_mmap_table->mmap_startup_info[variantnum].image = 
-		mvee::os_normalize_path_name(set_fd_table->get_full_path(variantnum, variants[variantnum].variantpid, AT_FDCWD, (void*) ARG1(variantnum)));
+		set_fd_table->get_full_path(variantnum, variants[variantnum].variantpid, AT_FDCWD, (void*) ARG1(variantnum));
     set_mmap_table->mmap_startup_info[variantnum].serialized_argv = args.str();
 	set_mmap_table->mmap_startup_info[variantnum].serialized_envp = envs.str();
 
@@ -930,16 +1116,15 @@ LOG_ARGS(execve)
 
 PRECALL(execve)
 {
-	handle_execve_get_args(0);
+	for (int i = 0; i < mvee::numvariants; ++i)
+        handle_execve_get_args(i);
 
 	// This is the default, but we might set it to true if
 	// sys_execve mismatches on the first arg
-	set_mmap_table->have_diversified_variants = false;
+	set_mmap_table->have_diversified_variants = false;	
 
     for (int i = 1; i < mvee::numvariants; ++i)
     {
-        handle_execve_get_args(i);
-		
         if (set_mmap_table->mmap_startup_info[i].image.compare(
 				set_mmap_table->mmap_startup_info[0].image))
         {
@@ -959,12 +1144,14 @@ PRECALL(execve)
 
 CALL(execve)
 {
+#if 0
 	if IS_UNSYNCED_CALL
 	{
 		warnf("unsynced execve dispatch - was this intentional?\n");
 		variants[variantnum].entry_point_bp_set = false;
 		return MVEE_CALL_ALLOW;
 	}
+#endif
 
 	// check if the file exists first
 	for (int i = 0; i < mvee::numvariants; ++i)
@@ -972,13 +1159,13 @@ CALL(execve)
 		std::string alias = mvee::get_alias(i, set_mmap_table->mmap_startup_info[i].image);
 		if (alias == "" && access(set_mmap_table->mmap_startup_info[i].image.c_str(), F_OK) == -1)
 		{
-			debugf("variant %d is trying to launch a non-existing program: %s\n", 
+			warnf("variant %d is trying to launch a non-existing program: %s\n", 
 				   i, set_mmap_table->mmap_startup_info[i].image.c_str());
 			return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOENT);
 		}
 		else if (alias != "" && access(alias.c_str(), F_OK) == -1)
 		{
-			debugf("variant %d is trying to launch a non-existing program alias: %s\n", 
+			warnf("variant %d is trying to launch a non-existing program alias: %s\n", 
 				   i, alias.c_str());
 			return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOENT);
 		}					
@@ -1008,7 +1195,10 @@ CALL(execve)
         perf = 1;
 
 	// return immediately if we don't have to use the MVEE_LD_Loader
-	if (!(*mvee::config_variant_global)["hide_vdso"].asBool() && 
+	if (
+#ifdef MVEE_ARCH_HAS_VDSO
+		!(*mvee::config_variant_global)["hide_vdso"].asBool() && 
+#endif
 		!(*mvee::config_variant_global)["non_overlapping_mmaps"].asInt() && 
 		(!(*mvee::config_variant_exec)["library_path"]
 		 || (*mvee::config_variant_exec)["library_path"].asString().length() == 0))
@@ -1026,7 +1216,7 @@ CALL(execve)
 	for (int i = 0; i < mvee::numvariants; ++i)
 	{
 		rewrite_execve_args(i, true, false);
-		variants[i].entry_point_bp_set = false;
+//		variants[i].entry_point_bp_set = false;
 	}
 
     return MVEE_CALL_ALLOW;
@@ -1127,14 +1317,27 @@ POSTCALL(execve)
             }
         }
 
-		// enable fast forwarding?
-		/*for (int i = 0; i < mvee::numvariants; ++i)
+#ifdef MVEE_ARCH_USE_LIBUNWIND
+		for (i = 0; i < mvee::numvariants; ++i)
 		{
-			variants[i].entry_point_address = 
-				mvee::os_get_entry_point_address(...);
-			
-			variants[i].fast_forward_to_entry_point = true;				
-		 }*/
+			unw_destroy_addr_space(variants[i].unwind_as);
+			variants[i].unwind_as = unw_create_addr_space(&_UPT_accessors, 0);
+			if (variants[i].unwind_info)
+				_UPT_destroy(variants[i].unwind_info);
+			variants[i].unwind_info = nullptr;
+		}
+#endif
+
+		// enable fast forwarding?
+		if (!(*mvee::config_variant_global)["xchecks_initially_enabled"].asBool())
+		{
+			for (int i = 0; i < mvee::numvariants; ++i)
+			{
+				variants[i].fast_forwarding = true;				
+				debugf("%s - Variant will start with cross-checks DISABLED\n", 
+					   call_get_variant_pidstr(i).c_str());
+			}
+		}
     }
 	else
 	{		
@@ -1159,7 +1362,7 @@ POSTCALL(execve)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_chdir - (const char __user *filename)
+  sys_chdir - (const char *filename)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(chdir)
 {
@@ -1174,14 +1377,7 @@ PRECALL(chdir)
 {
     CHECKPOINTER(1);
     CHECKSTRING(1);
-
-	if (call_do_alias<1>())
-	{
-		// TODO/FIXME: set_fd_table's cwd needs to be a vector
-		warnf("Aliased chdir - this is not fully supported right now\n");
-		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
-	}
-
+	call_do_alias<1>();
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
@@ -1189,17 +1385,33 @@ POSTCALL(chdir)
 {
     if (call_succeeded)
     {
-        auto str = rw::read_string(variants[0].variantpid, (void*) ARG1(0));
-        if (str.length() > 0)
-            set_fd_table->chdir(str.c_str());
+		if IS_UNSYNCED_CALL
+		{
+			auto str = rw::read_string(variants[variantnum].variantpid, (void*) ARG1(variantnum));
+			if (str.length() > 0)
+				set_fd_table->chdir(variantnum, str.c_str());
+		}
+		else
+		{
+			auto str = rw::read_string(variants[0].variantpid, (void*) ARG1(0));
+			if (str.length() > 0)
+				set_fd_table->chdir(-1, str.c_str());
+		}
     }
 
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_time - (time_t __user *tloc)
+  sys_time - (time_t *tloc)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(time)
+{
+	debugf("%s - SYS_TIME(0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned long)ARG1(variantnum));
+}
+
 PRECALL(time)
 {
     CHECKPOINTER(1);
@@ -1208,13 +1420,23 @@ PRECALL(time)
 
 POSTCALL(time)
 {
-    if (ARG1(0))
-        REPLICATEBUFFERFIXEDLEN(1, sizeof(time_t));
-    return 0;
+	if (IS_SYNCED_CALL)
+	{
+		if (ARG1(0))
+			REPLICATEBUFFERFIXEDLEN(1, sizeof(time_t));
+		return 0;
+	}
+	else
+	{
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
 }
 
 /*-----------------------------------------------------------------------------
-  sys_chmod - (const char __user *filename, mode_t mode)
+  sys_chmod - 
+
+  man(2): (const char* filename, mode_t mode)
+  kernel: (const char* filename, umode_t mode)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(chmod)
 {
@@ -1224,7 +1446,7 @@ LOG_ARGS(chmod)
 	debugf("%s - SYS_CHMOD(%s, 0x%08x = %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   str1.c_str(), 
-		   ARG2(variantnum), 
+		   (unsigned int)ARG2(variantnum), 
 		   mode.c_str());
 }
 
@@ -1241,8 +1463,19 @@ PRECALL(chmod)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fchmod - (unsigned int fd, mode_t mode)
+  sys_fchmod - 
+
+  man(2): (int fd, mode_t mode)
+  kernel: (unsigned int fd, umode_t mode)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(fchmod)
+{
+	debugf("%s - SYS_FCHMOD(%u, %s)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned int)ARG1(variantnum),
+		   getTextualFileMode(ARG2(variantnum)).c_str());
+}
+
 PRECALL(fchmod)
 {
     CHECKARG(2);
@@ -1258,15 +1491,18 @@ PRECALL(fchmod)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_lseek - (unsigned int fd, off_t offset, unsigned int origin)
+  sys_lseek - 
+
+  man(2): (int fd, off_t offset, int whence)
+  kernel: (unsigned int fd, off_t offset, unsigned int whence)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(lseek)
 {
-	debugf("%s - SYS_LSEEK(%d, 0x%08X, %d)\n", 
+	debugf("%s - SYS_LSEEK(%u, %ld, %u)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum));
+		   (unsigned int)ARG1(variantnum), 
+		   (off_t)ARG2(variantnum), 
+		   (unsigned int)ARG3(variantnum));
 }
 
 PRECALL(lseek)
@@ -1287,6 +1523,13 @@ PRECALL(lseek)
 /*-----------------------------------------------------------------------------
   sys_alarm - (unsigned int seconds)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(alarm)
+{
+	debugf("%s - SYS_ALARM(%u s)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned int)ARG1(variantnum));
+}
+
 PRECALL(alarm)
 {
     CHECKARG(1);
@@ -1294,8 +1537,35 @@ PRECALL(alarm)
 }
 
 /*-----------------------------------------------------------------------------
-    sys_setitimer - (int which, const struct itimerval* new_value, struct itimerval* old_value)
+  sys_setitimer - (int which, const struct itimerval* new_value, struct
+  itimerval* old_value)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(setitimer)
+{
+	struct timeval new_value[2];
+	std::stringstream timestr;
+
+	if (ARG2(variantnum))
+	{
+		if (!rw::read_struct(variants[variantnum].variantpid, (void*) ARG2(variantnum), 2 * sizeof(struct timeval), new_value))
+			throw RwMemFailure(variantnum, "read itimer value in sys_setitimer");
+
+		timestr << "INTERVAL DURATION: " << new_value[1].tv_sec << "." << std::setw(6) << std::setfill('0') << new_value[1].tv_usec << std::setw(0) << " s"
+				<< ", RESET VALUE: " << new_value[0].tv_sec << "." << std::setw(6) << std::setfill('0') << new_value[0].tv_usec << " s";
+	}
+	else
+	{
+		timestr << "<Invalid Interval Timer>";
+	}
+
+
+	debugf("%s - SYS_SETITIMER(%s, %s, 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   getTextualIntervalTimerType(ARG1(variantnum)),
+		   timestr.str().c_str(),
+		   (unsigned long)ARG3(variantnum));
+}
+
 PRECALL(setitimer)
 {
     CHECKARG(1);
@@ -1313,36 +1583,29 @@ POSTCALL(setitimer)
 }
 
 /*-----------------------------------------------------------------------------
-    sys_getpid
+  sys_getpid - (void)
 -----------------------------------------------------------------------------*/
-POSTCALL(getpid)
+LOG_ARGS(getpid)
 {
-	if IS_UNSYNCED_CALL
-		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	debugf("%s - SYS_GETPID()\n",
+		   call_get_variant_pidstr(variantnum).c_str());
+}
 
-    for (int i = 1; i < mvee::numvariants; ++i)
-	{
-		if (!interaction::write_syscall_return(variants[i].variantpid, variants[0].varianttgid))
-		{
-			warnf("%s - failed to replicate syscall return\n",
-				  call_get_variant_pidstr(i).c_str());
-			return 0;
-		}
-	}
-	
-	return 0;
+PRECALL(getpid)
+{
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_sendfile - (int out_fd, int in_fd, off_t __user * offset, size_t count)
+  sys_sendfile - (int out_fd, int in_fd, off_t* offset, size_t count)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(sendfile)
 {
-	debugf("%s - SYS_SENDFILE(OUT: %d, IN: %d, CNT: %d)\n",
+	debugf("%s - SYS_SENDFILE(OUT: %d, IN: %d, CNT: %zd)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG4(variantnum));
+		   (int)ARG1(variantnum), 
+		   (int)ARG2(variantnum), 
+		   (size_t)ARG4(variantnum));
 }
 
 PRECALL(sendfile)
@@ -1364,12 +1627,25 @@ PRECALL(sendfile)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_ptrace
+  sys_ptrace - 
+
+  man(2): (enum __ptrace_request request, pid_t pid, void* addr, void* data)
+  kernel: (long request, long pid, unsigned long addr, unsigned long data)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(ptrace)
+{
+	debugf("%s - SYS_PTRACE(%s, %ld, 0x" PTRSTR ", 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   getTextualPtraceRequest(ARG1(variantnum)),
+		   (long)ARG2(variantnum),
+		   (unsigned long)ARG3(variantnum),
+		   (unsigned long)ARG4(variantnum));
+}
+
 CALL(ptrace)
 {
     cache_mismatch_info("The program is trying to use ptrace. This call has been denied.\n");
-    cache_mismatch_info("request: %s\n",        getTextualRequest(ARG1(0)));
+    cache_mismatch_info("request: %s\n",        getTextualPtraceRequest(ARG1(0)));
     cache_mismatch_info("pid: %d\n",            ARG2(0));
     cache_mismatch_info("addr: 0x" PTRSTR "\n", ARG3(0));
     cache_mismatch_info("data: 0x" PTRSTR "\n", ARG4(0));
@@ -1378,8 +1654,14 @@ CALL(ptrace)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_pause
+  sys_pause - (void)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(pause)
+{
+	debugf("%s - SYS_PAUSE()\n", 
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 GET_CALL_TYPE(pause)
 {
 	// There is a slight chance that we will see the return site of
@@ -1455,8 +1737,9 @@ POSTCALL(rt_sigsuspend)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_utime - change access and/or modification times of an inode
-  (char __user * filename, struct utimbuf __user * times)
+  sys_utime - (char * filename, struct utimbuf * times)
+
+  change access and/or modification times of an inode
 -----------------------------------------------------------------------------*/
 LOG_ARGS(utime)
 {
@@ -1467,7 +1750,8 @@ LOG_ARGS(utime)
 	if (ARG2(variantnum))
 	{
 		if (!rw::read<struct utimbuf>(variants[variantnum].variantpid, (void*) ARG2(variantnum), times))
-			return;
+			throw RwMemFailure(variantnum, "read utimbuf in sys_utime");
+
 		timestr << "ACTIME: " << times.actime << ", MODTIME: " << times.modtime;
 	}
 	else
@@ -1495,19 +1779,22 @@ PRECALL(utime)
 }
 
 /*-----------------------------------------------------------------------------
-    sys_mknod - (const char *pathname, mode_t mode, dev_t dev)
+  sys_mknod - 
+
+  man(2): (const char *pathname, mode_t mode, dev_t dev)
+  kernel: (const char* filename umode_t mode, unsigned dev)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(mknod)
 {
 	auto str1 = rw::read_string(variants[variantnum].variantpid, (void*)ARG1(variantnum));
 	auto mode = getTextualFileMode(ARG2(variantnum));
 	
-	debugf("%s - SYS_MKNOD(%s, %08x - %s, %d)\n", 
+	debugf("%s - SYS_MKNOD(%s, %08x - %s, %u)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   str1.c_str(), 
-		   ARG2(variantnum), 
+		   (mode_t)ARG2(variantnum), 
 		   mode.c_str(), 
-		   ARG3(variantnum));
+		   (unsigned)ARG3(variantnum));
 }
 
 PRECALL(mknod)
@@ -1533,7 +1820,7 @@ LOG_ARGS(access)
 	debugf("%s - SYS_ACCESS(%s, 0x%08X = %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
 		   str1.c_str(), 
-		   ARG2(variantnum), 
+		   (unsigned int)ARG2(variantnum), 
 		   getTextualAccessMode(ARG2(variantnum)).c_str());
 }
 
@@ -1550,13 +1837,13 @@ PRECALL(access)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_kill - (int pid, int sig)
+  sys_kill - (pid_t pid, int sig)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(kill)
 {
 	debugf("%s - SYS_KILL(%d, %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (pid_t)ARG1(variantnum), 
 		   getTextualSig(ARG2(variantnum)));
 }
 
@@ -1568,7 +1855,7 @@ PRECALL(kill)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_rename - (const char __user *oldname, const char __user *newname)
+  sys_rename - (const char *oldname, const char *newname)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(rename)
 {
@@ -1598,7 +1885,10 @@ PRECALL(rename)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_mkdir - (const char __user *pathname, int mode)
+  sys_mkdir - 
+
+  man(2): (const char* pathname, mode_t mode)
+  kernel: (const char* pathname, umode_t mode)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(mkdir)
 {
@@ -1607,7 +1897,7 @@ LOG_ARGS(mkdir)
 	debugf("%s - SYS_MKDIR(%s, %d)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
 		   str.c_str(), 
-		   ARG2(variantnum));
+		   (int)ARG2(variantnum));
 }
 
 PRECALL(mkdir)
@@ -1623,7 +1913,7 @@ PRECALL(mkdir)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_rmdir - (const char __user *pathname)
+  sys_rmdir - (const char *pathname)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(rmdir)
 {
@@ -1646,7 +1936,10 @@ PRECALL(rmdir)
 }
 
 /*-----------------------------------------------------------------------------
-    sys_creat - (const char __user* pathname, umode_t mode)
+  sys_creat - 
+
+  man(2): (const char* pathname, mode_t mode)
+  kernel: (const char* pathname, umode_t mode)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(creat)
 {
@@ -1655,7 +1948,7 @@ LOG_ARGS(creat)
 	debugf("%s - SYS_CREAT(%s, %d)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   str.c_str(),
-		   ARG2(variantnum));
+		   (mode_t)ARG2(variantnum));
 }
 
 PRECALL(creat)
@@ -1716,13 +2009,16 @@ POSTCALL(creat)
 }
 
 /*-----------------------------------------------------------------------------
-    sys_dup - (unsigned int oldfd)
+  sys_dup - 
+
+  man(2): (int oldfd)
+  kernel: (unsigned int oldfd)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(dup)
 {
-	debugf("%s - SYS_DUP(%d)\n", 
+	debugf("%s - SYS_DUP(%u)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum));
+		   (unsigned int)ARG1(variantnum));
 }
 
 PRECALL(dup)
@@ -1740,6 +2036,19 @@ PRECALL(dup)
 
 POSTCALL(dup)
 {
+	if IS_UNSYNCED_CALL
+	{
+		if (call_succeeded)
+		{
+			unsigned long oldfd = ARG1(variantnum);
+			unsigned long newfd = call_postcall_get_variant_result(variantnum);
+			bool cloexec        = false;
+			set_fd_table->dup_temporary_fd(variantnum, oldfd, newfd, cloexec);
+		}
+
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
+
     std::vector<unsigned long> fds;
     bool                       master_file = false;
 
@@ -1781,8 +2090,15 @@ POSTCALL(dup)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_pipe - (int __user * fildes)
+  sys_pipe - (int* fildes)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(pipe)
+{
+	debugf("%s - SYS_PIPE(0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned long)ARG1(variantnum));
+}
+
 PRECALL(pipe)
 {
     CHECKPOINTER(1);
@@ -1791,6 +2107,21 @@ PRECALL(pipe)
 
 POSTCALL(pipe)
 {
+	if IS_UNSYNCED_CALL
+	{
+		if (call_succeeded)
+		{
+			int fildes[2];
+			if (!rw::read_struct(variants[variantnum].variantpid, (void*)ARG1(variantnum), 2 * sizeof(int), fildes))
+				throw RwMemFailure(0, "read fds in sys_pipe");
+
+			// create temporary file descriptor mappings for the pipe
+			set_fd_table->create_temporary_fd_info(variantnum, fildes[0], "pipe:read",  O_RDONLY, false, 0, FT_PIPE_BLOCKING);
+			set_fd_table->create_temporary_fd_info(variantnum, fildes[1], "pipe:write", O_WRONLY, false, 0, FT_PIPE_BLOCKING);
+		}
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
+
     if (call_succeeded)
     {
         int                        fildes[2];
@@ -1799,10 +2130,7 @@ POSTCALL(pipe)
 		std::vector<std::string> paths(mvee::numvariants);
 
         if (!rw::read_struct(variants[0].variantpid, (void*)ARG1(0), 2 * sizeof(int), fildes))
-        {
-            warnf("couldn't read fds\n");
-            return 0;
-        }
+			throw RwMemFailure(0, "read fds in sys_pipe");
 
         std::fill(read_fds.begin(),  read_fds.end(),  fildes[0]);
         std::fill(write_fds.begin(), write_fds.end(), fildes[1]);
@@ -1839,8 +2167,15 @@ POSTCALL(pipe)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_times - (struct tms  *  tbuf)
+  sys_times - (struct tms* tbuf)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(times)
+{
+	debugf("%s - SYS_TIMES(0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned long)ARG1(variantnum));
+}
+
 PRECALL(times)
 {
     CHECKPOINTER(1);
@@ -1849,111 +2184,330 @@ PRECALL(times)
 
 POSTCALL(times)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(1, sizeof(struct tms));
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
   sys_brk - (void* addr)
+
+  The program break's initial value cannot be controlled from user-space. This
+  causes problems when we have variant.global.settings.mvee_controlled_aslr set
+  to a non-zero value. We work around this problem by essentially turning
+  sys_brk into a sys_mmap wrapper. We do this as follows:
+
+  - When the program calls sys_brk(0), which they have to do to figure out where
+  the current break is located, we call 
+  sys_mmap(0, 4096, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0) instead.
+
+  - When the program calls sys_brk(<address>), which changes the upper bound of the heap,
+  we either call:
+  >>> sys_mmap(<end of current heap>, <address - end of current heap>, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0) if address > end of current heap
+  OR
+  >>> sys_munmap(<address>, <end of current heap - address>) if address < end of current heap  
 -----------------------------------------------------------------------------*/
-LOG_RETURN(brk)
+LOG_ARGS(brk)
 {
-	debugf("%s - SYS_BRK(0x" LONGPTRSTR ") return = 0x" LONGPTRSTR "\n",
-		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   call_postcall_get_variant_result(variantnum));
+	debugf("%s - SYS_BRK(0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned long)ARG1(variantnum));
 }
 
-POSTCALL(brk)
-{	
-	if IS_SYNCED_CALL
+LOG_RETURN(brk)
+{
+	if ((*mvee::config_variant_global)["mvee_controlled_aslr"].asInt() == 0)
 	{
-		for (int i = 0; i < mvee::numvariants; ++i)
+		debugf("%s - SYS_BRK(0x" PTRSTR ") return = 0x" PTRSTR "\n",
+			   call_get_variant_pidstr(variantnum).c_str(), 
+			   (unsigned long)ARG1(variantnum), 
+			   call_postcall_get_variant_result(variantnum));
+	}
+}
+
+PRECALL(brk)
+{
+	CHECKPOINTER(1);
+	return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+}
+
+CALL(brk)
+{	
+	if (IS_SYNCED_CALL && (*mvee::config_variant_global)["mvee_controlled_aslr"].asInt() > 0)
+	{
+		mmap_region_info* heap_region = set_mmap_table->get_heap_region(0);
+		unsigned long address = 0;
+		
+		// There's no heap yet. We have to allocate one
+		if (!heap_region)
 		{
-			long              result      = call_postcall_get_variant_result(i);
-			mmap_region_info* heap_region = set_mmap_table->get_heap_region(i);
-			fd_info           backing_file;
-
-//			log_variant_backtrace(i);
-
-			// BRK only returns the current end of the heap, not the start.
-			// consequently, if we do not have the heap region in our maps yet, we have no choice
-			// but to read it from /proc/%d/maps
-			//
-			// Do note that a heap MAY not be allocated until the first BRK call with a non-NULL arg
-			//
-			// In the old days we could've assumed that the heap started right after the last
-			// mapped region of the current program (i.e., its last bss section). Thanks
-			// to ASLR that is no longer true though.
-			//
-			// We could technically also read the __currbrk syms from the program's GOT..
-			if (!heap_region)
+			// pick a random address
+			if (ARG1(0) == 0)
 			{
-				char          cmd[512];
-				std::string   output;
-				unsigned long heap_start;
-				unsigned long heap_end;
+				// If the MVEE is controlling ASLR, then pick an address for the new heap
+				address = set_mmap_table->calculate_data_mapping_base(4096);
 
-				sprintf(cmd, "cat /proc/%d/maps | grep \"\\[heap\\]\"", variants[i].variantpid);
-				output                          = mvee::log_read_from_proc_pipe(cmd, NULL);
-
-				if (output == "" || sscanf(output.c_str(), LONGPTRSTR "-" LONGPTRSTR " %*s %*08x %*s %*s %*s", &heap_start, &heap_end) != 2)
+				// inject mmap
+				for (int i = 0; i < mvee::numvariants; ++i)
 				{
-					// There is no heap yet...
-					set_mmap_table->verify_mman_table(i, variants[i].variantpid);
-					return 0;
+                                        #ifndef __NR_mmap
+						if (!interaction::write_syscall_no(variants[i].variantpid, __NR_mmap2))
+							throw RwRegsFailure(variantnum, "inject mmap call for sys_brk(0)");
+					
+					#else
+                                                if (!interaction::write_syscall_no(variants[i].variantpid, __NR_mmap))
+							throw RwRegsFailure(variantnum, "inject mmap call for sys_brk(0)");
+					#endif
+					
+
+                                        call_overwrite_arg_value(i, 1, address, true);
+					call_overwrite_arg_value(i, 2, 4096, true);
+					call_overwrite_arg_value(i, 3, PROT_READ | PROT_WRITE, true);
+					call_overwrite_arg_value(i, 4, MAP_ANONYMOUS | MAP_PRIVATE, true);
+					call_overwrite_arg_value(i, 5, -1, true);
+					call_overwrite_arg_value(i, 6, 0, true);		
+
+					debugf("%s - call replaced by SYS_MMAP(0x" PTRSTR ", 4096, PROT_READ|PROT_WRITE, MAP_ANON|MAP_PRIVATE, -1, 0)\n",
+						   call_get_variant_pidstr(i).c_str(), 
+						   address);					
 				}
-
-				backing_file.fds.resize(mvee::numvariants);
-				backing_file.fds[i]             = MVEE_UNKNOWN_FD;
-				backing_file.paths[i]           = "[heap]";
-				backing_file.access_flags       = 0;
-				backing_file.original_file_size = 0;
-
-				set_mmap_table->map_range(i, heap_start, result-heap_start, MAP_ANONYMOUS | MAP_PRIVATE, PROT_READ | PROT_WRITE, &backing_file, 0);
 			}
 			else
 			{
-				// the kernel will not allow us to:
-				// a) change the base of the heap
-				// b) request a new size that would cause overlaps with existing vma's (mapped regions)
-				// it is therefore safe to just update the heap_region's size here
-				heap_region->region_size = ROUND_UP(result - heap_region->region_base_address, 4096);
+				// The program is trying to change the size of the heap, but we
+				// don't know where the heap is yet.
+				// This probably means that the program never called sys_brk(0).
+				// Just return -ENOMEM
+				return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOMEM);
+			}
+		}
+		else
+		{
+			// we already have a heap region
+			if (ARG1(0) == 0)
+			{
+				for (int i = 0; i < mvee::numvariants; ++i)
+				{
+					if (!interaction::write_syscall_no(variants[i].variantpid, __NR_getpid))
+						throw RwRegsFailure(variantnum, "inject getpid call for sys_brk(0)");					
+				}
+			}
+			else
+			{
+				// the variants are asking to adjust the limit of the current heap
+				for (int i = 0; i < mvee::numvariants; ++i)
+				{
+					mmap_region_info* heap_region = set_mmap_table->get_heap_region(i);
+
+					if (!heap_region)
+					{
+						warnf("heap region not found. This should not happen!\n");
+						shutdown(false);
+						return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOMEM);
+					}
+
+					unsigned long old_limit = heap_region->region_base_address + heap_region->region_size;
+					unsigned long new_limit = ARG1(i);
+
+					if (new_limit < old_limit)
+					{
+						// shrink the heap
+						if (!interaction::write_syscall_no(variants[i].variantpid, __NR_munmap))
+							throw RwRegsFailure(variantnum, "inject munmap call for sys_brk(notnull)");
+
+						call_overwrite_arg_value(i, 1, new_limit, true);
+						call_overwrite_arg_value(i, 2, old_limit - new_limit, true);
+
+						debugf("%s - call replaced by SYS_MUNMAP(0x" PTRSTR ", %ld)\n",
+							   call_get_variant_pidstr(i).c_str(), 
+							   old_limit, new_limit - old_limit);					
+
+						heap_region->region_size = new_limit - heap_region->region_base_address;
+					}
+					else if (new_limit == old_limit)
+					{
+						// just return the address of the current heap
+						if (!interaction::write_syscall_no(variants[i].variantpid, __NR_getpid))
+							throw RwRegsFailure(variantnum, "inject getpid call for sys_brk(notnull)");
+					}
+					else 
+					{
+						auto possibly_overlapping_region = set_mmap_table->get_region_info(i, old_limit + 1, new_limit - old_limit - 1);
+
+						if (possibly_overlapping_region)
+						{
+							debugf("%s - can't change heap bounds to 0x" PTRSTR "-0x" PTRSTR ")\n",
+								   call_get_variant_pidstr(i).c_str(), 
+								   heap_region->region_base_address, new_limit);					
+							possibly_overlapping_region->print_region_info("overlap with this region");
+
+							return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOMEM);
+						}
+
+						// grow the heap
+	                                        #ifndef __NR_mmap
+        	                                        if (!interaction::write_syscall_no(variants[i].variantpid, __NR_mmap2))
+                	                                        throw RwRegsFailure(variantnum, "inject mmap call for sys_brk(notnull)");
+		                                #else
+                	                                if (!interaction::write_syscall_no(variants[i].variantpid, __NR_mmap))
+								throw RwRegsFailure(variantnum, "inject mmap call for sys_brk(notnull)");
+                                	        #endif
+
+						call_overwrite_arg_value(i, 1, old_limit, true);
+						call_overwrite_arg_value(i, 2, new_limit - old_limit, true);
+						call_overwrite_arg_value(i, 3, PROT_READ | PROT_WRITE, true);
+						call_overwrite_arg_value(i, 4, MAP_ANONYMOUS | MAP_PRIVATE, true);
+						call_overwrite_arg_value(i, 5, -1, true);
+						call_overwrite_arg_value(i, 6, 0, true);
+
+						debugf("%s - call replaced by SYS_MMAP(0x" PTRSTR ", %ld, PROT_READ|PROT_WRITE, MAP_ANON|MAP_PRIVATE, -1, 0)\n",
+							   call_get_variant_pidstr(i).c_str(), 
+							   old_limit, new_limit - old_limit);
+
+						heap_region->region_size = new_limit - heap_region->region_base_address;
+					}
+				}
+			}
+		}
+	}
+
+    return MVEE_CALL_ALLOW;
+}
+
+POSTCALL(brk)
+{
+	if ((*mvee::config_variant_global)["mvee_controlled_aslr"].asInt() > 0)
+	{	   
+		if (IS_SYNCED_CALL && call_succeeded)
+		{
+			std::vector<unsigned long> addresses = call_postcall_get_result_vector();
+			mmap_region_info* heap_region = set_mmap_table->get_heap_region(0);
+			fd_info           backing_file;
+		
+			// This happens when we allocate the initial heap
+			if (!heap_region)
+			{
+				backing_file.fds.resize(mvee::numvariants);
+				std::fill(backing_file.fds.begin(), backing_file.fds.end(), MVEE_UNKNOWN_FD);
+				std::fill(backing_file.paths.begin(), backing_file.paths.end(), "[heap]");
+				backing_file.access_flags       = 0;
+				backing_file.original_file_size = 0;
+
+				for (int i = 0; i < mvee::numvariants; ++i)
+				{
+					set_mmap_table->map_range(i, addresses[i], 4096, MAP_ANONYMOUS | MAP_PRIVATE, PROT_READ | PROT_WRITE, &backing_file, 0);
+				}
 			}
 
-			set_mmap_table->verify_mman_table(i, variants[i].variantpid);
+			// now just return the limit of the heap for all variants
+			for (int i = 0; i < mvee::numvariants; ++i)
+			{
+				mmap_region_info* heap_region = set_mmap_table->get_heap_region(i);
+				call_postcall_set_variant_result(i, heap_region->region_base_address + heap_region->region_size);
+			}	
+		}
+
+		for (int i = 0; i < mvee::numvariants; ++i)
+		{
+			debugf("%s - SYS_BRK(0x" PTRSTR ") return = 0x" PTRSTR "\n",
+				   call_get_variant_pidstr(i).c_str(), 
+				   (unsigned long)ARG1(i), 
+				   call_postcall_get_variant_result(i));
 		}
 	}
 	else
 	{
-		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+		if IS_SYNCED_CALL
+		{
+			for (int i = 0; i < mvee::numvariants; ++i)
+			{
+				long              result      = call_postcall_get_variant_result(i);
+				mmap_region_info* heap_region = set_mmap_table->get_heap_region(i);
+				fd_info           backing_file;
+
+				// BRK only returns the current end of the heap, not the start.
+				// consequently, if we do not have the heap region in our maps yet, we have no choice
+				// but to read it from /proc/%d/maps
+				//
+				// Do note that a heap MAY not be allocated until the first BRK call with a non-NULL arg
+				//
+				// In the old days we could've assumed that the heap started right after the last
+				// mapped region of the current program (i.e., its last bss section). Thanks
+				// to ASLR that is no longer true though.
+				//
+				// We could technically also read the __currbrk syms from the program's GOT..
+				if (!heap_region)
+				{
+					char          cmd[512];
+					std::string   output;
+					unsigned long heap_start;
+					unsigned long heap_end;
+
+					sprintf(cmd, "cat /proc/%d/maps | grep \"\\[heap\\]\"", variants[i].variantpid);
+					output                          = mvee::log_read_from_proc_pipe(cmd, NULL);
+
+					if (output == "" || sscanf(output.c_str(), LONGPTRSTR "-" LONGPTRSTR " %*s %*08x %*s %*s %*s", &heap_start, &heap_end) != 2)
+					{
+						// There is no heap yet...
+						set_mmap_table->verify_mman_table(i, variants[i].variantpid);
+						return 0;
+					}
+
+					backing_file.fds.resize(mvee::numvariants);
+					backing_file.fds[i]             = MVEE_UNKNOWN_FD;
+					backing_file.paths[i]           = "[heap]";
+					backing_file.access_flags       = 0;
+					backing_file.original_file_size = 0;
+
+					set_mmap_table->map_range(i, heap_start, result-heap_start, MAP_ANONYMOUS | MAP_PRIVATE, PROT_READ | PROT_WRITE, &backing_file, 0);
+				}
+				else
+				{
+					// the kernel will not allow us to:
+					// a) change the base of the heap
+					// b) request a new size that would cause overlaps with existing vma's (mapped regions)
+					// it is therefore safe to just update the heap_region's size here
+					heap_region->region_size = ROUND_UP(result - heap_region->region_base_address, 4096);
+				}
+
+				set_mmap_table->verify_mman_table(i, variants[i].variantpid);
+			}
+		}
 	}
 
-    return 0;
+	return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
 
 /*-----------------------------------------------------------------------------
   sys_getgid - (void)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(getgid)
+{
+	debugf("%s - SYS_GETGID()\n", 
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 LOG_RETURN(getgid)
 {
 	long result DEBUGVAR =  call_postcall_get_variant_result(variantnum);
-	debugf("%s - SYS_GETGID return: %d (%s)\n", 
+	debugf("%s - SYS_GETGID return: %ld (%s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   result, 
+		   (long)result, 
 		   getTextualGroupId(result).c_str());
 }
 
 /*-----------------------------------------------------------------------------
-  sys_syslog - (int type, char __user * buf, int len)
+  sys_syslog - (int type, char* buf, int len)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(syslog)
 {
 	debugf("%s - SYS_SYSLOG(%s, 0x" PTRSTR ", %d)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
 		   getTextualSyslogAction(ARG1(variantnum)),
-		   ARG2(variantnum),
-		   ARG3(variantnum));
+		   (unsigned long)ARG2(variantnum),
+		   (int)ARG3(variantnum));
 }
 
 PRECALL(syslog)
@@ -1980,8 +2534,9 @@ LOG_RETURN(syslog)
 	}
 	else
 	{
-		debugf("%s - SYS_SYSLOG return: %d\n", 
-			   call_get_variant_pidstr(variantnum).c_str(), result);
+		debugf("%s - SYS_SYSLOG return: %ld\n", 
+			   call_get_variant_pidstr(variantnum).c_str(), 
+			   (long)result);
 	}
 }
 
@@ -2004,7 +2559,7 @@ LOG_ARGS(setuid)
 {
 	debugf("%s - SYS_SETUID(%d = %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
+		   (uid_t)ARG1(variantnum), 
 		   getTextualGroupId(ARG1(variantnum)).c_str());
 }
 
@@ -2021,7 +2576,7 @@ LOG_ARGS(setgid)
 {
 	debugf("%s - SYS_SETGID(%d = %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
+		   (gid_t)ARG1(variantnum), 
 		   getTextualGroupId(ARG1(variantnum)).c_str());
 }
 
@@ -2034,11 +2589,27 @@ PRECALL(setgid)
 /*-----------------------------------------------------------------------------
   sys_signal - (int sig, __sighandler_t handler)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(signal)
+{
+	debugf("%s - SYS_SIGNAL(%s, 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   getTextualSig(ARG1(variantnum)),
+		   (unsigned long)ARG2(variantnum));
+}
+
 PRECALL(signal)
 {
     CHECKARG(1);
     CHECKSIGHAND(2);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+}
+
+CALL(signal)
+{
+	// prohibit call if the variant set is shutting down
+	if (set_mmap_table->thread_group_shutting_down)
+		return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EINVAL);
+	return MVEE_CALL_ALLOW;
 }
 
 POSTCALL(signal)
@@ -2056,15 +2627,18 @@ POSTCALL(signal)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_ioctl - (unsigned int fd, unsigned int cmd, unsigned long arg)
+  sys_ioctl - 
+
+  man(2): (int fd, int cmd, ...)
+  kernel: (unsigned int fd, unsigned int cmd, unsigned long arg)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(ioctl)
 {
-	debugf("%s - SYS_IOCTL(%d, %d, 0x" PTRSTR ")\n", 
+	debugf("%s - SYS_IOCTL(%u, %u, 0x" PTRSTR ")\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum));
+		   (unsigned int)ARG1(variantnum), 
+		   (unsigned int)ARG2(variantnum), 
+		   (unsigned long)ARG3(variantnum));
 }
 
 // there are many many ioctls we don't know yet
@@ -2079,12 +2653,14 @@ PRECALL(ioctl)
     switch(ARG2(0))
     {	
         case TCGETS:     // struct termios *
+		case TCFLSH:     // int			
             is_master = set_fd_table->is_fd_master_file(ARG1(0));
             break;
         case FIONREAD:   // int*
         case TIOCGWINSZ: // struct winsize *
         case TIOCGPGRP:  // pid_t *
         case TIOCSPGRP:  // const pid_t *
+		case TIOCGPTN:   // int *
             is_master = 1;
             break;
         case TCSETS:     // const struct termios *
@@ -2093,6 +2669,7 @@ PRECALL(ioctl)
             CHECKBUFFER(3, sizeof(struct __kernel_termios));
             is_master = 1;
             break;
+		case TIOCSPTLCK: // const int*
         case FIONBIO:    // int*
         case FIOASYNC:
             is_master = 1;
@@ -2102,8 +2679,19 @@ PRECALL(ioctl)
             CHECKBUFFER(3, sizeof(struct winsize));
             is_master = 1;
             break;
+		case TIOCSCTTY:
+			CHECKARG(3);
+			is_master = 1;
+			break;
+		//
+		//  The call ioctl(fildes, FIOCLEX, NULL) is equivalent to:
+		//  fcntl(fildes, F_SETFD, FD_CLOEXEC)
+		//  The call ioctl(fildes, FIONCLEX, NULL) is equivalent to:
+		//  fcntl(fildes, F_SETFD, 0)
+		//
         case FIOCLEX:
         case FIONCLEX:
+			is_master = set_fd_table->is_fd_master_file(ARG1(0));
             break;
 		// takes a struct ifconf *.  The ifc_buf field points to a buffer of
 		// length ifc_len bytes, into which the kernel writes a list of type
@@ -2162,7 +2750,9 @@ PRECALL(ioctl)
 			// fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0));
 			// if (fd_info->path.find("nvidia") != std::string::npos)
 			//	break;
-            warnf("unknown ioctl: %d (0x%08x)\n", ARG2(0), ARG2(0));
+            warnf("unknown ioctl: %u (0x%08x)\n", 
+				  (unsigned int)ARG2(0), 
+				  (unsigned int)ARG2(0));
             shutdown(false);
             break;
 		}
@@ -2181,20 +2771,9 @@ PRECALL(ioctl)
 
 POSTCALL(ioctl)
 {
+    // Handle the common cases between synced and unsynced calls
     switch(ARG2(0))
     {
-        case FIONREAD:
-            REPLICATEBUFFERFIXEDLEN(3, sizeof(int));
-            break;
-        case TCGETS:
-            REPLICATEBUFFERFIXEDLEN(3, sizeof(struct __kernel_termios));
-            break;
-        case TIOCGPGRP:
-            REPLICATEBUFFERFIXEDLEN(3, sizeof(pid_t));
-            break;
-        case TIOCGWINSZ:
-            REPLICATEBUFFERFIXEDLEN(3, sizeof(struct winsize));
-            break;
         // sets cloexec on the fd
         case FIOCLEX:
             if (call_succeeded)
@@ -2213,6 +2792,29 @@ POSTCALL(ioctl)
                     fd_info->close_on_exec = false;
             }
             break;
+	}
+
+    if IS_UNSYNCED_CALL
+        return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
+    // Handle the synced-only cases
+    switch(ARG2(0))
+    {
+		case TIOCGPTN:
+			REPLICATEBUFFERFIXEDLEN(3, sizeof(int));
+			break;
+        case FIONREAD:
+            REPLICATEBUFFERFIXEDLEN(3, sizeof(int));
+            break;
+        case TCGETS:
+            REPLICATEBUFFERFIXEDLEN(3, sizeof(struct __kernel_termios));
+            break;
+        case TIOCGPGRP:
+            REPLICATEBUFFERFIXEDLEN(3, sizeof(pid_t));
+            break;
+        case TIOCGWINSZ:
+            REPLICATEBUFFERFIXEDLEN(3, sizeof(struct winsize));
+            break;
 		case SIOCGIFCONF:
 			REPLICATEIFCONF(3);
 			break;
@@ -2225,15 +2827,18 @@ POSTCALL(ioctl)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fcntl - (unsigned int fd, unsigned int cmd, unsigned long arg)
+  sys_fcntl - 
+
+  man(2): (int fd, int cmd, ...)
+  kernel: (unsigned int fd, unsigned int cmd, unsigned long arg)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(fcntl)
 {
-	debugf("%s - SYS_FCNTL(%d, %s, 0x" PTRSTR ")\n", 
+	debugf("%s - SYS_FCNTL(%u, %s, 0x" PTRSTR ")\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (unsigned int)ARG1(variantnum), 
 		   getTextualFcntlCmd(ARG2(variantnum)), 
-		   ARG3(variantnum));
+		   (unsigned long)ARG3(variantnum));
 }
 
 PRECALL(fcntl)
@@ -2258,6 +2863,42 @@ PRECALL(fcntl)
 
 POSTCALL(fcntl)
 {
+	if IS_UNSYNCED_CALL
+	{
+		if (ARG2(variantnum) == F_GETFD)
+		{
+			return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+		}
+		else if (ARG2(variantnum) == F_GETFL)
+		{
+			return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+		}
+		else if (ARG2(variantnum) == F_DUPFD || ARG2(variantnum) == F_DUPFD_CLOEXEC)
+		{
+			if (call_succeeded)
+			{
+				unsigned long oldfd = ARG1(variantnum);
+				unsigned long newfd = call_postcall_get_variant_result(variantnum);
+				bool cloexec        = ARG2(variantnum) == F_DUPFD_CLOEXEC;
+				set_fd_table->dup_temporary_fd(variantnum, oldfd, newfd, cloexec);
+			}
+
+			return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+		}
+		else if (ARG2(variantnum) == F_SETFD)
+		{
+			if (ARG3(variantnum) == FD_CLOEXEC)
+			{
+				fd_info* fd_info = set_fd_table->get_fd_info(ARG1(variantnum));
+				if (fd_info)
+					fd_info->close_on_exec = true;
+			}
+
+			return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+		}
+		return 0;
+	}
+
     if (call_succeeded)
     {
         if (ARG2(0) == F_GETLK || ARG2(0) == F_GETLK64) // locking operations
@@ -2292,7 +2933,7 @@ POSTCALL(fcntl)
                     REPLICATEFDRESULT();
                 }
 
-                fd_info*                   fd_info = set_fd_table->get_fd_info(ARG1(0));
+                fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0));
                 if (!fd_info)
                     return 0;
 
@@ -2326,14 +2967,17 @@ POSTCALL(fcntl)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_flock - (unsigned int fd, unsigned int operation)
+  sys_flock - 
+
+  man(2): (int fd, int cmd)
+  kernel: (unsigned int fd, unsigned int cmd)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(flock)
 {
 	debugf("%s - SYS_FLOCK(%u, %u (%s))\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
+		   (unsigned int)ARG1(variantnum), 
+		   (unsigned int)ARG2(variantnum), 
 		   getTextualFlockType(ARG2(variantnum)));
 }
 
@@ -2352,13 +2996,16 @@ PRECALL(flock)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_umask - (int mask)
+  sys_umask - 
+
+  man(2): (mode_t mask)
+  kernel: (int mask)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(umask)
 {
 	debugf("%s - SYS_UMASK(%d = %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   getTextualFileMode(ARG1(variantnum)).c_str());
 }
 
@@ -2375,14 +3022,17 @@ POSTCALL(umask)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_dup2 - (unsigned int oldfd, unsigned int newfd)
+  sys_dup2 - 
+
+  man(2): (int oldfd, int newfd)
+  kernel: (unsigned int oldfd, unsigned int newfd)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(dup2)
 {
-	debugf("%s - SYS_DUP2(%d, %d)\n", 
+	debugf("%s - SYS_DUP2(%u, %u)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum));
+		   (unsigned int)ARG1(variantnum), 
+		   (unsigned int)ARG2(variantnum));
 }
 
 PRECALL(dup2)
@@ -2408,6 +3058,19 @@ PRECALL(dup2)
 
 POSTCALL(dup2)
 {
+	if IS_UNSYNCED_CALL
+	{
+		if (call_succeeded)
+		{
+			unsigned long oldfd = ARG1(variantnum);
+			unsigned long newfd = call_postcall_get_variant_result(variantnum);
+			bool cloexec        = false;
+			set_fd_table->dup_temporary_fd(variantnum, oldfd, newfd, cloexec);
+		}
+
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
+
     std::vector<unsigned long> fds;
 
     if (state == STATE_IN_MASTERCALL)
@@ -2462,15 +3125,32 @@ POSTCALL(dup2)
 /*-----------------------------------------------------------------------------
   sys_setpgid - (pid_t pid, pid_t pgid)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(setpgid)
+{
+	debugf("%s - SYS_SETPGID(%d, %d)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (pid_t)ARG1(variantnum),
+		   (pid_t)ARG2(variantnum));
+}
+
 PRECALL(setpgid)
 {
     CHECKARG(1);
+	CHECKARG(2);
+	MAPPIDS(1);
+	MAPPIDS(2);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
 /*-----------------------------------------------------------------------------
   sys_getppid - (void)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(getppid)
+{
+	debugf("%s - SYS_GETPPID()\n", 
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 PRECALL(getppid)
 {
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
@@ -2479,6 +3159,12 @@ PRECALL(getppid)
 /*-----------------------------------------------------------------------------
   sys_getpgrp - (void)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(getpgrp)
+{
+	debugf("%s - SYS_GETPGRP()\n", 
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 PRECALL(getpgrp)
 {
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
@@ -2487,6 +3173,12 @@ PRECALL(getpgrp)
 /*-----------------------------------------------------------------------------
   sys_setsid - (void)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(setsid)
+{
+	debugf("%s - SYS_SETSID()\n", 
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 PRECALL(setsid)
 {
     warnf("Process is creating a new session (i.e. it's becoming a daemon!)\n");
@@ -2500,8 +3192,16 @@ PRECALL(setsid)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getgroups - (int gidsetsize, gid_t __user* grouplist)
+  sys_getgroups - (int gidsetsize, gid_t* grouplist)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(getgroups)
+{
+	debugf("%s - SYS_GETGROUPS(%d, 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (int)ARG1(variantnum),
+		   (unsigned long)ARG2(variantnum));
+}
+
 PRECALL(getgroups)
 {
     CHECKARG(1);
@@ -2516,47 +3216,50 @@ LOG_RETURN(getgroups)
 	if (ARG2(variantnum))
 	{
 		gid_t* grouplist = new(std::nothrow) gid_t[result];
-		if (!grouplist || !rw::read_struct(variants[variantnum].variantpid, (void*)ARG2(variantnum), sizeof(gid_t) * result, grouplist))
+		if (!grouplist || 
+			!rw::read_struct(variants[variantnum].variantpid, (void*)ARG2(variantnum), sizeof(gid_t) * result, grouplist))
 		{
-			warnf("couldn't read grouplist\n");
 			SAFEDELETEARRAY(grouplist);
-			return;
+			throw RwMemFailure(variantnum, "read grouplist in sys_getgroups");
 		}
 
 		debugf("%s - SYS_GETGROUPS return: %s\n", 
 			   call_get_variant_pidstr(variantnum).c_str(),
 			   getTextualGroups(result, grouplist).c_str());
+
 		SAFEDELETEARRAY(grouplist);
 	}
 	else
 	{
-		debugf("%s - SYS_GETGROUPS return: %d\n", 
+		debugf("%s - SYS_GETGROUPS return: %ld\n", 
 			   call_get_variant_pidstr(variantnum).c_str(),
-			   result);
+			   (long)result);
 	}
 }
 
 /*-----------------------------------------------------------------------------
-  sys_setgroups - (int gidsetsize, gid_t __user* grouplist)
+  sys_setgroups - (int gidsetsize, gid_t* grouplist)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(setgroups)
 {
 	if (ARG1(variantnum) && ARG2(variantnum))
 	{
 		gid_t* grouplist = new(std::nothrow) gid_t[ARG1(variantnum)];
+
 		if (grouplist)
 			memset(grouplist, 0, sizeof(gid_t) * ARG1(variantnum));
+
 		if (!grouplist || 
 			!rw::read_struct(variants[variantnum].variantpid, (void*) ARG2(variantnum), sizeof(gid_t) * ARG1(variantnum), grouplist))
 		{
-			warnf("couldn't read grouplist\n");
 			SAFEDELETEARRAY(grouplist);
-			return;
+			throw RwMemFailure(variantnum, "read grouplist in sys_setgroups");
 		}
 
 		debugf("%s - SYS_SETGROUPS (%s)\n", 
 			   call_get_variant_pidstr(variantnum).c_str(),
 			   getTextualGroups(ARG1(variantnum), grouplist).c_str());
+
 		SAFEDELETEARRAY(grouplist);
 	}
 	else
@@ -2581,9 +3284,9 @@ LOG_ARGS(setresuid)
 {
 	debugf("%s - SYS_SETRESUID (%d (= %s), %d (= %s), %d (= %s))\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), getTextualUserId(ARG1(variantnum)).c_str(),
-		   ARG2(variantnum), getTextualUserId(ARG2(variantnum)).c_str(),
-		   ARG3(variantnum), getTextualUserId(ARG3(variantnum)).c_str());
+		   (uid_t)ARG1(variantnum), getTextualUserId(ARG1(variantnum)).c_str(),
+		   (uid_t)ARG2(variantnum), getTextualUserId(ARG2(variantnum)).c_str(),
+		   (uid_t)ARG3(variantnum), getTextualUserId(ARG3(variantnum)).c_str());
 }
 
 PRECALL(setresuid)
@@ -2601,9 +3304,9 @@ LOG_ARGS(setresgid)
 {
 	debugf("%s - SYS_SETRESGID (%d (= %s), %d (= %s), %d (= %s))\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), getTextualGroupId(ARG1(variantnum)).c_str(),
-		   ARG2(variantnum), getTextualGroupId(ARG2(variantnum)).c_str(),
-		   ARG3(variantnum), getTextualGroupId(ARG3(variantnum)).c_str());
+		   (gid_t)ARG1(variantnum), getTextualGroupId(ARG1(variantnum)).c_str(),
+		   (gid_t)ARG2(variantnum), getTextualGroupId(ARG2(variantnum)).c_str(),
+		   (gid_t)ARG3(variantnum), getTextualGroupId(ARG3(variantnum)).c_str());
 }
 
 PRECALL(setresgid)
@@ -2615,8 +3318,8 @@ PRECALL(setresgid)
 }
 
 /*-----------------------------------------------------------------------------
-    sys_rt_sigaction - (int sig, const struct sigaction __user *act,
-    struct sigaction __user *oact, size_t sigsetsize)
+  sys_rt_sigaction - (int sig, const struct sigaction* act, struct sigaction*
+  oact, size_t sigsetsize)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(rt_sigaction)
 {
@@ -2624,7 +3327,7 @@ LOG_ARGS(rt_sigaction)
 
 	debugf("%s - SYS_RT_SIGACTION(%d - %s - %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   getTextualSig(ARG1(variantnum)),
 		   (action.sa_handler == SIG_DFL) ? "SIG_DFL" :
 		   (action.sa_handler == SIG_IGN) ? "SIG_IGN" :
@@ -2640,6 +3343,14 @@ PRECALL(rt_sigaction)
     CHECKPOINTER(3);
     CHECKSIGACTION(2, OLDCALLIFNOT(__NR_rt_sigaction));
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+}
+
+CALL(rt_sigaction)
+{
+	// prohibit call if the variant set is shutting down
+	if (set_mmap_table->thread_group_shutting_down && IS_SYNCED_CALL)
+		return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EINVAL);
+	return MVEE_CALL_ALLOW;
 }
 
 POSTCALL(rt_sigaction)
@@ -2659,10 +3370,18 @@ POSTCALL(rt_sigaction)
 }
 
 /*-----------------------------------------------------------------------------
-    sys_arch_prctl - (int code, unsigned long addr)
+  sys_arch_prctl - (int code, unsigned long addr)
 
-	This is used to get/set the FS/GS base on x86
+  This is used to get/set the FS/GS base on x86
 -----------------------------------------------------------------------------*/
+LOG_ARGS(arch_prctl)
+{
+	debugf("%s - SYS_ARCH_PRCTL(%s, 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   getTextualArchPrctl(ARG1(variantnum)),
+		   (unsigned long)ARG2(variantnum));
+}
+
 PRECALL(arch_prctl)
 {
     CHECKARG(1);
@@ -2670,26 +3389,32 @@ PRECALL(arch_prctl)
 }
 
 /*-----------------------------------------------------------------------------
-    sys_sync - (void)
+  sys_sync - (void)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(sync)
+{
+	debugf("%s - SYS_SYNC()\n", 
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 PRECALL(sync)
 {
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
 /*-----------------------------------------------------------------------------
-    sys_setrlimit - (int resource, const struct rlimit *rlim)
+  sys_setrlimit - 
+
+  man(2): (int resource, const struct rlimit* rlim)
+  kernel: (unsigned int resource, struct rlimit* rlim)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(setrlimit)
 {
 	struct rlimit  rlim;
 	if (!rw::read<struct rlimit>(variants[variantnum].variantpid, (void*) ARG2(variantnum), rlim))
-	{
-		warnf("couldn't read rlimit\n");
-		return;
-	}
+		throw RwMemFailure(variantnum, "read rlimit in sys_setrlimit");
 	
-	debugf("%s - SYS_SETRLIMIT(%s, CUR: %d, MAX: %d)\n", 
+	debugf("%s - SYS_SETRLIMIT(%s, CUR: %lu, MAX: %lu)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
 		   getTextualRlimitType(ARG1(variantnum)), 
 		   rlim.rlim_cur, 
@@ -2704,8 +3429,16 @@ PRECALL(setrlimit)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getrusage - (int who, struct rusage *usage)
+  sys_getrusage - (int who, struct rusage* usage)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(getrusage)
+{
+	debugf("%s - SYS_GETRUSAGE(%s, 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   getTextualRusageWho(ARG1(variantnum)),
+		   (unsigned long)ARG2(variantnum));
+}
+
 PRECALL(getrusage)
 {
     CHECKARG(1);
@@ -2715,14 +3448,24 @@ PRECALL(getrusage)
 
 POSTCALL(getrusage)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     if (ARG2(0))
         REPLICATEBUFFERFIXEDLEN(2, sizeof(struct rusage));
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_sysinfo - (struct sysinfo *info)
+  sys_sysinfo - (struct sysinfo* info)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(sysinfo)
+{
+	debugf("%s - SYS_SYSINFO(0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned long)ARG1(variantnum));
+}
+
 PRECALL(sysinfo)
 {
     CHECKPOINTER(1);
@@ -2731,13 +3474,24 @@ PRECALL(sysinfo)
 
 POSTCALL(sysinfo)
 {
+    if IS_UNSYNCED_CALL
+        return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(1, sizeof(struct sysinfo));
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_gettimeofday - (struct timeval *tv, struct timezone *tz)
+  sys_gettimeofday - (struct timeval* tv, struct timezone* tz)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(gettimeofday)
+{
+	debugf("%s - SYS_GETTIMEOFDAY(0x" PTRSTR ", 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned long)ARG1(variantnum),
+		   (unsigned long)ARG2(variantnum));
+}
+
 PRECALL(gettimeofday)
 {
     CHECKPOINTER(2);
@@ -2747,14 +3501,28 @@ PRECALL(gettimeofday)
 
 POSTCALL(gettimeofday)
 {
+    if IS_UNSYNCED_CALL
+        return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(1, sizeof(struct timeval));
     REPLICATEBUFFERFIXEDLEN(2, sizeof(struct timezone));
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getrlimit (unsigned int resource, struct rlimit __user* limit)
+  sys_getrlimit - 
+
+  man(2): (int resource, struct rlimit* rlim)
+  kernel: (unsigned int resource, struct rlimit* limit)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(getrlimit)
+{
+	debugf("%s - SYS_GETRLIMIT(%s, 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   getTextualRlimitType(ARG1(variantnum)),
+		   (unsigned long)ARG2(variantnum));
+}
+
 PRECALL(getrlimit)
 {
     CHECKARG(1);
@@ -2763,7 +3531,7 @@ PRECALL(getrlimit)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_symlink - (const char  *  oldname, const char  *  newname)
+  sys_symlink - (const char* oldname, const char* newname)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(symlink)
 {
@@ -2793,7 +3561,10 @@ PRECALL(symlink)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_readlink - (const char __user *path, char __user *buf, int bufsiz)
+  sys_readlink - 
+
+  man(2): (const char* path, char* buf, size_t bufsz)
+  kernel: (const char* path, char* buf, int bufsiz)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(readlink)
 {
@@ -2801,8 +3572,8 @@ LOG_ARGS(readlink)
 	debugf("%s - SYS_READLINK(%s, 0x" PTRSTR ", %d)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   str1.c_str(),
-		   ARG2(variantnum), 
-		   ARG3(variantnum));
+		   (unsigned long)ARG2(variantnum), 
+		   (int)ARG3(variantnum));
 }
 
 PRECALL(readlink)
@@ -2844,14 +3615,21 @@ CALL(readlink)
 POSTCALL(readlink)
 {
     REPLICATEBUFFER(2);
-    return 0;
+    return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_munmap - (void* addr, size_t length)
+  sys_munmap - 
+
+  man(2): (void* addr, size_t length)
+  kernel: (unsigned long addr, size_t length)
 -----------------------------------------------------------------------------*/
 GET_CALL_TYPE(munmap)
 {
+	// munmap xchecks can be relaxed regardless of the target region
+	if ((*mvee::config_variant_global)["relaxed_mman_xchecks"].asBool())
+		return MVEE_CALL_TYPE_UNSYNCED;
+
     // We do NOT want to sync on the munmap of the lower region
     if (in_new_heap_allocation)
     {
@@ -2878,10 +3656,10 @@ GET_CALL_TYPE(munmap)
 
 LOG_ARGS(munmap)
 {
-	debugf("%s - SYS_MUNMAP(0x" PTRSTR ", %d)\n", 
+	debugf("%s - SYS_MUNMAP(0x" PTRSTR ", %zd)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum));
+		   (unsigned long)ARG1(variantnum), 
+		   (size_t)ARG2(variantnum));
 }
 
 bool monitor::handle_munmap_precall_callback(mmap_table* table, std::vector<mmap_region_info*>& infos, void* mon)
@@ -2902,9 +3680,9 @@ bool monitor::handle_munmap_precall_callback(mmap_table* table, std::vector<mmap
 			unsigned long           actual_offset  = actual_base - infos[0]->region_base_address + infos[0]->region_backing_file_offset;
 			int                     writeback_size = MIN(infos[0]->region_backing_file_size - actual_offset, actual_size - actual_offset);
 
-			debugf("actual size of munmap: %d\n",                                      actual_size);
-			debugf("writeback_size: %d (actual offset: %d - backing_file_size: %d)\n", writeback_size, actual_offset, infos[0]->region_backing_file_size);
-			debugf("writeback region - we will write back %d bytes at offset: %08x in file: %s\n",
+			debugf("actual size of munmap: %lu\n",                                      actual_size);
+			debugf("writeback_size: %d (actual offset: %lu - backing_file_size: %zd)\n", writeback_size, actual_offset, infos[0]->region_backing_file_size);
+			debugf("writeback region - we will write back %d bytes at offset: " PTRSTR " in file: %s\n",
                    writeback_size, actual_offset, infos[0]->region_backing_file_path.c_str());
 
 			writeback_info          info;
@@ -3003,7 +3781,7 @@ POSTCALL(munmap)
 				if (i >= mvee::numvariants)
 				{
 					in_new_heap_allocation = false;
-					call_release_locks(MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN);
+					//call_release_locks(MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN);
 				}
 			}
 
@@ -3054,7 +3832,12 @@ POSTCALL(munmap)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_truncate - (const char  *  path, long  length)
+  sys_truncate - 
+
+  man(2): (const char* path, off_t length)
+  kernel: (const char* path, long length)
+
+  These type lists should be equivalent...
 -----------------------------------------------------------------------------*/
 LOG_ARGS(truncate)
 {
@@ -3063,7 +3846,7 @@ LOG_ARGS(truncate)
 	debugf("%s - SYS_TRUNCATE(%s, %ld)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   str1.c_str(), 
-		   ARG2(variantnum));
+		   (long)ARG2(variantnum));
 }
 
 PRECALL(truncate)
@@ -3079,14 +3862,17 @@ PRECALL(truncate)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_ftruncate - (unsigned int  fd, unsigned long  length)
+  sys_ftruncate - 
+
+  man(2): (int fd, off_t length)
+  kernel: (unsigned int fd, unsigned long length)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(ftruncate)
 {
-	debugf("%s - SYS_FTRUNCATE(%d, %ld)\n", 
+	debugf("%s - SYS_FTRUNCATE(%d, %lu)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   (unsigned int)ARG1(variantnum), 
-		   ARG2(variantnum));
+		   (unsigned long)ARG2(variantnum));
 }
 
 PRECALL(ftruncate)
@@ -3106,6 +3892,15 @@ PRECALL(ftruncate)
 /*-----------------------------------------------------------------------------
   sys_ioperm - (unsigned long from, unsigned long num, int turn_on)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(ioperm)
+{
+	debugf("%s - SYS_IOPERM(0x" PTRSTR ", %lu, %d)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned long)ARG1(variantnum),
+		   (unsigned long)ARG2(variantnum),
+		   (int)ARG3(variantnum));
+}
+
 CALL(ioperm)
 {
     cache_mismatch_info("The program is trying to access I/O ports. This call has been denied.\n");
@@ -3113,8 +3908,96 @@ CALL(ioperm)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_quotactl - (unsigned int cmd, const char* special, qid_t id, void* addr)
+  sys_quotactl - 
+
+  man(2): (int cmd, const char* special, int id, caddr_t addr)
+  kernel: (unsigned int cmd, const char* special, qid_t id, void* addr)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(quotactl)
+{
+	unsigned int type   = (ARG1(variantnum) &  SUBCMDMASK);
+	unsigned int subcmd = (ARG1(variantnum) >> SUBCMDSHIFT);
+	
+	std::string device = "(null)";
+	if (ARG2(variantnum))
+		device = rw::read_string(variants[variantnum].variantpid, (void*) ARG2(variantnum));
+
+	std::string group_or_user = (type == USRQUOTA) 
+		? getTextualUserId(ARG3(variantnum)) 
+		: getTextualGroupId(ARG3(variantnum));
+
+	switch(subcmd)
+	{
+		/* id is a quota format - addr ignored */
+		case Q_QUOTAON:
+		{
+			debugf("%s - SYS_QUOTACTL(%s, %s, %s, %s)\n", 
+				   call_get_variant_pidstr(variantnum).c_str(),
+				   getTextualQuotactlType(type),
+				   getTextualQuotactlCmd(subcmd),
+				   device.c_str(),
+				   getTextualQuotactlFmt(ARG3(variantnum)));
+			break;
+		}
+		/* id and addr ignored */
+		case Q_QUOTAOFF:
+		case Q_SYNC:
+		case Q_XQUOTARM:
+		{
+			debugf("%s - SYS_QUOTACTL(%s, %s, %s)\n", 
+				   call_get_variant_pidstr(variantnum).c_str(),
+				   getTextualQuotactlType(type),
+				   getTextualQuotactlCmd(subcmd),
+				   device.c_str());
+			break;
+		}
+		/* id is a group or user */
+		case Q_GETQUOTA:
+		case Q_SETQUOTA:
+		case Q_XQUOTAON:
+		case Q_XQUOTAOFF:
+		case Q_XGETQUOTA:
+		case Q_XSETQLIM:
+		case Q_XGETQSTAT:
+		{
+			debugf("%s - SYS_QUOTACTL(%s, %s, %s, %d = %s, 0x" PTRSTR ")\n", 
+				   call_get_variant_pidstr(variantnum).c_str(),
+				   getTextualQuotactlType(type),
+				   getTextualQuotactlCmd(subcmd),
+				   device.c_str(),
+				   (int)ARG3(variantnum),
+				   group_or_user.c_str(),
+				   (unsigned long)ARG4(variantnum));
+			break;
+		}
+		/* id ignored */
+		case Q_GETINFO:
+		case Q_SETINFO:
+		case Q_GETFMT:
+		{
+			debugf("%s - SYS_QUOTACTL(%s, %s, %s, 0x" PTRSTR ")\n", 
+				   call_get_variant_pidstr(variantnum).c_str(),
+				   getTextualQuotactlType(type),
+				   getTextualQuotactlCmd(subcmd),
+				   device.c_str(),
+				   (unsigned long)ARG4(variantnum));
+			break;
+		}
+		/* special and id ignored */
+#ifdef Q_GETSTATS
+		case Q_GETSTATS:
+		{
+			debugf("%s - SYS_QUOTACTL(%s, %s, 0x" PTRSTR ")\n", 
+				   call_get_variant_pidstr(variantnum).c_str(),
+				   getTextualQuotactlType(type),
+				   getTextualQuotactlCmd(subcmd),
+				   (unsigned long)ARG4(variantnum));
+			break;
+		}
+#endif
+	}
+}
+
 PRECALL(quotactl)
 {
     CHECKARG(1);
@@ -3171,12 +4054,38 @@ PRECALL(quotactl)
         /* The addr and id arguments are ignored. */
         case Q_SYNC:
         case Q_QUOTAOFF:
+		case Q_XQUOTARM:
         {
             break;
         }
+		/* addr is a pointer to an unsigned int */
+		case Q_XQUOTAON:
+		case Q_XQUOTAOFF:
+		{
+			CHECKARG(3);
+			CHECKPOINTER(4);
+			CHECKBUFFER(4, sizeof(unsigned int));
+			break;
+		}
+		/* addr is a pointer to an fs_disk_quota structure */
+		case Q_XGETQUOTA:
+		case Q_XGETQSTAT:
+		{
+			CHECKARG(3);
+			CHECKPOINTER(4);
+			break;
+		}
+		/* addr is a pointer to an fs_disk_quota structure */
+		case Q_XSETQLIM:
+		{
+			CHECKARG(3);
+			CHECKPOINTER(4);
+			CHECKBUFFER(4, sizeof(struct fs_disk_quota));
+			break;
+		}
         default:
         {
-            cache_mismatch_info("unknown sys_quotactl subcommand: %d - FIXME!\n", subcmd);
+            cache_mismatch_info("unknown sys_quotactl subcommand: %u - FIXME!\n", subcmd);
             return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
         }
     }
@@ -3217,9 +4126,9 @@ LOG_ARGS(socket)
 {
 	debugf("%s - SYS_SOCKET(%d = %s, %d = %s, %d = %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), getTextualSocketFamily(ARG1(variantnum)),
-		   ARG2(variantnum), getTextualSocketType(ARG2(variantnum)).c_str(),
-		   ARG3(variantnum), getTextualSocketProtocol(ARG3(variantnum)));
+		   (int)ARG1(variantnum), getTextualSocketFamily(ARG1(variantnum)),
+		   (int)ARG2(variantnum), getTextualSocketType(ARG2(variantnum)).c_str(),
+		   (int)ARG3(variantnum), getTextualSocketProtocol(ARG3(variantnum)));
 }
 
 PRECALL(socket)
@@ -3238,7 +4147,10 @@ POSTCALL(socket)
 		std::vector<std::string> paths(mvee::numvariants);
 
         std::fill(fds.begin(), fds.end(), call_postcall_get_variant_result(0));
-		std::fill(paths.begin(), paths.end(), "sock:unnamed");
+		if (ARG1(0) == AF_UNIX || ARG1(0) == AF_LOCAL)
+			std::fill(paths.begin(), paths.end(), "domainsock:unnamed");
+		else
+			std::fill(paths.begin(), paths.end(), "sock:unnamed");
 		
 		FileType type = (ARG2(0) & SOCK_NONBLOCK) ? FT_SOCKET_NON_BLOCKING : FT_SOCKET_BLOCKING;
 		bool cloexec = (ARG2(0) & SOCK_CLOEXEC) ? true : false;
@@ -3259,7 +4171,10 @@ POSTCALL(socket)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_bind - (int fd, struct sockaddr __user * umyaddr, int addrlen)
+  sys_bind - 
+
+  man(2): (int fd, const struct sockaddr* addr, socklen_t addrlen)
+  kernel: (int fd, struct sockaddr* addr, int addrlen)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(bind)
 {
@@ -3267,9 +4182,9 @@ LOG_ARGS(bind)
 
 	debugf("%s - SYS_BIND(%d, %s, %d)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   text_addr.c_str(), 
-		   ARG3(variantnum));
+		   (int)ARG3(variantnum));
 }
 
 PRECALL(bind)
@@ -3294,7 +4209,10 @@ POSTCALL(bind)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_connect - (int fd, struct sockaddr __user * uservaddr, int addrlen)
+  sys_connect - 
+
+  man(2): (int fd, const struct sockaddr* addr, socklen_t addrlen)
+  kernel: (int fd, struct sockaddr* addr, int addrlen)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(connect)
 {
@@ -3302,9 +4220,9 @@ LOG_ARGS(connect)
 
 	debugf("%s - SYS_CONNECT(%d, %s, %d)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   text_addr.c_str(), 
-		   ARG3(variantnum));
+		   (int)ARG3(variantnum));
 }
 
 PRECALL(connect)
@@ -3323,7 +4241,7 @@ POSTCALL(connect)
         GETTEXTADDRDIRECT(0, text_addr, 2, ARG3(0));
         fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0), 0);
         if (fd_info && text_addr != "")
-			std::fill(fd_info->paths.begin(), fd_info->paths.end(), std::string("clientsock:") + text_addr);
+			std::fill(fd_info->paths.begin(), fd_info->paths.end(), text_addr);
     }
     return 0;
 }
@@ -3335,8 +4253,8 @@ LOG_ARGS(listen)
 {
 	debugf("%s - SYS_LISTEN(%d, %d)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum));
+		   (int)ARG1(variantnum), 
+		   (int)ARG2(variantnum));
 }
 
 PRECALL(listen)
@@ -3347,15 +4265,17 @@ PRECALL(listen)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getsockname - (int fd, struct sockaddr __user * usockaddr,
-  int __user * usockaddr_len)
+  sys_getsockname - 
+
+  man(2): (int fd, struct sockaddr* addr, socklen_t* addrlen)
+  kernel: (int fd, struct sockaddr* addr, int* addrlen)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(getsockname)
 {
 	debugf("%s - SYS_GETSOCKNAME(%d, 0x" PTRSTR ")\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum));
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum));
 }
 
 PRECALL(getsockname)
@@ -3369,20 +4289,25 @@ PRECALL(getsockname)
 
 POSTCALL(getsockname)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERANDLEN(2, 3, int);
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getpeername - (int fd, struct sockaddr __user * usockaddr,
-  int __user * usockaddr_len)
+  sys_getpeername - 
+
+  man(2): (int fd, struct sockaddr* addr, socklen_t* addrlen)
+  kernel: (int fd, struct sockaddr* addr, int* addrlen)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(getpeername)
 {
 	debugf("%s - SYS_GETPEERNAME(%d, 0x" PTRSTR ")\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum));
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum));
 }
 
 PRECALL(getpeername)
@@ -3396,21 +4321,23 @@ PRECALL(getpeername)
 
 POSTCALL(getpeername)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERANDLEN(2, 3, int);
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_socketpair - (int family, int type, int protocol,
-  int __user * usockvec)
+  sys_socketpair - (int family, int type, int protocol, int* usockvec)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(socketpair)
 {
 	debugf("%s - SYS_SOCKETPAIR(%d = %s, %d = %s, %d = %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), getTextualSocketFamily(ARG1(variantnum)),
-		   ARG2(variantnum), getTextualSocketType(ARG2(variantnum)).c_str(),
-		   ARG3(variantnum), getTextualSocketProtocol(ARG3(variantnum)));
+		   (int)ARG1(variantnum), getTextualSocketFamily(ARG1(variantnum)),
+		   (int)ARG2(variantnum), getTextualSocketType(ARG2(variantnum)).c_str(),
+		   (int)ARG3(variantnum), getTextualSocketProtocol(ARG3(variantnum)));
 }
 
 PRECALL(socketpair)
@@ -3428,8 +4355,7 @@ LOG_RETURN(socketpair)
 	if (!rw::read_primitive<int>(variants[variantnum].variantpid, (void*) ARG4(variantnum), fd1) ||
 		!rw::read_primitive<int>(variants[variantnum].variantpid, (void*) (ARG4(variantnum) + sizeof(int)), fd2))
 	{
-		warnf("Couldn't read socketpair return values\n");
-		return;
+		throw RwMemFailure(variantnum, "read fds in sys_socketpair");
 	}
 
 	debugf("%s - SYS_SOCKETPAIR return: [%d, %d]\n", 
@@ -3450,13 +4376,15 @@ POSTCALL(socketpair)
 		if (!rw::read_primitive<int>(variants[0].variantpid, (void*) ARG4(0), fd1) ||
 			!rw::read_primitive<int>(variants[0].variantpid, (void*) (ARG4(0) + sizeof(int)), fd2))
 		{
-			warnf("Couldn't read socketpair return values\n");
-			return 0;
+			throw RwMemFailure(0, "read syscall result in sys_socketpair");
 		}
 
         std::fill(fds.begin(),  fds.end(),  fd1);
         std::fill(fds2.begin(), fds2.end(), fd2);
-		std::fill(paths.begin(), paths.end(), "sock:unnamed");
+		if (ARG1(0) == AF_UNIX || ARG1(0) == AF_LOCAL)
+			std::fill(paths.begin(), paths.end(), "domainsock:unnamed");
+		else
+			std::fill(paths.begin(), paths.end(), "sock:unnamed");
 
 		FileType type = (ARG2(0) & SOCK_NONBLOCK) ? FT_SOCKET_NON_BLOCKING : FT_SOCKET_BLOCKING;
 		bool cloexec = (ARG2(0) & SOCK_CLOEXEC) ? true : false;
@@ -3489,8 +4417,7 @@ POSTCALL(socketpair)
 			if (!rw::write_primitive<int>(variants[i].variantpid, (void*) ARG4(i), fds[0]) ||
 				!rw::write_primitive<int>(variants[i].variantpid, (void*) (ARG4(i) + sizeof(int)), fds2[0]))
 			{
-				warnf("Couldn't replicate socketpair return values\n");
-				return 0;
+				throw RwMemFailure(0, "replicate syscall result in sys_socketpair");
 			}
         }
     }
@@ -3498,21 +4425,26 @@ POSTCALL(socketpair)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_sendto -  (int fd, void __user * buff, size_t len,
-  unsigned int flags, struct sockaddr __user * addr, int addr_len)
+  sys_sendto -  
+
+  man(2): (int fd, const void* buf, size_t len, int flags, constr struct
+  sockaddr* addr, socklen_t addrlen)
+  kernel: (int fd, void* buff, size_t len, unsigned int flags, struct sockaddr*
+  addr, int addrlen)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(sendto)
 {
 	GETTEXTADDRDIRECT(variantnum, text_addr, 5, ARG6(variantnum));
 	auto buf_str = call_serialize_io_buffer(variantnum, (const unsigned char*) ARG2(variantnum), ARG3(variantnum));
 
-	debugf("%s - SYS_SENDTO(%d, " PTRSTR " (%s), %d, %d = %s, 0x" PTRSTR " (%s), %d)\n",
+	debugf("%s - SYS_SENDTO(%d, " PTRSTR " (%s), %zd, %u = %s, 0x" PTRSTR " (%s), %d)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), ARG2(variantnum), buf_str.c_str(),
-		   ARG3(variantnum),
-		   ARG4(variantnum), getTextualSocketMsgFlags(ARG4(variantnum)).c_str(),
-		   ARG5(variantnum), text_addr.c_str(),
-		   ARG6(variantnum));
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), buf_str.c_str(),
+		   (size_t)ARG3(variantnum),
+		   (unsigned int)ARG4(variantnum), getTextualSocketMsgFlags(ARG4(variantnum)).c_str(),
+		   (unsigned long)ARG5(variantnum), text_addr.c_str(),
+		   (int)ARG6(variantnum));
 }
  
 PRECALL(sendto)
@@ -3529,8 +4461,10 @@ PRECALL(sendto)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_send -  (int fd, void __user * buff, size_t len,
-  unsigned int flags)
+  sys_send -  
+
+  man(2): (int fd, const void* buf, size_t len, int flags)
+  kernel: (int fd, void* buf, size_t len, unsigned int flags)
 
   WRAPPER AROUND SENDTO!!!
 
@@ -3554,19 +4488,28 @@ PRECALL(send)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_recvfrom - (int fd, void __user * ubuf, size_t size,
-  unsigned int flags, struct sockaddr __user * addr,
-  int __user * addr_len)
+  sys_recvfrom - 
+
+  man(2): (int fd, void* buf, size_t len, int flags, struct sockaddr*
+  addr, socklen_t* addrlen)
+  kernel: (int fd, void* buf, size_t len, unsigned int flags, struct sockaddr*
+  addr, int* addrlen)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(recvfrom)
 {
-	debugf("%s - SYS_RECVFROM(%d, " PTRSTR ", %d, %d = %s, 0x" PTRSTR ", %d)\n",
+	int len; 
+	
+	if (!rw::read_primitive(variants[variantnum].variantpid, (void*) ARG6(variantnum), len))
+		throw RwMemFailure(variantnum, "read len in sys_recvfrom");
+
+	debugf("%s - SYS_RECVFROM(%d, " PTRSTR ", %zd, %u = %s, 0x" PTRSTR ", %d)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), ARG2(variantnum),
-		   ARG3(variantnum),
-		   ARG4(variantnum), getTextualSocketMsgFlags(ARG4(variantnum)).c_str(),
-		   ARG5(variantnum),
-		   ARG6(variantnum));
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum),
+		   (size_t)ARG3(variantnum),
+		   (unsigned int)ARG4(variantnum), getTextualSocketMsgFlags(ARG4(variantnum)).c_str(),
+		   (unsigned long)ARG5(variantnum),
+		   len);
 }
 
 PRECALL(recvfrom)
@@ -3594,8 +4537,8 @@ LOG_ARGS(shutdown)
 {
 	debugf("%s - SYS_SHUTDOWN(%d, %d = %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
+		   (int)ARG1(variantnum), 
+		   (int)ARG2(variantnum), 
 		   getTextualSocketShutdownHow(ARG2(variantnum)));
 }
 
@@ -3607,8 +4550,10 @@ PRECALL(shutdown)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_setsockopt - (int fd, int level, int optname,
-  char __user * optval, int optlen)
+  sys_setsockopt - 
+
+  man(2): (int fd, int level, int optname, void* optval, socklen_t optlen)
+  kernel: (int fd, int level, int optname, char* optval, int optlen)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(setsockopt)
 {
@@ -3616,11 +4561,11 @@ LOG_ARGS(setsockopt)
 
 	debugf("%s - SYS_SETSOCKOPT(%d, %d, %d, %s, %d)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum),
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
+		   (int)ARG1(variantnum),
+		   (int)ARG2(variantnum), 
+		   (int)ARG3(variantnum), 
 		   str.c_str(), 
-		   ARG5(variantnum));
+		   (int)ARG5(variantnum));
 }
 
 PRECALL(setsockopt)
@@ -3635,18 +4580,20 @@ PRECALL(setsockopt)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getsockopt - (int fd, int level, int optname, char __user * optval, 
-  int __user * optlen)
+  sys_getsockopt - 
+
+  man(2): (int fd, int level, int optname, void* optval, socklen_t* optlen)
+  kernel: (int fd, int level, int optname, char* optval, int* optlen)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(getsockopt)
 {
 	debugf("%s - SYS_GETSOCKOPT(%d, %d, %d, 0x" PTRSTR ", 0x" PTRSTR ")\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum), 
-		   ARG5(variantnum));
+		   (int)ARG1(variantnum), 
+		   (int)ARG2(variantnum), 
+		   (int)ARG3(variantnum), 
+		   (unsigned long)ARG4(variantnum), 
+		   (unsigned long)ARG5(variantnum));
 }
 
 PRECALL(getsockopt)
@@ -3667,25 +4614,25 @@ POSTCALL(getsockopt)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_sendmsg - (int fd, struct msghdr __user * msg, unsigned int flags)
+  sys_sendmsg - 
+
+  man(2): (int fd, const struct msghdr* msg, int flags)
+  kernel: (int fd, struct msghdr* msg, unsigned int flags)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(sendmsg)
 {
 	struct msghdr msg;
 	if (!rw::read<struct msghdr>(variants[variantnum].variantpid, (void*) ARG2(variantnum), msg))
-	{
-		warnf("couldn't read msghdr\n");
-		return;
-	}
+		throw RwMemFailure(variantnum, "read msghdr in sys_sendmsg");
 
 	auto msg_str = call_serialize_msgvector(variantnum, &msg);
 
-	debugf("%s - SYS_SENDMSG(%d, 0x" PTRSTR " (%s), %d = %s)\n",
+	debugf("%s - SYS_SENDMSG(%d, 0x" PTRSTR " (%s), %u = %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
 		   msg_str.c_str(),
-		   ARG3(variantnum), 
+		   (unsigned int)ARG3(variantnum), 
 		   getTextualSocketMsgFlags(ARG3(variantnum)).c_str());
 }
 
@@ -3699,17 +4646,17 @@ PRECALL(sendmsg)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_sendmmsg - (int fd, struct mmsghdr __user * mmsg,
-  unsigned int vlen, unsigned int flags)
+  sys_sendmmsg - (int fd, struct mmsghdr* mmsg, unsigned int vlen, unsigned int
+  flags)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(sendmmsg)
 {
-	debugf("%s - SYS_SENDMMSG(%d, 0x" PTRSTR ", %d, %d = %s)\n",
+	debugf("%s - SYS_SENDMMSG(%d, 0x" PTRSTR ", %u, %u = %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum),
-		   ARG4(variantnum), 
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum),  // TODO: Serialize and dump vector contents?
+		   (unsigned int)ARG3(variantnum),
+		   (unsigned int)ARG4(variantnum), 
 		   getTextualSocketMsgFlags(ARG4(variantnum)).c_str());
 }
 
@@ -3731,16 +4678,18 @@ POSTCALL(sendmmsg)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_recvmsg - (int fd, struct msghdr __user * msg,
-  unsigned int flags)
+  sys_recvmsg - 
+
+  man(2): (int fd, struct msghdr* msg, int flags)
+  kernel: (int fd, struct msghdr* msg, unsigned int flags)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(recvmsg)
 {
-	debugf("%s - SYS_RECVMSG(%d, 0x" PTRSTR ", %d = %s)\n",
+	debugf("%s - SYS_RECVMSG(%d, 0x" PTRSTR ", %u = %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
+		   (unsigned int)ARG3(variantnum), 
 		   getTextualSocketMsgFlags(ARG3(variantnum)).c_str());
 }
 
@@ -3757,13 +4706,10 @@ LOG_RETURN(recvmsg)
 {
 	struct msghdr msg;
 	if (!rw::read<struct msghdr>(variants[variantnum].variantpid, (void*) ARG2(variantnum), msg))
-	{
-		warnf("couldn't read msghdr\n");
-		return;
-	}
+		throw RwMemFailure(variantnum, "read msghdr in sys_recvmsg");
 
 	auto _msg = call_serialize_msgvector(variantnum, &msg);
-	debugf("%s - SYS_RECVMSG return: %d - %s\n", 
+	debugf("%s - SYS_RECVMSG return: %ld - %s\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   call_postcall_get_variant_result(variantnum), 
 		   _msg.c_str());
@@ -3772,14 +4718,54 @@ LOG_RETURN(recvmsg)
 POSTCALL(recvmsg)
 {
     REPLICATEMSGVECTOR(2);
+
+	fd_info* info = set_fd_table->get_fd_info(ARG1(0));
+	if (info && info->paths[0].find("domainsock:") == 0)
+	{
+		std::set<int> fds = call_get_fd_set_from_domain_msgvector((struct msghdr*) ARG2(0));
+		for (auto fd : fds)
+		{
+			debugf("%s - SYS_RECVMSG received fd from domain socket: %d\n",
+				   call_get_variant_pidstr(0).c_str(), fd);
+
+			set_fd_table->create_master_fd_info_from_proc(fd, variants[0].variantpid);
+		}
+	}
+	
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_recvmmsg - (int fd, struct mmsghdr __user * mmsg,
-  unsigned int vlen, unsigned int flags,
-  struct timespec __user * timeout)
+  sys_recvmmsg - (int fd, struct mmsghdr* mmsg, unsigned int vlen, unsigned int
+  flags, struct timespec* timeout)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(recvmmsg)
+{
+	struct timespec timeout;
+	std::stringstream timestr;
+
+	if (ARG5(variantnum))
+	{
+		if (!rw::read_struct(variants[variantnum].variantpid, (void*) ARG5(variantnum), sizeof(struct timespec), &timeout))
+			throw RwMemFailure(variantnum, "read timeout in sys_recvmmsg");
+
+		timestr << "TIMEOUT: " << timeout.tv_sec << std::setw(9) << std::setfill('0') << timeout.tv_nsec << std::setw(0) << " s";
+	}
+	else
+	{
+		timestr << "TIMEOUT: none";
+	}
+
+	debugf("%s - SYS_RECVMMSG(%d, 0x" PTRSTR ", %u, %u = %s, %s)\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum),  // TODO: Serialize and dump vector contents?
+		   (unsigned int)ARG3(variantnum),
+		   (unsigned int)ARG4(variantnum), 
+		   getTextualSocketMsgFlags(ARG4(variantnum)).c_str(),
+		   timestr.str().c_str());
+}
+
 PRECALL(recvmmsg)
 {
     CHECKFD(1);
@@ -3795,21 +4781,35 @@ PRECALL(recvmmsg)
 POSTCALL(recvmmsg)
 {
     REPLICATEMMSGVECTOR(2);
+
+	fd_info* info = set_fd_table->get_fd_info(ARG1(0));
+	if (info && info->paths[0].find("domainsock:") == 0)
+	{
+		std::set<int> fds = call_get_fd_set_from_domain_mmsgvector((struct mmsghdr*) ARG2(0), ARG3(0));
+		for (auto fd : fds)
+		{
+			debugf("%s - SYS_RECVMMSG received fd from domain socket: %d\n",
+				   call_get_variant_pidstr(0).c_str(), fd);
+
+			set_fd_table->create_master_fd_info_from_proc(fd, variants[0].variantpid);
+		}
+	}
+
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_accept4 - (int fd, struct sockaddr __user * upeer_sockaddr,
-  int __user * upeer_addrlen, int flags)
+  sys_accept4 - (int fd, struct sockaddr* upeer_sockaddr, int* upeer_addrlen,
+  int flags)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(accept4)
 {
 	debugf("%s - SYS_ACCEPT4(%d, 0x" PTRSTR ", 0x" PTRSTR ", %d = %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum), 
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
+		   (unsigned long)ARG3(variantnum), 
+		   (int)ARG4(variantnum), 
 		   getTextualSocketType(ARG4(variantnum)).c_str());
 }
 
@@ -3882,9 +4882,9 @@ POSTCALL(accept4)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(eventfd2)
 {
-	debugf("%s - SYS_EVENTFD2(%d, %d = %s)\n",
+	debugf("%s - SYS_EVENTFD2(%u, %d = %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (unsigned int)ARG1(variantnum), 
 		   (int)ARG2(variantnum), 
 		   getTextualEventFdFlags((int)ARG2(variantnum)));
 }
@@ -3971,8 +4971,10 @@ POSTCALL(epoll_create1)
 
 
 /*-----------------------------------------------------------------------------
-  sys_accept - (int fd, struct sockaddr __user * upeer_sockaddr,
-  int __user * upeer_addrlen)
+  sys_accept - 
+
+  man(2): (int fd, struct sockaddr* addr, socklen_t* addrlen)
+  kernel: (int fd, struct sockaddr* addr, int* addrlen)
 
   WRAPPER AROUND sys_accept4!!!
 -----------------------------------------------------------------------------*/
@@ -3998,9 +5000,9 @@ POSTCALL(accept)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_socketcall - (int call, unsigned long __user *args)
+  sys_socketcall - (int call, unsigned long *args)
 
-  This is i386 only!!! The syscall has now been split up. See the comment at
+  This is i386/ARM only!!! The syscall has now been split up. See the comment at
   the top. We extract the arguments in handle_socketcall_get_call_type
   and from there on, we use the specialized handlers even on i386!!!
 -----------------------------------------------------------------------------*/
@@ -4039,10 +5041,7 @@ GET_CALL_TYPE(socketcall)
     unsigned long real_args[6];
     memset(real_args, 0, sizeof(unsigned long)*6);
     if (!rw::read_struct(variants[variantnum].variantpid, ARG2(variantnum), nargs * sizeof(unsigned long), real_args))
-    {
-        warnf("couldn't read real_args\n");
-        return 0;
-    }
+		throw RwMemFailure(variantnum, "read args struct in sys_socketcall");
 
     ORIGARG1(variantnum) = ARG1(variantnum);
     ARG1(variantnum)     = real_args[0];
@@ -4145,17 +5144,16 @@ LOG_RETURN(socketcall)
 #endif
 
 /*-----------------------------------------------------------------------------
-  sys_wait4 - (pid_t pid, int __user *stat_addr,
-  int options, struct rusage __user *ru)
+  sys_wait4 - (pid_t pid, int* stat_addr, int options, struct rusage *ru)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(wait4)
 {
 	debugf("%s - SYS_WAIT4(%d, 0x" PTRSTR ", %d, 0x" PTRSTR ")\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum));
+		   (pid_t)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
+		   (int)ARG3(variantnum), 
+		   (unsigned long)ARG4(variantnum));
 }
 
 PRECALL(wait4)
@@ -4170,6 +5168,9 @@ PRECALL(wait4)
 
 POSTCALL(wait4)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     // we want to replicate the master result even if the call fails
     unsigned long master_result = call_postcall_get_variant_result(0);
 
@@ -4197,17 +5198,19 @@ POSTCALL(wait4)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_shmat - (int shmid, char __user * shmaddr, int shmflg)
+  sys_shmat - (int shmid, char * shmaddr, int shmflg)
 
-  AMD64-only!!! this used to be sys_ipc(SHMAT, shmid, shmaddr, shmflg)
+  sys_shmat did not exist on i386 when we added support for it. i386 used
+  sys_ipc(SHMAT, shmid, shmaddr, shmflg) instead. The syscall might have been
+  added by now.
 -----------------------------------------------------------------------------*/
 LOG_ARGS(shmat)
 {
 	debugf("%s - SYS_SHMAT(%d, 0x" PTRSTR ", %d (= %s))\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
+		   (int)ARG3(variantnum), 
 		   getTextualShmFlags(ARG3(variantnum)).c_str());
 }
 
@@ -4361,7 +5364,13 @@ LOG_RETURN(shmat)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_ipc - i386 only!!!
+  sys_ipc - This is a demultiplexer for SysV ipc requests. ARM and i386 use
+  this.  AMD64 does not use this. It calls the SysV ipc syscalls directly.
+
+  man(2): (unsigned int call, int first, int second, int third, void* ptr, long
+  fifth)
+  kernel: (unsigned int call, int first, unsigned long second, unsigned long
+  third, void* ptr, long fifth)
 -----------------------------------------------------------------------------*/
 PRECALL(ipc)
 {
@@ -4404,8 +5413,18 @@ LOG_RETURN(ipc)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fsync - (unsigned int fd)
+  sys_fsync - 
+
+  man(2): (int fd)
+  kernel: (unsigned int fd)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(fsync)
+{
+	debugf("%s - SYS_FSYNC(%u)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (unsigned int)ARG1(variantnum));
+}
+
 PRECALL(fsync)
 {
     CHECKFD(1);
@@ -4420,8 +5439,17 @@ PRECALL(fsync)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_sigreturn -
+  sys_sigreturn - 
+
+  man(2): (unsigned long unused)
+  kernel: (void)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(rt_sigreturn)
+{
+	debugf("%s - SYS_RT_SIGRETURN()\n", 
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 CALL(rt_sigreturn)
 {
     if (variants[0].callnumbackup == __NR_rt_sigsuspend
@@ -4448,8 +5476,15 @@ POSTCALL(rt_sigreturn)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_clone - (unsigned long clone_flags, unsigned long newsp,
-  void __user *parent_tid, void __user *variant_tid, struct pt_regs *regs)
+  sys_clone - 
+
+  The signature of this syscall function is distribution-specific. 
+  Ubuntu uses this version:
+
+  man(2): (unsigned long clone_flags, void* child_stack, void* parent_tid, void*
+  child_tid, struct pt_regs* regs)
+  kernel: (unsigned long clone_flags, unsigned long child_stack, int*
+  parent_tid, int* child_tid, int tls_val)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(clone)
 {
@@ -4471,6 +5506,30 @@ PRECALL(clone)
 
 POSTCALL(clone)
 {
+	if IS_UNSYNCED_CALL
+	{
+		if (call_succeeded)
+		{
+			// update stack regions (if applicable)
+			if (ARG2(variantnum))
+			{
+				mmap_region_info* stack_info = set_mmap_table->get_region_info(variantnum, ARG2(variantnum)-1, 0);
+				int               tid        = call_postcall_get_variant_result(variantnum);
+
+				if (stack_info)
+				{
+					std::stringstream ss;
+					ss << "[stack:" << tid << "]";
+
+					stack_info->region_backing_file_path = ss.str();
+					stack_info->region_map_flags         = MAP_PRIVATE | MAP_GROWSDOWN | MAP_STACK;
+				}
+			}
+		}
+
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
+
     int i, result;
 
     if (call_succeeded)
@@ -4509,26 +5568,38 @@ POSTCALL(clone)
     }
 
     return 0;
-    //	return MVEE_POSTCALL_DONTRESUME;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_mprotect - (unsigned long start, size_t len, unsigned long prot)
+  sys_mprotect - 
+
+  man(2): (void* start, size_t len, int prot)
+  kernel: (unsigned long start, size_t len, unsigned long prot)
 
   Unfortunately, it appears that this function must be synced. MMAP2 has a
   tendency to align new regions to existing bordering regions with the same
   protection flags. This behaviour CAN cause problems if we do not sync
   mprotect.
-
-TODO: Verify/Further documentation
 -----------------------------------------------------------------------------*/
+GET_CALL_TYPE(mprotect)
+{
+	// Unless we're making something PROT_EXEC, we can always relax this xcheck
+	if ((*mvee::config_variant_global)["relaxed_mman_xchecks"].asBool() &&
+		!(ARG3(variantnum) & PROT_EXEC))
+	{
+		return MVEE_CALL_TYPE_UNSYNCED;
+	}
+
+	return MVEE_CALL_TYPE_NORMAL;
+}
+
 LOG_ARGS(mprotect)
 {
-	debugf("%s - SYS_MPROTECT(0x" PTRSTR ", 0x" PTRSTR ", 0x%08X = %s)\n",
+	debugf("%s - SYS_MPROTECT(0x" PTRSTR ", %zd, " PTRSTR " = %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
+		   (unsigned long)ARG1(variantnum), 
+		   (size_t)ARG2(variantnum), 
+		   (unsigned long)ARG3(variantnum), 
 		   getTextualProtectionFlags(ARG3(variantnum)).c_str());
 }
 
@@ -4542,7 +5613,7 @@ PRECALL(mprotect)
 
 LOG_RETURN(mprotect)
 {
-	debugf("%s - SYS_MPROTECT return: %d\n", 
+	debugf("%s - SYS_MPROTECT return: %ld\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   call_postcall_get_variant_result(variantnum));
 }
@@ -4558,7 +5629,7 @@ POSTCALL(mprotect)
 		for (int i = 0; i < mvee::numvariants; ++i)
 			set_mmap_table->verify_mman_table(i, variants[i].variantpid);
 
-#ifdef MVEE_DUMP_JIT_CACHES
+#if defined(MVEE_DUMP_JIT_CACHES) && defined(MVEE_ARCH_SUPPORTS_DISASSEMBLY)
 		if (ARG3(0) & PROT_EXEC)
 		{
 			mmap_region_info* region = set_mmap_table->get_region_info(0, ARG1(0), 0);
@@ -4718,6 +5789,9 @@ POSTCALL(mprotect)
 	}
 	else
 	{
+		if (call_succeeded)
+			set_mmap_table->mprotect_range(variantnum, ARG1(variantnum), ARG2(variantnum), ARG3(variantnum));
+
 		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 	}
 
@@ -4725,8 +5799,14 @@ POSTCALL(mprotect)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getpgid
+  sys_getpgid - (void)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(getpgid)
+{
+	debugf("%s - SYS_GETPGID()\n",
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 PRECALL(getpgid)
 {
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
@@ -4735,6 +5815,14 @@ PRECALL(getpgid)
 /*-----------------------------------------------------------------------------
   sys_capget - (cap_user_header_t header, cap_user_data_t dataptr)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(capget)
+{
+	debugf("%s - SYS_CAPGET(0x" PTRSTR ", 0x" PTRSTR ")\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned long)ARG1(variantnum),
+		   (unsigned long)ARG2(variantnum));
+}
+
 PRECALL(capget)
 {
     CHECKPOINTER(1);
@@ -4746,14 +5834,27 @@ PRECALL(capget)
 
 POSTCALL(capget)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(1, sizeof(__user_cap_header_struct));
 	REPLICATEBUFFERFIXEDLEN(2, (sizeof(long) == 8 ? 2 : 1) * sizeof(__user_cap_data_struct));
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fchdir - (unsigned int fd)
+  sys_fchdir - 
+
+  man(2): (int fd)
+  kernel: (unsigned int fd)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(fchdir)
+{
+	debugf("%s - SYS_FCHDIR(%u)\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned int)ARG1(variantnum));
+}
+
 PRECALL(fchdir)
 {
     CHECKFD(1);
@@ -4765,9 +5866,18 @@ POSTCALL(fchdir)
 {
     if (call_succeeded)
     {
-        fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0));
-        if (fd_info && fd_info->paths[0] != "")
-            set_fd_table->chdir(fd_info->paths[0].c_str());
+		if IS_UNSYNCED_CALL
+		{
+			fd_info* fd_info = set_fd_table->get_fd_info(ARG1(variantnum));
+			if (fd_info && fd_info->paths[variantnum] != "")
+				set_fd_table->chdir(variantnum, fd_info->paths[variantnum].c_str());
+		}
+		else
+		{			
+			fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0));
+			if (fd_info && fd_info->paths[0] != "")
+				set_fd_table->chdir(-1, fd_info->paths[0].c_str());
+		}
     }
 
     return 0;
@@ -4775,18 +5885,18 @@ POSTCALL(fchdir)
 
 /*-----------------------------------------------------------------------------
   sys__llseek - (unsigned int fd, unsigned long offset_high,
-  unsigned long offset_low, loff_t __user * result,
+  unsigned long offset_low, loff_t * result,
   unsigned int origin)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(_llseek)
 {
-	debugf("%s - SYS_LLSEEK(%d, %ld, %ld, 0x" PTRSTR ", %d)\n", 
+	debugf("%s - SYS_LLSEEK(%u, %lu, %lu, 0x" PTRSTR ", %u)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum), 
-		   ARG5(variantnum));
+		   (unsigned int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
+		   (unsigned long)ARG3(variantnum), 
+		   (unsigned long)ARG4(variantnum), 
+		   (unsigned int)ARG5(variantnum));
 }
 
 PRECALL(_llseek)
@@ -4808,14 +5918,26 @@ PRECALL(_llseek)
 
 POSTCALL(_llseek)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(4, sizeof(loff_t));
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getdents - (unsigned int fd,
-  struct linux_dirent __user * dirent, unsigned int count)
+  sys_getdents - (unsigned int fd, struct linux_dirent* dirent, unsigned int
+  count)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(getdents)
+{
+	debugf("%s - SYS_GETDENTS(%u, 0x" PTRSTR ", %u)\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned int)ARG1(variantnum),
+		   (unsigned long)ARG2(variantnum),
+		   (unsigned int)ARG3(variantnum));
+}
+
 PRECALL(getdents)
 {
     CHECKPOINTER(2);
@@ -4833,23 +5955,26 @@ PRECALL(getdents)
 
 POSTCALL(getdents)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFER(2);
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
-  sys__newselect - (int n, fd_set __user *inp, fd_set __user *outp,
-  fd_set __user *exp, struct timeval __user *tvp)
+  sys__newselect - (int n, fd_set *inp, fd_set *outp, fd_set *exp, struct
+  timeval* tvp)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(select)
 {
 	debugf("%s - SYS_SELECT(%d, 0x" PTRSTR ", 0x" PTRSTR ", 0x" PTRSTR ", 0x" PTRSTR ")\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum), 
-		   ARG5(variantnum));
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
+		   (unsigned long)ARG3(variantnum), 
+		   (unsigned long)ARG4(variantnum), 
+		   (unsigned long)ARG5(variantnum));
 }
 
 PRECALL(select)
@@ -4874,7 +5999,10 @@ POSTCALL(select)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_msync - (unsigned long start, size_t len, int flags)
+  sys_msync - 
+
+  man(2): (void* start, size_t len, int flags)
+  kernel: (unsigned long start, size_t len, int flags)
 
   syncs a shared mapping with the backing file. i.e., writes changes
   to the memory mapping back to the file.
@@ -4887,10 +6015,10 @@ POSTCALL(select)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(msync)
 {
-	debugf("%s - SYS_MSYNC(0x" PTRSTR ", %d, %s)\n", 
+	debugf("%s - SYS_MSYNC(0x" PTRSTR ", %ld, %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
+		   (unsigned long)ARG1(variantnum), 
+		   (long)ARG2(variantnum), 
 		   getTextualMSyncFlags(ARG3(variantnum)).c_str());
 }
 
@@ -4938,9 +6066,20 @@ PRECALL(msync)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_readv - (unsigned long  fd, const struct iovec  *  vec,
-  unsigned long  vlen)
+  sys_readv - 
+
+  man(2): (int fd, const struct iovec* iov, int iovcnt)
+  kernel: (unsigned long fd, const struct iovec* iov, unsigned long iovcnt)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(readv)
+{
+	debugf("%s - SYS_READV(%lu, 0x" PTRSTR ", %lu)\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned long)ARG1(variantnum),
+		   (unsigned long)ARG2(variantnum),
+		   (unsigned long)ARG3(variantnum));
+}
+
 PRECALL(readv)
 {
     CHECKPOINTER(2);
@@ -4964,26 +6103,24 @@ POSTCALL(readv)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_writev - (unsigned long  fd, const struct iovec  *  vec,
-  unsigned long  vlen)
+  sys_writev - 
+
+  man(2): (int fd, const struct iovec* iov, int iovcnt)
+  kernel: (unsigned long fd, const struct iovec* iov, unsigned long iovcnt)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(writev)
 {
-	debugf("%s - SYS_WRITEV(%d, 0x" PTRSTR ", %d)\n", 
+	debugf("%s - SYS_WRITEV(%lu, 0x" PTRSTR ", %lu)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum));
+		   (unsigned long)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
+		   (unsigned long)ARG3(variantnum));
 
 	struct iovec* vec = new(std::nothrow) struct iovec[ARG3(variantnum)];
 
 	if (!vec || 
 		!rw::read_struct(variants[variantnum].variantpid, (void*) ARG2(variantnum), sizeof(struct iovec) * ARG3(variantnum), vec))
-	{
-		warnf("couldn't read iovec\n");
-		SAFEDELETEARRAY(vec);
-		return;
-	}
+		throw RwMemFailure(variantnum, "read iovec in sys_writev");
 
 	auto str = call_serialize_io_vector(variantnum, vec, ARG3(variantnum));
 	debugf("    => \n%s\n", str.c_str());
@@ -5007,8 +6144,18 @@ PRECALL(writev)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fdatasync - (unsigned int fd)
+  sys_fdatasync - 
+
+  man(2): (int fd)
+  kernel: (unsigned int fd)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(fdatasync)
+{
+	debugf("%s - SYS_FDATASYNC(%u)\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned int)ARG1(variantnum));
+}
+
 PRECALL(fdatasync)
 {
     CHECKFD(1);
@@ -5023,8 +6170,14 @@ PRECALL(fdatasync)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_sched_yield
+  sys_sched_yield - (void)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(sched_yield)
+{
+	debugf("%s - SYS_SCHED_YIELD()\n",
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 GET_CALL_TYPE(sched_yield)
 {
     return MVEE_CALL_TYPE_UNSYNCED;
@@ -5033,24 +6186,72 @@ GET_CALL_TYPE(sched_yield)
 /*-----------------------------------------------------------------------------
   sys_nanosleep - (const struct timespec* req, struct timespec* rem)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(nanosleep)
+{
+	struct timespec req;
+	std::stringstream timestr;
+
+	if (ARG2(variantnum))
+	{
+		if (!rw::read_struct(variants[variantnum].variantpid, (void*) ARG2(variantnum), sizeof(struct timespec), &req))
+			throw RwMemFailure(variantnum, "read req in sys_nanosleep");
+
+		timestr << "REQ: " << req.tv_sec << std::setw(9) << std::setfill('0') << req.tv_nsec << std::setw(0) << " s";
+	}
+	else
+	{
+		timestr << "REQ: none";
+	}
+
+	debugf("%s - SYS_NANOSLEEP(%s, 0x" PTRSTR ")\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   timestr.str().c_str(),
+		   (unsigned long)ARG2(variantnum));
+}
+
 GET_CALL_TYPE(nanosleep)
 {
     return MVEE_CALL_TYPE_UNSYNCED;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_mremap - unsigned long, addr, unsigned long, old_len,
-  unsigned long, new_len, unsigned long, flags,
-  unsigned long, new_addr
+  sys_mremap - 
+
+  man(2): (void* old_addr, size_t old_len, size_t new_len, int flags, ...)
+  kernel: (unsigned long old_addr, unsigned long old_len, unsigned long new_len,
+  unsigned long flags, unsigned long new_addr)
 -----------------------------------------------------------------------------*/
+GET_CALL_TYPE(mremap)
+{
+	// This one can be relaxed if the new region has MAP_ANONYMOUS and not PROT_EXEC
+	if ((*mvee::config_variant_global)["relaxed_mman_xchecks"].asBool())
+	{
+		bool has_prot_exec = false;
+		mmap_region_info* old_region = set_mmap_table->get_region_info(variantnum, ARG1(variantnum), ARG2(variantnum));
+
+		if (old_region && 
+			(old_region->region_prot_flags & PROT_EXEC))
+		{
+			has_prot_exec = true;
+		}
+
+		if (!has_prot_exec &&
+			(ARG4(variantnum) & MAP_ANONYMOUS))
+			return MVEE_CALL_TYPE_UNSYNCED;
+	}
+
+	return MVEE_CALL_TYPE_NORMAL;
+}
+
 LOG_ARGS(mremap)
 {
-	debugf("%s - SYS_MREMAP(0x" PTRSTR ", %d, %d, 0x" PTRSTR ", 0x" PTRSTR ")\n",
+	debugf("%s - SYS_MREMAP(OLD_ADDR=0x" PTRSTR ", OLD_LEN=%lu, NEW_LEN=%lu, FLAGS=%lu (%s), NEW_ADDR=0x" PTRSTR ")\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum));
+		   (unsigned long)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
+		   (unsigned long)ARG3(variantnum), 
+		   (unsigned long)ARG4(variantnum), getTextualMremapFlags(ARG4(variantnum)),
+		   (unsigned long)ARG5(variantnum));
 }
 
 PRECALL(mremap)
@@ -5062,17 +6263,91 @@ PRECALL(mremap)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
+CALL(mremap)
+{
+	if (IS_SYNCED_CALL && 
+		(ARG4(0) & MREMAP_MAYMOVE) &&
+		((*mvee::config_variant_global)["mvee_controlled_aslr"].asInt() > 0))
+	{
+		// if MREMAP_MAYMOVE is set, the mapping may be moved if it cannot be resized.
+		// If it moves, it must become subject to our MVEE-controlled ASLR
+		bool overlap = false;
+
+		for (int i = 0; i < mvee::numvariants; ++i)
+		{
+			// see if there would be overlap if we extend the mapping in-place
+			auto region_info = set_mmap_table->get_region_info(i, ARG1(i), ARG3(i));
+			if (region_info)
+			{
+				overlap = true;
+				break;
+			}
+		}
+				
+		// Ok, it's going to be moved. We need to calculate a base address	
+		if (overlap)
+		{
+			unsigned long address = set_mmap_table->calculate_data_mapping_base(ARG3(0));
+
+			for (int i = 0; i < mvee::numvariants; ++i)
+			{
+				call_overwrite_arg_value(i, 3, address, true);
+
+				debugf("%s - replaced call by SYS_MREMAP(OLD_ADDR=0x" PTRSTR ", OLD_LEN=%lu, NEW_LEN=%lu, FLAGS=%lu (%s), NEW_ADDR=0x" PTRSTR ")\n",
+					   call_get_variant_pidstr(variantnum).c_str(), 
+					   (unsigned long)ARG1(variantnum), 
+					   (unsigned long)ARG2(variantnum), 
+					   address, 
+					   (unsigned long)ARG4(variantnum), getTextualMremapFlags(ARG4(variantnum)),
+					   (unsigned long)ARG5(variantnum));
+			}
+		}
+	}
+
+	return MVEE_CALL_ALLOW;
+}
+
 POSTCALL(mremap)
 {
+	if IS_UNSYNCED_CALL
+	{
+	    if (call_succeeded)
+		{
+			unsigned long new_address = call_postcall_get_variant_result(variantnum);
+            mmap_region_info* info = set_mmap_table->get_region_info(variantnum, ARG1(variantnum), ARG2(variantnum));
+            if (info)
+            {
+                mmap_region_info* new_region = new(std::nothrow) mmap_region_info(*info);
+
+				if (new_region)
+				{
+					new_region->region_base_address = new_address;
+					new_region->region_size         = ARG3(variantnum);
+
+					set_mmap_table->munmap_range(variantnum, ARG1(variantnum), ARG2(variantnum));
+					set_mmap_table->munmap_range(variantnum, new_address,      ARG3(variantnum));
+
+					set_mmap_table->insert_region(variantnum, new_region);
+				}
+            }
+            else
+            {
+                warnf("remap range not found: 0x" PTRSTR "-0x" PTRSTR "\n",
+					  (unsigned long)ARG1(variantnum), (unsigned long)(ARG1(variantnum) + ARG2(variantnum)));
+                shutdown(false);
+            }
+		}
+
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
+
     if (call_succeeded)
     {
+		// unmap target pages
+		std::vector<unsigned long> new_addresses = call_postcall_get_result_vector();
         for (int i = 0; i < mvee::numvariants; ++i)
         {
-            // unmap target pages
-            std::vector<unsigned long> new_addresses = call_postcall_get_result_vector();
-
-            //
-            mmap_region_info*          info          = set_mmap_table->get_region_info(i, ARG1(i), ARG2(i));
+            mmap_region_info* info = set_mmap_table->get_region_info(i, ARG1(i), ARG2(i));
             if (info)
             {
                 mmap_region_info* new_region = new(std::nothrow) mmap_region_info(*info);
@@ -5093,7 +6368,7 @@ POSTCALL(mremap)
             else
             {
                 warnf("remap range not found: 0x" PTRSTR "-0x" PTRSTR "\n",
-                            ARG1(i), ARG1(i) + ARG2(i));
+					  (unsigned long)ARG1(i), (unsigned long)(ARG1(i) + ARG2(i)));
                 shutdown(false);
             }
 
@@ -5108,7 +6383,7 @@ LOG_RETURN(mremap)
 {
 	debugf("%s - SYS_MREMAP return: 0x" PTRSTR "\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   call_postcall_get_variant_result(variantnum));
+		   (unsigned long)call_postcall_get_variant_result(variantnum));
 
 #ifdef MVEE_MMAN_DEBUG
     set_mmap_table->print_mmap_table();
@@ -5116,15 +6391,15 @@ LOG_RETURN(mremap)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_poll - (struct pollfd __user *ufds, unsigned int nfds, long timeout)
+  sys_poll - (struct pollfd* ufds, unsigned int nfds, long timeout)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(poll)
 {
-	debugf("%s - SYS_POLL(0x" PTRSTR ", %d, %d)\n", 
+	debugf("%s - SYS_POLL(0x" PTRSTR ", %u, %ld)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum));
+		   (unsigned long)ARG1(variantnum), 
+		   (unsigned int)ARG2(variantnum), 
+		   (long)ARG3(variantnum));
 }
 
 PRECALL(poll)
@@ -5140,16 +6415,15 @@ LOG_RETURN(poll)
 {
 	long result  = call_postcall_get_variant_result(variantnum);
 
-	debugf("%s - SYS_POLL return: %d\n", call_get_variant_pidstr(variantnum).c_str(), result);
+	debugf("%s - SYS_POLL return: %ld\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   result);
 
-	for (unsigned int j = 0; j < result; ++j)
+	for (long j = 0; j < result; ++j)
 	{
 		struct pollfd fds;
 		if (!rw::read<struct pollfd>(variants[variantnum].variantpid, (struct pollfd*)ARG1(variantnum) + j, fds))
-		{
-			warnf("couldn't read pollfd\n");
-			return;
-		}
+			throw RwMemFailure(variantnum, "read pollfd in sys_poll");
 			
 		debugf("> fd: %d - events: %s - revents: %s\n",
 			   fds.fd,
@@ -5169,6 +6443,17 @@ POSTCALL(poll)
   sys_prctl - (int option, unsigned long arg2, unsigned long arg3,
   unsigned long arg4, unsigned long arg5)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(prctl)
+{
+	debugf("%s - SYS_PRCTL(%d, %lu, %lu, %lu, %lu)\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (int)ARG1(variantnum),
+		   (unsigned long)ARG2(variantnum),
+		   (unsigned long)ARG3(variantnum),
+		   (unsigned long)ARG4(variantnum),
+		   (unsigned long)ARG5(variantnum));
+}
+
 PRECALL(prctl)
 {
     // TODO: not all arguments are always used here, comparing unused args may cause false positives
@@ -5194,22 +6479,6 @@ PRECALL(prctl)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
-unsigned char ipmon_is_unchecked_syscall(unsigned char* mask, unsigned long syscall_no)
-{
-    unsigned long no_to_byte, bit_in_byte;
-
-    if (syscall_no > ROUND_UP(MAX_CALLS, 8))
-		return 0;
-
-    no_to_byte  = syscall_no / 8;
-    bit_in_byte = syscall_no % 8;
-
-    if (mask[no_to_byte] & (1 << (7 - bit_in_byte)))
-		return 1;
-    return 0;
-}
-
-
 CALL(prctl)
 {
     // check if the variants are trying to re-enable rdtsc
@@ -5222,13 +6491,24 @@ CALL(prctl)
 	{
 		// inspect the list of syscalls
 		unsigned char* ipmon_mask = rw::read_data(variants[0].variantpid, (void*) ARG2(0), ARG3(0));
+		SYSCALL_MASK(dummy_mask);
 
 		if (ipmon_mask)
 		{
-			if (ipmon_is_unchecked_syscall(ipmon_mask, __NR_mmap))
-				ipmon_mmap_handling = true;
-			if (ipmon_is_unchecked_syscall(ipmon_mask, __NR_open))
-				ipmon_fd_handling = true;
+			if (ARG3(0) >= sizeof(dummy_mask))
+			{
+#ifdef __NR_mmap
+				if (SYSCALL_MASK_ISSET(ipmon_mask, __NR_mmap))
+					ipmon_mmap_handling = true;
+#endif
+#ifdef __NR_mmap2
+				if (SYSCALL_MASK_ISSET(ipmon_mask, __NR_mmap2))
+					ipmon_mmap_handling = true;
+#endif
+
+				if (SYSCALL_MASK_ISSET(ipmon_mask, __NR_open))
+					ipmon_fd_handling = true;
+			}
 			
 			debugf("IP-MON handling mmap: %d - fd: %d\n", ipmon_mmap_handling, ipmon_fd_handling);
 
@@ -5244,7 +6524,7 @@ CALL(prctl)
 
 POSTCALL(prctl)
 {
-#ifdef MVEE_SUPPORTS_IPMON
+#ifdef MVEE_ARCH_SUPPORTS_IPMON
     // PR_REGISTER_IPMON returns the IP-MON key
     if (ARG1(0) == PR_REGISTER_IPMON && call_succeeded)
     {
@@ -5269,11 +6549,8 @@ POSTCALL(prctl)
 			unsigned long ip;
 
 			if (!interaction::fetch_ip(variants[i].variantpid, ip))
-			{
-				warnf("%s - Couldn't read instruction pointer\n", 
-					  call_get_variant_pidstr(i).c_str());
-				return 0;
-			}
+				throw RwRegsFailure(i, "fetch IP-MON registration site");
+
 			variants[i].ipmon_region = set_mmap_table->get_region_info(i, ip, 0);
 			debugf("Initializing IP-MON - IP: 0x" PTRSTR "\n", ip);
 			if (variants[i].ipmon_region)
@@ -5289,16 +6566,29 @@ POSTCALL(prctl)
 }
 
 /*-----------------------------------------------------------------------------
-  long sys32_rt_sigprocmask(int how,
-  compat_sigset_t __user *set,
-  compat_sigset_t __user *oset,
-  unsigned int sigsetsize)
+  sys_rt_sigprocmask - We use these handlers for sys_rt_sigprocmask AND
+  sys_sigprocmask.  The two calls are very similar. They differ in two respects:
+
+  * sys_sigprocmask accepts 'old_sigset_t' (aka 'unsigned int') arguments.
+  sys_rt_sigprocmask accepts 'sigset_t' (aka 'unsigned long') arguments.
+
+  * sys_rt_sigprocmask accepts a sigsetsize argument. sys_sigprocmask does not.
+
+  There is no rt_sigprocmask wrapper in user space. sigprocmask just calls one 
+  of the two syscalls, depending on which platform you're on.
+
+  Args for the syscalls: 
+
+  * sys_rt_sigprocmask: (int how, sigset_t* nset, sigset_t* oset, size_t
+  sigsetsize)
+
+  * sys_sigprocmask: (int how, sigset_t* nset, sigset_t* oset)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(rt_sigprocmask)
 {
 	debugf("%s - SYS_RT_SIGPROCMASK(%s, 0x" PTRSTR " - %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   getTextualSigHow(ARG1(variantnum)), ARG2(variantnum), 
+		   getTextualSigHow(ARG1(variantnum)), (unsigned long)ARG2(variantnum), 
 		   getTextualSigSet(call_get_sigset(variantnum, (void*) ARG2(variantnum), OLDCALLIFNOT(__NR_rt_sigprocmask))).c_str());
 }
 
@@ -5362,23 +6652,27 @@ POSTCALL(rt_sigprocmask)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_pread64 - (unsigned int fd, char __user *buf, size_t count, loff_t pos)
+  sys_pread64 - 
+
+  man(2): (int fd, void* buf, size_t count, loff_t pos)
+  kernel: (unsigned int fd, char* buf, size_t count, loff_t pos)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(pread64)
 {
-	debugf("%s - SYS_PREAD64(%d, 0x" PTRSTR ", %d, %d)\n",
+	debugf("%s - SYS_PREAD64(%u, 0x" PTRSTR ", %zd, %lld)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum));
+		   (unsigned int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
+		   (size_t)ARG3(variantnum), 
+		   (long long)arg64<4, 5>(variantnum));
 }
 
 PRECALL(pread64)
 {
     CHECKPOINTER(2);
     CHECKARG(3);
-    CHECKARG(4);
+	// pos is ARG4 for AMD64, ARG4:ARG5 for i386 and ARG5:ARG6 for ARM
+    CHECKARG64(4, 5);
     CHECKFD(1);
 
 	if (set_fd_table->is_fd_unsynced(ARG1(0)))
@@ -5395,7 +6689,7 @@ LOG_RETURN(pread64)
 	long result  = call_postcall_get_variant_result(variantnum);
 	auto result_str = call_serialize_io_buffer(variantnum, (const unsigned char*) ARG2(variantnum), result);
 	
-	debugf("%s - SYS_PREAD64 RETURN: %d => %s\n", 
+	debugf("%s - SYS_PREAD64 RETURN: %ld => %s\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   result, 
 		   result_str.c_str());
@@ -5408,26 +6702,30 @@ POSTCALL(pread64)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_pwrite64 - (unsigned int fd, const char __user *buf,
-  size_t count, loff_t pos)
+  sys_pwrite64 - 
+
+  man(2): no standardized user-space wrapper exists. pwrite(2) is used instead.
+  pwrite(2) calls sys_pwrite64 if sys_pwrite isn't available
+  kernel: (unsigned int fd, const char *buf, size_t count, loff_t pos)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(pwrite64)
 {
 	auto buf_str = call_serialize_io_buffer(variantnum, (const unsigned char*) ARG2(variantnum), ARG3(variantnum));
 
-	debugf("%s - SYS_PWRITE64(%d, %s, %d, %d)\n", 
+	debugf("%s - SYS_PWRITE64(%u, %s, %zd, %lld)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (unsigned int)ARG1(variantnum), 
 		   buf_str.c_str(), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum));
+		   (size_t)ARG3(variantnum), 
+		   (long long)arg64<4, 5>(variantnum));
 }
 
 PRECALL(pwrite64)
 {
     CHECKPOINTER(2);
     CHECKARG(3);
-    CHECKARG(4);
+	// pos is ARG4 on AMD64, ARG4:ARG5 on i386 and ARG5:ARG6 on ARM
+    CHECKARG64(4, 5);
     CHECKFD(1);
     CHECKBUFFER(2, ARG3(0));
 
@@ -5441,7 +6739,7 @@ PRECALL(pwrite64)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_chown - (const char  *  filename, uid_t  user, gid_t  group)
+  sys_chown - (const char* filename, uid_t user, gid_t group)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(chown)
 {
@@ -5449,11 +6747,11 @@ LOG_ARGS(chown)
 	auto user = getTextualUserId(ARG2(variantnum));
 	auto group = getTextualGroupId(ARG3(variantnum));
 
-	debugf("%s - SYS_CHOWN(%s, %ld - %s, %ld - %s)\n", 
+	debugf("%s - SYS_CHOWN(%s, %u - %s, %u - %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   str1.c_str(), 
-		   ARG2(variantnum), user.c_str(),
-		   ARG3(variantnum), group.c_str());
+		   (uid_t)ARG2(variantnum), user.c_str(),
+		   (gid_t)ARG3(variantnum), group.c_str());
 }
 
 PRECALL(chown)
@@ -5470,8 +6768,23 @@ PRECALL(chown)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fchown - (int fd, uid_t user, gid_t group)
+  sys_fchown - 
+
+  man(2): (int fd, uid_t user, gid_t group)
+  kernel: (unsigned int fd, uid_t user, gid_t group)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(fchown)
+{
+	auto user = getTextualUserId(ARG2(variantnum));
+	auto group = getTextualGroupId(ARG3(variantnum));
+
+	debugf("%s - SYS_FCHOWN(%d, %u - %s, %u - %s)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (int)ARG1(variantnum), 
+		   (uid_t)ARG2(variantnum), user.c_str(),
+		   (gid_t)ARG3(variantnum), group.c_str());
+}
+
 PRECALL(fchown)
 {
     CHECKFD(1);
@@ -5488,8 +6801,19 @@ PRECALL(fchown)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getcwd - (char* buf, int buflen)
+  sys_getcwd - 
+
+  man(2): (char* buf, size_t buflen)
+  kernel: (char* buf, unsigned long buflen)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(getcwd)
+{
+	debugf("%s - SYS_GETCWD(0x" PTRSTR ", %lu)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (unsigned long)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum));
+}
+
 PRECALL(getcwd)
 {
     CHECKPOINTER(1);
@@ -5498,48 +6822,77 @@ PRECALL(getcwd)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getrlimit - (unsigned int  resource, struct rlimit  *  rlim)
+  sys_mmap - There are several variants of this function: 
+
+  * AMD64 exposes sys_mmap. AMD64's sys_mmap is implemented by sys_mmap in 
+  arch/x86/kernel/sys_x86_64.c. This version of sys_mmap is a pretty simple
+  wrapper around sys_mmap_pgoff.
+
+  * i386 and ARM expose sys_old_mmap and sys_mmap2. i386's sys_old_mmap is
+  implemented by sys32_mmap in arch/x86/ia32/sys_ia32.c. ARM's sys_old_mmap is
+  implemented by sys_old_mmap in mm/mmap.c.
+
+  Both architectures' sys_mmap2 is implemented by sys_mmap_pgoff in mm/mmap.c.
+
+  sys_old_mmap is deprecated so we don't support it. sys_mmap and sys_mmap2 are
+  both supported by this set of handlers. There is only one important difference
+  between sys_mmap and sys_mmap2: sys_mmap accepts a byte offset as its 6th
+  argument.  sys_mmap2 accepts a page offset as its 6th argument.
+
+  Args:
+
+  man(2) mmap: (void* addr, size_t len, int prot, int flags, int fd, off_t
+  offset)
+  kernel mmap: (unsigned long addr, unsigned long len, unsigned long prot,
+  unsigned long flags, unsigned long fd, unsigned long pgoff)
+
+  man(2) mmap2: does not exist
+  kernel mmap2: (unsigned long addr, unsigned long len, unsigned long prot,
+  unsigned long flags, unsigned long fd, unsigned long pgoff)
 -----------------------------------------------------------------------------*/
-PRECALL(ugetrlimit)
+GET_CALL_TYPE(mmap)
 {
-    CHECKPOINTER(2);
-    CHECKARG(1);
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	// mman xchecks can be relaxed for non-executable heap allocations
+	if ((*mvee::config_variant_global)["relaxed_mman_xchecks"].asBool() &&
+		(ARG4(variantnum) & MAP_ANONYMOUS) &&
+		!(ARG3(variantnum) & PROT_EXEC))
+	{
+		return MVEE_CALL_TYPE_UNSYNCED;
+	}
+
+	if (set_mmap_table->have_diversified_variants &&
+		!(ARG4(variantnum) & MAP_ANONYMOUS) &&
+		(long)ARG5(variantnum) > 0)
+	{
+		fd_info* info = set_fd_table->get_fd_info(ARG5(variantnum));
+
+		if (info &&
+			info->paths[variantnum].compare(set_mmap_table->mmap_startup_info[variantnum].image) == 0)
+		{
+			debugf("%s - Dispatching as unsynced because this is an mmap of a diversified binary\n", 
+				   call_get_variant_pidstr(variantnum).c_str());
+
+			return MVEE_CALL_TYPE_UNSYNCED;
+		}
+	}
+
+	return MVEE_CALL_TYPE_NORMAL;
 }
 
-/*-----------------------------------------------------------------------------
-  sys_mmap2 - (unsigned long  addr, unsigned long  len, unsigned long  prot,
-  unsigned long  flags, int  fd, unsigned long  pgoff)
-
-  !!!!! fd is implicitly cast from unsigned long to int on AMD64 !!!
------------------------------------------------------------------------------*/
 LOG_ARGS(mmap)
 {
 	debugf("%s - SYS_MMAP(0x" PTRSTR ", %lu, %s, %s, %d, %lu)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum),
+		   (unsigned long)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum),
 		   getTextualProtectionFlags(ARG3(variantnum)).c_str(),
 		   getTextualMapType(ARG4(variantnum)).c_str(), 
 		   (int)ARG5(variantnum), 
-		   ARG6(variantnum));
+		   (unsigned long)ARG6(variantnum));
 }
-
-#ifdef MVEE_ENABLE_VALGRIND_HACKS
-static int first_mmap2_call = 1;
-#endif
 
 PRECALL(mmap)
 {
-#ifdef MVEE_ENABLE_VALGRIND_HACKS
-    if (first_mmap2_call)
-    {
-        first_mmap2_call = 0;
-        for (int i = 0; i < mvee::numvariants; ++i)
-			set_mmap_table->refresh_variant_maps(i, variants[i].variantpid);
-    }
-#endif
-
     CHECKARG(2);
     CHECKARG(3);
     CHECKARG(4);
@@ -5550,6 +6903,29 @@ PRECALL(mmap)
         CHECKARG(6);
 
     MAPFDS(5);
+
+#if defined(MVEE_VERIFY_ATOMIC_INSTRUMENTATION) && !defined(MVEE_BENCHMARK)
+	if ((ARG3(0) & PROT_EXEC) && 
+		ARG5(0) && (int)ARG5(0) != -1)
+	{
+		fd_info* info = set_fd_table->get_fd_info(ARG5(0));
+		
+		if (info)
+		{
+			if (mvee::os_has_noninstrumented_atomics(info->paths[0]))
+			{
+				warnf("The variants are loading a binary with non-instrumented atomic operations.\n");
+				warnf("Binary name: %s\n", info->paths[0].c_str());
+				warnf("If this is a multi-threaded program, you will probably see divergences because of this.\n");
+				warnf("Please refer to our EuroSys 2017 paper for more details:\n");
+				warnf("\tTaming Parallelism in a Multi-Variant Execution Environment\n");
+				warnf("\tStijn Volckaert, Bart Coppens, Bjorn De Sutter, Koen De Bosschere, Per Larsen, and Michael Franz.\n");
+				warnf("\tIn 12th European Conference on Computer Systems (EuroSys'17). ACM, 2017.\n");				
+				warnf("\n");
+			}
+		}		
+	}
+#endif
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
@@ -5565,7 +6941,29 @@ CALL(mmap)
     // this mapping is only shared between the calling process and its decendants
     // => this is a safe form of shared memory
     if (ARG4(0) & MAP_ANONYMOUS)
+	{
+		if (ARG1(0) == 0 && 
+			(ARG4(0) & MAP_PRIVATE) &&
+			(*mvee::config_variant_global)["mvee_controlled_aslr"].asInt() > 0)
+		{
+			unsigned long address = set_mmap_table->calculate_data_mapping_base(ARG2(0));
+
+			for (int i = 0; i < mvee::numvariants; ++i)
+			{
+				call_overwrite_arg_value(i, 1, address, true);
+
+				debugf("%s - replaced call by SYS_MMAP(0x" PTRSTR ", %lu, %s, %s, %d, %lu)\n",
+					   call_get_variant_pidstr(variantnum).c_str(), 
+					   address, 
+					   (unsigned long)ARG2(variantnum),
+					   getTextualProtectionFlags(ARG3(variantnum)).c_str(),
+					   getTextualMapType(ARG4(variantnum)).c_str(), 
+					   (int)ARG5(variantnum), 
+					   (unsigned long)ARG6(variantnum));
+			}
+		}
         return MVEE_CALL_ALLOW;
+	}
 
     // non-anonymous ==> it must have a backing file
     if (ARG5(0) && (int)ARG5(0) != -1)
@@ -5755,7 +7153,9 @@ POSTCALL(mmap)
 				}
 
 				info->original_file_size = _st.st_size;
-				warnf("size for: %s - %d bytes\n", info->paths[0].c_str(), _st.st_size);
+				warnf("size for: %s - %ld bytes\n", 
+					  info->paths[0].c_str(), 
+					  _st.st_size);
 			}
 		}
 
@@ -5791,7 +7191,7 @@ POSTCALL(mmap)
 			in_new_heap_allocation = true;
 
 			// bump the lock counter for the fd/mman locks - we'll unlock when we see the munmap of the upper region
-			call_grab_locks(MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN);
+			//call_grab_locks(MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN);
 
 			unsigned long requested_alignment = last_mmap_requested_alignment;
 			unsigned long requested_size      = last_mmap_requested_size;
@@ -5870,8 +7270,10 @@ POSTCALL(mmap)
 		set_mmap_table->map_range(variantnum, result, ARG2(variantnum), ARG4(variantnum), ARG3(variantnum), info, actual_offset);
 		set_mmap_table->verify_mman_table(variantnum, variants[variantnum].variantpid);
 
+// old code that did fast forwarding to the entry point
+#if 0
 		// Check if we mapped the main binary
-		/*if (info &&
+		if (info &&
 			variants[variantnum].fast_forward_to_entry_point &&
 			!variants[variantnum].entry_point_bp_set)
 		{
@@ -5882,11 +7284,11 @@ POSTCALL(mmap)
 //			warnf("Mapping %s\n", info->path.c_str());
 
 			if ((ARG3(variantnum) & PROT_EXEC) &&
-				info->path.compare(program_image) == 0)
+				info->paths[variantnum].compare(program_image) == 0)
 			{
 				// see if we can get a handle to the executable region that
 				// contains the entry point
-				unsigned long region_base = set_mmap_table->find_image_base(variantnum, info->path);
+				unsigned long region_base = set_mmap_table->find_image_base(variantnum, info->paths[variantnum]);
 
 				if (region_base)
 				{
@@ -5908,7 +7310,8 @@ POSTCALL(mmap)
 					}
 				}
 			}
-			}*/
+		}
+#endif
 
 		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 	}
@@ -5928,22 +7331,26 @@ LOG_RETURN(mmap)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_truncate64 - (const char __user * path, loff_t length)
+  sys_truncate64 - 
+
+  man(2): no standardized user-space wrapper exists. truncate(2) is used instead.
+  truncate(2) calls sys_truncate64 if sys_truncate is not available.
+  kernel: (const char* path, loff_t length)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(truncate64)
 {
 	auto str1 = rw::read_string(variants[variantnum].variantpid, (void*)ARG1(variantnum));
 
-	debugf("%s - SYS_TRUNCATE64(%s, %ld)\n", 
+	debugf("%s - SYS_TRUNCATE64(%s, %lld)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   str1.c_str(), 
-		   ARG2(variantnum));
+		   (long long)arg64<2, 3>(variantnum));
 }
 
 PRECALL(truncate64)
 {
     CHECKPOINTER(1);
-    CHECKARG(2);
+    CHECKARG64(2, 3);
     CHECKSTRING(1);
 
 	if (call_do_alias<1>())
@@ -5953,11 +7360,23 @@ PRECALL(truncate64)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_ftruncate64 - (unsigned int fd, loff_t length)
+  sys_ftruncate64 - 
+
+  man(2): no standardized user-space wrapper exists. ftruncate(2) is used instead.
+  ftruncate(2) calls sys_ftruncate64 if sys_ftruncate is not available
+  kernel: (unsigned int fd, loff_t length)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(ftruncate64)
+{
+	debugf("%s - SYS_FTRUNCATE64(%u, %lld)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+	       (unsigned int)ARG1(variantnum), 
+		   (long long)arg64<2, 3>(variantnum));
+}
+
 PRECALL(ftruncate64)
 {
-    CHECKARG(2);
+    CHECKARG64(2, 3);
     CHECKFD(1);
 
 	if (set_fd_table->is_fd_unsynced(ARG1(0)))
@@ -5970,7 +7389,11 @@ PRECALL(ftruncate64)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_stat64 - (char __user *filename, struct stat64 __user *statbuf);
+  sys_stat - (char* filename, struct stat* statbuf)
+
+  Even though the kernel exposes a sys_stat on all architectures, the actual
+  sys_stat implementation doesn't seem to get used anymore. Instead, the kernel
+  calls sys_newstat.
 -----------------------------------------------------------------------------*/
 LOG_ARGS(stat)
 {
@@ -6000,6 +7423,13 @@ POSTCALL(stat)
     return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
 
+/*-----------------------------------------------------------------------------
+  sys_stat64 - 
+
+  man(2): no standardized user-space wrapper exists. stat(2) calls sys_stat64
+  if it is available.
+  kernel: (char* filename, struct stat64* statbuf)
+-----------------------------------------------------------------------------*/
 LOG_ARGS(stat64)
 {
 	auto str1 = rw::read_string(variants[variantnum].variantpid, (void*) ARG1(variantnum));
@@ -6021,12 +7451,19 @@ PRECALL(stat64)
 
 POSTCALL(stat64)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(2, sizeof(struct stat64));
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_lstat64 - (char __user *filename, struct stat64 __user *statbuf);
+  sys_lstat - (char* filename, struct stat* statbuf)
+
+  Even though the kernel exposes a sys_lstat on all architectures, the actual
+  sys_lstat implementation doesn't seem to get used anymore. Instead, the kernel
+  calls sys_newlstat.
 -----------------------------------------------------------------------------*/
 LOG_ARGS(lstat)
 {
@@ -6051,6 +7488,9 @@ PRECALL(lstat)
 
 POSTCALL(lstat)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     if (sizeof(unsigned long) == 4)
     {
         REPLICATEBUFFERFIXEDLEN(2, sizeof(struct old_kernel_stat));
@@ -6062,6 +7502,13 @@ POSTCALL(lstat)
     return 0;
 }
 
+/*-----------------------------------------------------------------------------
+  sys_lstat64 - 
+
+  man(2): no standardized user-space wrapper exists. lstat(2) calls sys_lstat64
+  if it is available.
+  kernel: (char* filename, struct stat64* statbuf)
+-----------------------------------------------------------------------------*/
 LOG_ARGS(lstat64)
 {
 	auto str1 = rw::read_string(variants[variantnum].variantpid, (void*) ARG1(variantnum));
@@ -6085,19 +7532,29 @@ PRECALL(lstat64)
 
 POSTCALL(lstat64)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(2, sizeof(struct stat64));
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fstat - (unsigned long fd, struct stat64 * statbuf)
+  sys_fstat - 
+
+  man(2): (int fd, struct stat* statbuf)
+  kernel: (unsigned int fd, struct stat* statbuf)
+
+  Even though the kernel exposes a sys_fstat on all architectures, the actual
+  sys_fstat implementation doesn't seem to get used anymore. Instead, the kernel
+  calls sys_newfstat.
 -----------------------------------------------------------------------------*/
 LOG_ARGS(fstat)
 {
-	debugf("%s - SYS_FSTAT(%d, 0x" PTRSTR ")\n",
+	debugf("%s - SYS_FSTAT(%lu, 0x" PTRSTR ")\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum));
+		   (unsigned long)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum));
 }
 
 PRECALL(fstat)
@@ -6117,10 +7574,7 @@ LOG_RETURN(fstat)
 {
 	struct stat sb;
 	if (!rw::read<struct stat>(variants[variantnum].variantpid, (void*) ARG2(variantnum), sb))
-	{
-		warnf("Couldn't read stat\n");
-		return;
-	}
+		throw RwMemFailure(variantnum, "read stat in sys_fstat");
 
 	debugf("%s - SYS_FSTAT64 return\n", 
 		   call_get_variant_pidstr(variantnum).c_str());
@@ -6153,9 +7607,13 @@ LOG_RETURN(fstat)
 	debugf("Blocks allocated:         %lld\n",
 		   (long long) sb.st_blocks);
 
-	debugf("Last status change:       %s", ctime(&sb.st_ctime));
-	debugf("Last file access:         %s", ctime(&sb.st_atime));
-	debugf("Last file modification:   %s", ctime(&sb.st_mtime));
+	char timestr[30];
+	ctime_r(&sb.st_ctime, timestr);
+	debugf("Last status change:       %s", timestr);
+	ctime_r(&sb.st_atime, timestr);
+	debugf("Last file access:         %s", timestr);
+	ctime_r(&sb.st_mtime, timestr);
+	debugf("Last file modification:   %s", timestr);
 }
 
 POSTCALL(fstat)
@@ -6172,14 +7630,18 @@ POSTCALL(fstat)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fstat64 - (unsigned long fd, struct stat64 * statbuf)
+  sys_fstat64 - 
+
+  man(2): no standardized user-space wrapper exists. fstat(2) calls sys_fstat64
+  if it is available.
+  kernel: (unsigned long fd, struct stat64* statbuf)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(fstat64)
 {
-	debugf("%s - SYS_FSTAT64(%d, 0x" PTRSTR ")\n", 
+	debugf("%s - SYS_FSTAT64(%lu, 0x" PTRSTR ")\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum));
+		   (unsigned long)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum));
 }
 
 PRECALL(fstat64)
@@ -6199,10 +7661,8 @@ LOG_RETURN(fstat64)
 {
 	struct stat64 sb;
 	if (!rw::read<struct stat64>(variants[variantnum].variantpid, (void*) ARG2(variantnum), sb))
-	{
-		warnf("Couldn't read stat64\n");
-		return;
-	}
+		throw RwMemFailure(variantnum, "read stat64 in sys_fstat64");
+
 	debugf("%s - SYS_FSTAT64 return\n", 
 		   call_get_variant_pidstr(variantnum).c_str());
 
@@ -6234,28 +7694,56 @@ LOG_RETURN(fstat64)
 	debugf("Blocks allocated:         %lld\n",
 		   (long long) sb.st_blocks);
 
-	debugf("Last status change:       %s", ctime(&sb.st_ctime));
-	debugf("Last file access:         %s", ctime(&sb.st_atime));
-	debugf("Last file modification:   %s", ctime(&sb.st_mtime));
+	char timestr[30];
+	ctime_r(&sb.st_ctime, timestr);
+	debugf("Last status change:       %s", timestr);
+	ctime_r(&sb.st_atime, timestr);
+	debugf("Last file access:         %s", timestr);
+	ctime_r(&sb.st_mtime, timestr);
+	debugf("Last file modification:   %s", timestr);
 }
 
 POSTCALL(fstat64)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(2, sizeof(struct stat64));
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_madvise - (void* addr, size_t length, int advice)
+  sys_madvise - 
+
+  man(2): (void* addr, size_t length, int advice)
+  kernel: (unsigned long addr, size_t len, int advice)
 -----------------------------------------------------------------------------*/
 GET_CALL_TYPE(madvise)
 {
     return MVEE_CALL_TYPE_UNSYNCED;
 }
 
+LOG_ARGS(madvise)
+{
+	debugf("%s - SYS_MADVISE(" PTRSTR ", %zd, %d)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (unsigned long)ARG1(variantnum), 
+		   (size_t)ARG2(variantnum),
+		   (int)ARG3(variantnum));
+}
+
 /*-----------------------------------------------------------------------------
   sys_shmget - (key_t key, size_t size, int shmflg)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(shmget)
+{
+	debugf("%s - SYS_SHMGET(%s, %zd, %s)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   getTextualIpcShmKey(ARG1(variantnum)).c_str(), 
+		   (size_t)ARG2(variantnum),
+		   getTextualIpcShmFlags(ARG3(variantnum)).c_str());
+}
+
 CALL(shmget)
 {
 #ifndef MVEE_ALLOW_SHM
@@ -6267,9 +7755,20 @@ CALL(shmget)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getdents64 - (unsigned int  fd, struct linux_dirent64  *  dirent,
-  unsigned int  count)
+  sys_getdents64 - (unsigned int fd, struct linux_dirent64* dirent,
+  unsigned int count)
+
+  This syscall exists on all architectures, including AMD64.
 -----------------------------------------------------------------------------*/
+LOG_ARGS(getdents64)
+{
+	debugf("%s - SYS_GETDENTS(%u, 0x" PTRSTR ", %u)\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned int)ARG1(variantnum),
+		   (unsigned long)ARG2(variantnum),
+		   (unsigned int)ARG3(variantnum));
+}
+
 PRECALL(getdents64)
 {
     CHECKPOINTER(2);
@@ -6287,6 +7786,9 @@ PRECALL(getdents64)
 
 POSTCALL(getdents64)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFER(2);
     return 0;
 }
@@ -6332,8 +7834,8 @@ LOG_ARGS(gettid)
 					  err.msg,
 					  getTextualAllocResult(err.alloc_type, err.msg),
 					  err.chunksize,
-					  err.ar_ptr,
-					  err.chunk_ptr
+					  (unsigned long)err.ar_ptr,
+					  (unsigned long)err.chunk_ptr
 					);
 			}
 		}
@@ -6348,8 +7850,8 @@ LOG_ARGS(gettid)
 					  err.msg,
 					  getTextualAllocResult(err.alloc_type, err.msg),
 					  err.chunksize,
-					  err.ar_ptr,
-					  err.chunk_ptr
+					  (unsigned long)err.ar_ptr,
+					  (unsigned long)err.chunk_ptr
 					);
 			}
 			shutdown(false);
@@ -6357,8 +7859,14 @@ LOG_ARGS(gettid)
 		else if (ARG3(variantnum) == 76)
 		{
 			warnf("[PID:%05d] - [INTERPOSER_DATA_SIZE_MISMATCH] - [POS:%d] - [SLOT_SIZE:%d] - [DATA_SIZE:%d]\n",
-				  variants[variantnum].variantpid, ARG4(variantnum), ARG5(variantnum), ARG6(variantnum));
+				  variants[variantnum].variantpid, (int)ARG4(variantnum), (int)ARG5(variantnum), (int)ARG6(variantnum));
 			shutdown(false);
+		}
+		else if (ARG3(variantnum) < 59 || ARG3(variantnum) > 61)
+		{
+			debugf("[PID:%05d] - [UNKNOWN_DEBUG_EVENT:%d]\n",
+				   variants[variantnum].variantpid, (int)ARG3(variantnum));
+			//log_variant_backtrace(variantnum);
 		}
 	}
 	else
@@ -6385,24 +7893,24 @@ CALL(gettid)
 		if (ARG3(i) == 10)
 		{
 			warnf("[PID:%05d] - [LIBC_LOCK_BUFFER_ATTACHED:0x" PTRSTR "]\n",
-				  variants[i].variantpid, ARG4(i));
+				  variants[i].variantpid, (unsigned long)ARG4(i));
 		}
 		if (ARG3(i) == 59)
 		{
 			warnf("[PID:%05d] - [INVALID_LOCK_TYPE=>READ:%d (%s) - EXPECTED:%d (%s)]\n",
-				  variants[i].variantpid, ARG4(i), getTextualAtomicType(ARG4(i)),
-				  ARG5(i), getTextualAtomicType(ARG5(i)));
+				  variants[i].variantpid, (int)ARG4(i), getTextualAtomicType(ARG4(i)),
+				  (int)ARG5(i), getTextualAtomicType(ARG5(i)));
 			shutdown(false);
 		}
 		else if (ARG3(i) == 60)
 		{
 			warnf("[PID:%05d] - [INVALID_LOCK_TYPE] - [SLOT_SIZE:%d] - TMPPOS:%d\n",
-				  variants[i].variantpid, ARG4(i), ARG5(i));
+				  variants[i].variantpid, (int)ARG4(i), (int)ARG5(i));
 		}
 		else if (ARG3(i) == 61)
 		{
 			warnf("[PID:%05d] - [INVALID_LOCK_PTR] - [SLAVE_PTR:0x" PTRSTR "] - TMPPOS:%d\n",
-				  variants[i].variantpid, ARG4(i), ARG5(i));
+				  variants[i].variantpid, (unsigned long)ARG4(i), (int)ARG5(i));
 			shutdown(false);
 			
 		}
@@ -6412,7 +7920,7 @@ CALL(gettid)
 			std::string actual_callee = set_mmap_table->get_caller_info(i, variants[i].variantpid, ARG6(i));
 
 			warnf("[PID:%05d] - [INVALID_LOCK_CALLEE] - [LOCK_TYPE:%d (%s)] - [MASTER CALLEE:%s] - [ACTUAL CALLEE:%s]\n",
-				  variants[i].variantpid, ARG4(i), getTextualAtomicType(ARG4(i)),
+				  variants[i].variantpid, (int)ARG4(i), getTextualAtomicType(ARG4(i)),
 				  master_callee.c_str(), actual_callee.c_str());
 
 			shutdown(false);
@@ -6422,21 +7930,26 @@ CALL(gettid)
     }
 #endif
 
-#ifdef MVEE_ENABLE_VALGRIND_HACKS
-	return MVEE_CALL_ALLOW;
-#endif
-
     return MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(variants[0].variantpid);
 }
 
 /*-----------------------------------------------------------------------------
   sys_readahead - (int fd, loff_t offset, size_t sz)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(readahead)
+{
+	debugf("%s - SYS_READAHEAD(%d, %llu, %zu)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (int)ARG1(variantnum), 
+		   (long long)arg64<2, 3>(variantnum),
+		   (size_t)aligned_arg<3, 5>(variantnum));
+}
+
 PRECALL(readahead)
 {
     CHECKFD(1);
-    CHECKARG(2);
-    CHECKARG(3);
+    CHECKARG64(2, 3);
+    CHECKALIGNEDARG(3, 5);
     MAPFDS(1);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
@@ -6450,20 +7963,20 @@ POSTCALL(readahead)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_setxattr - (const char __user * pathname,
-  const char __user * name, void __user * value, size_t size, int flags)
+  sys_setxattr - (const char* pathname, const char* name, void* value, size_t
+  size, int flags)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(setxattr)
 {
 	auto path  = rw::read_string(variants[variantnum].variantpid, (void*) ARG1(variantnum));
 	auto name  = rw::read_string(variants[variantnum].variantpid, (void*) ARG2(variantnum));
 
-	debugf("%s - SYS_SETXATTR(%s, %s, %d, 0x" PTRSTR ", %d, %s)\n",
+	debugf("%s - SYS_SETXATTR(%s, %s, 0x" PTRSTR ", %zd, %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   path.c_str(), 
 		   name.c_str(), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum), 
+		   (unsigned long)ARG3(variantnum), 
+		   (size_t)ARG4(variantnum), 
 		   getTextualXattrFlags(ARG5(variantnum)));
 }
 
@@ -6485,19 +7998,19 @@ PRECALL(setxattr)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fsetxattr - (int fd,
-  const char __user * name, void __user * value, size_t size, int flags)
+  sys_fsetxattr - (int fd, const char* name, void* value, size_t size, int
+  flags)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(fsetxattr)
 {
 	auto name  = rw::read_string(variants[variantnum].variantpid, (void*) ARG2(variantnum));
 
-	debugf("%s - SYS_FSETXATTR(%d, %s, %d, 0x" PTRSTR ", %d, %s)\n",
+	debugf("%s - SYS_FSETXATTR(%d, %s, 0x" PTRSTR ", %zd, %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   name.c_str(), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum), 
+		   (unsigned long)ARG3(variantnum), 
+		   (size_t)ARG4(variantnum), 
 		   getTextualXattrFlags(ARG5(variantnum)));
 }
 
@@ -6521,20 +8034,20 @@ PRECALL(fsetxattr)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getxattr - (const char __user *, pathname,
-  const char __user *, name, void __user *, value, size_t, size)
+  sys_getxattr - (const char* pathname, const char* name, void* value, size_t
+  size)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(getxattr)
 {
 	auto path = rw::read_string(variants[variantnum].variantpid, (void*) ARG1(variantnum));
 	auto name = rw::read_string(variants[variantnum].variantpid, (void*) ARG2(variantnum));
 
-	debugf("%s - SYS_GETXATTR(%s, %s, %d, 0x" PTRSTR ", %d)\n",
+	debugf("%s - SYS_GETXATTR(%s, %s, 0x" PTRSTR ", %zd)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   path.c_str(), 
 		   name.c_str(), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum));
+		   (unsigned long)ARG3(variantnum), 
+		   (size_t)ARG4(variantnum));
 }
 
 PRECALL(getxattr)
@@ -6554,24 +8067,26 @@ PRECALL(getxattr)
 
 POSTCALL(getxattr)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(3, call_postcall_get_variant_result(0));
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fgetxattr - (int fd,
-  const char __user * name, void __user * value, size_t size)
+  sys_fgetxattr - (int fd, const char* name, void* value, size_t size)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(fgetxattr)
 {
 	auto name = rw::read_string(variants[variantnum].variantpid, (void*) ARG2(variantnum));
 
-	debugf("%s - SYS_FGETXATTR(%d, %s, %d, 0x" PTRSTR ", %d)\n",
+	debugf("%s - SYS_FGETXATTR(%d, %s, 0x" PTRSTR ", %zd)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   name.c_str(), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum));
+		   (unsigned long)ARG3(variantnum), 
+		   (size_t)ARG4(variantnum));
 }
 
 PRECALL(fgetxattr)
@@ -6593,24 +8108,48 @@ PRECALL(fgetxattr)
 
 POSTCALL(fgetxattr)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(3, call_postcall_get_variant_result(0));
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_futex - (u32* uaddr, int op, u32 val, struct timespec* utime,
-  u32* uaddr2, u32 val3)
+  sys_futex - 
+
+  man(2): (int* uaddr, int op, int val, const struct timespec* utime, int*
+  uaddr2, int val3)
+  kernel: (u32* uaddr, int op, u32 val, struct timespec* utime, u32* uaddr2, u32
+  val3)
+
+  These type lists should be compatible
 -----------------------------------------------------------------------------*/
 LOG_ARGS(futex)
 {
-	debugf("%s - SYS_FUTEX(0x" PTRSTR ", %s, %d, 0x" PTRSTR ", 0x" PTRSTR ", %d)\n",
+	struct timespec timeout;
+	std::stringstream timestr;
+
+	if (ARG4(variantnum))
+	{
+		if (!rw::read_struct(variants[variantnum].variantpid, (void*) ARG4(variantnum), sizeof(struct timespec), &timeout))
+			throw RwMemFailure(variantnum, "read timeout in sys_futex");
+
+		timestr << "TIMEOUT: " << timeout.tv_sec << std::setw(9) << std::setfill('0') << timeout.tv_nsec << std::setw(0) << " s";
+	}
+	else
+	{
+		timestr << "TIMEOUT: none";
+	}
+
+	debugf("%s - SYS_FUTEX(0x" PTRSTR ", %s, %u, %s, 0x" PTRSTR ", %u)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum),
+		   (unsigned long)ARG1(variantnum),
 		   getTextualFutexOp(ARG2(variantnum)), 
-		   ARG3(variantnum),
-		   ARG4(variantnum), 
-		   ARG5(variantnum),
-		   ARG6(variantnum));
+		   (unsigned int)ARG3(variantnum),
+		   timestr.str().c_str(),
+		   (unsigned long)ARG5(variantnum),
+		   (unsigned int)ARG6(variantnum));
 }
 
 PRECALL(futex)
@@ -6662,10 +8201,11 @@ POSTCALL(futex)
 		{
 			pid_t master_pid;
 			if (!rw::read_primitive<int>(variants[0].variantpid, (void*) ARG1(0), master_pid))
-				warnf("Failed to replicate pids\n");
+				throw RwMemFailure(0, "read master pid in sys_futex(FUTEX_WAIT_TID)");
+
 			for (int i = 1; i < mvee::numvariants; ++i)
 				if (!rw::write_primitive<int>(variants[i].variantpid, (void*) ARG1(i), master_pid))
-					warnf("Failed to replicate pids\n");
+					throw RwMemFailure(i, "replicate master pid in sys_futex(FUTEX_WAIT_TID)");
 		}
 	}
 #endif
@@ -6673,7 +8213,10 @@ POSTCALL(futex)
 }
 
 /*-----------------------------------------------------------------------------
-  int sched_setaffinity(pid_t pid, size_t cpusetsize, cpu_set_t *mask);
+  sched_setaffinity - 
+
+  man(2): (pid_t pid, size_t len, cpu_set_t* mask)
+  kernel: (pid_t pid, unsigned int len, unsigned long* mask)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(sched_setaffinity)
 {
@@ -6682,15 +8225,12 @@ LOG_ARGS(sched_setaffinity)
 
 	if (ARG2(variantnum) > sizeof(cpu_set_t) ||
 		!rw::read_struct(variants[variantnum].variantpid, (void*) ARG3(variantnum), ARG2(variantnum), &mask))
-	{
-		warnf("couldn't read cpu_set_t\n");
-		return;
-	}
+		throw RwMemFailure(variantnum, "read cpu_set_t in sys_sched_setaffinity");
 
-	debugf("%s - SYS_SCHED_SETAFFINITY(%d, %d, %s)\n",
+	debugf("%s - SYS_SCHED_SETAFFINITY(%d, %zd, %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum),
-		   ARG2(variantnum), 
+		   (pid_t)ARG1(variantnum),
+		   (size_t)ARG2(variantnum), 
 		   getTextualCPUSet(&mask).c_str());
 }
 
@@ -6715,10 +8255,7 @@ PRECALL(sched_setaffinity)
 
 				if (ARG2(i) > sizeof(cpu_set_t) ||
 					!rw::read_struct(variants[i].variantpid, (void*) ARG3(i), ARG2(i), &available_cores))
-				{
-					warnf("couldn't read cpu_set_t\n");
-					return 0;
-				}
+					throw RwMemFailure(i, "read cpu_set_t in sys_sched_setaffinity");
 
 				for (int j = 0; j < (int)ARG2(i) * 8; ++j)
 				{
@@ -6735,11 +8272,11 @@ PRECALL(sched_setaffinity)
 				if (modified_mask)
 				{
 #ifndef MVEE_BENCHMARK
-					debugf("manipulated virtual CPU mask for the variant: %d - %s\n", i,
-                           getTextualCPUSet(&available_cores).c_str());
+					debugf("manipulated virtual CPU mask for the variant: %d - %s\n", 
+						   i, getTextualCPUSet(&available_cores).c_str());
 #endif
 					if (!rw::write_data(variants[i].variantpid, (void*) ARG3(i), ARG2(i), &available_cores))
-						warnf("Couldn't write cpu_set_t\n");
+						throw RwMemFailure(i, "write cpu_set_t in sys_sched_setaffinity");
 				}
 			}
 		}
@@ -6756,8 +8293,10 @@ CALL(sched_setaffinity)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_sched_getaffinity - (pid_t pid, unsigned int len,
-  unsigned long __user * user_mask_ptr)
+  sys_sched_getaffinity - 
+
+  man(2): (pid_t pid, size_t len, cpu_set_t* mask)
+  kernel: (pid_t pid, unsigned int len, unsigned long* mask)
 -----------------------------------------------------------------------------*/
 GET_CALL_TYPE(sched_getaffinity)
 {
@@ -6765,15 +8304,19 @@ GET_CALL_TYPE(sched_getaffinity)
     return MVEE_CALL_TYPE_UNSYNCED;
 }
 
+LOG_ARGS(sched_getaffinity)
+{
+	debugf("%s - SYS_SCHED_GETAFFINITY(%d, %zd, " PTRSTR ")\n",
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (pid_t)ARG1(variantnum),
+		   (size_t)ARG2(variantnum), 
+		   (unsigned long)ARG3(variantnum));
+}
+
 POSTCALL(sched_getaffinity)
 {
+	/*
     // mask the return with the CPU cores we wish to make available to this variant
-
-    //debugf("%s - SYS_SCHED_GETAFFINITY return: %d\n",
-    //     variants[variantnum].variantpid,
-    //     call_postcall_get_variant_result(variantnum));
-
-
     int res = call_postcall_get_variant_result(variantnum);
     if (call_check_result(res) && ARG3(variantnum))
     {
@@ -6788,10 +8331,7 @@ POSTCALL(sched_getaffinity)
 
         if (ARG2(variantnum) > sizeof(cpu_set_t) ||
 			!rw::read_struct(variants[variantnum].variantpid, (void*) ARG3(variantnum), ARG2(variantnum), &available_cores))
-        {
-            warnf("couldn't read cpu_set_t\n");
-            return 0;
-        }
+			throw RwMemFailure(variantnum, "read cpu_set_t in sys_sched_getaffinity");
 
         for (unsigned int i = 0; i < ARG2(variantnum) * 8; ++i)
         {
@@ -6804,12 +8344,10 @@ POSTCALL(sched_getaffinity)
         }
 
         if (modified_mask)
-		{
             if (!rw::write_data(variants[variantnum].variantpid, (void*) ARG3(variantnum), ARG2(variantnum), &available_cores))
-				warnf("Failed to write cpu_set_t\n");
-		}
+				throw RwMemFailure(variantnum, "write cpu_set_t in sys_sched_setaffinity");
     }
-
+	*/
 
     return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
@@ -6821,7 +8359,7 @@ LOG_ARGS(epoll_create)
 {
 	debugf("%s - SYS_EPOLL_CREATE(%d)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum));
+		   (int)ARG1(variantnum));
 }
 
 PRECALL(epoll_create)
@@ -6857,8 +8395,9 @@ POSTCALL(epoll_create)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_exit_group - NOTE: this syscall does not seem to complete until all
-  variants have exited
+  sys_exit_group - (int error_code)
+
+  NOTE: this syscall does not seem to complete until all variants have exited
 -----------------------------------------------------------------------------*/
 #ifdef MVEE_DUMP_MEM_STATS
 static void handle_get_mem_size(int pid, unsigned long* phys_sz, unsigned long* virt_sz)
@@ -6893,6 +8432,13 @@ static void handle_get_mem_size(int pid, unsigned long* phys_sz, unsigned long* 
 }
 #endif
 
+LOG_ARGS(exit_group)
+{
+	debugf("%s - SYS_EXIT_GROUP(%d)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (int)ARG1(variantnum));
+}
+
 CALL(exit_group)
 {
 #ifdef MVEE_DUMP_MEM_STATS
@@ -6920,24 +8466,46 @@ CALL(exit_group)
     // This can cause mismatches in those other threads because some variants might still perform syscalls while the others are dead
 //	warnf("thread group shutting down\n");
 
-    set_mmap_table->thread_group_shutting_down = 1;
+    set_mmap_table->thread_group_shutting_down = true;
     return MVEE_CALL_ALLOW;
 }
 
 /*-----------------------------------------------------------------------------
-    sys_set_tid_address - (int* tidptr)
+  sys_set_tid_address - (int* tidptr)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(set_tid_address)
+{
+	debugf("%s - SYS_SET_TID_ADDRESS(" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (unsigned long)ARG1(variantnum));
+}
+
 POSTCALL(set_tid_address)
 {
-	// Always returns the caller's thread ID
-	for (int i = 0; i < mvee::numvariants; ++i)
-		call_postcall_set_variant_result(i, variants[0].variantpid);
+	if IS_UNSYNCED_CALL
+	{
+		call_postcall_set_variant_result(variantnum, variants[0].variantpid);
+	}
+	else
+	{
+		// Always returns the caller's thread ID
+		for (int i = 0; i < mvee::numvariants; ++i)
+			call_postcall_set_variant_result(i, variants[0].variantpid);
+	}
     return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
 
 /*-----------------------------------------------------------------------------
-  clock_gettime - (clockid_t which_clock, struct timespec __user* tp)
+  sys_clock_gettime - (clockid_t which_clock, struct timespec* tp)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(clock_gettime)
+{
+	debugf("%s - SYS_CLOCK_GETTIME(%s, 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   getTextualTimerType(ARG1(variantnum)), 
+		   (unsigned long)ARG2(variantnum));
+}
+
 PRECALL(clock_gettime)
 {
     CHECKPOINTER(2);
@@ -6947,12 +8515,15 @@ PRECALL(clock_gettime)
 
 POSTCALL(clock_gettime)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(2, sizeof(struct timespec));
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_statfs - (const char  *  pathname, struct statfs64  *  buf)
+  sys_statfs - (const char* pathname, struct statfs* buf)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(statfs)
 {
@@ -6961,7 +8532,7 @@ LOG_ARGS(statfs)
 	debugf("%s - SYS_STATFS(%s, 0x" PTRSTR ")\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   str1.c_str(), 
-		   ARG2(variantnum));
+		   (unsigned long)ARG2(variantnum));
 }
 
 PRECALL(statfs)
@@ -6978,22 +8549,29 @@ PRECALL(statfs)
 
 POSTCALL(statfs)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(2, sizeof(struct statfs64));
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_statfs64 - (const char  *  pathname, size_t  sz, struct statfs64  *  buf)
+  sys_statfs64 - 
+
+  man(2): there is no standardized user-space wrapper for this
+  function. statfs(2) seems to use sys_statfs64 if it is available.  
+  kernel: (const char* pathname, size_t sz, struct statfs64* buf)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(statfs64)
 {
 	auto str1 = rw::read_string(variants[variantnum].variantpid, (void*)ARG1(variantnum));
 
-	debugf("%s - SYS_STATFS64(%s, %ld, 0x" PTRSTR ")\n", 
+	debugf("%s - SYS_STATFS64(%s, %zd, 0x" PTRSTR ")\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   str1.c_str(), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum));
+		   (size_t)ARG2(variantnum), 
+		   (unsigned long)ARG3(variantnum));
 }
 
 PRECALL(statfs64)
@@ -7011,14 +8589,27 @@ PRECALL(statfs64)
 
 POSTCALL(statfs64)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(3, sizeof(struct statfs64));
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fstatfs - (int fd, struct statfs* buf)
-  sys_fstatfs64 - (int fd, size_t  sz, struct statfs64  *  buf)
+  sys_fstatfs - 
+
+  man(2): (int fd, struct statfs* buf)
+  kernel: (unsigned int fd, struct statfs* buf)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(fstatfs)
+{
+	debugf("%s - SYS_FSTATFS(%u, 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (unsigned int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum));
+}
+
 PRECALL(fstatfs)
 {
     CHECKFD(1);
@@ -7035,8 +8626,27 @@ PRECALL(fstatfs)
 
 POSTCALL(fstatfs)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(2, sizeof(struct statfs));
     return 0;
+}
+
+/*-----------------------------------------------------------------------------
+  sys_fstatfs64 - 
+
+  man(2): there is no standardized user-space wrapper for this
+  function. fstatfs(2) seems to use sys_fstatfs64 if it is available.  
+  kernel: (unsigned int fd, size_t sz, struct statfs64* buf)
+-----------------------------------------------------------------------------*/
+LOG_ARGS(fstatfs64)
+{
+	debugf("%s - SYS_FSTATFS64(%u, %zu, 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (unsigned int)ARG1(variantnum), 
+		   (size_t)ARG2(variantnum),
+		   (unsigned long)ARG3(variantnum));
 }
 
 PRECALL(fstatfs64)
@@ -7056,13 +8666,38 @@ PRECALL(fstatfs64)
 
 POSTCALL(fstatfs64)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(3, sizeof(struct statfs64));
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_getpriority - (int which, int who)
+  sys_getpriority - 
+
+  man(2): (int which, id_t who)
+  kernel: (int which, int who)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(getpriority)
+{
+	if (ARG1(variantnum) == PRIO_USER)
+	{
+		debugf("%s - SYS_GETPRIORITY(%s, %d = %s)\n", 
+			   call_get_variant_pidstr(variantnum).c_str(), 
+			   getTextualPriorityWhich(ARG1(variantnum)),
+			   (int)ARG2(variantnum),
+			   getTextualUserId(ARG2(variantnum)).c_str());
+	}
+	else
+	{
+		debugf("%s - SYS_GETPRIORITY(%s, %d)\n", 
+			   call_get_variant_pidstr(variantnum).c_str(), 
+			   getTextualPriorityWhich(ARG1(variantnum)),
+			   (int)ARG2(variantnum));		
+	}
+}
+
 PRECALL(getpriority)
 {
     CHECKARG(1);
@@ -7071,8 +8706,32 @@ PRECALL(getpriority)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_setpriority - (int which, int who, int niceval)
+  sys_setpriority - 
+
+  man(2): (int which, id_t who, int niceval)
+  kernel: (int which, int who, int niceval)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(setpriority)
+{
+	if (ARG1(variantnum) == PRIO_USER)
+	{
+		debugf("%s - SYS_SETPRIORITY(%s, %d = %s, %d)\n", 
+			   call_get_variant_pidstr(variantnum).c_str(), 
+			   getTextualPriorityWhich(ARG1(variantnum)),
+			   (int)ARG2(variantnum),
+			   getTextualUserId(ARG2(variantnum)).c_str(),
+			   (int)ARG3(variantnum));
+	}
+	else
+	{
+		debugf("%s - SYS_SETPRIORITY(%s, %d, %d)\n", 
+			   call_get_variant_pidstr(variantnum).c_str(), 
+			   getTextualPriorityWhich(ARG1(variantnum)),
+			   (int)ARG2(variantnum),
+			   (int)ARG3(variantnum));		
+	}
+}
+
 PRECALL(setpriority)
 {
     CHECKARG(1);
@@ -7087,10 +8746,22 @@ PRECALL(setpriority)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_sched_setscheduler
+  sys_sched_setscheduler - (pid_t pid, int policy, struct sched_param* param)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(sched_setscheduler)
+{
+	debugf("%s - SYS_SCHED_SETSCHEDULER(%d, %s, 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (int)ARG1(variantnum),
+		   getTextualSchedulingPolicy(ARG2(variantnum)),
+		   (unsigned long)ARG3(variantnum));
+}
+
 PRECALL(sched_setscheduler)
 {
+	CHECKARG(1);
+	CHECKARG(2);
+	CHECKPOINTER(3);
 	return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
@@ -7100,17 +8771,17 @@ CALL(sched_setscheduler)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_epoll_wait - (int epfd, struct epoll_event __user* events, 
-  int maxevents, int timeout)
+  sys_epoll_wait - (int epfd, struct epoll_event* events, int maxevents, int
+  timeout)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(epoll_wait)
 {
 	debugf("%s - SYS_EPOLL_WAIT(%d, 0x" PTRSTR ", %d, %d)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum),
-		   ARG2(variantnum),
-		   ARG3(variantnum),
-		   ARG4(variantnum));
+		   (int)ARG1(variantnum),
+		   (unsigned long)ARG2(variantnum),
+		   (int)ARG3(variantnum),
+		   (int)ARG4(variantnum));
 }
 
 PRECALL(epoll_wait)
@@ -7126,7 +8797,7 @@ LOG_RETURN(epoll_wait)
 {
 	long result  = call_postcall_get_variant_result(variantnum);
 
-	debugf("%s - SYS_EPOLL_WAIT return: %d\n", 
+	debugf("%s - SYS_EPOLL_WAIT return: %ld\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   result);
 
@@ -7135,13 +8806,9 @@ LOG_RETURN(epoll_wait)
 		struct epoll_event* events = new(std::nothrow) struct epoll_event[result];
 		if (!events || 
 			!rw::read_struct(variants[variantnum].variantpid, (void*) ARG2(variantnum), sizeof(struct epoll_event) * result, events))
-		{
-			warnf("couldn't read epoll_event\n");
-			SAFEDELETEARRAY(events);
-			return;
-		}
+			throw RwMemFailure(variantnum, "read epoll_events in sys_epoll_wait");
 
-		for (unsigned int j = 0; j < result; ++j)
+		for (long j = 0; j < result; ++j)
 			debugf("%s - > SYS_EPOLL_WAIT fd ready: 0x" PTRSTR " - events: %s\n",
 				   call_get_variant_pidstr(variantnum).c_str(), 
 				   (unsigned long)events[j].data.ptr, 
@@ -7161,11 +8828,7 @@ POSTCALL(epoll_wait)
             struct epoll_event* master_events = new(std::nothrow) struct epoll_event[master_result];
             if (!master_events ||
 				!rw::read_struct(variants[0].variantpid, (void*) ARG2(0), sizeof(struct epoll_event) * master_result, master_events))
-            {
-                warnf("couldn't replicate epoll_events\n");
-				SAFEDELETEARRAY(master_events);
-                return 0;
-            }
+				throw RwMemFailure(0, "read master epoll_events in sys_epoll_wait");
 
             for (int j = 1; j < mvee::numvariants; ++j)
             {
@@ -7195,7 +8858,8 @@ POSTCALL(epoll_wait)
                 }
 
                 if (!rw::write_data(variants[j].variantpid, (void*) ARG2(j), sizeof(epoll_event) * master_result, (unsigned char*)slave_events))
-                    warnf("failed to replicate epoll_events to slave variant %d\n", j);
+					throw RwMemFailure(j, "replicate epoll_events in sys_epoll_wait");
+
                 SAFEDELETEARRAY(slave_events);
             }
 
@@ -7207,7 +8871,7 @@ POSTCALL(epoll_wait)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_epoll_ctl - (int epfd, int op, int fd, struct epoll_event __user* event)
+  sys_epoll_ctl - (int epfd, int op, int fd, struct epoll_event* event)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(epoll_ctl)
 {
@@ -7217,18 +8881,16 @@ LOG_ARGS(epoll_ctl)
 	if (ARG4(variantnum))
 	{
 		if (!rw::read<struct epoll_event>(variants[variantnum].variantpid, (void*) ARG4(variantnum), event))
-		{
-			warnf("couldn't read epoll_event\n");
-			return;
-		}
+			throw RwMemFailure(variantnum, "read epoll_event in sys_epoll_ctl");
+
 		events = getTextualEpollEvents(event.events);
 	}
 
 	debugf("%s - SYS_EPOLL_CTL(%d, %s, %d, %s, ID = 0x" PTRSTR ")\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum),
+		   (int)ARG1(variantnum),
 		   getTextualEpollOp(ARG2(variantnum)),
-		   ARG3(variantnum),
+		   (int)ARG3(variantnum),
 		   events.c_str(),
 		   (unsigned long)event.data.ptr);
 }
@@ -7256,10 +8918,8 @@ POSTCALL(epoll_ctl)
                 struct epoll_event event;
                 memset(&event, 0, sizeof(struct epoll_event));
                 if (!rw::read<struct epoll_event>(variants[i].variantpid, (void*) ARG4(i), event))
-                {
-                    warnf("couldn't read epoll_event\n");
-                    return 0;
-                }
+					throw RwMemFailure(i, "read epoll_event in sys_epoll_ctl");
+
                 ids[i] = (unsigned long)event.data.ptr;
             }
 
@@ -7275,15 +8935,18 @@ POSTCALL(epoll_ctl)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_tgkill - (int tgid, int pid, int sig)
+  sys_tgkill - 
+
+  man(2): (int tgid, int pid, int sig)
+  kernel: (pid_t tgid, pid_t pid, int sig)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(tgkill)
 {
 	debugf("%s - SYS_TGKILL(%d, %d, %d = %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
+		   (int)ARG1(variantnum), 
+		   (int)ARG2(variantnum), 
+		   (int)ARG3(variantnum), 
 		   getTextualSig(ARG3(variantnum)));
 }
 
@@ -7318,10 +8981,7 @@ LOG_ARGS(utimes)
 	if (ARG2(variantnum))
 	{
 		if (!rw::read_struct(variants[variantnum].variantpid, (void*) ARG2(variantnum), 2 * sizeof(struct timeval), utimes))
-		{
-			warnf("couldn't read utimes\n");
-			return;
-		}
+			throw RwMemFailure(variantnum, "read utimes in sys_utimes");
 
 		timestr << "ACTIME: " << utimes[0].tv_sec << "." << std::setw(6) << std::setfill('0') << utimes[0].tv_usec << std::setw(0)
 				<< ", MODTIME: " << utimes[1].tv_sec << "." << std::setw(6) << std::setfill('0') << utimes[1].tv_usec;
@@ -7350,18 +9010,24 @@ PRECALL(utimes)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_waitid - (int which, pid_t pid, struct siginfo __user *infop,
-  int options, struct rusage __user *ru);
+  sys_waitid - 
+
+  man(2): (idtype_t which, id_t pid, struct siginfo* infop, int options, struct
+  rusage* ru)
+  kernel: (int which, pid_t pid, struct siginfo *infop, int options, struct
+  rusage* ru)
+
+  These type lists should be equivalent
 -----------------------------------------------------------------------------*/
 LOG_ARGS(waitid)
 {
 	debugf("%s - SYS_WAITID(%d, %d, 0x" PTRSTR ", 0x" PTRSTR ", 0x" PTRSTR ")\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum), 
-		   ARG5(variantnum));
+		   (int)ARG1(variantnum), 
+		   (pid_t)ARG2(variantnum), 
+		   (unsigned long)ARG3(variantnum), 
+		   (unsigned long)ARG4(variantnum), 
+		   (unsigned long)ARG5(variantnum));
 }
 
 PRECALL(waitid)
@@ -7377,6 +9043,9 @@ PRECALL(waitid)
 
 POSTCALL(waitid)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     // we want to replicate the master result even if the call fails
     unsigned long master_result = call_postcall_get_variant_result(0);
 
@@ -7406,6 +9075,12 @@ POSTCALL(waitid)
 /*-----------------------------------------------------------------------------
   sys_inotify_init - (void)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(inotify_init)
+{
+	debugf("%s - SYS_INOTIFY_INIT()\n", 
+		   call_get_variant_pidstr(variantnum).c_str());
+}
+
 PRECALL(inotify_init)
 {
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
@@ -7448,7 +9123,7 @@ LOG_ARGS(inotify_add_watch)
 
 	debugf("%s - SYS_INOTIFY_ADD_WATCH(%d, %s, %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   str1.c_str(), 
 		   mask.c_str());
 }
@@ -7466,8 +9141,19 @@ PRECALL(inotify_add_watch)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_inotify_rm_watch - (int fd, int wd)
+  sys_inotify_rm_watch - 
+
+  man(2): (int fd, int wd)
+  kernel: (int fd, __s32 wd)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(inotify_rm_watch)
+{
+	debugf("%s - SYS_INOTIFY_RM_WATCH(%d, %d)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (int)ARG1(variantnum), 
+		   (int)ARG2(variantnum));
+}
+
 PRECALL(inotify_rm_watch)
 {
 	CHECKARG(1);
@@ -7476,7 +9162,10 @@ PRECALL(inotify_rm_watch)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_openat - (int dfd, const char __user *filename, int flags, int mode)
+  sys_openat - 
+
+  man(2): (int dfd, const char *filename, int flags, mode_t mode)
+  kernel: (int dfd, const char *filename, int flags, umode_t mode)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(openat)
 {
@@ -7484,10 +9173,10 @@ LOG_ARGS(openat)
 
 	debugf("%s - SYS_OPENAT(%d, %s, 0x%08X (%s), 0x%08X (%s))\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   filename.c_str(), 		   
-		   ARG3(variantnum), getTextualFileFlags(ARG3(variantnum)).c_str(),
-		   ARG4(variantnum), getTextualFileMode(ARG4(variantnum) & S_FILEMODEMASK).c_str());
+		   (int)ARG3(variantnum), getTextualFileFlags(ARG3(variantnum)).c_str(),
+		   (int)ARG4(variantnum), getTextualFileMode(ARG4(variantnum) & S_FILEMODEMASK).c_str());
 }
 
 PRECALL(openat)
@@ -7508,14 +9197,12 @@ PRECALL(openat)
         MAPFDS(1);
 
     std::string full_path = set_fd_table->get_full_path(0, variants[0].variantpid, (unsigned long)(int)ARG1(0), (void*)ARG2(0));
-//    warnf("openat: %s\n", full_path.c_str());
+    //warnf("openat: %s\n", full_path.c_str());
 
     if (full_path == "")
         return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
 
-    if (full_path.find("/proc/self/") == 0
-        && full_path != "/proc/self/maps"
-        && full_path != "/proc/self/exe")
+    if (!set_fd_table->should_open_in_all_variants(full_path, variants[0].variantpid))
         return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
@@ -7524,13 +9211,16 @@ PRECALL(openat)
 // See comment above CALL(open) for info on what this function does
 CALL(openat)
 {
+	if (IS_UNSYNCED_CALL)
+		return MVEE_CALL_ALLOW;
+	
 	int result = MVEE_CALL_ALLOW;
 
 	// If do_alias returns true, we will have found aliases for at least
 	// one variant. In this case, we want to repeat the check_open_call + 
 	// flag stripping iteration below for each variant
 	if (call_do_alias_at<1, 2>())
-	{
+	{		
 		for (auto i = 0; i < mvee::numvariants; ++i)
 		{
 			auto file = set_fd_table->get_full_path(i, variants[i].variantpid, (unsigned long)(int)ARG1(i), (void*) ARG2(i));
@@ -7563,8 +9253,11 @@ CALL(openat)
 
 POSTCALL(openat)
 {
-    if (call_succeeded)
-    {
+    if (!call_succeeded)
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
+	if (IS_SYNCED_CALL)
+	{
 		bool unsynced_access;
 		std::vector<unsigned long> fds = call_postcall_get_result_vector();
 		std::vector<std::string> resolved_paths(mvee::numvariants);
@@ -7590,18 +9283,30 @@ POSTCALL(openat)
 									 state == STATE_IN_MASTERCALL,                                 // opened by master only?
 									 unsynced_access);                                             // unsynced access to the file?
 
-        REPLICATEFDRESULT();
+		REPLICATEFDRESULT();
 #ifdef MVEE_FD_DEBUG
-        set_fd_table->verify_fd_table(getpids());
+		set_fd_table->verify_fd_table(getpids());
 #endif
 		aliased_open = false;
-    }
+	}
+	else
+	{
+		std::string path = set_fd_table->get_full_path(variantnum, variants[variantnum].variantpid, ARG1(variantnum), (void*)ARG2(variantnum));
+
+		set_fd_table->create_temporary_fd_info(variantnum, call_postcall_get_variant_result(variantnum), path, ARG3(variantnum), ARG3(variantnum) & O_CLOEXEC);
+
+		aliased_open = false;
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
 
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_mkdirat - (int dirfd, const char *pathname, mode_t mode)
+  sys_mkdirat - 
+
+  man(2): (int dirfd, const char *pathname, mode_t mode)
+  kernel: (int dirfd, const char *pathname, umode_t mode)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(mkdirat)
 {
@@ -7610,7 +9315,7 @@ LOG_ARGS(mkdirat)
 
 	debugf("%s - SYS_MKDIRAT(%d, %s, %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   str1.c_str(), 
 		   mode.c_str());
 }
@@ -7633,10 +9338,12 @@ PRECALL(mkdirat)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fstatat64 - (int dirfd, const char *pathname, struct stat *buf, int flags)
+  sys_newfstatat - (int dfd, const char* filename, struct stat* statbuf, int
+  flag)
 
-  sys_newfstatat - (int dfd, const char __user * filename,
-  struct stat __user * statbuf, int flag)
+  sys_fstatat is deprecated so fstatat(2) now uses this syscall instead. This
+  call only exists on 64-bit platforms.  32-bit platforms use sys_fstatat64
+  instead.  
 -----------------------------------------------------------------------------*/
 LOG_ARGS(newfstatat)
 {
@@ -7644,10 +9351,10 @@ LOG_ARGS(newfstatat)
 
 	debugf("%s - SYS_NEWFSTATAT(%d, %s, 0x" PTRSTR ", 0x%08X)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   path.c_str(), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum));
+		   (unsigned long)ARG3(variantnum), 
+		   (unsigned int)ARG4(variantnum));
 }
 
 PRECALL(newfstatat)
@@ -7670,20 +9377,29 @@ PRECALL(newfstatat)
 
 POSTCALL(newfstatat)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(3, sizeof(struct stat64));
     return 0;
 }
 
+/*-----------------------------------------------------------------------------
+  sys_fstatat64 - (int dfd, const char* filename, struct stat64* statbuf, int
+  flag)
+
+  fstat(2) uses this syscall on 32-bit platforms.
+-----------------------------------------------------------------------------*/
 LOG_ARGS(fstatat64)
 {
 	auto path = rw::read_string(variants[variantnum].variantpid, (void*) ARG2(variantnum));
 
 	debugf("%s - SYS_FSTATAT64(%d, %s, 0x" PTRSTR ", 0x%08X)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   path.c_str(), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum));
+		   (unsigned long)ARG3(variantnum), 
+		   (unsigned int)ARG4(variantnum));
 }
 
 PRECALL(fstatat64)
@@ -7708,12 +9424,10 @@ LOG_RETURN(fstatat64)
 {
 	struct stat64 sb;
 	if (!rw::read<struct stat64>(variants[variantnum].variantpid, (void*) ARG3(variantnum), sb))
-	{
-		warnf("Couldn't read stat64\n");
-		return;
-	}
+		throw RwMemFailure(variantnum, "read stat64 in sys_fstatat64");
+
 	debugf("%s - SYS_FSTATAT64 return\n", 
-		   variants[variantnum].variantpid);
+		   call_get_variant_pidstr(variantnum).c_str());
 
 	switch (sb.st_mode & S_IFMT) {
 		case S_IFBLK:  debugf("File type:                block device\n");            break;
@@ -7742,13 +9456,20 @@ LOG_RETURN(fstatat64)
 	debugf("Blocks allocated:         %lld\n",
 		   (long long) sb.st_blocks);
 
-	debugf("Last status change:       %s", ctime(&sb.st_ctime));
-	debugf("Last file access:         %s", ctime(&sb.st_atime));
-	debugf("Last file modification:   %s", ctime(&sb.st_mtime));
+	char timestr[30];
+	ctime_r(&sb.st_ctime, timestr);
+	debugf("Last status change:       %s", timestr);
+	ctime_r(&sb.st_atime, timestr);
+	debugf("Last file access:         %s", timestr);
+	ctime_r(&sb.st_mtime, timestr);
+	debugf("Last file modification:   %s", timestr);
 }
 
 POSTCALL(fstatat64)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFERFIXEDLEN(3, sizeof(struct stat64));
     return 0;
 }
@@ -7763,7 +9484,7 @@ LOG_ARGS(unlinkat)
 
 	debugf("%s - SYS_UNLINKAT(%d, %s, %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   str1.c_str(), 
 		   flags.c_str());
 }
@@ -7789,8 +9510,8 @@ PRECALL(unlinkat)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_renameat - (int olddirfd, const char *oldpath,
-  int newdirfd, const char *newpath)
+  sys_renameat - (int olddirfd, const char *oldpath, int newdirfd, const char
+  *newpath)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(renameat)
 {
@@ -7799,9 +9520,9 @@ LOG_ARGS(renameat)
 
 	debugf("%s - SYS_RENAMEAT(%d, %s, %d, %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   str1.c_str(), 
-		   ARG3(variantnum), 
+		   (int)ARG3(variantnum), 
 		   str2.c_str());
 }
 
@@ -7831,8 +9552,8 @@ PRECALL(renameat)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_linkat - (int olddirfd, const char *oldpath,
-  int newdirfd, const char *newpath, int flags)
+  sys_linkat - (int olddirfd, const char *oldpath, int newdirfd, const char
+  *newpath, int flags)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(linkat)
 {
@@ -7842,9 +9563,9 @@ LOG_ARGS(linkat)
 
 	debugf("%s - SYS_LINKAT(%d, %s, %d, %s, %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   str1.c_str(), 
-		   ARG3(variantnum), 
+		   (int)ARG3(variantnum), 
 		   str2.c_str(), 
 		   flags.c_str());
 }
@@ -7885,7 +9606,7 @@ LOG_ARGS(symlinkat)
 	debugf("%s - SYS_SYMLINKAT(%s, %d, %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   str1.c_str(), 
-		   ARG2(variantnum), 
+		   (int)ARG2(variantnum), 
 		   str2.c_str());
 }
 
@@ -7912,19 +9633,18 @@ PRECALL(symlinkat)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_readlinkat - (int dirfd, const char *pathname,
-  char *buf, size_t bufsiz)
+  sys_readlinkat - (int dirfd, const char *pathname, char *buf, size_t bufsiz)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(readlinkat)
 {
 	auto str1 = rw::read_string(variants[variantnum].variantpid, (void*)ARG2(variantnum));
 
-	debugf("%s - SYS_READLINKAT(%d, %s, 0x" PTRSTR", %ld)\n", 
+	debugf("%s - SYS_READLINKAT(%d, %s, 0x" PTRSTR", %zd)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   str1.c_str(), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum));
+		   (unsigned long)ARG3(variantnum), 
+		   (size_t)ARG4(variantnum));
 }
 
 PRECALL(readlinkat)
@@ -7947,12 +9667,18 @@ PRECALL(readlinkat)
 
 POSTCALL(readlinkat)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     REPLICATEBUFFER(3);
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fchmodat - (int dfd, const char __user * filename, umode_t mode, int flags)
+  sys_fchmodat - 
+
+  man(2): (int dfd, const char * filename, mode_t mode, int flags)
+  kernel: (int dfd, const char * filename, umode_t mode, int flags)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(fchmodat)
 {
@@ -7962,7 +9688,7 @@ LOG_ARGS(fchmodat)
 
 	debugf("%s - SYS_FCHMODAT(%d, %s, %s, %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   str1.c_str(), 
 		   mode.c_str(), 
 		   flags.c_str());
@@ -7986,19 +9712,24 @@ PRECALL(fchmodat)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_faccessat - (int dirfd, const char *pathname, int mode)
+  sys_faccessat - 
+
+  man(2): (int dirfd, const char* pathname, int mode, int flags)
+  kernel: (int dirfd, const char* pathname, int mode)
+
+  The flags argument is only used in glibc itself and never passed to the
+  syscall.
 -----------------------------------------------------------------------------*/
 LOG_ARGS(faccessat)
 {
 	auto str1 = rw::read_string(variants[variantnum].variantpid, (void*)ARG2(variantnum));
 
-	debugf("%s - SYS_FACCESSAT(%d, %s, 0x%08X = %s, 0x%08x)\n",
+	debugf("%s - SYS_FACCESSAT(%d, %s, 0x%08X = %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum), 
+		   (int)ARG1(variantnum), 
 		   str1.c_str(), 
-		   ARG3(variantnum),
-		   getTextualAccessMode(ARG3(variantnum)).c_str(), 
-		   ARG4(variantnum));
+		   (unsigned int)ARG3(variantnum),
+		   getTextualAccessMode(ARG3(variantnum)).c_str());
 }
 
 PRECALL(faccessat)
@@ -8019,7 +9750,152 @@ PRECALL(faccessat)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_unshare - (int flags)
+  sys_pselect6 - like select but:
+
+  - the fifth argument is a struct timespec ptr, not a struct timeval ptr
+  - the timespec is constant for pselect. select may modify the timeval
+  - pselect sets a sigmask while inside the call. select does not have this arg
+
+
+  (int nfds, fd_set* readfds, fd_set* writefds, fd_set* exceptfds, 
+  const struct timespec* timeout, const sigset_t* sigmask)
+-----------------------------------------------------------------------------*/
+LOG_ARGS(pselect6)
+{
+	struct timespec timeout;
+	std::stringstream timestr;
+
+	if (ARG5(variantnum))
+	{
+		if (!rw::read_struct(variants[variantnum].variantpid, (void*) ARG5(variantnum), sizeof(struct timespec), &timeout))
+			throw RwMemFailure(variantnum, "read timeout in sys_pselect6");
+
+		timestr << "TIMEOUT: " << timeout.tv_sec << std::setw(9) << std::setfill('0') << timeout.tv_nsec << std::setw(0) << " s";
+	}
+	else
+	{
+		timestr << "TIMEOUT: none";
+	}
+
+	debugf("%s - SYS_PSELECT6(%d, 0x" PTRSTR ", 0x" PTRSTR ", 0x" PTRSTR ", %s, %s)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum), 
+		   (unsigned long)ARG3(variantnum), 
+		   (unsigned long)ARG4(variantnum), 
+		   timestr.str().c_str(),
+		   getTextualSigSet(call_get_sigset(variantnum, (void*) ARG6(variantnum), true)).c_str());
+}
+
+PRECALL(pselect6)
+{
+    CHECKARG(1);
+    CHECKPOINTER(5);
+    CHECKPOINTER(4);
+    CHECKPOINTER(3);
+    CHECKPOINTER(2);
+    CHECKFDSET(4, ARG1(0));
+    CHECKFDSET(3, ARG1(0));
+//	CHECKSIGSET(6, true);
+	CHECKBUFFER(5, sizeof(struct timespec));
+
+	variants[0].last_sigset = blocked_signals[0];
+	auto _set = call_get_sigset(0, (void*) ARG6(0), true);
+	sigemptyset(&blocked_signals[0]);
+	for (int i = 1; i < SIGRTMAX+1; ++i)
+		if (sigismember(&_set, i))
+			sigaddset(&blocked_signals[0], i);
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+}
+
+POSTCALL(pselect6)
+{
+    REPLICATEBUFFERFIXEDLEN(2, ROUND_UP(ARG1(0) + 1, sizeof(unsigned long)));
+    REPLICATEBUFFERFIXEDLEN(3, ROUND_UP(ARG1(0) + 1, sizeof(unsigned long)));
+    REPLICATEBUFFERFIXEDLEN(4, ROUND_UP(ARG1(0) + 1, sizeof(unsigned long)));
+	blocked_signals[0] = variants[0].last_sigset;
+    return 0;
+}
+
+/*-----------------------------------------------------------------------------
+  sys_ppoll: like poll but:
+
+  - the third argument is a struct timespec ptr, not an int
+  - ppoll sets a sigmask while inside the call. poll does not have this arg
+
+  (struct pollfd* fds, nfds_t nfds, const struct timespec* tmo_p, const
+  sigset_t* sigmask)
+-----------------------------------------------------------------------------*/
+LOG_ARGS(ppoll)
+{
+	struct timespec timeout;
+	std::stringstream timestr;
+
+	if (ARG3(variantnum))
+	{
+		if (!rw::read_struct(variants[variantnum].variantpid, (void*) ARG3(variantnum), sizeof(struct timespec), &timeout))
+			throw RwMemFailure(variantnum, "read timeout in sys_ppoll");
+
+		timestr << "TIMEOUT: " << timeout.tv_sec << std::setw(9) << std::setfill('0') << timeout.tv_nsec << std::setw(0) << " s";
+	}
+	else
+	{
+		timestr << "TIMEOUT: none";
+	}
+
+	debugf("%s - SYS_PPOLL(0x" PTRSTR ", %u, %s, %s)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (unsigned long)ARG1(variantnum), 
+		   (unsigned int)ARG2(variantnum), 
+		   timestr.str().c_str(),
+		   getTextualSigSet(call_get_sigset(variantnum, (void*) ARG4(variantnum), true)).c_str());		
+}
+
+PRECALL(ppoll)
+{
+    CHECKPOINTER(1);
+    CHECKARG(2);
+    CHECKPOINTER(3);
+	CHECKPOINTER(4);
+    CHECKBUFFER(1, sizeof(struct pollfd) * ARG2(0));
+	CHECKBUFFER(3, sizeof(struct timespec));
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+}
+
+LOG_RETURN(ppoll)
+{
+	long result  = call_postcall_get_variant_result(variantnum);
+
+	debugf("%s - SYS_PPOLL return: %ld\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   result);
+
+	for (long j = 0; j < result; ++j)
+	{
+		struct pollfd fds;
+		if (!rw::read<struct pollfd>(variants[variantnum].variantpid, (struct pollfd*)ARG1(variantnum) + j, fds))
+			throw RwMemFailure(variantnum, "read pollfd in sys_ppoll");
+			
+		debugf("> fd: %d - events: %s - revents: %s\n",
+			   fds.fd,
+			   getTextualPollRequest(fds.events).c_str(),
+			   getTextualPollRequest(fds.revents).c_str());
+	}
+}
+
+POSTCALL(ppoll)
+{
+//    long result = call_postcall_get_variant_result(0);
+    REPLICATEBUFFERFIXEDLEN(1, sizeof(struct pollfd) * ARG2(0));
+    return 0;
+}
+
+/*-----------------------------------------------------------------------------
+  sys_unshare - 
+
+  man(2): (int flags)
+  kernel: (unsigned long flags)
 
   reverses the effect of sharing certain kernel data structures through
   sys_clone
@@ -8028,7 +9904,7 @@ LOG_ARGS(unshare)
 {
 	debugf("%s - SYS_UNSHARE(%d)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
-		   ARG1(variantnum));
+		   (int)ARG1(variantnum));
 }
 
 PRECALL(unshare)
@@ -8071,8 +9947,8 @@ CALL(unshare)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_utimensat - (int dirfd, const char *pathname,
-  const struct timespec times[2], int flags)
+  sys_utimensat - (int dirfd, const char *pathname, const struct timespec
+  times[2], int flags)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(utimensat)
 {
@@ -8083,11 +9959,7 @@ LOG_ARGS(utimensat)
 	if (ARG3(variantnum))
 	{
 		if (!rw::read_struct(variants[variantnum].variantpid, (void*) ARG3(variantnum), 2 * sizeof(struct timespec), times))
-		{
-			warnf("%s - couldn't read timespec\n",
-				  call_get_variant_pidstr(variantnum).c_str());
-			return;
-		}
+			throw RwMemFailure(variantnum, "read timespec in sys_utimensat");
 
 		timestr << "ACTIME: " << times[0].tv_sec << std::setw(9) << std::setfill('0') << times[0].tv_nsec << std::setw(0)
 				<< ", MODTIME: " << times[1].tv_sec << std::setw(9) << std::setfill('0') << times[1].tv_nsec;
@@ -8099,7 +9971,7 @@ LOG_ARGS(utimensat)
 
 	debugf("%s - SYS_UTIMENSAT(%d, %s, %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum),
+		   (int)ARG1(variantnum),
 		   str1.c_str(),
 		   timestr.str().c_str());
 }
@@ -8166,8 +10038,8 @@ LOG_ARGS(timerfd_create)
 {
 	debugf("%s - SYS_TIMERFD_CREATE(%d (%s), %d (%s))\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), getTextualTimerType(ARG1(variantnum)),
-		   ARG2(variantnum), getTextualTimerFlags(ARG2(variantnum)).c_str());
+		   (int)ARG1(variantnum), getTextualTimerType(ARG1(variantnum)),
+		   (int)ARG2(variantnum), getTextualTimerFlags(ARG2(variantnum)).c_str());
 }
 
 PRECALL(timerfd_create)
@@ -8206,14 +10078,28 @@ POSTCALL(timerfd_create)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_fallocate - (int fd, int mode, off_t offset, off_t len)
+  sys_fallocate - 
+
+  man(2): (int fd, int mode, off_t offset, off_t len)
+  kernel: (int fd, int mode, loff_t offset, loff_t len)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(fallocate)
+{
+	debugf("%s - SYS_FALLOCATE(%d, %d = %s, %lld, %lld)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (int)ARG1(variantnum), 
+		   (int)ARG2(variantnum), 
+		   getTextualFallocateFlags(ARG2(variantnum)).c_str(),
+		   (long long)arg64<3, 3>(variantnum), 
+		   (long long)arg64<4, 5>(variantnum));
+}
+
 PRECALL(fallocate)
 {
     CHECKFD(1);
     CHECKARG(2);
-    CHECKARG(3);
-    CHECKARG(4);
+    CHECKARG64(3, 3);
+    CHECKARG64(4, 5);
 
 	if (set_fd_table->is_fd_unsynced(ARG1(0)))
 	{
@@ -8225,9 +10111,20 @@ PRECALL(fallocate)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_timerfd_settime - (int ufd, int flags,
-  const struct itimerspec* utmr, struct itimerspec* otmr)
+  sys_timerfd_settime - (int ufd, int flags, const struct itimerspec* utmr,
+  struct itimerspec* otmr)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(timerfd_settime)
+{
+	debugf("%s - SYS_TIMERFD_SETTIME(%d, %d = %s, 0x" PTRSTR ", 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (int)ARG1(variantnum), 
+		   (int)ARG2(variantnum), 
+		   getTextualTimerFlags(ARG2(variantnum)).c_str(),
+		   (unsigned long)ARG3(variantnum), 
+		   (unsigned long)ARG4(variantnum));
+}
+
 PRECALL(timerfd_settime)
 {
     CHECKFD(1);
@@ -8255,6 +10152,14 @@ POSTCALL(timerfd_settime)
 /*-----------------------------------------------------------------------------
   sys_timerfd_gettime - (int ufd, struct itimerspec* otmr)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(timerfd_gettime)
+{
+	debugf("%s - SYS_TIMERFD_GETTIME(%d, 0x" PTRSTR ")\n", 
+		   call_get_variant_pidstr(variantnum).c_str(), 
+		   (int)ARG1(variantnum), 
+		   (unsigned long)ARG2(variantnum));
+}
+
 PRECALL(timerfd_gettime)
 {
     CHECKFD(1);
@@ -8271,21 +10176,29 @@ PRECALL(timerfd_gettime)
 
 POSTCALL(timerfd_gettime)
 {
+	if IS_UNSYNCED_CALL
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     if (ARG2(0))
         REPLICATEBUFFERFIXEDLEN(2, sizeof(struct itimerspec));
     return 0;
 }
 
 /*-----------------------------------------------------------------------------
-  sys_dup3 - (unsigned int oldfd, unsigned int newfd, int flags)
-  the only valid flag that can be passed to dup3 through the flags field is O_CLOEXEC!!!
+  sys_dup3 - 
+
+  man(2): (int oldfd, int newfd, int flags)
+  kernel: (unsigned int oldfd, unsigned int newfd, int flags)
+
+  the only valid flag that can be passed to dup3 through the flags field is
+  O_CLOEXEC!!!
 -----------------------------------------------------------------------------*/
 LOG_ARGS(dup3)
 {
-	debugf("%s - SYS_DUP3(%d, %d, %s)\n", 
+	debugf("%s - SYS_DUP3(%u, %u, %s)\n", 
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
+		   (unsigned int)ARG1(variantnum), 
+		   (unsigned int)ARG2(variantnum), 
 		   getTextualFileFlags(ARG3(variantnum)).c_str());
 }
 
@@ -8307,6 +10220,19 @@ PRECALL(dup3)
 
 POSTCALL(dup3)
 {
+	if IS_UNSYNCED_CALL
+	{
+		if (call_succeeded)
+		{
+			unsigned long oldfd = ARG1(variantnum);
+			unsigned long newfd = call_postcall_get_variant_result(variantnum);
+			bool cloexec        = ARG3(variantnum) & O_CLOEXEC;
+			set_fd_table->dup_temporary_fd(variantnum, oldfd, newfd, cloexec);
+		}
+
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
+
 	std::vector<unsigned long> fds;
 
     if (state == STATE_IN_MASTERCALL)
@@ -8360,6 +10286,15 @@ POSTCALL(dup3)
 /*-----------------------------------------------------------------------------
   sys_pipe2 - (int* pipefd, int flags)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(pipe2)
+{
+	debugf("%s - SYS_PIPE2(0x" PTRSTR ", %d = %s)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned long)ARG1(variantnum),
+		   (int)ARG2(variantnum),
+		   getTextualFileFlags(ARG2(variantnum)).c_str());
+}
+
 PRECALL(pipe2)
 {
     CHECKPOINTER(1);
@@ -8369,6 +10304,24 @@ PRECALL(pipe2)
 
 POSTCALL(pipe2)
 {
+	if IS_UNSYNCED_CALL
+	{
+		if (call_succeeded)
+		{
+			int fildes[2];
+			if (!rw::read_struct(variants[variantnum].variantpid, (void*)ARG1(variantnum), 2 * sizeof(int), fildes))
+				throw RwMemFailure(0, "read fds in sys_pipe");
+
+			FileType type = (ARG2(variantnum) & O_NONBLOCK) ? FT_PIPE_NON_BLOCKING : FT_PIPE_BLOCKING;
+			bool cloexec = (ARG2(variantnum) & O_CLOEXEC) ? true : false;
+
+			// create temporary file descriptor mappings for the pipe
+			set_fd_table->create_temporary_fd_info(variantnum, fildes[0], "pipe:read",  O_RDONLY, cloexec, 0, type);
+			set_fd_table->create_temporary_fd_info(variantnum, fildes[1], "pipe:write", O_WRONLY, cloexec, 0, type);
+		}
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
+
     if (call_succeeded)
     {
         int                        fildes[2];
@@ -8377,10 +10330,7 @@ POSTCALL(pipe2)
 		std::vector<std::string> paths(mvee::numvariants);
 
         if (!rw::read_struct(variants[0].variantpid, (void*)ARG1(0), 2 * sizeof(int), fildes))
-        {
-            warnf("couldn't read master fds\n");
-            return 0;
-        }
+			throw RwMemFailure(0, "read master fds in sys_pipe2");
 
 		std::fill(read_fds.begin(),  read_fds.end(),  fildes[0]);
 		std::fill(write_fds.begin(), write_fds.end(), fildes[1]);
@@ -8403,7 +10353,7 @@ POSTCALL(pipe2)
 
 		std::fill(paths.begin(), paths.end(), "pipe2:write");
 		set_fd_table->create_fd_info(type,      // file type
-									 read_fds,  // fd vector
+									 write_fds, // fd vector
 									 paths,     // path vector
 									 O_WRONLY,  // access flags
 									 cloexec,   // cloexec file?
@@ -8422,6 +10372,13 @@ POSTCALL(pipe2)
 /*-----------------------------------------------------------------------------
   sys_inotify_init1 - (int flags)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(inotify_init1)
+{
+	debugf("%s - SYS_INOTIFY_INIT1(%s)\n", 
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   getTextualInotifyFlags(ARG1(variantnum)));
+}
+
 PRECALL(inotify_init1)
 {
     CHECKARG(1);
@@ -8460,6 +10417,29 @@ POSTCALL(inotify_init1)
 /*-----------------------------------------------------------------------------
   sys_rt_tgsigqueueinfo - (pid_t tgid, pid_t pid, int sig, siginfo_t* uinfo)
 -----------------------------------------------------------------------------*/
+LOG_ARGS(rt_tgsigqueueinfo)
+{
+	siginfo_t* si = (siginfo_t*)rw::read_data(variants[variantnum].variantpid,
+											  (void*) ARG3(variantnum),
+											  sizeof(siginfo_t));
+	
+	if (!si)
+	{
+		warnf("Couldn't read uinfo\n");
+		return;
+	}
+
+	debugf("%s - SYS_RT_TGSIGQUEUEINFO(%d, %d, %s, [si_code: %s, si_pid: %d, si_uid: %d, si_value: %d])\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (pid_t)ARG1(variantnum), 
+		   (pid_t)ARG2(variantnum), 
+		   getTextualSig(ARG3(variantnum)), 
+		   getTextualSEGVCode(si->si_code),
+		   si->si_pid,
+		   si->si_uid,
+		   si->si_value.sival_int);
+}
+
 PRECALL(rt_tgsigqueueinfo)
 {
 	CHECKARG(1);
@@ -8479,10 +10459,10 @@ LOG_ARGS(perf_event_open)
 {
 	debugf("%s - SYS_PERF_EVENT_OPEN(0x" PTRSTR ", %d, %d, %d, %s)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
-		   ARG1(variantnum), 
-		   ARG2(variantnum), 
-		   ARG3(variantnum), 
-		   ARG4(variantnum), 
+		   (unsigned long)ARG1(variantnum), 
+		   (pid_t)ARG2(variantnum), 
+		   (int)ARG3(variantnum), 
+		   (int)ARG4(variantnum), 
 		   getTextualPerfFlags(ARG5(variantnum)).c_str());
 }
 
@@ -8534,7 +10514,12 @@ POSTCALL(perf_event_open)
 }
 
 /*-----------------------------------------------------------------------------
-  sys_seccomp - seccomp can be used to filter syscalls based on the syscall
+  sys_seccomp - 
+
+  man(2): (unsigned int op, unsigned int flags, void* uargs)
+  kernel: (unsigned int op, unsigned int flags, const char* uargs)
+
+  seccomp can be used to filter syscalls based on the syscall
   numbers or arguments. We currently disable this syscall as our sync agents
   might trigger seccomp violations.
 
@@ -8542,6 +10527,7 @@ POSTCALL(perf_event_open)
   involve a lot of engineering), or we could manipulate the filters passed
   to seccomp so they become sync agent-aware.
 -----------------------------------------------------------------------------*/
+#ifdef __NR_seccomp
 PRECALL(seccomp)
 {
 	CHECKARG(1);
@@ -8554,7 +10540,7 @@ PRECALL(seccomp)
 		case SECCOMP_SET_MODE_FILTER:
 			break;
 		default:
-			warnf("unknown seccomp option used: %d\n", ARG1(0));
+			warnf("unknown seccomp option used: %d\n", (int)ARG1(0));
 			return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
 
 	}
@@ -8568,6 +10554,37 @@ CALL(seccomp)
 	if (ARG1(0) == SECCOMP_SET_MODE_FILTER)
 		return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EINVAL);
 	return MVEE_CALL_ALLOW;	
+}
+#endif
+
+/*-----------------------------------------------------------------------------
+  sys_getrandom - 
+
+  man(2): (void* buf, size_t buflen, unsigned int flags)
+  kernel: (char* buf, size_t count, unsigned int flags)
+-----------------------------------------------------------------------------*/
+LOG_ARGS(getrandom)
+{
+	debugf("%s - SYS_GETRANDOM(0x" PTRSTR ", %lu, %u (= %s))\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned long) ARG1(variantnum), 
+		   (size_t) ARG2(variantnum), 
+		   (unsigned int) ARG3(variantnum), 
+		   getTextualRandFlags(ARG3(variantnum)).c_str());
+}
+
+PRECALL(getrandom)
+{
+	CHECKPOINTER(1);
+	CHECKARG(2);
+	CHECKARG(3);
+	return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+}
+
+POSTCALL(getrandom)
+{
+	REPLICATEBUFFER(1);
+	return 0;
 }
 
 /*-----------------------------------------------------------------------------
@@ -8588,7 +10605,6 @@ void mvee::init_syslocks()
     /*
     These annotations get picked up by the generate_syscall_table.rb script
 	DONTNEED PRECALL(shmctl)
-    DONTNEED PRECALL(brk)
     DONTNEED PRECALL(shmget)
     DONTNEED PRECALL(uname)
     DONTNEED PRECALL(sched_getparam)
@@ -8609,7 +10625,7 @@ void mvee::init_syslocks()
     DONTNEED PRECALL(getresgid)
     DONTNEED PRECALL(madvise)
     DONTNEED PRECALL(set_thread_area)
-    DONTNEED PRECALL(exit_group)
+	DONTNEED PRECALL(exit_group)
     DONTNEED PRECALL(set_tid_address)
     DONTNEED PRECALL(clock_getres)
     DONTNEED PRECALL(set_robust_list)
@@ -8617,7 +10633,6 @@ void mvee::init_syslocks()
     DONTNEED PRECALL(fadvise64)
     DONTNEED PRECALL(sched_getaffinity)
     DONTNEED PRECALL(rt_sigreturn)
-    DONTNEED PRECALL(getpid)
     DONTNEED PRECALL(prlimit64)
     DONTNEED PRECALL(sigaltstack)
     DONTNEED PRECALL(shmdt)
@@ -8627,10 +10642,12 @@ void mvee::init_syslocks()
     ALIAS rt_sigaction sigaction
     ALIAS rt_sigreturn sigreturn
     ALIAS rt_sigsuspend sigsuspend
+	ALIAS rt_sigprocmask sigprocmask
     ALIAS select _newselect
     ALIAS getxattr lgetxattr
     ALIAS setxattr lsetxattr
     ALIAS getgroups getgroups32
+    ALIAS getrlimit ugetrlimit
     */
 
     // Syslock init
@@ -8694,12 +10711,17 @@ void mvee::init_syslocks()
 
     // master calls that create/destroy/modify file descriptors
     REG_LOCKS(__NR_bind,                MVEE_SYSLOCK_FD | MVEE_SYSLOCK_FULL);
+#ifdef __NR_select
     REG_LOCKS(__NR_select,              MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL | MVEE_SYSLOCK_POSTCALL); // may block
+#endif
     REG_LOCKS(__NR_accept,              MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL | MVEE_SYSLOCK_POSTCALL); // may block
     REG_LOCKS(__NR_accept4,             MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL | MVEE_SYSLOCK_POSTCALL); // may block
     REG_LOCKS(__NR_connect,             MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL | MVEE_SYSLOCK_POSTCALL); // may block
 #ifdef __NR__newselect
     REG_LOCKS(__NR__newselect,          MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL | MVEE_SYSLOCK_POSTCALL);
+#endif
+#ifdef __NR_pselect6
+    REG_LOCKS(__NR_pselect6,            MVEE_SYSLOCK_FD | MVEE_SYSLOCK_SIG | MVEE_SYSLOCK_PRECALL | MVEE_SYSLOCK_POSTCALL); // may block
 #endif
 
     // syscalls with fd arguments
@@ -8745,8 +10767,8 @@ void mvee::init_syslocks()
     REG_LOCKS(__NR_sendmmsg,    MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL);
     REG_LOCKS(__NR_sendmsg,     MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL);
     REG_LOCKS(__NR_recvfrom,    MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL);
-    REG_LOCKS(__NR_recvmmsg,    MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL);
-    REG_LOCKS(__NR_recvmsg,     MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL);
+    REG_LOCKS(__NR_recvmmsg,    MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL | MVEE_SYSLOCK_POSTCALL);
+    REG_LOCKS(__NR_recvmsg,     MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL | MVEE_SYSLOCK_POSTCALL);
     REG_LOCKS(__NR_shutdown,    MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL);
     REG_LOCKS(__NR_fdatasync,   MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL);
     REG_LOCKS(__NR_poll,        MVEE_SYSLOCK_FD | MVEE_SYSLOCK_PRECALL);
@@ -8754,7 +10776,12 @@ void mvee::init_syslocks()
 
     // normal syscalls with mman creations/deletions/modifications
     REG_LOCKS(__NR_msync,       MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN | MVEE_SYSLOCK_FULL);
+#ifdef __NR_mmap
     REG_LOCKS(__NR_mmap,        MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN | MVEE_SYSLOCK_FULL);
+#endif
+#ifdef __NR_mmap2
+    REG_LOCKS(__NR_mmap2,        MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN | MVEE_SYSLOCK_FULL);
+#endif
     REG_LOCKS(__NR_mremap,      MVEE_SYSLOCK_MMAN | MVEE_SYSLOCK_FULL);
     REG_LOCKS(__NR_brk,         MVEE_SYSLOCK_MMAN | MVEE_SYSLOCK_FULL);
     REG_LOCKS(__NR_mprotect,    MVEE_SYSLOCK_MMAN | MVEE_SYSLOCK_FULL);
