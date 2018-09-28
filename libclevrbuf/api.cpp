@@ -33,11 +33,33 @@ struct CrossCheck
 #pragma pack(pop)
 static_assert(sizeof(CrossCheck) == 9);
 
-__thread struct rbuf* buf = nullptr;
-int my_variant_num = 0;
+static __thread struct rbuf* buf = nullptr;
+static int my_variant_num = 0;
+
+#ifdef EXPLICIT_RB_INIT
+extern "C"
+#else
+static inline
+#endif
+void rb_init()
+{
+	if (buf != nullptr)
+		return;
+
+	// if we started with cross-checks disabled, enable them now
+	syscall(MVEE_ENABLE_XCHECKS, NULL);
+	buf = rbuf_init<CrossCheck>(4096, 0);
+	syscall(MVEE_GET_THREAD_NUM, &my_variant_num);
+	// we only wanted cross-checks for rbuf_init(),
+	// disable them now
+	syscall(MVEE_DISABLE_XCHECKS, NULL);
+}
 
 static inline void xcheck_internal(CrossCheck &xcheck)
 {
+	if (buf == nullptr)
+		rb_init();
+
 	if (my_variant_num == 0)
 	{
 		rbuf_push<CrossCheck>(buf, xcheck);
@@ -58,22 +80,6 @@ static inline void xcheck_internal(CrossCheck &xcheck)
 	}
 }
 
-#ifdef EXPLICIT_RB_INIT
-extern "C" void rb_init()
-#else
-__attribute__((constructor))
-static void rb_init()
-#endif
-{
-	// if we started with cross-checks disabled, enable them now
-	syscall(MVEE_ENABLE_XCHECKS, NULL);
-	buf = rbuf_init<CrossCheck>(4096, 0);
-	syscall(MVEE_GET_THREAD_NUM, &my_variant_num);
-	// we only wanted cross-checks for rbuf_init(),
-	// disable them now
-	syscall(MVEE_DISABLE_XCHECKS, NULL);
-}
-
 #ifdef EXPLICIT_RB_FINI
 extern "C" void rb_fini()
 #else
@@ -81,6 +87,9 @@ __attribute__((destructor))
 static void rb_fini()
 #endif
 {
+	if (buf == nullptr)
+		return;
+
 	// Add a cross-check for program termination
 	CrossCheck xcheck = { 0, CrossCheckType::TERMINATOR };
 	xcheck_internal(xcheck);
