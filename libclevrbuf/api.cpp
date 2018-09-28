@@ -9,7 +9,11 @@ enum CrossCheckType : uint8_t
 	TERMINATOR,
 
 	// For client-provided tags, add their tag value to this
-	FIRST_CLIENT_TAG
+	FIRST_CLIENT_TAG,
+
+	UNKNOWN_TAG = FIRST_CLIENT_TAG,
+	FUNCTION_ENTRY_TAG,
+	FUNCTION_EXIT_TAG,
 };
 
 #pragma pack(push, 1)
@@ -35,6 +39,8 @@ static_assert(sizeof(CrossCheck) == 9);
 
 static __thread struct rbuf* buf = nullptr;
 static int my_variant_num = 0;
+static uint64_t first_func_xcheck = 0;
+static bool seen_first_func = false;
 
 #ifdef EXPLICIT_RB_INIT
 extern "C"
@@ -56,6 +62,12 @@ void rb_init()
 	syscall(MVEE_DISABLE_XCHECKS, NULL);
 #endif
 }
+
+#ifdef EXPLICIT_RB_FINI
+extern "C" void rb_fini();
+#else
+static void rb_fini();
+#endif
 
 static inline void xcheck_internal(CrossCheck &xcheck)
 {
@@ -80,12 +92,24 @@ static inline void xcheck_internal(CrossCheck &xcheck)
 						 "mov %%rax, (%%rbx)" :: "g"(xcheck.item) : "rax", "rbx");
 		}
 	}
+
+	if (!seen_first_func &&
+		xcheck.type == FUNCTION_ENTRY_TAG) {
+		seen_first_func = true;
+		first_func_xcheck = xcheck.item;
+	}
+	if (seen_first_func &&
+		xcheck.type == FUNCTION_EXIT_TAG &&
+		xcheck.item == first_func_xcheck) {
+		// The first cross-checked function just returned,
+		// so wrap everything up
+		rb_fini();
+	}
 }
 
 #ifdef EXPLICIT_RB_FINI
 extern "C" void rb_fini()
 #else
-__attribute__((destructor))
 static void rb_fini()
 #endif
 {
@@ -95,6 +119,7 @@ static void rb_fini()
 	// Add a cross-check for program termination
 	CrossCheck xcheck = { 0, CrossCheckType::TERMINATOR };
 	xcheck_internal(xcheck);
+	syscall(MVEE_DISABLE_XCHECKS, NULL);
 }
 
 extern "C" void rb_xcheck(uint8_t tag, uint64_t val)
