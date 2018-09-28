@@ -50,9 +50,11 @@ void rb_init()
 	syscall(MVEE_ENABLE_XCHECKS, NULL);
 	buf = rbuf_init<CrossCheck>(4096, 0);
 	syscall(MVEE_GET_THREAD_NUM, &my_variant_num);
+#ifdef UNSYNCED_SYSCALLS
 	// we only wanted cross-checks for rbuf_init(),
 	// disable them now
 	syscall(MVEE_DISABLE_XCHECKS, NULL);
+#endif
 }
 
 static inline void xcheck_internal(CrossCheck &xcheck)
