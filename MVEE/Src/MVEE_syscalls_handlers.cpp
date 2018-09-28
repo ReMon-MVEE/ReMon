@@ -2209,6 +2209,14 @@ POSTCALL(times)
   OR
   >>> sys_munmap(<address>, <end of current heap - address>) if address < end of current heap  
 -----------------------------------------------------------------------------*/
+GET_CALL_TYPE(brk)
+{
+	if ((*mvee::config_variant_global)["unsynced_brk"].asBool())
+		return MVEE_CALL_TYPE_UNSYNCED;
+
+	return MVEE_CALL_TYPE_NORMAL;
+}
+
 LOG_ARGS(brk)
 {
 	debugf("%s - SYS_BRK(0x" PTRSTR ")\n", 
