@@ -382,6 +382,38 @@
     }
 
 //
+// Compare pollfds - POINTER ARGUMENT!!!
+//
+#define CHECKPOLLFD(numarg, len)                                                                               \
+    if (ARG ## numarg(0) && len > 0)                                                                           \
+    {                                                                                                          \
+        std::vector<void*> pollfds(mvee::numvariants);                                                         \
+        FILLARGARRAY(numarg, pollfds);                                                                         \
+        struct pollfd master_pollfd, slave_pollfd;                                                             \
+        if (!rw::read_struct(variants[0].variantpid, pollfds[0], sizeof(struct pollfd), &master_pollfd))       \
+        {                                                                                                      \
+            cache_mismatch_info("couldn't read pollfd\n");                                                     \
+            return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;                                \
+        }                                                                                                      \
+        for (int i = 1; i < mvee::numvariants; ++i)                                                            \
+        {                                                                                                      \
+            if (!rw::read_struct(variants[i].variantpid, pollfds[i], sizeof(struct pollfd), &slave_pollfd))    \
+            {                                                                                                  \
+                cache_mismatch_info("couldn't read pollfd\n");                                                 \
+                return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;                            \
+            }                                                                                                  \
+            if (slave_pollfd.fd     != master_pollfd.fd ||                                                     \
+                slave_pollfd.events != master_pollfd.events)                                                   \
+            {                                                                                                  \
+                cache_mismatch_info("pollfd mismatch in argument %d - syscall: %ld (%s)\n",                    \
+                            numarg, variants[0].callnum,                                                       \
+                            getTextualSyscall(variants[0].callnum));                                           \
+                return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;                            \
+            }                                                                                                  \
+        }                                                                                                      \
+    }
+
+//
 // Replicate buffer contents. Use this only for mastercalls that return
 // a fixed length buffer - POINTER ARGUMENT!!!
 //
