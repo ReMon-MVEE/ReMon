@@ -1121,6 +1121,8 @@ void monitor::handle_event (interaction::mvee_wait_status& status)
 		{
 			if (handle_rdtsc_event(index))
 				return;
+			if (handle_c2rust_event(index))
+				return;
 		}
 #endif
 		else if (status.data == SIGSTOP)
@@ -1266,6 +1268,52 @@ bool monitor::handle_rdtsc_event(int variantnum)
     return false;
 }
 #endif
+
+/*-----------------------------------------------------------------------------
+    handle_c2rust_event - Handle SIGSEGV signals caused by C2Rust
+
+    @param variantnum variant index
+
+    @return true if the SIGSEGV signal was handled, false otherwise
+-----------------------------------------------------------------------------*/
+bool monitor::handle_c2rust_event(int variantnum)
+{
+	unsigned long eip;
+
+	// read current opcode
+	if (!interaction::fetch_ip(variants[variantnum].variantpid, eip))
+		throw RwRegsFailure(variantnum, "C2Rust IP check");
+
+	const char c2rust_marker[] = "C2RUST_INVPTR";
+	constexpr size_t marker_size = sizeof(c2rust_marker);
+	char buf[marker_size];
+	unsigned long marker_start = eip - marker_size;
+	if (!rw::read_struct(variants[variantnum].variantpid,
+						 (void*)marker_start, marker_size, &buf))
+		throw RwMemFailure(variantnum, "C2Rust marker check");
+
+	if (memcmp(c2rust_marker, buf, marker_size) == 0)
+	{
+		debugf("%s - Found C2Rust marker at %p\n",
+			   call_get_variant_pidstr(variantnum).c_str(),
+			   (void*)marker_start);
+
+		short delta;
+		if (!rw::read_primitive<short>(variants[variantnum].variantpid,
+									   (void*)(marker_start - 2), delta))
+			throw RwMemFailure(variantnum, "C2Rust marker check");
+
+		if (!interaction::write_ip(variants[variantnum].variantpid, eip + delta))
+			throw RwRegsFailure(variantnum, "C2Rust IP check");
+
+		if (!interaction::resume_until_syscall(variants[variantnum].variantpid))
+			throw ResumeFailure(variantnum, "C2Rust resume");
+
+		return true;
+	}
+
+	return false;
+}
 
 /*-----------------------------------------------------------------------------
     handle_attach_event
