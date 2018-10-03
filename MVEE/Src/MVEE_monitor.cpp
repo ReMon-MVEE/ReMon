@@ -1307,7 +1307,7 @@ bool monitor::handle_c2rust_event(int variantnum)
 			throw RwRegsFailure(variantnum, "C2Rust IP check");
 
 		if (!interaction::resume_until_syscall(variants[variantnum].variantpid))
-			throw RwRegsFailure(variantnum, "C2Rust resume");
+			throw ResumeFailure(variantnum, "C2Rust resume");
 
 		return true;
 	}
