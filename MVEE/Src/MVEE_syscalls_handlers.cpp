@@ -2919,8 +2919,6 @@ POSTCALL(fcntl)
             // This can be dispatched as either a mastercall or as a normal call
             // Mastercall IFF the fd is a master_file
             // else normal call
-            if (call_succeeded)
-            {
                 std::vector<unsigned long> fds;
                 if (state == STATE_IN_MASTERCALL)
                 {
@@ -2952,15 +2950,14 @@ POSTCALL(fcntl)
 #ifdef MVEE_FD_DEBUG
                 set_fd_table->verify_fd_table(getpids());
 #endif
-            }
-			else if (ARG2(0) == F_SETFL)
-			{
-				if (ARG3(0) & O_NONBLOCK)
-					set_fd_table->set_non_blocking(ARG1(0));
-				else
-					set_fd_table->set_blocking(ARG1(0));
-			}
         }
+        else if (ARG2(0) == F_SETFL)
+		{
+			if (ARG3(0) & O_NONBLOCK)
+				set_fd_table->set_non_blocking(ARG1(0));
+			else
+				set_fd_table->set_blocking(ARG1(0));
+		}
     }
 
     return 0;
