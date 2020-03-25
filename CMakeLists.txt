@@ -5,6 +5,10 @@ if (NOT DEFINED CMAKE_BUILD_TYPE)
         set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build, options are: Debug Release" FORCE)
 endif()
 
+if(DEFINED ENV{MVEE_DEPS_PRESENT_IN_SYSTEM})
+        set(DEPS_PRESENT_IN_SYSTEM TRUE)
+endif()
+
 # prerun ===============================================================================================================
 
 # get architecture
@@ -186,10 +190,18 @@ set(MVEE_INCLUDE_DIRS
         PRIVATE ${CMAKE_SOURCE_DIR}/MVEE/Inc/arch
         PRIVATE ${CMAKE_SOURCE_DIR}/MVEE/Inc/arch/${ARCH}
         PRIVATE ${CMAKE_SOURCE_DIR}/MVEE/Inc/arch/${ARCH}/shared_mem/
-        PRIVATE ${CMAKE_SOURCE_DIR}/deps/jsoncpp/include
-        PRIVATE ${CMAKE_SOURCE_DIR}/deps/libdwarf/libdwarf
-        PRIVATE ${CMAKE_SOURCE_DIR}/deps/binutils/zlib
 )
+
+if(DEPS_PRESENT_IN_SYSTEM)
+        set(MVEE_INCLUDE_DIRS ${MVEE_INCLUDE_DIRS}
+                PRIVATE /usr/include/jsoncpp/
+                PRIVATE /usr/include/libdwarf/)
+else()
+        set(MVEE_INCLUDE_DIRS ${MVEE_INCLUDE_DIRS}
+                PRIVATE ${CMAKE_SOURCE_DIR}/deps/jsoncpp/include
+                PRIVATE ${CMAKE_SOURCE_DIR}/deps/libdwarf/libdwarf
+                PRIVATE ${CMAKE_SOURCE_DIR}/deps/binutils/zlib)
+endif()
 
 # ======================================================================================================================
 
@@ -210,14 +222,23 @@ add_dependencies(mvee
 target_include_directories(mvee ${MVEE_INCLUDE_DIRS})
 
 # link dwarf, elf, and jsoncpp
-target_link_libraries(mvee PRIVATE
-        ${CMAKE_SOURCE_DIR}/deps/jsoncpp/build/src/lib_json/libjsoncpp.a
-        ${CMAKE_SOURCE_DIR}/deps/libdwarf/libdwarf/.libs/libdwarf.a
-        ${CMAKE_SOURCE_DIR}/deps/libelf/lib/libelf.a
-        ${CMAKE_SOURCE_DIR}/deps/binutils/build-tree/zlib/libz.a
-)
+if(DEPS_PRESENT_IN_SYSTEM)
+        target_link_libraries(mvee
+                PRIVATE jsoncpp
+                PRIVATE dwarf
+                PRIVATE elf
+                PRIVATE z
+        )
+else()
+        target_link_libraries(mvee PRIVATE
+                ${CMAKE_SOURCE_DIR}/deps/jsoncpp/build/src/lib_json/libjsoncpp.a
+                ${CMAKE_SOURCE_DIR}/deps/libdwarf/libdwarf/.libs/libdwarf.a
+                ${CMAKE_SOURCE_DIR}/deps/libelf/lib/libelf.a
+                ${CMAKE_SOURCE_DIR}/deps/binutils/build-tree/zlib/libz.a
+        )
+endif()
 
-# link pathced binaries
+# link patched binaries
 target_link_libraries(mvee INTERFACE
         ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/libc.so.6
         ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/libpthread.so.0

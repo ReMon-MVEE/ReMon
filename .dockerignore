@@ -1,0 +1,8 @@
+build/
+projects/
+**/.git
+**/Dockerfile*
+**/*.pyc
+**/*.sw*
+**/*.vim
+**/*~
