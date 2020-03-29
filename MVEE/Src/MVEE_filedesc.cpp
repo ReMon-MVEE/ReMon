@@ -516,6 +516,8 @@ void fd_table::create_master_fd_info_from_proc (int fd, pid_t master_pid)
 		type = FT_SOCKET_NON_BLOCKING;
 	else if (path.find("pipe:") == 0)
 		type = FT_PIPE_NON_BLOCKING;
+	else if (path.find("/memfd:") == 0)
+		type = FT_MEMFD;
 	else if (path.find("/") != std::string::npos)
 		type = FT_REGULAR;
 

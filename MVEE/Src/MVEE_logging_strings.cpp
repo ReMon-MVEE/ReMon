@@ -1264,6 +1264,7 @@ const char* getTextualFileType(int type)
 		DEF_CASE(FT_POLL_BLOCKING);
 		DEF_CASE(FT_POLL_NON_BLOCKING);
 		DEF_CASE(FT_SPECIAL);
+		DEF_CASE(FT_MEMFD);
     }
 
     return result;
@@ -2169,3 +2170,22 @@ std::string getTextualRandFlags (unsigned int mode)
     return result;
 }
 
+/*-----------------------------------------------------------------------------
+    getTextualMemfdFlags
+-----------------------------------------------------------------------------*/
+std::string getTextualMemfdFlags (unsigned int flags)
+{
+    std::string result;
+
+    TEST_FLAG(flags, MFD_CLOEXEC       , result);
+    TEST_FLAG(flags, MFD_ALLOW_SEALING , result);
+    TEST_FLAG(flags, MFD_HUGETLB       , result);
+#ifdef SHM_HUGE_2MB
+    TEST_FLAG(flags, MFD_HUGE_2MB      , result);
+#endif
+#ifdef SHM_HUGE_1GB
+    TEST_FLAG(flags, MFD_HUGE_1GB      , result);
+#endif
+
+    return result;
+}
