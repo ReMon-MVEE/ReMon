@@ -1195,29 +1195,29 @@ CALL(execve)
         perf = 1;
 
 	// return immediately if we don't have to use the MVEE_LD_Loader
-	if (
+    if (
 #ifdef MVEE_ARCH_HAS_VDSO
-		!(*mvee::config_variant_global)["hide_vdso"].asBool() && 
+        !(*mvee::config_variant_global)["hide_vdso"].asBool() &&
 #endif
-		!(*mvee::config_variant_global)["non_overlapping_mmaps"].asInt() && 
-		(!(*mvee::config_variant_exec)["library_path"]
-		 || (*mvee::config_variant_exec)["library_path"].asString().length() == 0))
-		return MVEE_CALL_ALLOW;
+        !(*mvee::config_variant_global)["non_overlapping_mmaps"].asInt() &&
+        (!(*mvee::config_variant_exec)["library_path"]
+         || (*mvee::config_variant_exec)["library_path"].asString().length() == 0))
+        return MVEE_CALL_ALLOW;
 
-	// check if we can load indirectly
-	if (!mvee::os_can_load_indirect(set_mmap_table->mmap_startup_info[0].image))
-	{
-		warnf("File %s is statically linked and position dependent. We will not be able to use"
-			  " any of our GHUMVEE goodies (DCL, custom libraries, ...)\n", 
-			  set_mmap_table->mmap_startup_info[0].image.c_str());
-		return MVEE_CALL_ALLOW; 
-	}
+    // check if we can load indirectly
+    if (!mvee::os_can_load_indirect(set_mmap_table->mmap_startup_info[0].image))
+    {
+        warnf("File %s is statically linked and position dependent. We will not be able to use"
+              " any of our GHUMVEE goodies (DCL, custom libraries, ...)\n", 
+              set_mmap_table->mmap_startup_info[0].image.c_str());
+        return MVEE_CALL_ALLOW;
+    }
 
-	for (int i = 0; i < mvee::numvariants; ++i)
-	{
-		rewrite_execve_args(i, true, false);
-//		variants[i].entry_point_bp_set = false;
-	}
+    for (int i = 0; i < mvee::numvariants; ++i)
+    {
+        rewrite_execve_args(i, true, false);
+        //		variants[i].entry_point_bp_set = false;
+    }
 
     return MVEE_CALL_ALLOW;
 }

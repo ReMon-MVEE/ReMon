@@ -1281,7 +1281,7 @@ int mmap_table::check_vdso_overlap(int variantnum)
     if (!vdso)
         return -1;
 
-	vdso->print_region_info("Checking overlap for VDSO");
+    vdso->print_region_info("Checking overlap for VDSO");
 
     for (int i = 0; i < variantnum; ++i)
     {
