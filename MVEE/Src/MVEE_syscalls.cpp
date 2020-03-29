@@ -344,7 +344,7 @@ long monitor::call_precall ()
 
     if (result & MVEE_PRECALL_CALL_DENY)
         call_release_syslocks(-1, callnum, MVEE_SYSLOCK_PRECALL | MVEE_SYSLOCK_FULL);
-	return result;
+    return result;
 }
 
 /*-----------------------------------------------------------------------------

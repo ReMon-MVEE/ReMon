@@ -899,8 +899,8 @@ nobacktrace:
         delete atomic_buffer;
     if (ipmon_buffer)
         delete ipmon_buffer;
-	if (ring_buffer)
-		delete ring_buffer;
+    if (ring_buffer)
+        delete ring_buffer;
 
     pthread_mutex_lock(&monitor_lock);
     local_detachlist.clear();

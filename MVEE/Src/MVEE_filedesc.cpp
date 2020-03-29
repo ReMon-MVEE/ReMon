@@ -728,12 +728,12 @@ void fd_table::print_fd_table ()
     for (auto it = table.begin(); it != table.end(); it++)
         it->second.print_fd_info();
 
-	for (int i = 0; i < mvee::numvariants; ++i)
-	{
-		debugf("Temporary FD table dump for variant %d:\n", i);
-		for (auto it = temporary_files[i].begin(); it != temporary_files[i].end(); ++it)
-			it->second.print_fd_info();
-	}
+    for (int i = 0; i < mvee::numvariants; ++i)
+    {
+        debugf("Temporary FD table dump for variant %d:\n", i);
+        for (auto it = temporary_files[i].begin(); it != temporary_files[i].end(); ++it)
+            it->second.print_fd_info();
+    }
 }
 
 /*-----------------------------------------------------------------------------
@@ -782,12 +782,12 @@ bool fd_table::verify_path(std::string& mvee_path, const char* proc_path)
         && mvee_path.find("inotify_init") == 0)
         return true;
 
-	if (strstr(proc_path, "/proc/") == proc_path && 
-		mvee_path.find("/proc/") == 0)
-		return true;
+    if (strstr(proc_path, "/proc/") == proc_path &&
+        mvee_path.find("/proc/") == 0)
+        return true;
 
-	if (strstr(proc_path, ".mozilla/firefox/Crash"))
-		return true;
+    if (strstr(proc_path, ".mozilla/firefox/Crash"))
+        return true;
 
     return false;
 }
