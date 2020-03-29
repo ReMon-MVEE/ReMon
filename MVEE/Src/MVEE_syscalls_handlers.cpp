@@ -10640,6 +10640,106 @@ PRECALL(mincore)
 }
 
 /*-----------------------------------------------------------------------------
+  sys_memfd_create - (const char *name, unsigned int flags)
+-----------------------------------------------------------------------------*/
+LOG_ARGS(memfd_create)
+{
+    auto str1 = rw::read_string(variants[variantnum].variantpid, (void*)ARG1(variantnum));
+
+    debugf("%s - SYS_MEMFD_CREATE(%s, 0x%08X = %s)\n",
+           call_get_variant_pidstr(variantnum).c_str(),
+           str1.c_str(),
+           (unsigned int)ARG2(variantnum), getTextualMemfdFlags(ARG2(variantnum)).c_str());
+}
+
+PRECALL(memfd_create)
+{
+    CHECKPOINTER(1);
+    CHECKSTRING(1);
+    CHECKARG(2);
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+}
+
+// Can't do memfd_create in all variants, that would lead to N different memfd's
+// So we have MVEE do it, and rewrite the syscall in all variants so they all open() the
+// memfd just created by the MVEE.
+CALL(memfd_create)
+{
+    std::string memfd_name = rw::read_string(variants[0].variantpid, (void*)ARG1(0));
+    int memfd = memfd_create(memfd_name.c_str(), ARG2(0));
+
+    std::stringstream memfd_ss;
+    memfd_ss << "/proc/" << getpid() << "/fd/" << memfd;
+    std::string memfd_path = memfd_ss.str();
+
+    // Determine flags for open syscall
+    long flags = O_RDWR | O_LARGEFILE;// Default flags for memfd files
+    if (ARG2(0) & MFD_CLOEXEC)
+        flags |= O_CLOEXEC;
+
+    for (int i = 0; i < mvee::numvariants; ++i)
+    {
+        if (!interaction::write_syscall_no(variants[i].variantpid, __NR_open))
+            throw RwRegsFailure(i, "inject open call for sys_memfd_create(0)");
+
+        call_overwrite_arg_data(i, 1, memfd_name.size() +1, (void*) memfd_path.c_str(), memfd_path.size() +1, true);
+        ARG2(i) = flags;
+        SETARG2(i, ARG2(i));
+
+
+        debugf("%s - call replaced by SYS_OPEN(%s, 0x%08X = %s)\n",
+               call_get_variant_pidstr(i).c_str(),
+               memfd_path.c_str(),
+               (unsigned int)flags, getTextualFileFlags(flags).c_str());
+    }
+
+    return MVEE_CALL_ALLOW;
+}
+
+LOG_RETURN(memfd_create)
+{
+    long result DEBUGVAR =  call_postcall_get_variant_result(variantnum);
+    debugf("%s - SYS_MEMFD_CREATE return = %ld)\n",
+           call_get_variant_pidstr(variantnum).c_str(),
+           result);
+}
+
+POSTCALL(memfd_create)
+{
+    if (call_succeeded)
+    {
+        // The name of the memfd file was overwritten. Get the real name, and use the overwritten argument to figure out the MVEE's fd
+        std::string memfd_name_real = rw::read_string(variants[0].variantpid, (void*)variants[0].overwritten_args[0].arg_old_value);
+        std::string memfd_name_overwritten = rw::read_string(variants[0].variantpid, (void*)ARG1(0));
+        int mvee_fd = std::stoi(memfd_name_overwritten.substr(memfd_name_overwritten.rfind('/') +1));
+
+        // Set up metadata
+        std::vector<unsigned long> fds = call_postcall_get_result_vector();
+        std::vector<std::string> paths(mvee::numvariants);
+        std::fill(paths.begin(), paths.end(), "/memfd:" + memfd_name_real);
+
+        set_fd_table->create_fd_info(FT_MEMFD,                // file type
+                                     fds,                     // fd vector
+                                     paths,                   // path vector
+                                     ARG2(0),                 // access flags
+                                     ARG2(0) & O_CLOEXEC,     // cloexec file?
+                                     false,                   // opened by master only?
+                                     true,                    // unsynced access to the file?
+                                     true);                   // file unlinked from the file system?
+        REPLICATEFDRESULT();
+#ifdef MVEE_FD_DEBUG
+        set_fd_table->verify_fd_table(getpids());
+#endif
+
+        // Close the memfd file in the MVEE as it doesn't need it (the file is still open in the variants)
+        close(mvee_fd);
+    }
+
+    return 0;
+}
+
+/*-----------------------------------------------------------------------------
   handlers_setalias
 -----------------------------------------------------------------------------*/
 static void mvee_handlers_setalias(int callnum, int alias)
@@ -10756,6 +10856,7 @@ void mvee::init_syslocks()
     REG_LOCKS(__NR_epoll_create,        MVEE_SYSLOCK_FD | MVEE_SYSLOCK_FULL);
     REG_LOCKS(__NR_epoll_create1,       MVEE_SYSLOCK_FD | MVEE_SYSLOCK_FULL);
     REG_LOCKS(__NR_epoll_ctl,           MVEE_SYSLOCK_FD | MVEE_SYSLOCK_FULL);
+    REG_LOCKS(__NR_memfd_create,        MVEE_SYSLOCK_FD | MVEE_SYSLOCK_FULL);
 
     // normal syscalls that read the file system
     REG_LOCKS(__NR_chdir,               MVEE_SYSLOCK_FD | MVEE_SYSLOCK_POSTCALL);

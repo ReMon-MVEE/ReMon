@@ -107,5 +107,6 @@ std::string getTextualIpcShmKey         (key_t key);
 std::string getTextualIpcShmFlags       (int shmflg);
 std::string getTextualFallocateFlags    (int mode);
 std::string getTextualRandFlags         (unsigned int mode);
+std::string getTextualMemfdFlags        (unsigned int flags);
 
 #endif // MVEE_LOGGING_H_INCLUDED
