@@ -22,13 +22,13 @@ RUN \
     make -j `getconf _NPROCESSORS_ONLN`
 
 # Install ReMon LLVM
-#COPY deps/llvm /opt/source/llvm/
-#RUN \
-#    mkdir -p /build/llvm/ && \
-#    cd /build/llvm/ && \
-#    cmake -DLLVM_TARGETS_TO_BUILD="X86;ARM" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/deps/llvm/build-tree/ -DLLVM_BINUTILS_INCDIR=/opt/source/binutils/include -DLLVM_CCACHE_BUILD=OFF \
-#    -DLLVM_CCACHE_DIR=/build/ccache/ /opt/source/llvm/ && \
-#    make -j `getconf _NPROCESSORS_ONLN` install
+COPY deps/llvm /opt/source/llvm/
+RUN \
+    mkdir -p /build/llvm/ && \
+    cd /build/llvm/ && \
+    cmake -DLLVM_TARGETS_TO_BUILD="X86;ARM" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/deps/llvm/build-tree/ -DLLVM_BINUTILS_INCDIR=/opt/source/binutils/include -DLLVM_CCACHE_BUILD=OFF \
+    -DLLVM_CCACHE_DIR=/build/ccache/ -DLLVM_ENABLE_PROJECTS="clang;compiler-rt" /opt/source/llvm/llvm/ && \
+    make -j `getconf _NPROCESSORS_ONLN` install
 
 # Cleanup
 RUN rm -rf /opt/source/*

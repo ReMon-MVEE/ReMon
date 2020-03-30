@@ -40,15 +40,7 @@ download_deps() {
     # download remon llvm
     if [ ! -e deps/llvm ]
     then
-        git clone https://github.com/stijn-volckaert/remon-llvm.git deps/llvm
-    fi
-    if [ ! -e deps/llvm/tools/clang ]
-    then
-        git clone https://github.com/stijn-volckaert/remon-clang.git deps/llvm/tools/clang
-    fi
-    if [ ! -e deps/llvm/projects/compiler-rt ]
-    then
-        git clone https://github.com/stijn-volckaert/remon-compiler-rt.git deps/llvm/projects/compiler-rt
+        git clone https://github.com/csl-ugent/ReMon-llvm-project.git deps/llvm
     fi
 
     # Set the version for the patched libc

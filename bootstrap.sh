@@ -31,21 +31,13 @@ fi
 # Download & Install ReMon LLVM
 if [ ! -e deps/llvm ]
 then
-    git clone https://github.com/stijn-volckaert/ReMon-llvm.git deps/llvm
-fi
-if [ ! -e deps/llvm/tools/clang ]
-then
-    git clone https://github.com/stijn-volckaert/ReMon-clang.git deps/llvm/tools/clang
-fi
-if [ ! -e deps/llvm/projects/compiler-rt ]
-then 
-    git clone https://github.com/stijn-volckaert/ReMon-compiler-rt.git deps/llvm/projects/compiler-rt
+    git clone https://github.com/csl-ugent/ReMon-llvm-project.git deps/llvm
 fi
 if [ ! -e deps/llvm/build-tree ]
 then
     mkdir -p deps/llvm/build-tree
     cd deps/llvm/build-tree
-    cmake -DLLVM_TARGETS_TO_BUILD="X86;ARM" -DCMAKE_BUILD_TYPE=Release -DLLVM_BINUTILS_INCDIR=$ORIG_PWD/deps/binutils/include ..
+    cmake -DLLVM_TARGETS_TO_BUILD="X86;ARM" -DCMAKE_BUILD_TYPE=Release -DLLVM_BINUTILS_INCDIR=$ORIG_PWD/deps/binutils/include -DLLVM_ENABLE_PROJECTS="clang;compiler-rt" ../llvm/
     make -j `getconf _NPROCESSORS_ONLN`
     cd ../../../
 fi
