@@ -4494,10 +4494,16 @@ PRECALL(send)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(recvfrom)
 {
-	int len; 
-	
-	if (!rw::read_primitive(variants[variantnum].variantpid, (void*) ARG6(variantnum), len))
-		throw RwMemFailure(variantnum, "read len in sys_recvfrom");
+	int len;
+
+    // addrlen might be NULL. If it is, don't read (and cause a NULL dereference..) but just set len to 0
+    if (ARG6(variantnum))
+    {
+        if (!rw::read_primitive(variants[variantnum].variantpid, (void*) ARG6(variantnum), len))
+            throw RwMemFailure(variantnum, "read len in sys_recvfrom");
+    }
+    else
+        len = 0;
 
 	debugf("%s - SYS_RECVFROM(%d, " PTRSTR ", %zd, %u = %s, 0x" PTRSTR ", %d)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
