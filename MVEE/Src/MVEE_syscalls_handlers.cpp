@@ -8139,27 +8139,27 @@ LOG_ARGS(futex)
 	// referred to as 'val2' rather than timeout)!
 	// We filter out those operations.
 	switch (ARG2(variantnum) & FUTEX_CMD_MASK) {
-		case FUTEX_WAKE:           return; /* timeout ignored */
-		case FUTEX_FD:             return; /* timeout ignored */
-		case FUTEX_WAKE_BITSET:    return; /* timeout ignored */
-		case FUTEX_TRYLOCK_PI:     return; /* timeout ignored */
-		case FUTEX_UNLOCK_PI:      return; /* timeout ignored */
-		case FUTEX_WAKE_OP:        return; /* used as val2 */
-		case FUTEX_CMP_REQUEUE:    return; /* used as val2 */
-		case FUTEX_CMP_REQUEUE_PI: return; /* used as val2 */
-		default:                   ; /* ok, TIMEOUT can be a pointer to be read from */
-	}
+		case FUTEX_WAKE:           timestr << "TIMEOUT: ignored"; break; /* timeout ignored */
+		case FUTEX_FD:             timestr << "TIMEOUT: ignored"; break; /* timeout ignored */
+		case FUTEX_WAKE_BITSET:    timestr << "TIMEOUT: ignored"; break; /* timeout ignored */
+		case FUTEX_TRYLOCK_PI:     timestr << "TIMEOUT: ignored"; break; /* timeout ignored */
+		case FUTEX_UNLOCK_PI:      timestr << "TIMEOUT: ignored"; break; /* timeout ignored */
+		case FUTEX_WAKE_OP:        timestr << "TIMEOUT: val2"; break; /* used as val2 */
+		case FUTEX_CMP_REQUEUE:    timestr << "TIMEOUT: val2"; break; /* used as val2 */
+		case FUTEX_CMP_REQUEUE_PI: timestr << "TIMEOUT: val2"; break; /* used as val2 */
+		default:
+			/* ok, TIMEOUT can be a pointer to be read from */
+			if (ARG4(variantnum))
+			{
+				if (!rw::read_struct(variants[variantnum].variantpid, (void*) ARG4(variantnum), sizeof(struct timespec), &timeout))
+					throw RwMemFailure(variantnum, "read timeout in sys_futex");
 
-	if (ARG4(variantnum))
-	{
-		if (!rw::read_struct(variants[variantnum].variantpid, (void*) ARG4(variantnum), sizeof(struct timespec), &timeout))
-			throw RwMemFailure(variantnum, "read timeout in sys_futex");
-
-		timestr << "TIMEOUT: " << timeout.tv_sec << std::setw(9) << std::setfill('0') << timeout.tv_nsec << std::setw(0) << " s";
-	}
-	else
-	{
-		timestr << "TIMEOUT: none";
+				timestr << "TIMEOUT: " << timeout.tv_sec << std::setw(9) << std::setfill('0') << timeout.tv_nsec << std::setw(0) << " s";
+			}
+			else
+			{
+				timestr << "TIMEOUT: none";
+			}
 	}
 
 	debugf("%s - SYS_FUTEX(0x" PTRSTR ", %s, %u, %s, 0x" PTRSTR ", %u)\n",
