@@ -8121,8 +8121,9 @@ POSTCALL(fgetxattr)
 /*-----------------------------------------------------------------------------
   sys_futex - 
 
-  man(2): (int* uaddr, int op, int val, const struct timespec* utime, int*
-  uaddr2, int val3)
+  man(2): (int *uaddr, int futex_op, int val,
+           const struct timespec *timeout *or:* uint32_t val2,
+           int *uaddr2, int val3)
   kernel: (u32* uaddr, int op, u32 val, struct timespec* utime, u32* uaddr2, u32
   val3)
 
@@ -8132,6 +8133,22 @@ LOG_ARGS(futex)
 {
 	struct timespec timeout;
 	std::stringstream timestr;
+
+	// In some operations Linux can either ignore the timeout argument completely,
+	// or it interprets this as an integer (in which case it is
+	// referred to as 'val2' rather than timeout)!
+	// We filter out those operations.
+	switch (ARG2(variantnum) & FUTEX_CMD_MASK) {
+		case FUTEX_WAKE:           return; /* timeout ignored */
+		case FUTEX_FD:             return; /* timeout ignored */
+		case FUTEX_WAKE_BITSET:    return; /* timeout ignored */
+		case FUTEX_TRYLOCK_PI:     return; /* timeout ignored */
+		case FUTEX_UNLOCK_PI:      return; /* timeout ignored */
+		case FUTEX_WAKE_OP:        return; /* used as val2 */
+		case FUTEX_CMP_REQUEUE:    return; /* used as val2 */
+		case FUTEX_CMP_REQUEUE_PI: return; /* used as val2 */
+		default:                   ; /* ok, TIMEOUT can be a pointer to be read from */
+	}
 
 	if (ARG4(variantnum))
 	{
