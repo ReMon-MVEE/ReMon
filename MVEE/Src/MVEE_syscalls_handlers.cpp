@@ -3943,6 +3943,31 @@ CALL(ioperm)
 }
 
 /*-----------------------------------------------------------------------------
+  sys_iopl - 
+
+  man(2): (int level)
+  kernel: (unsigned int level)
+-----------------------------------------------------------------------------*/
+LOG_ARGS(iopl)
+{
+	debugf("%s - SYS_IOPL(%d)\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned int)ARG1(variantnum));
+}
+
+PRECALL(iopl)
+{
+	CHECKARG(1);
+	return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+}
+
+CALL(iopl)
+{
+    cache_mismatch_info("The program is trying to access I/O ports. This call has been denied.\n");
+    return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
+}
+
+/*-----------------------------------------------------------------------------
   sys_quotactl - 
 
   man(2): (int cmd, const char* special, int id, caddr_t addr)
