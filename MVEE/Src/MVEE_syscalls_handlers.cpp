@@ -10608,6 +10608,27 @@ POSTCALL(getrandom)
 }
 
 /*-----------------------------------------------------------------------------
+  man(2): sys_mincore - (void *addr, size_t length, unsigned char *vec)
+-----------------------------------------------------------------------------*/
+LOG_ARGS(mincore)
+{
+	debugf("%s - SYS_MINCORE(0x" PTRSTR ", %lu, 0x" PTRSTR ")\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned long)ARG1(variantnum),
+		   (size_t)ARG2(variantnum),
+		   (unsigned long)ARG3(variantnum));
+}
+
+PRECALL(mincore)
+{
+	CHECKPOINTER(1);
+	CHECKARG(2);
+	CHECKPOINTER(3);
+
+	return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+}
+
+/*-----------------------------------------------------------------------------
   handlers_setalias
 -----------------------------------------------------------------------------*/
 static void mvee_handlers_setalias(int callnum, int alias)
