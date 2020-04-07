@@ -5507,8 +5507,19 @@ PRECALL(clone)
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_FORK;
 }
 
+CALL(clone)
+{
+	if (ARG1(0) & CLONE_VFORK)
+		call_release_syslocks(variantnum, __NR_clone, MVEE_SYSLOCK_FULL);
+
+	return MVEE_CALL_ALLOW;
+}
+
 POSTCALL(clone)
 {
+	if (ARG1(0) & CLONE_VFORK)
+		call_grab_syslocks(variantnum, __NR_clone, MVEE_SYSLOCK_FULL);
+
 	if IS_UNSYNCED_CALL
 	{
 		if (call_succeeded)

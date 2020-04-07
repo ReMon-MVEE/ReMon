@@ -1562,7 +1562,8 @@ void monitor::handle_fork_event(int index, interaction::mvee_wait_status& status
 
         monitor* new_monitor = new monitor(this,
                                            shares_fd_table, shares_mmap_table, shares_sighand_table, shares_threadgroup);
-        if (variants[0].callnum == __NR_vfork)
+        if (   variants[0].callnum == __NR_vfork
+            || (variants[0].callnum == __NR_clone && (ARG1(0) & CLONE_VFORK))  )
             new_monitor->created_by_vfork = true;
 
         for (int i = 0; i < mvee::numvariants; ++i)
