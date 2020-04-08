@@ -242,7 +242,6 @@ target_link_libraries(mvee PRIVATE
 target_compile_options(mvee PRIVATE
         -D__LINUX_X86__
         -Wall
-        -Werror
         -Wextra
         -Wpedantic
         -Wno-unused-parameter
@@ -269,6 +268,7 @@ if(${CMAKE_BUILD_TYPE} MATCHES "Debug")
             -std=c++14
             -pedantic-errors
             -fno-omit-frame-pointer
+            -Werror
     )
 
     target_compile_definitions(mvee PRIVATE
@@ -294,7 +294,6 @@ else()
             -ffast-math
             -std=c++14
             -static
-            -Werror
             -fvisibility=hidden
     )
 endif()
