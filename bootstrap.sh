@@ -53,7 +53,7 @@ fi
 # Download & Build libelf
 if [ ! -e deps/libelf ]
 then
-    wget http://www.mr511.de/software/libelf-0.8.13.tar.gz
+    wget https://fossies.org/linux/misc/old/libelf-0.8.13.tar.gz
     tar xzf libelf-0.8.13.tar.gz -C deps
     rm libelf-0.8.13.tar.gz
     cd deps
@@ -106,3 +106,27 @@ fi
 # All done!
 printf "\033[0;32mReMon's dependencies are now installed!\033[0m\n"
 
+# setting up build directory
+
+# variables ============================================================================================================
+   BUILD_PWD=$(pwd)
+   BUILD_CXX=${BUILD_PWD}"/deps/llvm/build-tree/bin/clang++"
+BUILD_LINKER=${BUILD_PWD}"/deps/binutils/build-tree/gold/ld-new"
+    BUILD_AR=${BUILD_PWD}"/deps/binutils/build-tree/binutils/ar"
+BUILD_RANLIB=${BUILD_PWD}"/deps/binutils/build-tree/binutils/ranlib"
+# ======================================================================================================================
+
+
+# setup cmake ==========================================================================================================
+if [ ! -e $BUILD_PWD"/build" ]
+then
+  mkdir $BUILD_PWD"/build"
+fi
+
+cd $BUILD_PWD"/build"
+cmake -DCMAKE_CXX_COMPILER=$BUILD_CXX                      \
+            -DCMAKE_LINKER=$BUILD_LINKER                   \
+                -DCMAKE_AR=$BUILD_AR                       \
+            -DCMAKE_RANLIB=$BUILD_RANLIB                   \
+      ..
+# ======================================================================================================================
