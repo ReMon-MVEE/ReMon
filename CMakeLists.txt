@@ -60,45 +60,21 @@ execute_process(
 
 if (${ARCH} STREQUAL amd64)
     set(LD_LOADER_LONG_NAME MVEE_LD_Loader_this_is_a_very_long_process_name_that_must_be_at_least_as_long_as_slash_lib64_slash_ld-linux-x86-64.so.2_times_two)
-    # set(EXTRA_REGISTER_ACCESS_SIZE 512)
-    # set(EXTRA_REGS_READ_SIZE 6)
-    # set(EXTRA_REGS_WRITE_SIZE 6)
-    # set(EXTRA_REGS_WRITE_OFFSSET 186)
 elseif(${ARCH} STREQUAL arm)
     set(LD_LOADER_LONG_NAME MVEE_LD_Loader_this_is_a_very_long_process_name_that_must_be_at_least_as_long_as_slash_lib_slash_ld-linux-armhf.so.3_times_two)
-    # set(EXTRA_REGISTER_ACCESS_SIZE 0)
 elseif(${ARCH} STREQUAL i386)
     set(LD_LOADER_LONG_NAME MVEE_LD_Loader_this_is_a_very_long_process_name_that_must_be_at_least_as_long_as_slash_lib_slash_ld-linux.so.2_times_two)
-    # set(EXTRA_REGISTER_ACCESS_SIZE 0)
 endif()
-
-# extra register acces binatry
-add_custom_command(OUTPUT ${CMAKE_SOURCE_DIR}/MVEE_LD_Loader/extra_reg_access.bin
-        COMMAND gcc
-                -c
-                -o extra_reg_access.o
-                ./${ARCH}/extra_reg_access.s
-        COMMAND ld
-                -T  linkerscript_extra_reg_access.txt
-                -o extra_reg_access.bin
-                extra_reg_access.o
-        COMMAND rm extra_reg_access.o
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/MVEE_LD_Loader
-)
-
 
 add_custom_command(OUTPUT ${CMAKE_SOURCE_DIR}/MVEE_LD_Loader/${LD_LOADER_LONG_NAME}
         COMMAND ${CMAKE_SOURCE_DIR}/deps/musl-install/bin/musl-gcc
             -I./${ARCH}/
             -DUNISTD_HDR="<${UNISTD_HDR}>"
-            # -DEXTRA_REG_ACCESS_FILE='"${CMAKE_SOURCE_DIR}/MVEE_LD_Loader/extra_reg_access.bin"'
-            # -DEXTRA_REGISTER_ACCESS_SIZE=${EXTRA_REGISTER_ACCESS_SIZE}
             -fuse-ld=bfd
             -std=c99
             -o ${LD_LOADER_LONG_NAME}
             -static MVEE_LD_Loader.c
             -T linkerscript_${ARCH}.txt
-        # DEPENDS ${CMAKE_SOURCE_DIR}/MVEE_LD_Loader/extra_reg_access.bin
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/MVEE_LD_Loader
 )
 
@@ -326,10 +302,6 @@ endif()
 
 # compile definitions, uncomment to set or comment to unset
 target_compile_definitions(mvee PRIVATE
-#       MVEE_ALLOW_SHM
-        EXTRA_REG_ACCESS_FILE="${CMAKE_SOURCE_DIR}/MVEE_LD_Loader/extra_reg_access.bin"
-        EXTRA_REGS_READ_SIZE=${EXTRA_REGS_READ_SIZE}
-        EXTRA_REGS_WRITE_SIZE=${EXTRA_REGS_WRITE_SIZE}
-        EXTRA_REGS_WRITE_OFFSET=${EXTRA_REGS_WRITE_OFFSSET}
+        
 )
 # ======================================================================================================================
