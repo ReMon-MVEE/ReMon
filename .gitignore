@@ -7,3 +7,4 @@ tags
 #*#
 .clangd
 .vscode
+build
