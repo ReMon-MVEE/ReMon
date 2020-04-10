@@ -4,13 +4,15 @@ set -o pipefail
 set -o nounset
 #set -o xtrace
 
-# This script can be invoked in three modes:
+# This script can be invoked in the following modes:
 # - 'download'      => downloads the dependencies for the MVEE
 # - 'build'         => builds the dependencies in a Ubuntu 18.04 docker
 # - 'run' (default) => runs the docker, in which you can build and use the MVEE
+# - 'dev'           => runs the docker in development mode (all sources are mounted to re-compile)
 
 IMAGE=remon
 BUILD_DIR=$PWD/build
+DEPS_DIR=$PWD/deps
 SHARED_PROJECTS_DIR=$PWD/projects
 
 build_docker() {
@@ -65,22 +67,28 @@ run_docker() {
         exit 1
     fi
 
+    # Make these folders here. If docker makes them for us, they will be root-owned...
+    mkdir -p $BUILD_DIR
+    mkdir -p $SHARED_PROJECTS_DIR
+
     # This script adds numerous volumes to the container:
     # - the repository, containing all the code
     # - a persistent home folder. This is provided by x11docker, and can contain your config files and bash history (across docker runs!)
     # - a shared 'projects' folder, where you can place applications to build and/or run in the MVEE, as well as their data.
     # - the 'build' data volume. This named volume can be used to incrementally build LLVM (or other applications) in.
+    VOLUMES="--volume $PWD:/opt/repo --volume $SHARED_PROJECTS_DIR:/projects --volume build:/build"
 
-    # Make these folders here. If docker makes them for us, they will be root-owned...
-    mkdir -p $BUILD_DIR
-    mkdir -p $SHARED_PROJECTS_DIR
+    # In development mode, we also mount the source code of the dependencies
+    if [ "$#" -eq 1 ]; then
+        VOLUMES="$VOLUMES --volume $DEPS_DIR:/opt/source"
+    fi
 
     # The following command consists of:
     # 1st line: the x11docker invocation and its options (allow for sudo/su, with default password 'x11docker')
-    # 2nd line: the docker options (mounting the repo, shared projects folder, and the build named data volume)
+    # 2nd line: the docker options (allow ptracing and mount volumes)
     # 3rd line: the actual docker image and the command to run in it
     x11docker --gpu --pulseaudio --interactive --home --sudouser -- \
-        --cap-add SYS_PTRACE -ti --volume  "$PWD:/opt/repo" --volume "$SHARED_PROJECTS_DIR:/projects" --volume "build:/build" -- \
+        --cap-add SYS_PTRACE -ti $VOLUMES -- \
         $IMAGE bash
 }
 
@@ -103,6 +111,10 @@ case "$mode" in
 
     run)
         run_docker
+        ;;
+
+    dev)
+        run_docker 1
         ;;
 
     *)
