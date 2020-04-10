@@ -55,10 +55,13 @@ ENV MVEE_DEPS_PRESENT_IN_SYSTEM yes
 ########################################################################## Extra stuff #########################################################################
 ################################################################################################################################################################
 
+# Enable deb-src
+RUN sed -i 's/^#\sdeb-src/deb-src/' /etc/apt/sources.list
+
 # Install extra applications to run in MVEE, or tools to build those applications
 RUN \
     apt-get update && \
-    apt-get install -y vim less strace
+    apt-get install -y vim less strace sudo
 
 # Make sure normal users have plenty of rights to /opt
 RUN chmod 777 /opt
