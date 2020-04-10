@@ -85,10 +85,10 @@ run_docker() {
     mkdir -p $SHARED_PROJECTS_DIR
 
     # The following command consists of:
-    # 1st line: the x11docker invocation and its options
+    # 1st line: the x11docker invocation and its options (allow for sudo/su, with default password 'x11docker')
     # 2nd line: the docker options (mounting the repo, shared projects folder, and the build named data volume)
     # 3rd line: the actual docker image and the command to run in it
-    x11docker --gpu --pulseaudio --interactive --home -- \
+    x11docker --gpu --pulseaudio --interactive --home --sudouser -- \
         --cap-add SYS_PTRACE -ti --volume  "$PWD:/opt/repo" --volume "$SHARED_PROJECTS_DIR:/projects" --volume "build:/build" -- \
         $IMAGE bash
 }
