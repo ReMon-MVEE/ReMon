@@ -280,7 +280,7 @@ bool monitor::handle_is_known_false_positive(const char* program_name, long call
 		// Allow variants to open "> MVEE Variant <num> >" with mismatching nums
         for (int i = 0; i < mvee::numvariants; ++i)
         {
-            char  tmp[20];
+            char  tmp[32];
             sprintf(tmp, "MVEE Variant %d >", i);
 
             if (files[i].compare(tmp) != 0)
@@ -322,7 +322,7 @@ bool monitor::handle_is_known_false_positive(const char* program_name, long call
 		// Allow variants to open "> MVEE Variant <num> >" with mismatching nums
         for (int i = 0; i < mvee::numvariants; ++i)
         {
-            char  tmp[20];
+            char  tmp[32];
             sprintf(tmp, "MVEE Variant %d >", i);
 
             if (files[i].compare(tmp) != 0)
