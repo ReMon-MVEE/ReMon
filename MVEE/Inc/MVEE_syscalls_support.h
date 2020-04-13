@@ -564,6 +564,9 @@
 #define OLDCALLIFNOT(newcallnum) \
     ((variants[0].callnum == newcallnum) ? false : true)
 
+#define POSTCALL_OLDCALLIFNOT(newcallnum) \
+    ((variants[0].prevcallnum == newcallnum) ? false : true)
+
 //
 // Map master fds onto slave fds - used at the system call site
 //
