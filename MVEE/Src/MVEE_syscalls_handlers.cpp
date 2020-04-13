@@ -3359,7 +3359,7 @@ POSTCALL(rt_sigaction)
 
     if (call_succeeded && ARG2(0))
     {
-        struct sigaction action = call_get_sigaction(0, (void*) ARG2(0), OLDCALLIFNOT(__NR_rt_sigaction));
+        struct sigaction action = call_get_sigaction(0, (void*) ARG2(0), POSTCALL_OLDCALLIFNOT(__NR_rt_sigaction));
         set_sighand_table->set_sigaction(ARG1(0), &action);
     }
 
