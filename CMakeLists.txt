@@ -32,19 +32,21 @@ execute_process(
 message("get alternative architecture result: " ${ALT_ARCH})
 message("")
 
+# Get UNISTD
+execute_process(
+        COMMAND ./getunistd.rb
+        OUTPUT_VARIABLE UNISTD_HDR
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/MVEE_LD_Loader
+)
 
 # generate syscall tables
-execute_process(
+add_custom_target(syscall_tables
+        # TODO: Ideally this is turned into a (or several) add_custom_command with the generated headers as OUTPUT
+        # This way the script is not *always* invoked, but only if one of the dependencies changes..
         COMMAND ${CMAKE_SOURCE_DIR}/build_scripts/generate_syscall_tables.rb
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-        OUTPUT_VARIABLE SYSCALL_GENERATOR_OUTPUT
-        RESULT_VARIABLE SYSCALL_GENERATOR_RESULT
+        DEPENDS ${CMAKE_SOURCE_DIR}/MVEE/Src/MVEE_syscalls_handlers.cpp ${UNISTD_HDR}
+        COMMENT "Generating syscall tables"
 )
-message("syscall generation result:\n"
-        "\toutput:\n" ${SYSCALL_GENERATOR_OUTPUT}
-        "\n\tresult: " ${SYSCALL_GENERATOR_RESULT})
-message("")
-
 
 # compile the syncagent
 execute_process(
@@ -60,12 +62,6 @@ message("")
 
 
 # compile the loader
-execute_process(
-        COMMAND ./getunistd.rb
-        OUTPUT_VARIABLE UNISTD_HDR
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/MVEE_LD_Loader
-)
-
 if (${ARCH} STREQUAL amd64)
     set(LD_LOADER_LONG_NAME MVEE_LD_Loader_this_is_a_very_long_process_name_that_must_be_at_least_as_long_as_slash_lib64_slash_ld-linux-x86-64.so.2_times_two)
 elseif(${ARCH} STREQUAL arm)
@@ -216,6 +212,7 @@ add_executable(mvee
 add_dependencies(mvee
         ld_loader
         linking
+        syscall_tables
 )
 
 # include directories for mvee executable
