@@ -1583,6 +1583,30 @@ POSTCALL(setitimer)
 }
 
 /*-----------------------------------------------------------------------------
+  sys_getitimer - (int which, struct itimerval* curr_value)
+-----------------------------------------------------------------------------*/
+LOG_ARGS(getitimer)
+{
+    debugf("%s - SYS_GETITIMER(%s, 0x" PTRSTR ")\n",
+           call_get_variant_pidstr(variantnum).c_str(),
+           getTextualIntervalTimerType(ARG1(variantnum)),
+           (unsigned long)ARG2(variantnum));
+}
+
+PRECALL(getitimer)
+{
+    CHECKARG(1);
+    CHECKPOINTER(2);
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+}
+
+POSTCALL(getitimer)
+{
+    REPLICATEBUFFERFIXEDLEN(2, sizeof(struct itimerval));
+    return 0;
+}
+
+/*-----------------------------------------------------------------------------
   sys_getpid - (void)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(getpid)
