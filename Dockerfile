@@ -21,13 +21,6 @@ RUN \
     /tmp/binutils/configure --enable-plugins --enable-gold --disable-werror && \
     make -j `getconf _NPROCESSORS_ONLN`
 
-# Build musl
-COPY deps/musl /tmp/musl/
-RUN \
-    cd /tmp/musl && \
-    /tmp/musl/configure --prefix=/opt/deps/musl-install --exec-prefix=/opt/deps/musl-install && \
-    make -j `getconf _NPROCESSORS_ONLN` install
-
 # Build libjson
 COPY deps/jsoncpp /tmp/jsoncpp/
 RUN \

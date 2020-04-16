@@ -70,8 +70,14 @@ elseif(${ARCH} STREQUAL i386)
     set(LD_LOADER_LONG_NAME MVEE_LD_Loader_this_is_a_very_long_process_name_that_must_be_at_least_as_long_as_slash_lib_slash_ld-linux.so.2_times_two)
 endif()
 
+if(DEPS_PRESENT_IN_SYSTEM)
+    set(MUSL_GCC musl-gcc)
+else()
+    set(MUSL_GCC ${CMAKE_SOURCE_DIR}/deps/musl-install/bin/musl-gcc)
+endif()
+
 add_custom_command(OUTPUT ${CMAKE_SOURCE_DIR}/MVEE_LD_Loader/${LD_LOADER_LONG_NAME}
-        COMMAND ${CMAKE_SOURCE_DIR}/deps/musl-install/bin/musl-gcc
+        COMMAND ${MUSL_GCC}
             -I./${ARCH}/
             -DUNISTD_HDR="<${UNISTD_HDR}>"
             -fuse-ld=bfd
