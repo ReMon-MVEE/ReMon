@@ -57,15 +57,6 @@ download_deps() {
         git reset --hard 6a15ca64429e1ce6d2fff915ff14ce1c2a96975c
         cd -
     fi
-
-    # download musl
-    if [ ! -e deps/musl ]
-    then
-        wget http://www.musl-libc.org/releases/musl-1.1.19.tar.gz
-        tar xzf musl-1.1.19.tar.gz
-        mv musl-1.1.19 deps/musl
-        rm musl-1.1.19.tar.gz
-    fi
 }
 
 run_docker() {
