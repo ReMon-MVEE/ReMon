@@ -134,7 +134,14 @@ void mvee::start_variant(int variantnum)
 
 	// change to the variant's specified working directory (if any)
 	if (variant_config && !(*variant_config)["pwd"].isNull())
-		chdir((*variant_config)["pwd"].asCString());
+	{
+		if (chdir((*variant_config)["pwd"].asCString()))
+		{
+			warnf("Failed to change to specified working directory - error: %s\n",
+				getTextualErrno(errno));
+			return;
+		}
+	}
 
 	// this should not return
 	execv(alias.c_str(), (char* const*)_args);
