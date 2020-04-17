@@ -1,4 +1,5 @@
 cmake_minimum_required (VERSION 3.10.2)
+project(remon)
 
 if (NOT DEFINED CMAKE_BUILD_TYPE)
         message(STATUS "CMAKE_BUILD_TYPE not defined. Defaulting to Release.")
@@ -173,9 +174,6 @@ message("")
 message("build type: " ${CMAKE_BUILD_TYPE})
 # ======================================================================================================================
 
-
-# project name
-project(remon)
 
 # files and directories for mvee executables ===========================================================================
 
