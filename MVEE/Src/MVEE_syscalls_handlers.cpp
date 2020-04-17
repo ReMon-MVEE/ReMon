@@ -2334,7 +2334,7 @@ CALL(brk)
 
 					unsigned long old_limit = heap_region->region_base_address + heap_region->region_size;
 					// The kernel actually rounds up to the next page, some code seems to depend on this
-					unsigned long new_limit = (ARG1(i) + 4095) & ~4095;
+					unsigned long new_limit = ROUND_UP(ARG1(i), 4096);
 
 					if (new_limit < old_limit)
 					{
