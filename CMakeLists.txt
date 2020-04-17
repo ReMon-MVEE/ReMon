@@ -61,40 +61,14 @@ message("syncagent compilation result:\n"
         "\n\tresult: " ${COMPILE_SYNCAGENT_RESULT})
 message("")
 
-
-# compile the loader
-if (${ARCH} STREQUAL amd64)
-    set(LD_LOADER_LONG_NAME MVEE_LD_Loader_this_is_a_very_long_process_name_that_must_be_at_least_as_long_as_slash_lib64_slash_ld-linux-x86-64.so.2_times_two)
-elseif(${ARCH} STREQUAL arm)
-    set(LD_LOADER_LONG_NAME MVEE_LD_Loader_this_is_a_very_long_process_name_that_must_be_at_least_as_long_as_slash_lib_slash_ld-linux-armhf.so.3_times_two)
-elseif(${ARCH} STREQUAL i386)
-    set(LD_LOADER_LONG_NAME MVEE_LD_Loader_this_is_a_very_long_process_name_that_must_be_at_least_as_long_as_slash_lib_slash_ld-linux.so.2_times_two)
-endif()
-
 if(DEPS_PRESENT_IN_SYSTEM)
     set(MUSL_GCC musl-gcc)
 else()
     set(MUSL_GCC ${CMAKE_SOURCE_DIR}/deps/musl-install/bin/musl-gcc)
 endif()
 
-add_custom_command(OUTPUT ${CMAKE_SOURCE_DIR}/MVEE_LD_Loader/${LD_LOADER_LONG_NAME}
-        COMMAND ${MUSL_GCC}
-            -I./${ARCH}/
-            -DUNISTD_HDR="<${UNISTD_HDR}>"
-            -fuse-ld=bfd
-            -std=c99
-            -o ${LD_LOADER_LONG_NAME}
-            -static MVEE_LD_Loader.c
-            -T linkerscript_${ARCH}.txt
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/MVEE_LD_Loader
-)
-
-add_custom_target(ld_loader
-        DEPENDS ${CMAKE_SOURCE_DIR}/MVEE_LD_Loader/${LD_LOADER_LONG_NAME}
-)
-
 # ======================================================================================================================
-
+add_subdirectory(MVEE_LD_Loader)
 
 # libraries ============================================================================================================
 set(LIBC_VER 2.27.9000)
@@ -214,7 +188,6 @@ add_executable(mvee
 )
 
 add_dependencies(mvee
-        ld_loader
         linking
         syscall_tables
 )
