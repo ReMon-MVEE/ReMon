@@ -1,7 +1,7 @@
 cmake_minimum_required (VERSION 3.10.2)
 project(remon)
 
-if (NOT DEFINED CMAKE_BUILD_TYPE)
+if (NOT CMAKE_BUILD_TYPE)
         message(STATUS "CMAKE_BUILD_TYPE not defined. Defaulting to Release.")
         set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build, options are: Debug Release" FORCE)
 endif()
