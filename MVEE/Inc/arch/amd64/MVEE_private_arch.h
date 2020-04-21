@@ -178,7 +178,8 @@
 /*-----------------------------------------------------------------------------
   Register selection
 -----------------------------------------------------------------------------*/
-#define PTRACE_REGS struct user_regs_struct
+#define PTRACE_REGS   struct user_regs_struct
+#define PTRACE_FPREGS struct user_fpregs_struct
 #define SYSCALL_INS_LEN            2
 
 //

@@ -20,6 +20,7 @@
 #include <vector>
 #include <deque>
 #include <sstream>
+#include "shared_mem_handling.h"
 #include "MVEE_build_config.h"
 #include "MVEE_private_arch.h"
 #include "MVEE_interaction.h"
@@ -143,12 +144,14 @@ public:
     long          callnum;                                          // System call number being executed by this variant.
     int           call_flags;                                       // Result of the call handler
     PTRACE_REGS   regs;                                             // Arguments for the syscall are copied into the variantstate just before entering the call
-    long          return_value;                                     // Return of the current syscall. 
+    PTRACE_FPREGS fpregs;                                           // Arguments for the syscall are copied into the variantstate just before entering the call
+    long          return_value;                                     // Return of the current syscall.
     long          extended_value;                                   // Extended value to be returned through the EAX register.
 
     unsigned char call_type;                                        // Type of the current system call, i.e. synced/unsynced/unknown
     bool          call_dispatched;                                  // has the current call been dispatched yet?
     bool          regs_valid;                                       // Are the regs up to date?
+    bool          fpregs_valid;                                     // Are the fpregs up to date?
     bool          return_valid;                                     // Is the return value up to date?
     bool          restarted_syscall;                                // Did we restart the current syscall? Might happen if a signal has arrived while the variant was in the middle of a blocking syscall
     bool          restarting_syscall;
@@ -258,6 +261,14 @@ public:
 	std::vector<overwritten_syscall_arg>
        	  	      overwritten_args;
 
+    // shared mem ------------------------------------------------------------------------------------------------------
+    instruction_intent
+                  instruction;
+    int           variant_num;
+    shared_mem_translation_table
+                  translation_table;
+    // -----------------------------------------------------------------------------------------------------------------
+
     variantstate();
 	~variantstate();
 };
@@ -269,6 +280,9 @@ public:
 class monitor
 {
 	friend class mvee;
+    friend class instruction_intent_emulation;
+    friend class instruction_intent;
+    friend class intent_replay_buffer;
 public:
 
 	// *************************************************************************
@@ -413,6 +427,12 @@ private:
 	// @variantnum, possibly refreshing it if necessary 
 	//
     void             call_check_regs                     (int variantnum);
+
+	//
+	// Check if our cached fpregs variable is still up to date for variant
+	// @variantnum, possibly refreshing it if necessary
+	//
+    void             call_check_fpregs                   (int variantnum);
 
 	// 
 	// Returns true if the specified syscall result indicates an error
@@ -1120,6 +1140,13 @@ private:
 	int master_core;
 
 	std::stringstream mismatch_info;                          // cached mismatch info
+
+    // shared memory ===================================================================================================
+    int             map_shared_mapping                              ();
+
+    memory_mapping_table              memory_table;
+    intent_replay_buffer              replay_buffer;
+    // shared memory ===================================================================================================
 };
 
 class detachedvariant

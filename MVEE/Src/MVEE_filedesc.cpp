@@ -58,7 +58,7 @@ fd_info::fd_info
 	, unsynced_access(unsynced_access)
 	, unlinked(unlinked)
 	, original_file_size(original_file_size)
-	, file_type(type)	
+    , file_type(type)
 {
 #ifndef MVEE_BENCHMARK
 	if (!unsynced_access &&

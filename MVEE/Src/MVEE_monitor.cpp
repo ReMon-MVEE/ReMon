@@ -88,6 +88,7 @@ variantstate::variantstate()
     , callnumbackup (0)
     , orig_controllen (0)
     , config (NULL)
+    , instruction (&this->variantpid, &this->variant_num)
 #ifdef __NR_socketcall
     , orig_arg1 (0)
 #endif
@@ -199,9 +200,12 @@ void monitor::init()
 
     pthread_mutex_init(&monitor_lock, NULL);
     pthread_cond_init(&monitor_cond, NULL);
+
+    memory_table = memory_mapping_table();
 }
 
 monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap_table, bool shares_sighand_table, bool shares_tgid)
+        : replay_buffer(this, mvee::numvariants)
 {
     init();
 
@@ -241,6 +245,7 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
 }
 
 monitor::monitor(std::vector<pid_t>& pids)
+        : replay_buffer(this, mvee::numvariants)
 {
     init();
 
@@ -267,7 +272,7 @@ monitor::monitor(std::vector<pid_t>& pids)
 // Just here so we don't instantiate an implicit destructor in MVEE.cpp
 monitor::~monitor()
 {
-
+    replay_buffer.~intent_replay_buffer();
 }
 
 int monitor::get_master_core()
@@ -292,6 +297,7 @@ void monitor::init_variant(int variantnum, pid_t variantpid, pid_t varianttgid)
 {
     variants[variantnum].callnum     = NO_CALL;
     variants[variantnum].variantpid  = variantpid;
+    variants[variantnum].variant_num = variantnum;
     variants[variantnum].varianttgid = varianttgid ? varianttgid : variantpid;
 	if (!mvee::config["variant"]["specs"] ||
 		!mvee::config["variant"]["specs"]["test"])
@@ -2141,16 +2147,97 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
 
         if (signal == SIGSEGV)
         {
-			if (!ip && !interaction::fetch_ip(variants[variantnum].variantpid, ip))
+            // invalidate cached register content
+            variantstate* variant = &variants[variantnum];
+            variant->regs_valid = false;
+            variant->fpregs_valid = false;
+
+            call_check_regs(variantnum);
+
+			if (!variant->regs.rip)
 				throw RwRegsFailure(variantnum, "get trap location");
-			
-			std::string caller_info = set_mmap_table->get_caller_info(variantnum, variants[variantnum].variantpid, ip, 0);
+			ip = variant->regs.rip;
+
+
+            // shared memory access ====================================================================================
+            // check if this SIGSEGV was caused by a genuine shared memory access
+            if (SHARED_MEMORY_ACCESS(variantnum, siginfo))
+            {
+
+                // update the intent for the faulting variant
+                instruction_intent* instruction = &variant->instruction;
+                instruction->update((void*) variant->regs.rip, siginfo.si_addr);
+                // instruction->debug_print();
+
+
+                int result;
+                if ((result = instruction_intent_emulation::lookup_table[instruction->opcode()].emulator(*instruction,
+                        *this, variant)) != 0)
+                {
+                    if (result < 0)
+                    {
+#ifdef JNS_DEBUG
+                        variant->instruction.debug_print_minimal();
+#endif
+                        warnf("something went wrong\n");
+                        signal_shutdown();
+                        return;
+                    }
+
+                    if (result > 0)
+                    {
+                        // warnf("variant %d asked to wait\n\n", variantnum);
+                        return;
+                    }
+                }
+
+
+                // update instruction pointer to skip instruction
+                variant->regs.rip += variant->instruction.size;
+                if (!interaction::write_all_regs(variant->variantpid, &variant->regs))
+                    warnf("\n\n\nerror\n\n\n");
+
+                // quick check if the leader is waiting
+                if (replay_buffer.extra & LEADER_WAITING_MASK)
+                    if (replay_buffer.maybe_resume_leader())
+                    {
+                        warnf("could not resume leader.\n");
+                        signal_shutdown();
+                        return;
+                    }
+
+                call_resume(variantnum);
+                return;
+            }
+            // shared memory access ====================================================================================
+
+
+            std::string caller_info = set_mmap_table->get_caller_info(variantnum, variants[variantnum].variantpid, ip, 0);
 
 #ifndef MVEE_BENCHMARK
 			debugf("%s - variant crashed - trapping ins: %s\n", 
 				   call_get_variant_pidstr(variantnum).c_str(), caller_info.c_str());
 			if (caller_info.find("mvee_log_stack at") != std::string::npos)
 				skip_segv = true;
+
+			// check for cpuid exception
+			instruction_intent instruction(&variants[variantnum].variantpid, &variants[variantnum].variant_num);
+			if (instruction.update((void*) variant->regs.rip) == 0 &&
+			        instruction[0] == 0x0f && instruction[1] == 0xa2)
+            {
+			    if (instruction_intent_emulation::lookup_table[instruction[1]].emulator(instruction, *this, variant))
+                {
+			        warnf("something went wrong handling cpuid");
+			        signal_shutdown();
+                    return;
+                }
+
+                variant->regs.rip += instruction.size;
+                if (!interaction::write_all_regs(variant->variantpid, &variant->regs))
+                    warnf("\n\n\nerror\n\n\n");
+                call_resume(variantnum);
+                return;
+            }
 #endif
 			if (caller_info.find("rb_xcheck at") != std::string::npos)
 			{
@@ -3258,3 +3345,63 @@ void* monitor::thread(void* param)
     mon->shutdown(true);
     return NULL;
 }
+
+
+// shared memory =======================================================================================================
+
+int             monitor::map_shared_mapping                                 ()
+{
+    // get fd info on file being mapped
+    fd_info* info = this->set_fd_table->get_fd_info(ARG5(0), 0);
+    if (!info)
+    {
+        warnf("no associated file descriptor found for shared mapping\n");
+        this->signal_shutdown();
+        return -1;
+    }
+    warnf("opening shared mapping for file %s\n", info->paths[0].c_str());
+
+    // open file that is currently being mapped
+    // open as read and write for now
+    int fd = shm_open(info->paths[0].substr(strlen("/dev/shm/")).c_str(), O_RDWR | O_CREAT,
+            S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+    if (fd < 0)
+    {
+        warnf("could not open file %s to open shared mapping... | error %d\n", info->paths[0].c_str(), errno);
+        return -1;
+    }
+
+    // truncate to size
+    if (ftruncate(fd, ARG2(0)))
+    {
+        warnf("problem truncating file for shared mapping\n");
+        return -1;
+    }
+
+    // open actual mapping
+    errno = 0;
+    void* mapping = mmap(nullptr, ARG2(0), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (mapping == MAP_FAILED)
+    {
+        warnf("could not map shared file %s | error %d\n", info->paths[0].c_str(), errno);
+        return -1;
+    }
+
+    // add to relevant data structures
+    warnf("adding mapping to monitor table at %p of size %llu\n", mapping, ARG2(0));
+    unsigned long memory_id = this->memory_table.add(mapping, ARG2(0));
+    for (int variant_num = 0; variant_num < mvee::numvariants; variant_num++)
+    {
+        this->variants[variant_num].translation_table.add_record((void*) this->variants[variant_num].last_mmap_result,
+                (void*) (this->variants[variant_num].last_mmap_result + ARG2(0)), memory_id);
+    }
+
+    for (int variant_num = 0; variant_num < mvee::numvariants; variant_num++)
+    {
+        this->variants[variant_num].translation_table.debug_log();
+    }
+
+    return 0;
+}
+
+// shared memory =======================================================================================================

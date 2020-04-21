@@ -11,7 +11,6 @@ if(DEFINED ENV{MVEE_DEPS_PRESENT_IN_SYSTEM})
 endif()
 
 # prerun ===============================================================================================================
-
 # get architecture
 execute_process(
         COMMAND bash -c "${CMAKE_SOURCE_DIR}/build_scripts/getmakearch.rb | grep ^ARCH | cut -d':' -f2 | tr -d '\n'"
@@ -60,19 +59,16 @@ message("syncagent compilation result:\n"
         "\toutput:\n" ${COMPILE_SYNCAGENT_OUTPUT}
         "\n\tresult: " ${COMPILE_SYNCAGENT_RESULT})
 message("")
-
 if(DEPS_PRESENT_IN_SYSTEM)
     set(MUSL_GCC musl-gcc)
 else()
     set(MUSL_GCC ${CMAKE_SOURCE_DIR}/deps/musl-install/bin/musl-gcc)
 endif()
-
 # ======================================================================================================================
 add_subdirectory(MVEE_LD_Loader)
 
 # libraries ============================================================================================================
 set(LIBC_VER 2.27.9000)
-set(LIBC_DIR /home/jonas/sources/linux/libc/glibc_build)
 add_custom_command(
         OUTPUT      ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/libc.so.6
         COMMAND     ln -f -s libc-${LIBC_VER}.so patched_binaries/libc/${ARCH}/libc.so.6
@@ -147,7 +143,6 @@ message("\t- " ${CMAKE_RANLIB})
 message("")
 message("build type: " ${CMAKE_BUILD_TYPE})
 # ======================================================================================================================
-
 
 # files and directories for mvee executables ===========================================================================
 

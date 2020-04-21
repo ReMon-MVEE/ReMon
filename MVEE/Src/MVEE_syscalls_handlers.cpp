@@ -3395,6 +3395,14 @@ POSTCALL(rt_sigaction)
   sys_arch_prctl - (int code, unsigned long addr)
 
   This is used to get/set the FS/GS base on x86
+
+  Not specified in the man pages, this system call is also used to enable and
+  disable a process' ability to use the CPUID instruction. The first argument
+  determines the action:
+    * ARCH_GET_CPUID: Check whether this process can execute CPUID in second
+                      argument.
+    * ARCH_SET_CPUID: Enables CPUID execution for a process if the second
+                      argument is > 0, disables otherwise.
 -----------------------------------------------------------------------------*/
 LOG_ARGS(arch_prctl)
 {
@@ -3407,6 +3415,11 @@ LOG_ARGS(arch_prctl)
 PRECALL(arch_prctl)
 {
     CHECKARG(1);
+    CHECKARG(2);
+
+    // do not allow a monitored process to re-enable CPUID instructions
+    if (ARG1(0) == ARCH_SET_CPUID && ARG2(0) > 0)
+        return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DENY;
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
@@ -6937,6 +6950,23 @@ PRECALL(mmap)
     CHECKARG(4);
     CHECKFD(5);
 
+
+    // shared memory interception ======================================================================================
+    // only relevant for read and/or write shared mappings
+    if (ARG3(0) & (PROT_READ | PROT_WRITE) && ARG4(0) & MAP_SHARED)
+    {
+        unsigned long long flags = (ARG4(0) & ~((unsigned) MAP_SHARED)) | MAP_PRIVATE;
+        for (int variant_num = 0; variant_num < mvee::numvariants; variant_num++)
+        {
+            // remove shared mapping option from flags for all variants, making each mapping private
+            SETARG4(variant_num, flags);
+            // set none mapping
+            SETARG3(variant_num, PROT_NONE);
+        }
+    }
+    // shared memory interception ======================================================================================
+
+
     // offset is ignored for anonymous mappings
     if ((int)ARG5(0) !=-1 || (ARG4(0) & MAP_ANONYMOUS))
         CHECKARG(6);
@@ -7157,7 +7187,23 @@ POSTCALL(mmap)
 		for (int i = 0; i < mvee::numvariants; ++i)
 			variants[i].last_mmap_result = results[i];
 
-		if (ARG5(0) && (int)ARG5(0) != -1)
+        // shared memory ===============================================================================================
+        // map in monitor space as well
+        if (ARG5(0) &&
+            (int) ARG5(0) != -1 &&
+            (ARG3(0) & (PROT_READ | PROT_WRITE)) &&
+            (ARG4(0) & MAP_SHARED))
+        {
+            if (reinterpret_cast<void *>(variants[variantnum].last_mmap_result) == MAP_FAILED)
+            {
+                warnf("mmap failed...\n");
+                signal_shutdown();
+            }
+            this->map_shared_mapping();
+        }
+        // shared memory ===============================================================================================
+
+        if (ARG5(0) && (int)ARG5(0) != -1)
 		{
 			info = set_fd_table->get_fd_info(ARG5(0));
 			if (!info)
@@ -9272,14 +9318,20 @@ CALL(openat)
 	
 	int result = MVEE_CALL_ALLOW;
 
+    auto path_processed = set_fd_table->get_full_path(0, variants[0].variantpid,
+            (unsigned long)(int)ARG1(0),
+            (void*) ARG2(0));
+
 	// If do_alias returns true, we will have found aliases for at least
 	// one variant. In this case, we want to repeat the check_open_call + 
 	// flag stripping iteration below for each variant
-	if (call_do_alias_at<1, 2>())
+	// no aliases are created if the file is created in /dev/shm, this is a special shared memory exception
+	if (path_processed.find("/dev/shm") != 0 && call_do_alias_at<1, 2>())
 	{		
 		for (auto i = 0; i < mvee::numvariants; ++i)
 		{
-			auto file = set_fd_table->get_full_path(i, variants[i].variantpid, (unsigned long)(int)ARG1(i), (void*) ARG2(i));
+			auto file = set_fd_table->get_full_path(i, variants[i].variantpid,
+			        (unsigned long)(int)ARG1(i), (void*) ARG2(i));
 
 			result = handle_check_open_call(file.c_str(), ARG3(i), ARG4(i));
 
@@ -9294,8 +9346,7 @@ CALL(openat)
 	}
 	else
 	{
-		auto file = set_fd_table->get_full_path(0, variants[0].variantpid, (unsigned long)(int)ARG1(0), (void*) ARG2(0));		
-		result = handle_check_open_call(file.c_str(), ARG3(0), ARG4(0));
+		result = handle_check_open_call(path_processed.c_str(), ARG3(0), ARG4(0));
 		
 		if ((result & MVEE_CALL_ALLOW) && (ARG3(0) & O_CREAT) && (ARG3(0) & O_EXCL))
 			for (auto i = 0; i < mvee::numvariants; ++i)
@@ -9334,10 +9385,10 @@ POSTCALL(openat)
 		set_fd_table->create_fd_info((unsynced_access && !aliased_open) ? FT_SPECIAL : FT_REGULAR, // file type
 									 fds,                                                          // fd vector
 									 resolved_paths,                                               // path vector
-									 ARG3(0),                                                      // access flags
-									 ARG3(0) & O_CLOEXEC,                                          // cloexec file?
-									 state == STATE_IN_MASTERCALL,                                 // opened by master only?
-									 unsynced_access);                                             // unsynced access to the file?
+									 ARG3(0),                                               // access flags
+									 ARG3(0) & O_CLOEXEC,                      // cloexec file?
+									 state == STATE_IN_MASTERCALL,                          // opened by master only?
+									 unsynced_access);                                                // unsynced access to the file?
 
 		REPLICATEFDRESULT();
 #ifdef MVEE_FD_DEBUG
