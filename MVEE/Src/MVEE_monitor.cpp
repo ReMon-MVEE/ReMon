@@ -2158,7 +2158,7 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
 				throw RwRegsFailure(variantnum, "get trap location");
 			ip = variant->regs.rip;
 
-
+#ifdef MVEE_EMULATE_SHARED_MEMORY
             // shared memory access ====================================================================================
             // check if this SIGSEGV was caused by a genuine shared memory access
             if (SHARED_MEMORY_ACCESS(variantnum, siginfo))
@@ -2210,7 +2210,7 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                 return;
             }
             // shared memory access ====================================================================================
-
+#endif
 
             std::string caller_info = set_mmap_table->get_caller_info(variantnum, variants[variantnum].variantpid, ip, 0);
 

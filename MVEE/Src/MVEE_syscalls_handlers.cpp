@@ -6952,6 +6952,7 @@ PRECALL(mmap)
 
 
     // shared memory interception ======================================================================================
+#ifdef MVEE_EMULATE_SHARED_MEMORY
     // only relevant for read and/or write shared mappings
     if (ARG3(0) & (PROT_READ | PROT_WRITE) && ARG4(0) & MAP_SHARED)
     {
@@ -6964,6 +6965,7 @@ PRECALL(mmap)
             SETARG3(variant_num, PROT_NONE);
         }
     }
+#endif
     // shared memory interception ======================================================================================
 
 
@@ -7188,6 +7190,7 @@ POSTCALL(mmap)
 			variants[i].last_mmap_result = results[i];
 
         // shared memory ===============================================================================================
+#ifdef MVEE_EMULATE_SHARED_MEMORY
         // map in monitor space as well
         if (ARG5(0) &&
             (int) ARG5(0) != -1 &&
@@ -7198,9 +7201,11 @@ POSTCALL(mmap)
             {
                 warnf("mmap failed...\n");
                 signal_shutdown();
+                return 0;
             }
             this->map_shared_mapping();
         }
+#endif
         // shared memory ===============================================================================================
 
         if (ARG5(0) && (int)ARG5(0) != -1)
