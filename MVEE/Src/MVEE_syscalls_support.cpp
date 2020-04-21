@@ -38,6 +38,18 @@ void monitor::call_check_regs (int variantnum)
     }
 }
 
+void monitor::call_check_fpregs (int variantnum)
+{
+    if (!variants[variantnum].fpregs_valid)
+    {
+        if (!interaction::read_all_fpregs(variants[variantnum].variantpid,
+										&variants[variantnum].fpregs))
+			throw RwRegsFailure(variantnum, "refresh syscall args");
+
+		variants[variantnum].fpregs_valid = true;
+    }
+}
+
 /*-----------------------------------------------------------------------------
     call_check_result - Checks the result value of a system call and
     returns false if the result value indicates an error.

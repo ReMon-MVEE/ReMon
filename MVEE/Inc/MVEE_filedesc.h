@@ -66,7 +66,7 @@ public:
     fd_info(
 		FileType type, 
 		std::vector<unsigned long>& fds, 
-		std::vector<std::string>& path, 
+		std::vector<std::string>& path,
 		unsigned long access_flags, 
 		bool close_on_exec, 
 		bool master_file, 
@@ -116,7 +116,7 @@ public:
     void          create_fd_info      (
 		FileType type, 
 		std::vector<unsigned long>& fds, 
-		std::vector<std::string>& path, 
+		std::vector<std::string>& path,
 		unsigned long access_flags,
 		bool close_on_exec,
 		bool master_file,

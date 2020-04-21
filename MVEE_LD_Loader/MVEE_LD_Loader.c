@@ -19,6 +19,10 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+/* musl-gcc doesn't allow us to import the correct header */
+#define ARCH_GET_CPUID		0x1011
+#define ARCH_SET_CPUID		0x1012
+
 #include "MVEE_LD_Loader.h"
 
 //#define MVEE_DEBUG
@@ -463,6 +467,9 @@ void  mvee_write_stack_and_transfer()
 
 int main (int argc, char** argv, char** envp)
 {
+    // disable CPUID execution for this process
+    syscall(__NR_arch_prctl, ARCH_SET_CPUID, 0);
+
     int           interp_fd = 0;
     struct stat   statbuf;
 
