@@ -429,6 +429,13 @@ namespace interaction
 		return false;
 	}
 
+    static bool read_all_fpregs (pid_t variantpid, user_fpregs_struct* regs)
+    {
+        if (ptrace(PTRACE_GETFPREGS, variantpid, 0, regs) == 0)
+            return true;
+        return false;
+    }
+
     // 
     // Copy an entire user_regs_struct into the variant's general purpose
     // register context
@@ -439,6 +446,17 @@ namespace interaction
 			return true;
 		return false;
 	}
+
+    //
+    // Copy an entire user_fpregs_struct into the variant's fp
+    // register context
+    //
+    static bool write_all_fpregs (pid_t variantpid, user_fpregs_struct* regs)
+    {
+        if (ptrace(PTRACE_SETFPREGS, variantpid, 0, regs) == 0)
+            return true;
+        return false;
+    }
 
 	// 
 	// Read a specific register from the variant's register context.
