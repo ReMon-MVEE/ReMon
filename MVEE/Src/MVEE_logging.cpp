@@ -35,12 +35,16 @@
 /*-----------------------------------------------------------------------------
     Static Variable Initialization
 -----------------------------------------------------------------------------*/
-FILE*             mvee::logfile              = NULL;
-FILE*             mvee::ptrace_logfile       = NULL;
-FILE*             mvee::datatransfer_logfile = NULL;
-FILE*             mvee::lockstats_logfile    = NULL;
+FILE*             mvee::logfile              = nullptr;
+FILE*             mvee::ptrace_logfile       = nullptr;
+FILE*             mvee::datatransfer_logfile = nullptr;
+FILE*             mvee::lockstats_logfile    = nullptr;
 double            mvee::startup_time         = 0.0;
 pthread_mutex_t   mvee::loglock              = PTHREAD_MUTEX_INITIALIZER;
+
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+FILE*             mvee::instruction_log      = nullptr;
+#endif
 
 /*-----------------------------------------------------------------------------
     cache_mismatch_info
@@ -411,6 +415,54 @@ void monitor::log_fini()
         fclose(monitor_log);
     monitor_log = NULL;
 #endif
+}
+
+/*-----------------------------------------------------------------------------
+
+-----------------------------------------------------------------------------*/
+void monitor::log_instruction_trace()
+{
+    fprintf(mvee::instruction_log, "[\n");
+
+    tracing_data* data = variants[0].result;
+    tracing_data* temp_data;
+    tracing_data::files* temp_files;
+
+    while (data != nullptr)
+    {
+        fprintf(mvee::instruction_log, "\t{\n");
+        fprintf(mvee::instruction_log, "\t\t\"instruction\": \"%s\",\n", data->instruction);
+        fprintf(mvee::instruction_log, "\t\t\"hits\": \"%d\",\n", data->hits);
+        fprintf(mvee::instruction_log, "\t\t\"files accessed\": [\n");
+
+
+        fprintf(mvee::instruction_log, "\t\t\t{\n");
+        fprintf(mvee::instruction_log, "\t\t\t\"file\": \"%s\",\n", data->files_accessed.file);
+        fprintf(mvee::instruction_log, "\t\t\t\"hits\": \"%d\",\n", data->files_accessed.hits);
+        fprintf(mvee::instruction_log, "\t\t\t},\n");
+        tracing_data::files *files = data->files_accessed.next;
+        while (files != nullptr)
+        {
+            fprintf(mvee::instruction_log, "\t\t\t{\n");
+            fprintf(mvee::instruction_log, "\t\t\t\"file\": \"%s\",\n", files->file);
+            fprintf(mvee::instruction_log, "\t\t\t\"hits\": \"%d\",\n", files->hits);
+            fprintf(mvee::instruction_log, "\t\t\t},\n");
+
+            temp_files = files;
+            files = files->next;
+            free(temp_files);
+        }
+
+        fprintf(mvee::instruction_log, "\t\t]\n");
+        temp_data = data;
+        data = data->next;
+        free(temp_data);
+        fprintf(mvee::instruction_log, "\t},\n");
+    }
+
+    fprintf(mvee::instruction_log, "]\n");
+
+    fflush(mvee::instruction_log);
 }
 
 /*-----------------------------------------------------------------------------
@@ -1323,6 +1375,19 @@ void mvee::log_init()
     if (mvee::lockstats_logfile == NULL)
         perror("Failed to open lockstats log");
 #endif
+
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+  #ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING_FILE
+    #define MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING_FILE "./Logs/instruction_trace.log"
+  #endif
+    mvee::instruction_log = fopen64(MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING_FILE, "w");
+    if (mvee::instruction_log == nullptr)
+        perror("could not open instruction trace log");
+  #ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL
+    fprintf(mvee::instruction_log, "instruction pointer;instruction;address accessed;backing file\n");
+  #endif
+    printf("instruction tracing log opened at %s\n", MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING_FILE);
+#endif
 }
 
 /*-----------------------------------------------------------------------------
@@ -1359,6 +1424,11 @@ void mvee::log_fini(bool terminated)
 #ifdef MVEE_GENERATE_LOCKSTATS
     if (mvee::lockstats_logfile)
         fclose(mvee::lockstats_logfile);
+#endif
+
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+    if(mvee::instruction_log)
+        fclose(mvee::instruction_log);
 #endif
 }
 

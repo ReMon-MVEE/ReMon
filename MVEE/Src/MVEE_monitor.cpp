@@ -89,6 +89,9 @@ variantstate::variantstate()
     , orig_controllen (0)
     , config (NULL)
     , instruction (&this->variantpid, &this->variant_num)
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+    , result(nullptr)
+#endif
 #ifdef __NR_socketcall
     , orig_arg1 (0)
 #endif
@@ -927,6 +930,11 @@ nobacktrace:
     }
 
     // Successful return. Unregister the monitor from all mappings
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+#ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL
+    log_instruction_trace();
+#endif
+#endif
     log_fini();
     mvee::unregister_monitor(this, !have_running_variants);
 
@@ -2163,11 +2171,19 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
             // check if this SIGSEGV was caused by a genuine shared memory access
             if (SHARED_MEMORY_ACCESS(variantnum, siginfo))
             {
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+                // log instruction =====================================================================================
+                if (instruction_tracing::log_shared_instruction(*this, variant, siginfo.si_addr) < 0)
+                    signal_shutdown();
+                return;
+                // log instruction =====================================================================================
+#endif
 
                 // update the intent for the faulting variant
                 instruction_intent* instruction = &variant->instruction;
                 instruction->update((void*) variant->regs.rip, siginfo.si_addr);
-                // instruction->debug_print();
+                if (variantnum == 0)
+                    instruction->debug_print_minimal();
 
 
                 int result;
@@ -2177,7 +2193,7 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                     if (result < 0)
                     {
 #ifdef JNS_DEBUG
-                        variant->instruction.debug_print_minimal();
+                        variant->instruction.debug_print();
 #endif
                         warnf("something went wrong\n");
                         signal_shutdown();
@@ -3389,7 +3405,11 @@ int             monitor::map_shared_mapping                                 ()
 
     // add to relevant data structures
     warnf("adding mapping to monitor table at %p of size %llu\n", mapping, ARG2(0));
+#ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
     unsigned long memory_id = this->memory_table.add(mapping, ARG2(0));
+#else
+    unsigned long memory_id = this->memory_table.add(mapping, ARG2(0), info->paths[0]);
+#endif
     for (int variant_num = 0; variant_num < mvee::numvariants; variant_num++)
     {
         this->variants[variant_num].translation_table.add_record((void*) this->variants[variant_num].last_mmap_result,
@@ -3403,5 +3423,4 @@ int             monitor::map_shared_mapping                                 ()
 
     return 0;
 }
-
 // shared memory =======================================================================================================

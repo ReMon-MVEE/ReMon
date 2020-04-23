@@ -448,17 +448,43 @@ void  mvee_write_stack_and_transfer()
 		   (void*)((unsigned long)initial_stack + 8192 - initial_stack_depth),
 		   initial_stack_depth);
 
+
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+    // map some extra easy syscall code, should only be used to log instructions
+    void* syscall_pointer = mmap(0, 2, PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (syscall_pointer == MAP_FAILED)
+    {
+        printf("problem setting up syscall instruction for instruction logging\n");
+        exit(-1);
+    }
+
+
+    // load syscall instruction
+    ((char*) syscall_pointer)[0] = 0x0f;
+    ((char*) syscall_pointer)[1] = 0x05;
+
+    // set syscall instruction to executable
+    mprotect(syscall_pointer, 2, PROT_EXEC);
+
+    // printf("set up syscall instruction at %p\n", syscall_pointer);
+#endif
+
+
 #ifdef MVEE_DEBUG
     fprintf(stderr, "stack copied\n");
 #endif
-	
     // the monitor can now restore esp so it points to argc, delete the loader program from memory
     // and then transfer control to ld-linux's start routine
 	old_sp = new_sp;
 	old_entry = new_entry;
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+    syscall(MVEE_FAKE_SYSCALL_BASE + 16, new_sp, new_entry, syscall_pointer);
+#else
     syscall(MVEE_FAKE_SYSCALL_BASE + 16, new_sp, new_entry);
+#endif
 	new_sp = old_sp;
 	new_entry = old_entry;
+
 
     // we should never get to this point unless we're running natively!!!
 	ARCH_JMP_TO_LD(new_sp, new_entry);
