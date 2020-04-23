@@ -3380,8 +3380,7 @@ int             monitor::map_shared_mapping                                 ()
 
     // open file that is currently being mapped
     // open as read and write for now
-    int fd = shm_open(info->paths[0].substr(strlen("/dev/shm/")).c_str(), O_RDWR | O_CREAT,
-            S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+    int fd = open(info->paths[0].c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
     if (fd < 0)
     {
         warnf("could not open file %s to open shared mapping... | error %d\n", info->paths[0].c_str(), errno);
