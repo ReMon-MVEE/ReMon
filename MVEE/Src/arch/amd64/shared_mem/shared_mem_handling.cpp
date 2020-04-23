@@ -695,7 +695,7 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
         (*data)->hits++;
         tracing_data::files* files = &(*data)->files_accessed;
         bool already_accessed = false;
-        while (files->next != nullptr)
+        do
         {
             if (strcmp(files->file, result_file) == 0)
             {
@@ -703,7 +703,7 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
                 break;
             }
             files = files->next;
-        }
+        } while (files->next != nullptr);
 
         if (already_accessed)
             files->hits++;
