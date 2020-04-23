@@ -91,6 +91,7 @@ variantstate::variantstate()
     , instruction (&this->variantpid, &this->variant_num)
 #ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
     , result(nullptr)
+    , lost(nullptr)
 #endif
 #ifdef __NR_socketcall
     , orig_arg1 (0)
