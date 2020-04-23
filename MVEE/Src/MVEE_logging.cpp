@@ -444,8 +444,8 @@ void monitor::log_instruction_trace()
         while (files != nullptr)
         {
             fprintf(mvee::instruction_log, "\t\t\t{\n");
-            fprintf(mvee::instruction_log, "\t\t\t\"file\": \"%s\",\n", files->file);
-            fprintf(mvee::instruction_log, "\t\t\t\"hits\": \"%d\",\n", files->hits);
+            fprintf(mvee::instruction_log, "\t\t\t\t\"file\": \"%s\",\n", files->file);
+            fprintf(mvee::instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", files->hits);
             fprintf(mvee::instruction_log, "\t\t\t},\n");
 
             temp_files = files;
