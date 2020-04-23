@@ -2043,6 +2043,15 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+	if (mvee::numvariants != 1)
+    {
+	    printf("to run instruction tracing it is required to run only 1 variant.\n");
+	    usage();
+        return -1;
+    }
+#endif
+
 	// Everything is set up so we can initialize the alias maps now
 	mvee::init_aliases();
 	

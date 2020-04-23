@@ -267,11 +267,18 @@ public:
     int           variant_num;
     shared_mem_translation_table
                   translation_table;
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+    void*         syscall_pointer;
+    void*         shared_base;
+    unsigned int  shared_size;
+    tracing_data* result;
+#endif
     // -----------------------------------------------------------------------------------------------------------------
 
     variantstate();
 	~variantstate();
 };
+
 
 //
 // This class represents the monitors that monitor the variants.  Unless
@@ -283,6 +290,9 @@ class monitor
     friend class instruction_intent_emulation;
     friend class instruction_intent;
     friend class intent_replay_buffer;
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+    friend class instruction_tracing;
+#endif
 public:
 
 	// *************************************************************************
@@ -907,6 +917,11 @@ private:
     void log_fini                        ();
 
 	//
+	// Logs the instruction trace in json format, should only be called when running an instruction trace.
+	//
+    void log_instruction_trace           ();
+
+	//
 	// Logs a stack trace for variant @variantnum
 	//
     void log_variant_backtrace             (int variantnum, int max_depth=0, int calculate_file_offsets=0, int is_segfault=0);
@@ -1143,6 +1158,7 @@ private:
 
     // shared memory ===================================================================================================
     int             map_shared_mapping                              ();
+    int             log_shared_instruction                          (variantstate* variant, void* address);
 
     memory_mapping_table              memory_table;
     intent_replay_buffer              replay_buffer;

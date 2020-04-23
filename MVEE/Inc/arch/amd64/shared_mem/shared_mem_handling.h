@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <bits/types/siginfo_t.h>
 #include <vector>
+#include <string>
 
 
 #include "shared_mem_operations.h"
@@ -512,11 +513,14 @@ struct monitor_mapping
 {
     void*           base_addr;
     size_t          size;
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+    const char*    file;
+#endif
 };
 
 
 // =====================================================================================================================
-//      monitor mapping table
+//      monitor mapping table\
 // =====================================================================================================================
 class memory_mapping_table
 {
@@ -537,7 +541,12 @@ public:
 
 
     //updating ---------------------------------------------------------------------------------------------------------
+#ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
     unsigned long   add                                             (void* monitor_base, size_t size);
+#else
+    unsigned long   add                                             (void* monitor_base, size_t size,
+                                                                     const std::string &file);
+#endif
 
     int             remove                                          (void* monitor_base);
 
@@ -607,6 +616,37 @@ public:
      */
     __uint8_t       extra;
 };
+
+
+// =====================================================================================================================
+//      instruction tracing
+// =====================================================================================================================
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+class instruction_tracing
+{
+public:
+    static int      log_shared_instruction                          (monitor &relevant_monitor,
+                                                                     variantstate* variant, void* address);
+};
+
+struct access_data {
+    const char* identification;
+    int hits;
+    access_data* next;
+};
+
+struct tracing_data
+{
+    const char* instruction;
+    unsigned int hits;
+    struct files {
+        const char* file;
+        unsigned int hits;
+        files* next;
+    } files_accessed;
+    tracing_data* next;
+};
+#endif
 
 
 #endif //REMON_SHARED_MEM_HANDLING_H

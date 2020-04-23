@@ -8,6 +8,8 @@
 #include <ios>
 #include <MVEE.h>
 #include <MVEE_monitor.h>
+#include <sys/mman.h>
+#include <arch/amd64/hde.h>
 #include "shared_mem_reg_access.h"
 #include "MVEE_interaction.h"
 
@@ -244,6 +246,8 @@ void instruction_intent::debug_print_minimal                        ()
     if (size)
     {
         START_OUTPUT_DEBUG
+        output << "instruction pointer: " << std::hex << instruction_pointer << "\n";
+        output << "faulting address: " << std::hex << effective_address << "\n";
         ADD_OUTPUT_DEBUG("instruction:", instruction, size)
         PRINT_OUTPUT_DEBUG
     }
@@ -365,6 +369,7 @@ void            shared_mem_translation_table::debug_log             ()
 
 
 // updating ============================================================================================================
+#ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
 unsigned long   memory_mapping_table::add                           (void *monitor_base, size_t size)
 {
     unsigned long memory_id;
@@ -383,6 +388,34 @@ unsigned long   memory_mapping_table::add                           (void *monit
 
     return memory_id;
 }
+#else
+unsigned long   memory_mapping_table::add                           (void *monitor_base, size_t size,
+                                                                     const std::string &file)
+{
+    unsigned long memory_id;
+    if (!free_ids.empty())
+    {
+        memory_id = this->free_ids.front();
+        this->free_ids.erase(this->free_ids.begin());
+
+        char* file_pointer = (char*) malloc(file.size() + 1);
+        strncpy(file_pointer, file.c_str(), file.size());
+        file_pointer[file.size()] = 0x00;
+        this->monitor_addresses[memory_id] = { monitor_base, size, file_pointer };
+    }
+    else
+    {
+        memory_id = this->monitor_addresses.size();
+
+        char* file_pointer = (char*) malloc(file.size() + 1);
+        strncpy(file_pointer, file.c_str(), file.size());
+        file_pointer[file.size()] = 0x00;
+        this->monitor_addresses.push_back({monitor_base, size, file_pointer });
+    }
+
+    return memory_id;
+}
+#endif
 
 int             memory_mapping_table::remove                        (void *monitor_base)
 {
@@ -390,7 +423,13 @@ int             memory_mapping_table::remove                        (void *monit
     {
         if (this->monitor_addresses[id].base_addr == monitor_base)
         {
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+            monitor_mapping mapping = *this->monitor_addresses.erase(this->monitor_addresses.begin() + id);
+            free((void*) mapping.file);
+#else
             this->monitor_addresses.erase(this->monitor_addresses.begin() + id);
+#endif
+
             this->insert_free_id(id);
             return 0;
         }
@@ -416,7 +455,7 @@ int             memory_mapping_table::remove                        (unsigned lo
 monitor_mapping memory_mapping_table::operator[]                    (unsigned long index)
 {
     if (index >= this->monitor_addresses.size())
-        return {nullptr, 0};
+        return {nullptr, 0, nullptr};
 
     return this->monitor_addresses[index];
 }
@@ -578,3 +617,204 @@ int             intent_replay_buffer::access_data                   (unsigned in
     // tell variant to proceed
     return 0;
 }
+
+
+// =====================================================================================================================
+//      instruction tracing
+// =====================================================================================================================
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+int             instruction_tracing::log_shared_instruction         (monitor &relevant_monitor,
+                                                                     variantstate* variant, void* address)
+{
+    // temporary local variables
+    int status;
+    user_regs_struct temp_regs;
+
+
+    // logging stage ---------------------------------------------------------------------------------------------------
+    // retrieve instruction
+    __uint8_t instruction[MAX_INSTRUCTION_SIZE];
+    if (!interaction::read_memory(variant->variantpid, (void*) variant->regs.rip, MAX_INSTRUCTION_SIZE, instruction))
+        return -1;
+    hde64s disassembled;
+    unsigned int instruction_size = hde64_disasm(instruction, &disassembled);
+
+    // get shared mem info
+    translation_record* record = variant->translation_table[address];
+    variant->shared_base = record->variant_base;
+    variant->shared_size = (unsigned int)
+            ((unsigned long long) record->variant_end - (unsigned long long) record->variant_base);
+
+    // log instruction
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL
+    std::stringstream output;
+    output << std::hex << variant->regs.rip << ";";
+    for (unsigned int i = 0; i < instruction_size; i++)
+        output << ((instruction[i] & 0xffu) < 0x10 ? "0" : "")
+                << std::hex << (instruction[i] & 0xffu) << ((i == (instruction_size - 1)) ? ";" : "-");
+    output << std::hex << address << ";";
+    output << (relevant_monitor.memory_table[record->memory_id].file ?
+            relevant_monitor.memory_table[record->memory_id].file : "unknown") << ";";
+    fprintf(mvee::instruction_log, "%s\n", output.str().c_str());
+#else
+    std::stringstream instruction_identification;
+    for (unsigned int i = 0; i < instruction_size; i++)
+        instruction_identification << ((instruction[i] & 0xffu) < 0x10 ? "0" : "")
+               << std::hex << (instruction[i] & 0xffu) << ((i == (instruction_size - 1)) ? "" : "-");
+    instruction_identification << '\0';
+
+    char* result_instruction_identification = (char*) malloc(instruction_identification.str().size());
+    strncpy(result_instruction_identification, instruction_identification.str().c_str(),
+            instruction_identification.str().size());
+
+    char* result_file = (char*) malloc(strlen(relevant_monitor.memory_table[record->memory_id].file) + 1);
+    strncpy(result_file, relevant_monitor.memory_table[record->memory_id].file,
+            strlen(relevant_monitor.memory_table[record->memory_id].file) + 1);
+
+
+    tracing_data** data = &variant->result;
+    while (*data != nullptr)
+    {
+        if (strcmp((*data)->instruction, instruction_identification.str().c_str()) == 0)
+            break;
+        data = &(*data)->next;
+    }
+
+    if (*data == nullptr)
+    {
+        *data = (tracing_data*) malloc(sizeof(tracing_data));
+        (*data)->instruction = result_instruction_identification;
+        (*data)->hits = 1;
+        (*data)->files_accessed = {
+                result_file, 1, nullptr
+        };
+        (*data)->next = nullptr;
+    }
+    else
+    {
+        (*data)->hits++;
+        tracing_data::files* files = &(*data)->files_accessed;
+        bool already_accessed = false;
+        while (files->next != nullptr)
+        {
+            if (strcmp(files->file, result_file) == 0)
+            {
+                already_accessed = true;
+                break;
+            }
+            files = files->next;
+        }
+
+        if (already_accessed)
+            files->hits++;
+        else
+        {
+            files->next = (tracing_data::files*) malloc(sizeof(tracing_data::files));
+            files->next->file = result_file;
+            files->next->hits = 1;
+            files->next->next = nullptr;
+        }
+    }
+#endif
+    // -----------------------------------------------------------------------------------------------------------------
+
+
+    // user local register struct --------------------------------------------------------------------------------------
+    temp_regs = variant->regs;
+    // -----------------------------------------------------------------------------------------------------------------
+
+
+    // remove protection on mapping ------------------------------------------------------------------------------------
+
+    // mprotect syscall to enable shared mapping
+    temp_regs.orig_rax = __NR_mprotect;
+    temp_regs.rax = __NR_mprotect;
+    temp_regs.rdi = (unsigned long long) variant->shared_base;
+    temp_regs.rsi = (unsigned long long) variant->shared_size;
+    temp_regs.rdx = PROT_READ | PROT_WRITE;
+    temp_regs.rip = (unsigned long long) variant->syscall_pointer;
+
+    if (!interaction::write_all_regs(variant->variantpid, &temp_regs))
+        return -1;
+
+    // have variant execute call
+    if (!interaction::resume_until_syscall(variant->variantpid, 0))
+        return -1;
+    waitpid(variant->variantpid, &status, 0);
+
+    // syscall enter
+    if (!interaction::resume_until_syscall(variant->variantpid, 0))
+        return -1;
+    waitpid(variant->variantpid, &status, 0);
+
+    // syscall exit
+    // check for mprotect result 0
+    if (!interaction::read_all_regs(variant->variantpid, &temp_regs))
+        return -1;
+    if (temp_regs.rax != 0)
+    {
+        warnf("mprotect failed while enabling\n");
+        return -1;
+    }
+    // -----------------------------------------------------------------------------------------------------------------
+
+
+    // perform actual instruction --------------------------------------------------------------------------------------
+    if (!interaction::write_all_regs(variant->variantpid, &variant->regs))
+        return -1;
+
+    if (ptrace(PTRACE_SINGLESTEP, variant->variantpid, nullptr, nullptr) != 0)
+        return -1;
+    waitpid(variant->variantpid, &status, 0);
+
+    if (!interaction::read_all_regs(variant->variantpid, &variant->regs))
+        return -1;
+    // -----------------------------------------------------------------------------------------------------------------
+
+
+    // reset protection ------------------------------------------------------------------------------------------------
+    // mprotect syscall to disable shared mapping
+    temp_regs = variant->regs;
+    temp_regs.orig_rax = __NR_mprotect;
+    temp_regs.rax = __NR_mprotect;
+    temp_regs.rdi = (unsigned long long) variant->shared_base;
+    temp_regs.rsi = (unsigned long long) variant->shared_size;
+    temp_regs.rdx = PROT_NONE;
+    temp_regs.rip = (unsigned long long) variant->syscall_pointer;
+
+    if (!interaction::write_all_regs(variant->variantpid, &temp_regs))
+        return -1;
+
+    // start syscall
+    if (!interaction::resume_until_syscall(variant->variantpid, 0))
+        return -1;
+    waitpid(variant->variantpid, &status, 0);
+
+    // syscall entered
+    if (!interaction::resume_until_syscall(variant->variantpid, 0))
+        return -1;
+    waitpid(variant->variantpid, &status, 0);
+
+    // syscall exit, check for mprotect failure
+    if (!interaction::read_all_regs(variant->variantpid, &temp_regs))
+        return -1;
+    if (temp_regs.rax != 0)
+    {
+        warnf("mprotect failed while disabling\n");
+        return -1;
+    }
+    // -----------------------------------------------------------------------------------------------------------------
+
+
+    // resume execution as if nothing happened -------------------------------------------------------------------------
+    if (!interaction::write_all_regs(variant->variantpid, &variant->regs))
+        return -1;
+
+    if (!interaction::resume_until_syscall(variant->variantpid, 0))
+        return -1;
+    // return ok
+    return 0;
+    // -----------------------------------------------------------------------------------------------------------------
+}
+
+#endif

@@ -1002,6 +1002,10 @@ long monitor::call_postcall_return_unsynced (int variantnum)
 			IP_IN_REGS(variants[variantnum].regs) = ld_entry;
 			if (!interaction::write_all_regs(variants[variantnum].variantpid, &variants[variantnum].regs))
 				throw RwRegsFailure(variantnum, "transfer control to interpreter");
+
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+			variants[variantnum].syscall_pointer = (void*) ARG3(variantnum);
+#endif
 		}
 	}
 
