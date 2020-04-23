@@ -629,22 +629,49 @@ public:
                                                                      variantstate* variant, void* address);
 };
 
-struct access_data {
-    const char* identification;
-    int hits;
-    access_data* next;
+struct tracing_data_t
+{
+    const char* opcode;
+    struct prefixes_t
+    {
+        const char* prefixes;
+        unsigned int hits;
+        prefixes_t* next;
+    } prefixes;
+    struct modrm_t
+    {
+        const char* modrm;
+        unsigned int hits;
+        modrm_t* next;
+    } modrm;
+    struct immediate_t
+    {
+        const char* immediate;
+        unsigned int size;
+        unsigned int hits;
+        immediate_t* next;
+    } immediate;
+    unsigned int hits;
+    struct files_t
+    {
+        const char* file;
+        unsigned int hits;
+        files_t* next;
+    } files_accessed;
+    tracing_data_t* next;
 };
 
-struct tracing_data
+struct tracing_lost_t
 {
     const char* instruction;
     unsigned int hits;
-    struct files {
+    struct files_t
+    {
         const char* file;
         unsigned int hits;
-        files* next;
+        files_t* next;
     } files_accessed;
-    tracing_data* next;
+    tracing_lost_t* next;
 };
 #endif
 

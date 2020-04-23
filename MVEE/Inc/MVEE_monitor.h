@@ -271,7 +271,8 @@ public:
     void*         syscall_pointer;
     void*         shared_base;
     unsigned int  shared_size;
-    tracing_data* result;
+    tracing_data_t* result;
+    tracing_lost_t* lost;
 #endif
     // -----------------------------------------------------------------------------------------------------------------
 

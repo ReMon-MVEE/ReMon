@@ -645,77 +645,329 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
     variant->shared_size = (unsigned int)
             ((unsigned long long) record->variant_end - (unsigned long long) record->variant_base);
 
-    // log instruction
+
+    if (disassembled.flags & (F_ERROR | F_ERROR_OPCODE | F_ERROR_LENGTH | F_ERROR_LOCK | F_ERROR_OPERAND) ||
+            instruction_size == 0)
+    {
+        std::stringstream instruction_strstream;
+        for (int i = 0; i < MAX_INSTRUCTION_SIZE; i++)
+            instruction_strstream << (instruction[i] < 0x10 ? "0" : "") << std::hex <<
+                    ((unsigned int) instruction[i] & 0xff) << ((i == MAX_INSTRUCTION_SIZE - 1) ? "" : "-");
+        instruction_strstream << (char) 0x00;
+
+        // log instruction
 #ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL
-    std::stringstream output;
-    output << std::hex << variant->regs.rip << ";";
-    for (unsigned int i = 0; i < instruction_size; i++)
-        output << ((instruction[i] & 0xffu) < 0x10 ? "0" : "")
-                << std::hex << (instruction[i] & 0xffu) << ((i == (instruction_size - 1)) ? ";" : "-");
-    output << std::hex << address << ";";
-    output << (relevant_monitor.memory_table[record->memory_id].file ?
-            relevant_monitor.memory_table[record->memory_id].file : "unknown") << ";";
-    fprintf(mvee::instruction_log, "%s\n", output.str().c_str());
+        std::stringstream output;
+        output << std::hex << variant->regs.rip << ";";
+        output << "false;";
+        output << ";";
+        output << ";";
+        output << ";";
+        output << ";";
+        output << ";";
+        output << instruction_strstream.str().c_str() << ";";
+        output << std::hex << address << ";";
+        output << (relevant_monitor.memory_table[record->memory_id].file ?
+                   relevant_monitor.memory_table[record->memory_id].file : "unknown") << ";";
+        fprintf(mvee::instruction_log, "%s\n", output.str().c_str());
 #else
-    std::stringstream instruction_identification;
-    for (unsigned int i = 0; i < instruction_size; i++)
-        instruction_identification << ((instruction[i] & 0xffu) < 0x10 ? "0" : "")
-               << std::hex << (instruction[i] & 0xffu) << ((i == (instruction_size - 1)) ? "" : "-");
-    instruction_identification << '\0';
+        warnf("General Kenobi\n\n");
+        char *result_file = (char *) malloc(strlen(relevant_monitor.memory_table[record->memory_id].file) + 1);
+        strncpy(result_file, relevant_monitor.memory_table[record->memory_id].file,
+                strlen(relevant_monitor.memory_table[record->memory_id].file) + 1);
 
-    char* result_instruction_identification = (char*) malloc(instruction_identification.str().size());
-    strncpy(result_instruction_identification, instruction_identification.str().c_str(),
-            instruction_identification.str().size());
+        char* instruction_identification = (char*) malloc(instruction_strstream.str().size());
+        strncpy(instruction_identification, instruction_strstream.str().c_str(), instruction_strstream.str().size());
 
-    char* result_file = (char*) malloc(strlen(relevant_monitor.memory_table[record->memory_id].file) + 1);
-    strncpy(result_file, relevant_monitor.memory_table[record->memory_id].file,
-            strlen(relevant_monitor.memory_table[record->memory_id].file) + 1);
+        tracing_lost_t **lost = &variant->lost;
+        while (*lost != nullptr) {
+            if (strcmp((*lost)->instruction, instruction_identification) == 0)
+                break;
+            lost = &(*lost)->next;
+        }
 
+        if (*lost == nullptr)
+        {
+            *lost = (tracing_lost_t*) malloc(sizeof(tracing_lost_t));
+            (*lost)->instruction = instruction_identification;
+            (*lost)->hits = 1;
+            (*lost)->next = nullptr;
+            (*lost)->files_accessed = { result_file, 1, nullptr };
+        }
+        else
+        {
+            (*lost)->hits++;
+            tracing_lost_t::files_t *files = &(*lost)->files_accessed;
+            bool already_accessed = false;
+            do {
+                if (strcmp(files->file, result_file) == 0) {
+                    already_accessed = true;
+                    break;
+                }
+                if (files->next == nullptr)
+                    break;
+                files = files->next;
+            } while (true);
 
-    tracing_data** data = &variant->result;
-    while (*data != nullptr)
-    {
-        if (strcmp((*data)->instruction, instruction_identification.str().c_str()) == 0)
-            break;
-        data = &(*data)->next;
-    }
-
-    if (*data == nullptr)
-    {
-        *data = (tracing_data*) malloc(sizeof(tracing_data));
-        (*data)->instruction = result_instruction_identification;
-        (*data)->hits = 1;
-        (*data)->files_accessed = {
-                result_file, 1, nullptr
-        };
-        (*data)->next = nullptr;
+            if (already_accessed)
+                files->hits++;
+            else {
+                files->next = (tracing_lost_t::files_t *) malloc(sizeof(tracing_lost_t::files_t));
+                files->next->file = result_file;
+                files->next->hits = 1;
+                files->next->next = nullptr;
+            }
+        }
+#endif
     }
     else
     {
-        (*data)->hits++;
-        tracing_data::files* files = &(*data)->files_accessed;
-        bool already_accessed = false;
-        do
-        {
-            if (strcmp(files->file, result_file) == 0)
-            {
-                already_accessed = true;
-                break;
-            }
-            files = files->next;
-        } while (files->next != nullptr);
+        // prefixes
+        std::stringstream prefix_strstream;
+        if (disassembled.flags & F_PREFIX_REX) {
+            unsigned int rex = 0x40;
+            rex |= (disassembled.rex_b ? 0b0001u : 0b0000u);
+            rex |= (disassembled.rex_x ? 0b0010u : 0b0000u);
+            rex |= (disassembled.rex_r ? 0b0100u : 0b0000u);
+            rex |= (disassembled.rex_w ? 0b1000u : 0b0000u);
+            prefix_strstream << std::hex << ((unsigned int) rex & 0xffu);
+            prefix_strstream << "-";
+        }
+        if (disassembled.flags & F_PREFIX_66)
+            prefix_strstream << "66-";
+        if (disassembled.flags & F_PREFIX_67)
+            prefix_strstream << "67-";
+        if (disassembled.flags & F_PREFIX_REPNZ)
+            prefix_strstream << "f2-";
+        if (disassembled.flags & F_PREFIX_REPX)
+            prefix_strstream << "f3-";
+        if (disassembled.flags & F_PREFIX_LOCK)
+            prefix_strstream << "f0-";
+        if (disassembled.flags & F_PREFIX_SEG)
+            prefix_strstream << std::hex << ((unsigned int) disassembled.p_seg & 0xffu) << "-";
 
-        if (already_accessed)
-            files->hits++;
+        char *prefixes = (char *) malloc(prefix_strstream.str().empty() ? 1 : prefix_strstream.str().size());
+        if (!prefix_strstream.str().empty())
+            strncpy(prefixes, prefix_strstream.str().c_str(), (int) prefix_strstream.str().size());
+        prefixes[prefix_strstream.str().empty() ? 0 : prefix_strstream.str().size() - 1] = 0x00;
+
+        // opcode
+        std::stringstream opcode_strstream;
+        opcode_strstream << (disassembled.opcode < 0x10 ? "0" : "") << std::hex
+                         << ((unsigned int) disassembled.opcode & 0xffu);
+        if (disassembled.opcode == 0x0f)
+            opcode_strstream << "-" << (disassembled.opcode2 < 0x10 ? "0" : "")
+                             << std::hex << ((unsigned int) disassembled.opcode2 & 0xffu);
+        opcode_strstream << (char) 0x00;
+
+        char *opcode = (char *) malloc(opcode_strstream.str().size());
+        strncpy(opcode, opcode_strstream.str().c_str(), (int) opcode_strstream.str().size());
+
+        // modrm/sib+displacement
+        std::stringstream modrm_strstream;
+        if (disassembled.flags & F_MODRM)
+            modrm_strstream << (disassembled.modrm < 0x10 ? "0": "")
+                    << std::hex << ((unsigned int) disassembled.modrm);
+        if (disassembled.flags & F_SIB)
+            modrm_strstream << "-" << (disassembled.sib < 0x10 ? "0" : "")
+                    << std::hex << ((unsigned int) disassembled.sib) << "-";
+        if (disassembled.flags & F_DISP8)
+            modrm_strstream << "-" << (disassembled.disp.disp8 < 0x10 ? "0" : "")
+                    << std::hex << ((unsigned int) disassembled.disp.disp8);
+        else if (disassembled.flags & F_DISP16)
+            modrm_strstream << "-" << (disassembled.disp.disp16 < 0x10 ? "0" : "")
+                    << std::hex << ((unsigned int) disassembled.disp.disp16);
+        else if (disassembled.flags & F_DISP32)
+            modrm_strstream << "-" << (disassembled.disp.disp32 < 0x10 ? "0" : "")
+                    << std::hex << ((unsigned int) disassembled.disp.disp32);
+        modrm_strstream << (char) 0x00;
+
+        char *modrm = (char *) malloc(modrm_strstream.str().size());
+        strncpy(modrm, modrm_strstream.str().c_str(), (int) modrm_strstream.str().size());
+        unsigned int immediate_size = 0;
+
+        // immediate
+        std::stringstream immediate_strstream;
+        if (disassembled.flags & F_IMM8)
+        {
+            immediate_size = 8;
+            immediate_strstream << (disassembled.imm.imm8 < 0x10 ? "0" : "")
+                    << std::hex << ((unsigned int) disassembled.imm.imm8);
+        }
+        else if (disassembled.flags & F_IMM16)
+        {
+            immediate_size = 16;
+            immediate_strstream << (disassembled.imm.imm16 < 0x10 ? "0" : "")
+                    << std::hex << ((unsigned int) disassembled.imm.imm16);
+        }
+        else if (disassembled.flags & F_IMM32)
+        {
+            immediate_size = 32;
+            immediate_strstream << (disassembled.imm.imm32 < 0x10 ? "0" : "")
+                    << std::hex << ((unsigned int) disassembled.imm.imm32);
+        }
+        else if (disassembled.flags & F_IMM64)
+        {
+            immediate_size = 64;
+            immediate_strstream << (disassembled.imm.imm64 < 0x10 ? "0" : "")
+                    << std::hex << ((unsigned int) disassembled.imm.imm64);
+        }
+        immediate_strstream << (char) 0x00;
+        char *immediate = (char *) malloc(immediate_strstream.str().size());
+        strncpy(immediate, immediate_strstream.str().c_str(), (int) immediate_strstream.str().size());
+
+
+        // log instruction
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL
+        std::stringstream output;
+        output << std::hex << variant->regs.rip << ";";
+        output << "true;";
+        output << prefixes << ";";
+        output << opcode << ";";
+        output << modrm << ";";
+        output << immediate << ";";
+        output << immediate_size << ";";
+        for (unsigned int i = 0; i < instruction_size; i++)
+            output << (instruction[i] < 0x10 ? "0" : "") << std::hex << ((unsigned int) instruction[i] & 0xff)
+                    << (i == instruction_size - 1 ? ";" : "-");
+        output << std::hex << address << ";";
+        output << (relevant_monitor.memory_table[record->memory_id].file ?
+                relevant_monitor.memory_table[record->memory_id].file : "unknown") << ";";
+        fprintf(mvee::instruction_log, "%s\n", output.str().c_str());
+
+        free(prefixes);
+        free(opcode);
+        free(modrm);
+        free(immediate);
+#else
+        char *result_file = (char *) malloc(strlen(relevant_monitor.memory_table[record->memory_id].file) + 1);
+        strncpy(result_file, relevant_monitor.memory_table[record->memory_id].file,
+                strlen(relevant_monitor.memory_table[record->memory_id].file) + 1);
+
+
+        tracing_data_t **data = &variant->result;
+        while (*data != nullptr) {
+            if (strcmp((*data)->opcode, opcode) == 0)
+                break;
+            data = &(*data)->next;
+        }
+
+        if (*data == nullptr) {
+            *data = (tracing_data_t *) malloc(sizeof(tracing_data_t));
+            (*data)->opcode = opcode;
+            (*data)->prefixes =
+            {
+                    prefixes, 1, nullptr
+            };
+            (*data)->modrm =
+            {
+                    modrm, 1, nullptr
+            };
+            (*data)->immediate =
+            {
+                    immediate, immediate_size, 1, nullptr
+            };
+            (*data)->hits = 1;
+            (*data)->files_accessed = {
+                    result_file, 1, nullptr
+            };
+            (*data)->next = nullptr;
+        }
         else
         {
-            files->next = (tracing_data::files*) malloc(sizeof(tracing_data::files));
-            files->next->file = result_file;
-            files->next->hits = 1;
-            files->next->next = nullptr;
+            (*data)->hits++;
+
+            // prefix data
+            tracing_data_t::prefixes_t * prefixes_data = &(*data)->prefixes;
+            bool already_prefixed = false;
+            do {
+                if (strcmp(prefixes_data->prefixes, prefixes) == 0) {
+                    already_prefixed = true;
+                    break;
+                }
+                if (prefixes_data->next == nullptr)
+                    break;
+                prefixes_data = prefixes_data->next;
+            } while (true);
+
+            if (already_prefixed)
+                prefixes_data->hits++;
+            else {
+                prefixes_data->next = (tracing_data_t::prefixes_t *) malloc(sizeof(tracing_data_t::prefixes_t));
+                prefixes_data->next->prefixes = prefixes;
+                prefixes_data->next->hits = 1;
+                prefixes_data->next->next = nullptr;
+            }
+
+            // modrm data
+            tracing_data_t::modrm_t * modrm_data = &(*data)->modrm;
+            bool modrm_already_used = false;
+            do {
+                if (strcmp(modrm_data->modrm, modrm) == 0) {
+                    modrm_already_used = true;
+                    break;
+                }
+                if (modrm_data->next == nullptr)
+                    break;
+                modrm_data = modrm_data->next;
+            } while (true);
+
+            if (modrm_already_used)
+                modrm_data->hits++;
+            else {
+                modrm_data->next = (tracing_data_t::modrm_t *) malloc(sizeof(tracing_data_t::modrm_t));
+                modrm_data->next->modrm = modrm;
+                modrm_data->next->hits = 1;
+                modrm_data->next->next = nullptr;
+            }
+
+            // immediate data
+            tracing_data_t::immediate_t * immediate_data = &(*data)->immediate;
+            bool already_used = false;
+            do {
+                if (strcmp(immediate_data->immediate, immediate) == 0 && immediate_data->size == immediate_size) {
+                    already_used = true;
+                    break;
+                }
+                if (immediate_data->next == nullptr)
+                    break;
+                immediate_data = immediate_data->next;
+            } while (true);
+
+            if (already_used)
+                immediate_data->hits++;
+            else {
+                immediate_data->next = (tracing_data_t::immediate_t *) malloc(sizeof(tracing_data_t::immediate_t));
+                immediate_data->next->immediate = immediate;
+                immediate_data->next->hits = 1;
+                immediate_data->size = immediate_size;
+                immediate_data->next->next = nullptr;
+            }
+
+            // file access data
+            tracing_data_t::files_t *files = &(*data)->files_accessed;
+            bool already_accessed = false;
+            do {
+                if (strcmp(files->file, result_file) == 0) {
+                    already_accessed = true;
+                    break;
+                }
+                if (files->next == nullptr)
+                    break;
+                files = files->next;
+            } while (files->next != nullptr);
+
+            if (already_accessed)
+                files->hits++;
+            else {
+                files->next = (tracing_data_t::files_t *) malloc(sizeof(tracing_data_t::files_t));
+                files->next->file = result_file;
+                files->next->hits = 1;
+                files->next->next = nullptr;
+            }
         }
-    }
 #endif
+    }
     // -----------------------------------------------------------------------------------------------------------------
 
 

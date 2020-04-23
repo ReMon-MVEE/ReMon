@@ -297,5 +297,6 @@ endif()
 target_compile_definitions(mvee PRIVATE
         MVEE_EMULATE_SHARED_MEMORY
         MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+        #MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL
 )
 # ======================================================================================================================
