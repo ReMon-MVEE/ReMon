@@ -265,14 +265,8 @@ public:
     instruction_intent
                   instruction;
     int           variant_num;
-    shared_mem_translation_table
-                  translation_table;
 #ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
     void*         syscall_pointer;
-    void*         shared_base;
-    unsigned int  shared_size;
-    tracing_data_t* result;
-    tracing_lost_t* lost;
 #endif
     // -----------------------------------------------------------------------------------------------------------------
 
@@ -291,6 +285,7 @@ class monitor
     friend class instruction_intent_emulation;
     friend class instruction_intent;
     friend class intent_replay_buffer;
+
 #ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
     friend class instruction_tracing;
 #endif
@@ -920,7 +915,9 @@ private:
 	//
 	// Logs the instruction trace in json format, should only be called when running an instruction trace.
 	//
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
     void log_instruction_trace           ();
+#endif
 
 	//
 	// Logs a stack trace for variant @variantnum
@@ -1158,11 +1155,15 @@ private:
 	std::stringstream mismatch_info;                          // cached mismatch info
 
     // shared memory ===================================================================================================
-    int             map_shared_mapping                              ();
-    int             log_shared_instruction                          (variantstate* variant, void* address);
-
-    memory_mapping_table              memory_table;
     intent_replay_buffer              replay_buffer;
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+    tracing_data_t*                   instruction_log_result;
+    tracing_lost_t*                   instruction_log_lost;
+    //
+    // Used to log instructions to when building shared memory access traces
+    //
+    FILE*                             instruction_log;
+#endif
     // shared memory ===================================================================================================
 };
 

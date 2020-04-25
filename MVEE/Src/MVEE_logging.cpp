@@ -42,10 +42,6 @@ FILE*             mvee::lockstats_logfile    = nullptr;
 double            mvee::startup_time         = 0.0;
 pthread_mutex_t   mvee::loglock              = PTHREAD_MUTEX_INITIALIZER;
 
-#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
-FILE*             mvee::instruction_log      = nullptr;
-#endif
-
 /*-----------------------------------------------------------------------------
     cache_mismatch_info
 -----------------------------------------------------------------------------*/
@@ -403,6 +399,19 @@ void monitor::log_init()
     if (!monitor_log)
         perror("Failed to open local logfile");
 #endif
+
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+  #ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING_FILE
+    #define MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING_FILE "./Logs/instruction_trace"
+  #endif
+    std::stringstream logfile;
+    logfile << MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING_FILE << monitorid << ".log";
+    instruction_log = fopen64(logfile.str().c_str(), "w");
+    if (instruction_log == nullptr)
+        warnf("could not open instruction loggin file @ %s\n", logfile.str().c_str());
+    else
+        debugf("instruction logging file opened @ %s\n", logfile.str().c_str());
+#endif
 }
 
 /*-----------------------------------------------------------------------------
@@ -415,169 +424,157 @@ void monitor::log_fini()
         fclose(monitor_log);
     monitor_log = NULL;
 #endif
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+#ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL
+    log_instruction_trace();
+#endif
+    if (instruction_log)
+        fclose(instruction_log);
+#endif
 }
 
 /*-----------------------------------------------------------------------------
 
 -----------------------------------------------------------------------------*/
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
 void monitor::log_instruction_trace()
 {
-    fprintf(mvee::instruction_log, "[\n");
+    fprintf(instruction_log, "[\n");
 
-    tracing_data_t* data = variants[0].result;
-    tracing_data_t* temp_data;
-    tracing_data_t::files_t* temp_files;
-    tracing_data_t::prefixes_t* temp_prefixes;
-    tracing_data_t::modrm_t* temp_modrm;
-    tracing_data_t::immediate_t* temp_immediate;
+    tracing_data_t* data = instruction_log_result;
 
     while (data != nullptr)
     {
-        fprintf(mvee::instruction_log, "\t{\n");
-        fprintf(mvee::instruction_log, "\t\t\"type\": \"decoded\",\n");
-        fprintf(mvee::instruction_log, "\t\t\"instruction\": \"%s\",\n", data->opcode);
-        fprintf(mvee::instruction_log, "\t\t\"hits\": \"%d\",\n", data->hits);
+        fprintf(instruction_log, "\t{\n");
+        fprintf(instruction_log, "\t\t\"type\": \"decoded\",\n");
+        fprintf(instruction_log, "\t\t\"instruction\": \"%s\",\n", data->opcode);
+        fprintf(instruction_log, "\t\t\"hits\": \"%d\",\n", data->hits);
 
 
-        fprintf(mvee::instruction_log, "\t\t\"prefixes used\": [\n");
+        fprintf(instruction_log, "\t\t\"prefixes used\": [\n");
 
-        fprintf(mvee::instruction_log, "\t\t\t{\n");
-        fprintf(mvee::instruction_log, "\t\t\t\t\"prefixes\": \"%s\",\n", data->prefixes.prefixes);
-        fprintf(mvee::instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", data->prefixes.hits);
-        fprintf(mvee::instruction_log, "\t\t\t},\n");
+        fprintf(instruction_log, "\t\t\t{\n");
+        fprintf(instruction_log, "\t\t\t\t\"prefixes\": \"%s\",\n", data->prefixes.prefixes);
+        fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", data->prefixes.hits);
+        fprintf(instruction_log, "\t\t\t},\n");
         tracing_data_t::prefixes_t *prefixes = data->prefixes.next;
         while (prefixes != nullptr)
         {
-            fprintf(mvee::instruction_log, "\t\t\t{\n");
-            fprintf(mvee::instruction_log, "\t\t\t\t\"prefixes\": \"%s\",\n", prefixes->prefixes);
-            fprintf(mvee::instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", prefixes->hits);
-            fprintf(mvee::instruction_log, "\t\t\t},\n");
+            fprintf(instruction_log, "\t\t\t{\n");
+            fprintf(instruction_log, "\t\t\t\t\"prefixes\": \"%s\",\n", prefixes->prefixes);
+            fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", prefixes->hits);
+            fprintf(instruction_log, "\t\t\t},\n");
 
-            temp_prefixes = prefixes;
             prefixes = prefixes->next;
-            free(temp_prefixes);
         }
 
-        fprintf(mvee::instruction_log, "\t\t],\n");
+        fprintf(instruction_log, "\t\t],\n");
 
 
-        fprintf(mvee::instruction_log, "\t\t\"modrm used\": [\n");
+        fprintf(instruction_log, "\t\t\"modrm used\": [\n");
 
-        fprintf(mvee::instruction_log, "\t\t\t{\n");
-        fprintf(mvee::instruction_log, "\t\t\t\t\"modrm\": \"%s\",\n", data->modrm.modrm);
-        fprintf(mvee::instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", data->modrm.hits);
-        fprintf(mvee::instruction_log, "\t\t\t},\n");
+        fprintf(instruction_log, "\t\t\t{\n");
+        fprintf(instruction_log, "\t\t\t\t\"modrm\": \"%s\",\n", data->modrm.modrm);
+        fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", data->modrm.hits);
+        fprintf(instruction_log, "\t\t\t},\n");
         tracing_data_t::modrm_t* modrm = data->modrm.next;
         while (modrm != nullptr)
         {
-            fprintf(mvee::instruction_log, "\t\t\t{\n");
-            fprintf(mvee::instruction_log, "\t\t\t\t\"modrm\": \"%s\",\n", modrm->modrm);
-            fprintf(mvee::instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", modrm->hits);
-            fprintf(mvee::instruction_log, "\t\t\t},\n");
+            fprintf(instruction_log, "\t\t\t{\n");
+            fprintf(instruction_log, "\t\t\t\t\"modrm\": \"%s\",\n", modrm->modrm);
+            fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", modrm->hits);
+            fprintf(instruction_log, "\t\t\t},\n");
 
-            temp_modrm = modrm;
             modrm = modrm->next;
-            free(temp_modrm);
         }
 
-        fprintf(mvee::instruction_log, "\t\t],\n");
+        fprintf(instruction_log, "\t\t],\n");
 
 
-        fprintf(mvee::instruction_log, "\t\t\"immediate used\": [\n");
+        fprintf(instruction_log, "\t\t\"immediate used\": [\n");
 
-        fprintf(mvee::instruction_log, "\t\t\t{\n");
-        fprintf(mvee::instruction_log, "\t\t\t\"immediate\": \"%s\",\n", data->immediate.immediate);
-        fprintf(mvee::instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", data->immediate.hits);
-        fprintf(mvee::instruction_log, "\t\t\t\t\"size\": \"%d\",\n", data->immediate.size);
-        fprintf(mvee::instruction_log, "\t\t\t},\n");
+        fprintf(instruction_log, "\t\t\t{\n");
+        fprintf(instruction_log, "\t\t\t\"immediate\": \"%s\",\n", data->immediate.immediate);
+        fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", data->immediate.hits);
+        fprintf(instruction_log, "\t\t\t\t\"size\": \"%d\",\n", data->immediate.size);
+        fprintf(instruction_log, "\t\t\t},\n");
         tracing_data_t::immediate_t* immediate = data->immediate.next;
         while (immediate != nullptr)
         {
-            fprintf(mvee::instruction_log, "\t\t\t{\n");
-            fprintf(mvee::instruction_log, "\t\t\t\t\"immediate\": \"%s\",\n", immediate->immediate);
-            fprintf(mvee::instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", immediate->hits);
-            fprintf(mvee::instruction_log, "\t\t\t\t\"size\": \"%d\",\n", immediate->size);
-            fprintf(mvee::instruction_log, "\t\t\t},\n");
+            fprintf(instruction_log, "\t\t\t{\n");
+            fprintf(instruction_log, "\t\t\t\t\"immediate\": \"%s\",\n", immediate->immediate);
+            fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", immediate->hits);
+            fprintf(instruction_log, "\t\t\t\t\"size\": \"%d\",\n", immediate->size);
+            fprintf(instruction_log, "\t\t\t},\n");
 
-            temp_immediate = immediate;
             immediate = immediate->next;
-            free(temp_immediate);
         }
 
-        fprintf(mvee::instruction_log, "\t\t],\n");
+        fprintf(instruction_log, "\t\t],\n");
 
 
-        fprintf(mvee::instruction_log, "\t\t\"files accessed\": [\n");
+        fprintf(instruction_log, "\t\t\"files accessed\": [\n");
 
-        fprintf(mvee::instruction_log, "\t\t\t{\n");
-        fprintf(mvee::instruction_log, "\t\t\t\t\"file\": \"%s\",\n", data->files_accessed.file);
-        fprintf(mvee::instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", data->files_accessed.hits);
-        fprintf(mvee::instruction_log, "\t\t\t},\n");
+        fprintf(instruction_log, "\t\t\t{\n");
+        fprintf(instruction_log, "\t\t\t\t\"file\": \"%s\",\n", data->files_accessed.file);
+        fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", data->files_accessed.hits);
+        fprintf(instruction_log, "\t\t\t},\n");
         tracing_data_t::files_t *files = data->files_accessed.next;
         while (files != nullptr)
         {
-            fprintf(mvee::instruction_log, "\t\t\t{\n");
-            fprintf(mvee::instruction_log, "\t\t\t\t\"file\": \"%s\",\n", files->file);
-            fprintf(mvee::instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", files->hits);
-            fprintf(mvee::instruction_log, "\t\t\t},\n");
+            fprintf(instruction_log, "\t\t\t{\n");
+            fprintf(instruction_log, "\t\t\t\t\"file\": \"%s\",\n", files->file);
+            fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", files->hits);
+            fprintf(instruction_log, "\t\t\t},\n");
 
-            temp_files = files;
             files = files->next;
-            free(temp_files);
         }
 
-        fprintf(mvee::instruction_log, "\t\t]\n");
+        fprintf(instruction_log, "\t\t]\n");
 
-        temp_data = data;
         data = data->next;
-        free(temp_data);
-        fprintf(mvee::instruction_log, "\t},\n");
+        fprintf(instruction_log, "\t},\n");
     }
 
 
-    tracing_lost_t* lost = variants[0].lost;
-    tracing_lost_t* temp_lost;
-    tracing_lost_t::files_t* temp_lost_files;
+    tracing_lost_t* lost = instruction_log_lost;
     while (lost != nullptr)
     {
-        fprintf(mvee::instruction_log, "\t{\n");
-        fprintf(mvee::instruction_log, "\t\t\"type\": \"lost\",\n");
-        fprintf(mvee::instruction_log, "\t\t\"instruction\": \"%s\",\n", lost->instruction);
-        fprintf(mvee::instruction_log, "\t\t\"hits\": \"%d\",\n", lost->hits);
+        fprintf(instruction_log, "\t{\n");
+        fprintf(instruction_log, "\t\t\"type\": \"lost\",\n");
+        fprintf(instruction_log, "\t\t\"instruction\": \"%s\",\n", lost->instruction);
+        fprintf(instruction_log, "\t\t\"hits\": \"%d\",\n", lost->hits);
 
 
-        fprintf(mvee::instruction_log, "\t\t\"files accessed\": [\n");
+        fprintf(instruction_log, "\t\t\"files accessed\": [\n");
 
-        fprintf(mvee::instruction_log, "\t\t\t{\n");
-        fprintf(mvee::instruction_log, "\t\t\t\t\"file\": \"%s\",\n", lost->files_accessed.file);
-        fprintf(mvee::instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", lost->files_accessed.hits);
-        fprintf(mvee::instruction_log, "\t\t\t},\n");
+        fprintf(instruction_log, "\t\t\t{\n");
+        fprintf(instruction_log, "\t\t\t\t\"file\": \"%s\",\n", lost->files_accessed.file);
+        fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", lost->files_accessed.hits);
+        fprintf(instruction_log, "\t\t\t},\n");
         tracing_lost_t::files_t *files = lost->files_accessed.next;
         while (files != nullptr)
         {
-            fprintf(mvee::instruction_log, "\t\t\t{\n");
-            fprintf(mvee::instruction_log, "\t\t\t\t\"file\": \"%s\",\n", files->file);
-            fprintf(mvee::instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", files->hits);
-            fprintf(mvee::instruction_log, "\t\t\t},\n");
+            fprintf(instruction_log, "\t\t\t{\n");
+            fprintf(instruction_log, "\t\t\t\t\"file\": \"%s\",\n", files->file);
+            fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", files->hits);
+            fprintf(instruction_log, "\t\t\t},\n");
 
-            temp_lost_files = files;
             files = files->next;
-            free(temp_lost_files);
         }
 
-        fprintf(mvee::instruction_log, "\t\t]\n");
+        fprintf(instruction_log, "\t\t]\n");
 
 
-        temp_lost = lost;
         lost = lost->next;
-        free(temp_lost);
-        fprintf(mvee::instruction_log, "\t},\n");
+        fprintf(instruction_log, "\t},\n");
     }
 
-    fprintf(mvee::instruction_log, "]\n");
+    fprintf(instruction_log, "]\n");
 
-    fflush(mvee::instruction_log);
+    fflush(instruction_log);
 }
+#endif
 
 /*-----------------------------------------------------------------------------
   log_caller_info
@@ -1489,19 +1486,6 @@ void mvee::log_init()
     if (mvee::lockstats_logfile == NULL)
         perror("Failed to open lockstats log");
 #endif
-
-#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
-  #ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING_FILE
-    #define MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING_FILE "./Logs/instruction_trace.log"
-  #endif
-    mvee::instruction_log = fopen64(MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING_FILE, "w");
-    if (mvee::instruction_log == nullptr)
-        perror("could not open instruction trace log");
-  #ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL
-    fprintf(mvee::instruction_log, "instruction pointer;decoded;prefixes;opcode;modrm;immediate;immediate size;instruction;address accessed;backing file\n");
-  #endif
-    printf("instruction tracing log opened at %s\n", MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING_FILE);
-#endif
 }
 
 /*-----------------------------------------------------------------------------
@@ -1538,11 +1522,6 @@ void mvee::log_fini(bool terminated)
 #ifdef MVEE_GENERATE_LOCKSTATS
     if (mvee::lockstats_logfile)
         fclose(mvee::lockstats_logfile);
-#endif
-
-#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
-    if(mvee::instruction_log)
-        fclose(mvee::instruction_log);
 #endif
 }
 

@@ -8,6 +8,7 @@
 #include <ios>
 #include <MVEE.h>
 #include <MVEE_monitor.h>
+#include <MVEE_mman.h>
 #include <sys/mman.h>
 #include <arch/amd64/hde.h>
 #include "shared_mem_reg_access.h"
@@ -108,32 +109,36 @@ int             instruction_intent::determine_monitor_pointer       (monitor& re
                                                                      void* variant_address, void** monitor_pointer)
 {
     // translate variant address to monitor address
-    translation_record* translation = variant->translation_table[variant_address];
-    if (!translation)
+    mmap_region_info* variant_map_info = relevant_monitor.set_mmap_table->get_shared_info(variant->variant_num,
+            (unsigned long long) variant_address);
+    if (!variant_map_info)
     {
         warnf("variant %d address %lx does not have an associated monitor mapping\n",
               variant->variant_num, (unsigned long) variant_address);
         return -1;
     }
 
-    monitor_mapping monitor_effective_mapping = relevant_monitor.memory_table[translation->memory_id];
-    if (monitor_effective_mapping.base_addr == nullptr)
+    shared_monitor_map_info* monitor_map_info = variant_map_info->shadow;
+    if (!monitor_map_info || monitor_map_info->shadow_base == nullptr)
     {
-        warnf("variant %d address %lx maps to monitor mapping with id %lu, which points to null...\n",
-              variant->variant_num, (unsigned long)variant_address, translation->memory_id);
+        warnf("variant %d address %lx maps to monitor mapping that points to null or none at all...\n",
+              variant->variant_num, (unsigned long)variant_address);
         return -1;
     }
 
-    if (variant_address >= translation->variant_end || variant_address < translation->variant_base)
+    if ((unsigned long long) variant_address >=
+            (variant_map_info->region_base_address + variant_map_info->region_size) ||
+            (unsigned long long) variant_address < variant_map_info->region_base_address)
     {
-        warnf("No offset could be calculated.\n");
+        warnf("No offset can be calculated.\n");
         warnf("Variant effective address 0x%p does not fall between mapping in variant: [0x%p, 0x%p).\n",
-              variant_address, translation->variant_base, translation->variant_end);
+              variant_address, (void*) variant_map_info->region_base_address,
+              (void*) (variant_map_info->region_base_address + variant_map_info->region_size));
         return -1;
     }
 
-    unsigned long long offset = (unsigned long long) variant_address - (unsigned long long) translation->variant_base;
-    *monitor_pointer = (void*) ((unsigned long long) monitor_effective_mapping.base_addr + offset);
+    unsigned long long offset = (unsigned long long) variant_address - variant_map_info->region_base_address;
+    *monitor_pointer = (void*) ((unsigned long long) monitor_map_info->shadow_base + offset);
 
     // return ok
     return 0;
@@ -254,227 +259,6 @@ void instruction_intent::debug_print_minimal                        ()
     else
         debug_print();
 #endif
-}
-
-
-// =====================================================================================================================
-// translation table
-// =====================================================================================================================
-
-// map init and destruction ============================================================================================
-                shared_mem_translation_table::shared_mem_translation_table
-                                                                    (): table()
-{
-}
-
-
-                shared_mem_translation_table::~shared_mem_translation_table
-                                                                    () = default;
-
-
-// map updating ========================================================================================================
-int             shared_mem_translation_table::add_record            (void *variant_base, void *variant_end,
-                                                                     unsigned long memory_id)
-{
-    // insert before any other mapping
-    if (this->table.empty() || variant_end <= this->table.front().variant_base)
-    {
-        this->table.insert(this->table.begin(), {variant_base, variant_end, memory_id});
-        return 0;
-    }
-
-
-    for (auto iterator = this->table.begin(); iterator != table.end(); iterator++)
-    {
-        if (variant_end <= (*(iterator+1)).variant_base)
-        {
-            if (variant_base >= (*iterator).variant_end)
-            {
-                this->table.insert(iterator+1, {variant_base, variant_end, memory_id});
-                return 0;
-            }
-            else
-                return -1;
-        }
-    }
-
-    // insert at end
-    if (variant_base >= this->table.back().variant_end)
-    {
-        this->table.insert(this->table.end(), {variant_base, variant_end, memory_id});
-        return 0;
-    }
-    return -1;
-}
-
-
-int             shared_mem_translation_table::remove_record         (void *variant_base)
-{
-    for (auto iterator = this->table.begin(); iterator != table.end(); iterator++)
-    {
-        if ((*iterator).variant_base == variant_base)
-        {
-            this->table.erase(iterator);
-            return 0;
-        }
-    }
-
-    return -1;
-}
-
-
-// table access ========================================================================================================
-translation_record*
-                shared_mem_translation_table::operator[]            (void *variant_address)
-{
-    for (auto iterator = this->table.begin(); iterator != table.end(); iterator++)
-    {
-        if (variant_address >= (*iterator).variant_base)
-        {
-            if (variant_address >= (*iterator).variant_end)
-                return nullptr;
-            else
-                return &(*iterator);
-        }
-    }
-
-    return nullptr;
-}
-
-
-// debug ===============================================================================================================
-void            shared_mem_translation_table::debug_log             ()
-{
-#ifdef JNS_DEBUG
-    debugf("\ttranslation table:\n");
-    for (auto & iterator : this->table)
-        debugf("\t\t%lu\t| %llx > %llx\n", iterator.memory_id, (unsigned long long) iterator.variant_base,
-               (unsigned long long) iterator.variant_end);
-#endif
-}
-
-
-// =====================================================================================================================
-//      monitor mapping table
-// =====================================================================================================================
-
-// construction and destruction ========================================================================================
-                memory_mapping_table::memory_mapping_table          () : monitor_addresses(),
-                                                                         free_ids()
-{
-
-}
-
-                memory_mapping_table::~memory_mapping_table         () = default;
-
-
-// updating ============================================================================================================
-#ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
-unsigned long   memory_mapping_table::add                           (void *monitor_base, size_t size)
-{
-    unsigned long memory_id;
-    if (!free_ids.empty())
-    {
-        memory_id = this->free_ids.front();
-        this->free_ids.erase(this->free_ids.begin());
-
-        this->monitor_addresses[memory_id] = {monitor_base, size};
-    }
-    else
-    {
-        memory_id = this->monitor_addresses.size();
-        this->monitor_addresses.push_back({monitor_base, size});
-    }
-
-    return memory_id;
-}
-#else
-unsigned long   memory_mapping_table::add                           (void *monitor_base, size_t size,
-                                                                     const std::string &file)
-{
-    unsigned long memory_id;
-    if (!free_ids.empty())
-    {
-        memory_id = this->free_ids.front();
-        this->free_ids.erase(this->free_ids.begin());
-
-        char* file_pointer = (char*) malloc(file.size() + 1);
-        strncpy(file_pointer, file.c_str(), file.size());
-        file_pointer[file.size()] = 0x00;
-        this->monitor_addresses[memory_id] = { monitor_base, size, file_pointer };
-    }
-    else
-    {
-        memory_id = this->monitor_addresses.size();
-
-        char* file_pointer = (char*) malloc(file.size() + 1);
-        strncpy(file_pointer, file.c_str(), file.size());
-        file_pointer[file.size()] = 0x00;
-        this->monitor_addresses.push_back({monitor_base, size, file_pointer });
-    }
-
-    return memory_id;
-}
-#endif
-
-int             memory_mapping_table::remove                        (void *monitor_base)
-{
-    for (unsigned long id = 0; id < this->monitor_addresses.size(); id++)
-    {
-        if (this->monitor_addresses[id].base_addr == monitor_base)
-        {
-#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
-            monitor_mapping mapping = *this->monitor_addresses.erase(this->monitor_addresses.begin() + id);
-            free((void*) mapping.file);
-#else
-            this->monitor_addresses.erase(this->monitor_addresses.begin() + id);
-#endif
-
-            this->insert_free_id(id);
-            return 0;
-        }
-    }
-
-    return -1;
-}
-
-
-int             memory_mapping_table::remove                        (unsigned long memory_id)
-{
-    if (memory_id >= this->monitor_addresses.size())
-        return -1;
-
-    this->monitor_addresses.erase(this->monitor_addresses.begin() + memory_id);
-    this->insert_free_id(memory_id);
-
-    return 0;
-}
-
-
-// access ==============================================================================================================
-monitor_mapping memory_mapping_table::operator[]                    (unsigned long index)
-{
-    if (index >= this->monitor_addresses.size())
-        return {nullptr, 0, nullptr};
-
-    return this->monitor_addresses[index];
-}
-
-
-// private functions ===================================================================================================
-void            memory_mapping_table::insert_free_id                (unsigned long free_id)
-{
-    if (free_id > this->free_ids.back())
-        this->free_ids.insert(this->free_ids.end(), free_id);
-    else
-    {
-        for (auto iterator = this->free_ids.begin(); iterator != this->free_ids.end(); iterator++) {
-            if (*iterator < free_id) {
-                this->free_ids.insert(iterator, free_id);
-                break;
-            }
-        }
-    }
 }
 
 
@@ -620,6 +404,194 @@ int             intent_replay_buffer::access_data                   (unsigned in
 
 
 // =====================================================================================================================
+//      shadow maintenance
+// =====================================================================================================================
+int             mmap_table::shadow_map                              (const char* file, int access_flags,
+                                                                     shared_monitor_map_info** shadow, size_t size,
+                                                                     int protection, int flags, int offset)
+{
+    if (file == nullptr)
+        warnf("\n\n\tBIG OOPSIE\n\n");
+    debugf("opening shadow mapping for %s\n", file);
+
+    // open file
+    int fd = open(file, access_flags & ~(O_TRUNC | O_CREAT));
+    if (fd < 0)
+    {
+        warnf("could not open file %s to open shared mapping... | error %d\n", file, errno);
+#ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+        // we won't be using this anyway
+        return -1;
+#endif
+    }
+
+    // map shadow
+    errno = 0;
+    void* temp_shadow = mmap(nullptr, size, protection, flags, fd, offset);
+    if (temp_shadow == MAP_FAILED)
+    {
+        warnf("\tsize:       %zu\n", size);
+        warnf("\tprotection: %d\n", protection);
+        warnf("\tflags:      %d\n", flags);
+        warnf("\tfd:         %d\n", fd);
+        warnf("\toffset:     %d\n", offset);
+        warnf("could not map shared file %s | error %d\n", file, errno);
+#ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+        // we won't be using this anyway
+        close(fd);
+        return -1;
+#endif
+    }
+
+    close(fd);
+
+    // bookkeeping
+    unsigned int backing_size = strlen(file);
+    char* backing = (char*) malloc(backing_size + 1);
+    strncpy(backing, file, backing_size);
+    backing[backing_size] = 0x00;
+    *shadow = (shared_monitor_map_info*) malloc((sizeof(shared_monitor_map_info)));
+    **shadow = {
+        temp_shadow, size, protection, flags, backing, access_flags, offset, 1
+    };
+    monitor_mappings.push_back(*shadow);
+
+    // return ok
+    return 0;
+}
+
+
+int             mmap_table::insert_variant_shared_region            (int variant, mmap_region_info* region)
+{
+    unsigned long long end = region->region_base_address + region->region_size;
+
+    if (variant_mappings[variant].empty() || end <= variant_mappings[variant].front()->region_base_address)
+    {
+        variant_mappings[variant].insert(variant_mappings[variant].begin(), region);
+        return 0;
+    }
+
+    for (auto iter = variant_mappings[variant].begin(); iter != variant_mappings[variant].end(); iter++)
+    {
+        if (((*iter)->region_base_address + (*iter)->region_size) <= region->region_base_address&&
+                (*(iter + 1))->region_base_address >= end)
+        {
+            variant_mappings[variant].insert(iter + 1, region);
+            return 0;
+        }
+    }
+
+    if (region->region_base_address >= (variant_mappings[variant].back()->region_base_address) +
+                                               variant_mappings[variant].back()->region_size)
+    {
+        variant_mappings[variant].insert(variant_mappings[variant].end(), region);
+        return 0;
+    }
+
+    return -1;
+}
+
+
+mmap_region_info*
+                mmap_table::get_shared_info                         (int variant, unsigned long long address)
+{
+    for (auto &iter: variant_mappings[variant])
+    {
+        if (address >= iter->region_base_address && address < (iter->region_base_address + iter->region_size))
+            return iter;
+    }
+
+    return nullptr;
+}
+
+
+int             mmap_table::munmap_variant_shadow_region            (int variant, mmap_region_info* region_info)
+{
+    region_info->shadow->reference_count--;
+
+    if (region_info->shadow->reference_count == 0)
+    {
+        munmap(region_info->shadow->shadow_base, region_info->shadow->size);
+
+        int erased = -1;
+        for (unsigned int i = 0; i < monitor_mappings.size(); i++)
+        {
+            if (*(monitor_mappings.begin() + i) == region_info->shadow)
+            {
+                free((void*) region_info->shadow->backing);
+                free((void*) region_info->shadow);
+                monitor_mappings.erase(monitor_mappings.begin() + i);
+                erased = (int) i;
+                break;
+            }
+        }
+        if (erased < 0)
+            return -1;
+    }
+
+    for (unsigned int i = 0; i < variant_mappings[variant].size(); i++)
+    {
+        if (*(variant_mappings[variant].begin() + i) == region_info)
+        {
+            variant_mappings[variant].erase(variant_mappings[variant].begin() + i);
+            break;
+        }
+    }
+
+    region_info->shadow = nullptr;
+
+    return 0;
+}
+int             mmap_table::split_variant_shadow_region             (int variant, mmap_region_info* region_info)
+{
+    region_info->shadow->reference_count++;
+    return 0;
+}
+int             mmap_table::merge_variant_shadow_region             (int variant, mmap_region_info* region_info1,
+                                                                     mmap_region_info* region_info2)
+{
+    if (region_info1->shadow != region_info2->shadow)
+        return -1;
+
+    region_info1->shadow->reference_count--;
+
+    int to_erase = -1;
+    for (unsigned int i = 0; i < variant_mappings[variant].size(); i++)
+    {
+        if (*(variant_mappings[variant].begin() + i) == region_info2)
+        {
+            to_erase = (int) i;
+            variant_mappings[variant].erase(variant_mappings[variant].begin() + i);
+            break;
+        }
+    }
+
+    if (to_erase == -1)
+        return -1;
+
+    return 0;
+}
+
+
+void               mmap_table::debug_shared                         ()
+{
+    std::stringstream output;
+    output << "mappings:\n";
+    for (int i = 0; i < mvee::numvariants; i++)
+    {
+        output << "\tvariant " << i << ":\n";
+        for (auto iter: variant_mappings[i])
+            output << "[ " << iter->region_base_address << "; " << iter->region_base_address + iter->region_size
+                    << " )  -  " << iter->shadow->backing << "\n";
+    }
+    output << "\n";
+
+    warnf("%s\n", output.str().c_str());
+}
+
+
+
+// =====================================================================================================================
 //      instruction tracing
 // =====================================================================================================================
 #ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
@@ -640,10 +612,13 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
     unsigned int instruction_size = hde64_disasm(instruction, &disassembled);
 
     // get shared mem info
-    translation_record* record = variant->translation_table[address];
-    variant->shared_base = record->variant_base;
-    variant->shared_size = (unsigned int)
-            ((unsigned long long) record->variant_end - (unsigned long long) record->variant_base);
+    mmap_region_info* variant_map_info = relevant_monitor.set_mmap_table->get_shared_info(variant->variant_num,
+            (unsigned long long) address);
+    if (!variant_map_info)
+    {
+        warnf("Could not identify shared mapping...\n");
+        return -1;
+    }
 
 
     if (disassembled.flags & (F_ERROR | F_ERROR_OPCODE | F_ERROR_LENGTH | F_ERROR_LOCK | F_ERROR_OPERAND) ||
@@ -652,7 +627,7 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
         std::stringstream instruction_strstream;
         for (int i = 0; i < MAX_INSTRUCTION_SIZE; i++)
             instruction_strstream << (instruction[i] < 0x10 ? "0" : "") << std::hex <<
-                    ((unsigned int) instruction[i] & 0xff) << ((i == MAX_INSTRUCTION_SIZE - 1) ? "" : "-");
+                    ((unsigned int) instruction[i] & 0xffu) << ((i == MAX_INSTRUCTION_SIZE - 1) ? "" : "-");
         instruction_strstream << (char) 0x00;
 
         // log instruction
@@ -667,19 +642,16 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
         output << ";";
         output << instruction_strstream.str().c_str() << ";";
         output << std::hex << address << ";";
-        output << (relevant_monitor.memory_table[record->memory_id].file ?
-                   relevant_monitor.memory_table[record->memory_id].file : "unknown") << ";";
-        fprintf(mvee::instruction_log, "%s\n", output.str().c_str());
+        output << (variant_map_info->shadow ? variant_map_info->shadow->backing : "unknown") << ";";
+        fprintf(relevant_monitor.instruction_log, "%s\n", output.str().c_str());
 #else
-        warnf("General Kenobi\n\n");
-        char *result_file = (char *) malloc(strlen(relevant_monitor.memory_table[record->memory_id].file) + 1);
-        strncpy(result_file, relevant_monitor.memory_table[record->memory_id].file,
-                strlen(relevant_monitor.memory_table[record->memory_id].file) + 1);
+        char *result_file = (char *) malloc(strlen(variant_map_info->shadow->backing) + 1);
+        strncpy(result_file, variant_map_info->shadow->backing, strlen(variant_map_info->shadow->backing) + 1);
 
         char* instruction_identification = (char*) malloc(instruction_strstream.str().size());
         strncpy(instruction_identification, instruction_strstream.str().c_str(), instruction_strstream.str().size());
 
-        tracing_lost_t **lost = &variant->lost;
+        tracing_lost_t **lost = &relevant_monitor.instruction_log_lost;
         while (*lost != nullptr) {
             if (strcmp((*lost)->instruction, instruction_identification) == 0)
                 break;
@@ -831,21 +803,19 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
             output << (instruction[i] < 0x10 ? "0" : "") << std::hex << ((unsigned int) instruction[i] & 0xff)
                     << (i == instruction_size - 1 ? ";" : "-");
         output << std::hex << address << ";";
-        output << (relevant_monitor.memory_table[record->memory_id].file ?
-                relevant_monitor.memory_table[record->memory_id].file : "unknown") << ";";
-        fprintf(mvee::instruction_log, "%s\n", output.str().c_str());
+        output << (variant_map_info->shadow ? variant_map_info->shadow->backing : "unknown") << ";";
+        fprintf(relevant_monitor.instruction_log, "%s\n", output.str().c_str());
 
         free(prefixes);
         free(opcode);
         free(modrm);
         free(immediate);
 #else
-        char *result_file = (char *) malloc(strlen(relevant_monitor.memory_table[record->memory_id].file) + 1);
-        strncpy(result_file, relevant_monitor.memory_table[record->memory_id].file,
-                strlen(relevant_monitor.memory_table[record->memory_id].file) + 1);
+        char *result_file = (char *) malloc(strlen(variant_map_info->shadow->backing) + 1);
+        strncpy(result_file, variant_map_info->shadow->backing, strlen(variant_map_info->shadow->backing) + 1);
 
 
-        tracing_data_t **data = &variant->result;
+        tracing_data_t **data = &relevant_monitor.instruction_log_result;
         while (*data != nullptr) {
             if (strcmp((*data)->opcode, opcode) == 0)
                 break;
@@ -878,7 +848,7 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
             (*data)->hits++;
 
             // prefix data
-            tracing_data_t::prefixes_t * prefixes_data = &(*data)->prefixes;
+            tracing_data_t::prefixes_t* prefixes_data = &(*data)->prefixes;
             bool already_prefixed = false;
             do {
                 if (strcmp(prefixes_data->prefixes, prefixes) == 0) {
@@ -893,14 +863,14 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
             if (already_prefixed)
                 prefixes_data->hits++;
             else {
-                prefixes_data->next = (tracing_data_t::prefixes_t *) malloc(sizeof(tracing_data_t::prefixes_t));
+                prefixes_data->next = (tracing_data_t::prefixes_t*) malloc(sizeof(tracing_data_t::prefixes_t));
                 prefixes_data->next->prefixes = prefixes;
                 prefixes_data->next->hits = 1;
                 prefixes_data->next->next = nullptr;
             }
 
             // modrm data
-            tracing_data_t::modrm_t * modrm_data = &(*data)->modrm;
+            tracing_data_t::modrm_t* modrm_data = &(*data)->modrm;
             bool modrm_already_used = false;
             do {
                 if (strcmp(modrm_data->modrm, modrm) == 0) {
@@ -915,14 +885,14 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
             if (modrm_already_used)
                 modrm_data->hits++;
             else {
-                modrm_data->next = (tracing_data_t::modrm_t *) malloc(sizeof(tracing_data_t::modrm_t));
+                modrm_data->next = (tracing_data_t::modrm_t*) malloc(sizeof(tracing_data_t::modrm_t));
                 modrm_data->next->modrm = modrm;
                 modrm_data->next->hits = 1;
                 modrm_data->next->next = nullptr;
             }
 
             // immediate data
-            tracing_data_t::immediate_t * immediate_data = &(*data)->immediate;
+            tracing_data_t::immediate_t* immediate_data = &(*data)->immediate;
             bool already_used = false;
             do {
                 if (strcmp(immediate_data->immediate, immediate) == 0 && immediate_data->size == immediate_size) {
@@ -937,7 +907,7 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
             if (already_used)
                 immediate_data->hits++;
             else {
-                immediate_data->next = (tracing_data_t::immediate_t *) malloc(sizeof(tracing_data_t::immediate_t));
+                immediate_data->next = (tracing_data_t::immediate_t*) malloc(sizeof(tracing_data_t::immediate_t));
                 immediate_data->next->immediate = immediate;
                 immediate_data->next->hits = 1;
                 immediate_data->size = immediate_size;
@@ -945,7 +915,7 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
             }
 
             // file access data
-            tracing_data_t::files_t *files = &(*data)->files_accessed;
+            tracing_data_t::files_t* files = &(*data)->files_accessed;
             bool already_accessed = false;
             do {
                 if (strcmp(files->file, result_file) == 0) {
@@ -955,12 +925,12 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
                 if (files->next == nullptr)
                     break;
                 files = files->next;
-            } while (files->next != nullptr);
+            } while (true);
 
             if (already_accessed)
                 files->hits++;
             else {
-                files->next = (tracing_data_t::files_t *) malloc(sizeof(tracing_data_t::files_t));
+                files->next = (tracing_data_t::files_t*) malloc(sizeof(tracing_data_t::files_t));
                 files->next->file = result_file;
                 files->next->hits = 1;
                 files->next->next = nullptr;
@@ -977,13 +947,12 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
 
 
     // remove protection on mapping ------------------------------------------------------------------------------------
-
     // mprotect syscall to enable shared mapping
     temp_regs.orig_rax = __NR_mprotect;
     temp_regs.rax = __NR_mprotect;
-    temp_regs.rdi = (unsigned long long) variant->shared_base;
-    temp_regs.rsi = (unsigned long long) variant->shared_size;
-    temp_regs.rdx = PROT_READ | PROT_WRITE;
+    temp_regs.rdi = variant_map_info->region_base_address;
+    temp_regs.rsi = variant_map_info->region_size;
+    temp_regs.rdx = variant_map_info->region_prot_flags;
     temp_regs.rip = (unsigned long long) variant->syscall_pointer;
 
     if (!interaction::write_all_regs(variant->variantpid, &temp_regs))
@@ -1005,7 +974,13 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
         return -1;
     if (temp_regs.rax != 0)
     {
-        warnf("mprotect failed while enabling\n");
+        warnf("mprotect failed while enabling - %lld\n", temp_regs.rax);
+        warnf("address: %p\n", address);
+        warnf("protection: %d\n", variant_map_info->region_prot_flags);
+        warnf("base: %p\n", (void*) variant_map_info->region_base_address);
+
+        relevant_monitor.set_mmap_table->debug_shared();
+
         return -1;
     }
     // -----------------------------------------------------------------------------------------------------------------
@@ -1029,8 +1004,8 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
     temp_regs = variant->regs;
     temp_regs.orig_rax = __NR_mprotect;
     temp_regs.rax = __NR_mprotect;
-    temp_regs.rdi = (unsigned long long) variant->shared_base;
-    temp_regs.rsi = (unsigned long long) variant->shared_size;
+    temp_regs.rdi = variant_map_info->region_base_address;
+    temp_regs.rsi = variant_map_info->region_size;
     temp_regs.rdx = PROT_NONE;
     temp_regs.rip = (unsigned long long) variant->syscall_pointer;
 
@@ -1053,6 +1028,9 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
     if (temp_regs.rax != 0)
     {
         warnf("mprotect failed while disabling\n");
+        warnf("accessed: %p\n", address);
+        warnf("protection: %d\n", variant_map_info->region_prot_flags);
+        warnf("address: %p\n", (void*) variant_map_info->region_base_address);
         return -1;
     }
     // -----------------------------------------------------------------------------------------------------------------

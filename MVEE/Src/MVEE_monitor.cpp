@@ -89,10 +89,6 @@ variantstate::variantstate()
     , orig_controllen (0)
     , config (NULL)
     , instruction (&this->variantpid, &this->variant_num)
-#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
-    , result(nullptr)
-    , lost(nullptr)
-#endif
 #ifdef __NR_socketcall
     , orig_arg1 (0)
 #endif
@@ -204,12 +200,14 @@ void monitor::init()
 
     pthread_mutex_init(&monitor_lock, NULL);
     pthread_cond_init(&monitor_cond, NULL);
-
-    memory_table = memory_mapping_table();
 }
 
 monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap_table, bool shares_sighand_table, bool shares_tgid)
         : replay_buffer(this, mvee::numvariants)
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+        , instruction_log_result(nullptr)
+        , instruction_log_lost(nullptr)
+#endif
 {
     init();
 
@@ -236,6 +234,10 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
         init_variant(i, parent_monitor->variants[i].pendingpid,
 					 shares_tgid ? parent_monitor->variants[i].varianttgid : 
 					 parent_monitor->variants[i].pendingpid);
+
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+        variants[i].syscall_pointer = parent_monitor->variants[i].syscall_pointer;
+#endif
     }
 
     // variant monitors are a different story. New variants (forks/vforks/clones) always
@@ -250,6 +252,10 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
 
 monitor::monitor(std::vector<pid_t>& pids)
         : replay_buffer(this, mvee::numvariants)
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+        , instruction_log_result(nullptr)
+        , instruction_log_lost(nullptr)
+#endif
 {
     init();
 
@@ -277,6 +283,75 @@ monitor::monitor(std::vector<pid_t>& pids)
 monitor::~monitor()
 {
     replay_buffer.~intent_replay_buffer();
+
+
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+    tracing_data_t* temp_data;
+    tracing_data_t::prefixes_t* data_prefixes;
+    tracing_data_t::prefixes_t* temp_data_prefixes;
+    tracing_data_t::modrm_t* data_modrm;
+    tracing_data_t::modrm_t* temp_data_modrm;
+    tracing_data_t::immediate_t* data_immediate;
+    tracing_data_t::immediate_t* temp_data_immediate;
+    tracing_data_t::files_t* data_files;
+    tracing_data_t::files_t* temp_data_files;
+
+    while (instruction_log_result)
+    {
+        data_prefixes = instruction_log_result->prefixes.next;
+        do {
+            temp_data_prefixes = data_prefixes;
+            data_prefixes = data_prefixes->next;
+            free(temp_data_prefixes);
+        } while (data_prefixes);
+
+        data_modrm = instruction_log_result->modrm.next;
+        do {
+            temp_data_modrm = data_modrm;
+            data_modrm = data_modrm->next;
+            free(temp_data_modrm);
+        } while (data_modrm);
+
+        data_immediate = instruction_log_result->immediate.next;
+        do {
+            temp_data_immediate = data_immediate;
+            data_immediate = data_immediate->next;
+            free(temp_data_immediate);
+        } while (data_immediate);
+
+        data_files = instruction_log_result->files_accessed.next;
+        do {
+            temp_data_files = data_files;
+            data_files = data_files->next;
+            free(temp_data_files);
+        } while (data_files);
+
+
+        temp_data = instruction_log_result;
+        instruction_log_result = instruction_log_result->next;
+        free(temp_data);
+    }
+
+
+    tracing_lost_t* temp_lost;
+    tracing_lost_t::files_t* lost_files;
+    tracing_lost_t::files_t* temp_lost_files;
+
+    while (instruction_log_lost)
+    {
+        lost_files = instruction_log_lost->files_accessed.next;
+        do {
+            temp_lost_files = lost_files;
+            lost_files = lost_files->next;
+            free(temp_lost_files);
+        } while (lost_files);
+
+
+        temp_lost = instruction_log_lost;
+        instruction_log_lost = instruction_log_lost->next;
+        free(temp_lost);
+    }
+#endif
 }
 
 int monitor::get_master_core()
@@ -931,11 +1006,6 @@ nobacktrace:
     }
 
     // Successful return. Unregister the monitor from all mappings
-#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
-#ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL
-    log_instruction_trace();
-#endif
-#endif
     log_fini();
     mvee::unregister_monitor(this, !have_running_variants);
 
@@ -2183,8 +2253,8 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                 // update the intent for the faulting variant
                 instruction_intent* instruction = &variant->instruction;
                 instruction->update((void*) variant->regs.rip, siginfo.si_addr);
-                if (variantnum == 0)
-                    instruction->debug_print_minimal();
+                // if (variantnum == 0)
+                //     instruction->debug_print_minimal();
 
 
                 int result;
@@ -2236,15 +2306,17 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
 				   call_get_variant_pidstr(variantnum).c_str(), caller_info.c_str());
 			if (caller_info.find("mvee_log_stack at") != std::string::npos)
 				skip_segv = true;
+#endif
 
 			// check for cpuid exception
+#ifdef MVEE_EMULATE_CPUID
 			instruction_intent instruction(&variants[variantnum].variantpid, &variants[variantnum].variant_num);
 			if (instruction.update((void*) variant->regs.rip) == 0 &&
 			        instruction[0] == 0x0f && instruction[1] == 0xa2)
             {
 			    if (instruction_intent_emulation::lookup_table[instruction[1]].emulator(instruction, *this, variant))
                 {
-			        warnf("something went wrong handling cpuid");
+			        warnf("something went wrong emulating cpuid");
 			        signal_shutdown();
                     return;
                 }
@@ -2256,6 +2328,7 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                 return;
             }
 #endif
+
 			if (caller_info.find("rb_xcheck at") != std::string::npos)
 			{
 				warnf("%s - Failed ring buffer cross-check\n",
@@ -3362,65 +3435,3 @@ void* monitor::thread(void* param)
     mon->shutdown(true);
     return NULL;
 }
-
-
-// shared memory =======================================================================================================
-
-int             monitor::map_shared_mapping                                 ()
-{
-    // get fd info on file being mapped
-    fd_info* info = this->set_fd_table->get_fd_info(ARG5(0), 0);
-    if (!info)
-    {
-        warnf("no associated file descriptor found for shared mapping\n");
-        this->signal_shutdown();
-        return -1;
-    }
-    warnf("opening shared mapping for file %s\n", info->paths[0].c_str());
-
-    // open file that is currently being mapped
-    // open as read and write for now
-    int fd = open(info->paths[0].c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-    if (fd < 0)
-    {
-        warnf("could not open file %s to open shared mapping... | error %d\n", info->paths[0].c_str(), errno);
-        return -1;
-    }
-
-    // truncate to size
-    if (ftruncate(fd, ARG2(0)))
-    {
-        warnf("problem truncating file for shared mapping\n");
-        return -1;
-    }
-
-    // open actual mapping
-    errno = 0;
-    void* mapping = mmap(nullptr, ARG2(0), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (mapping == MAP_FAILED)
-    {
-        warnf("could not map shared file %s | error %d\n", info->paths[0].c_str(), errno);
-        return -1;
-    }
-
-    // add to relevant data structures
-    warnf("adding mapping to monitor table at %p of size %llu\n", mapping, ARG2(0));
-#ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
-    unsigned long memory_id = this->memory_table.add(mapping, ARG2(0));
-#else
-    unsigned long memory_id = this->memory_table.add(mapping, ARG2(0), info->paths[0]);
-#endif
-    for (int variant_num = 0; variant_num < mvee::numvariants; variant_num++)
-    {
-        this->variants[variant_num].translation_table.add_record((void*) this->variants[variant_num].last_mmap_result,
-                (void*) (this->variants[variant_num].last_mmap_result + ARG2(0)), memory_id);
-    }
-
-    for (int variant_num = 0; variant_num < mvee::numvariants; variant_num++)
-    {
-        this->variants[variant_num].translation_table.debug_log();
-    }
-
-    return 0;
-}
-// shared memory =======================================================================================================

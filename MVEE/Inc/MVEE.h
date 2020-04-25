@@ -584,14 +584,6 @@ public:
 	// control from the main MVEE process to the primary monitor thread.
 	//
     volatile static unsigned long   can_run;
-
-
-#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
-    //
-    // Used to log instructions to when building shared memory access traces
-    //
-    static FILE*                                instruction_log;
-#endif
 private:
 
 	// *************************************************************************
