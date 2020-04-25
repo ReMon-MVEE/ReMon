@@ -117,6 +117,22 @@ public:
 	void reset();
 };
 
+
+//
+// Info about shared regions
+//
+struct shared_monitor_map_info
+{
+    void*       shadow_base;
+    size_t      size;
+    int         protection;
+    int         flags;
+    const char* backing;
+    int         backing_access;
+    int         offset;
+    int         reference_count;
+};
+
 //
 // Info about an mmap'ed region
 //
@@ -147,6 +163,12 @@ public:
     bool          region_is_so;               // set to true if the backing file of this region is a shared library
 
     //
+    // Shared memory shadow
+    //
+    shared_monitor_map_info*
+                  shadow;
+
+    //
     // Debugging/Backtracing support
     //
     void                 print_region_info          (const char* log_prefix, void (*logfunc)(const char* format, ...)=NULL);
@@ -157,7 +179,8 @@ public:
     //
     // Constructor
     //
-    mmap_region_info(int variantnum, unsigned long address, unsigned long size, unsigned int prot_flags, fd_info* backing_file, unsigned int backing_file_offset, unsigned int map_flags);
+    mmap_region_info(int variantnum, unsigned long address, unsigned long size, unsigned int prot_flags,
+            fd_info* backing_file, unsigned int backing_file_offset, unsigned int map_flags);
 
 private:
     std::shared_ptr<mmap_addr2line_proc>
@@ -278,7 +301,10 @@ public:
     bool        mprotect_range              (int variantnum, unsigned long base, unsigned long size, unsigned int new_prot_flags);
     static bool mman_munmap_range_callback  (mmap_table* table, mmap_region_info* region_info, void* callback_param);
     bool        munmap_range                (int variantnum, unsigned long base, unsigned long size);
-    bool        map_range                   (int variantnum, unsigned long address, unsigned long size, unsigned int map_flags, unsigned int prot_flags, fd_info* region_backing_file, unsigned int region_backing_file_offset);
+    bool        map_range                   (int variantnum, unsigned long address, unsigned long size,
+                                             unsigned int map_flags, unsigned int prot_flags,
+                                             fd_info* region_backing_file, unsigned int region_backing_file_offset,
+                                             shared_monitor_map_info* shadow = nullptr);
 	unsigned long find_image_base           (int variantnum, std::string image_name);
 
     //
@@ -327,6 +353,21 @@ public:
     void release_lock                ();
     void full_release_lock           ();
 
+    //
+    // Shared memory
+    //
+    int                shadow_map                   (const char* file, int access_flags,
+                                                     shared_monitor_map_info** shadow, size_t size,
+                                                     int protection, int flags, int offset);
+    int                insert_variant_shared_region (int variant, mmap_region_info* region);
+    mmap_region_info*  get_shared_info              (int variant, unsigned long long address);
+    int                munmap_variant_shadow_region (int variant, mmap_region_info* region_info);
+    int                split_variant_shadow_region  (int variant, mmap_region_info* region_info);
+    int                merge_variant_shadow_region  (int variant, mmap_region_info* region_info1,
+                                                     mmap_region_info* region_info2);
+    void               debug_shared                 ();
+
+
 private:
     void init();
     pthread_mutex_t mmap_lock;
@@ -343,6 +384,10 @@ private:
     std::map<std::string,
              std::map<std::string, unsigned long> >
                     cached_syms;                      // maps libname -> symbol name -> symbol offset within lib
+    std::vector<shared_monitor_map_info*>
+                    monitor_mappings;
+    std::vector<std::vector<mmap_region_info*>>
+                    variant_mappings;
 };
 
 #endif /* MVEE_MMAN_H_INCLUDED */

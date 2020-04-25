@@ -393,11 +393,13 @@ long monitor::handle_check_open_call(const std::string& full_path, int flags, in
         cache_mismatch_info("The program is trying to do direct rendering (open(%s)). This call has been denied.\n", full_path.c_str());
         return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
     }
+#ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
     else if (full_path.find("/dev/nvidia") == 0)
 	{
 		warnf("refusing nvidia diver request\n");
 		return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
 	}
+#endif
 	else
     {
         //
@@ -2772,9 +2774,9 @@ PRECALL(ioctl)
         default:
 		{
 			// TODO: Remove this. temporary whitelist of nvidia ioctls
-			// fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0));
-			// if (fd_info->path.find("nvidia") != std::string::npos)
-			//	break;
+			fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0));
+			if (fd_info->paths[0].find("nvidia") != std::string::npos)
+				break;
             warnf("unknown ioctl: %u (0x%08x)\n", 
 				  (unsigned int)ARG2(0), 
 				  (unsigned int)ARG2(0));
@@ -6981,7 +6983,11 @@ PRECALL(mmap)
     // only relevant for read and/or write shared mappings
     if (ARG3(0) & (PROT_READ | PROT_WRITE) && ARG4(0) & MAP_SHARED)
     {
-        unsigned long long flags = (ARG4(0) & ~((unsigned) MAP_SHARED)) | MAP_PRIVATE;
+        unsigned long long flags = ARG4(0);
+#ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+        flags &= ~MAP_SHARED;
+        flags |= | MAP_PRIVATE;
+#endif
         for (int variant_num = 0; variant_num < mvee::numvariants; variant_num++)
         {
             // remove shared mapping option from flags for all variants, making each mapping private
@@ -7214,25 +7220,6 @@ POSTCALL(mmap)
 		for (int i = 0; i < mvee::numvariants; ++i)
 			variants[i].last_mmap_result = results[i];
 
-        // shared memory ===============================================================================================
-#ifdef MVEE_EMULATE_SHARED_MEMORY
-        // map in monitor space as well
-        if (ARG5(0) &&
-            (int) ARG5(0) != -1 &&
-            (ARG3(0) & (PROT_READ | PROT_WRITE)) &&
-            (ARG4(0) & MAP_SHARED))
-        {
-            if (reinterpret_cast<void *>(variants[variantnum].last_mmap_result) == MAP_FAILED)
-            {
-                warnf("mmap failed...\n");
-                signal_shutdown();
-                return 0;
-            }
-            this->map_shared_mapping();
-        }
-#endif
-        // shared memory ===============================================================================================
-
         if (ARG5(0) && (int)ARG5(0) != -1)
 		{
 			info = set_fd_table->get_fd_info(ARG5(0));
@@ -7274,6 +7261,20 @@ POSTCALL(mmap)
 			}
 		}
 
+#ifdef MVEE_EMULATE_SHARED_MEMORY
+        shared_monitor_map_info* shadow = nullptr;
+        if (ARG3(0) & (PROT_READ | PROT_WRITE) && ARG4(0) & MAP_SHARED)
+        {
+            if (set_mmap_table->shadow_map(info->paths[0].c_str(), info->access_flags, &shadow,
+                                           ARG2(0), ARG3(0), ARG4(0), ARG6(0)) < 0)
+            {
+                warnf("could not create shadow mapping...\n");
+                shutdown(false);
+                return 0;
+            }
+        }
+#endif
+
 		for (int i = 0; i < mvee::numvariants; ++i)
 		{
 			unsigned int actual_offset = ARG6(0);
@@ -7281,7 +7282,7 @@ POSTCALL(mmap)
 			if (variants[0].prevcallnum == __NR_mmap2)
 				actual_offset *= 4096;
 #endif
-			set_mmap_table->map_range(i, results[i], ARG2(0), ARG4(0), ARG3(0), info, actual_offset);
+			set_mmap_table->map_range(i, results[i], ARG2(0), ARG4(0), ARG3(0), info, actual_offset, shadow);
 		}
 
 		//
@@ -9357,7 +9358,7 @@ CALL(openat)
 	// flag stripping iteration below for each variant
 	// no aliases are created if the file is created in /dev/shm, this is a special shared memory exception
 	if (path_processed.find("/dev/shm") != 0 && call_do_alias_at<1, 2>())
-	{		
+	{
 		for (auto i = 0; i < mvee::numvariants; ++i)
 		{
 			auto file = set_fd_table->get_full_path(i, variants[i].variantpid,

@@ -39,13 +39,25 @@ execute_process(
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/MVEE_LD_Loader
 )
 
+
 # generate syscall tables
 add_custom_target(syscall_tables
-        # TODO: Ideally this is turned into a (or several) add_custom_command with the generated headers as OUTPUT
-        # This way the script is not *always* invoked, but only if one of the dependencies changes..
+        DEPENDS ${CMAKE_SOURCE_DIR}/MVEE/Inc/arch/${ARCH}/MVEE_syscall_alias_locks.h
+                ${CMAKE_SOURCE_DIR}/MVEE/Inc/arch/${ARCH}/MVEE_syscall_handler_prototypes.h
+                ${CMAKE_SOURCE_DIR}/MVEE/Inc/arch/${ARCH}/MVEE_syscall_handler_table.h
+                ${CMAKE_SOURCE_DIR}/MVEE/Inc/arch/${ARCH}/MVEE_syscall_string_table.h
+                ${CMAKE_SOURCE_DIR}/MVEE/Inc/MVEE_numcalls.h
+        COMMENT "Generating syscall tables"
+)
+
+add_custom_command(
+        OUTPUT  ${CMAKE_SOURCE_DIR}/MVEE/Inc/arch/${ARCH}/MVEE_syscall_alias_locks.h
+                ${CMAKE_SOURCE_DIR}/MVEE/Inc/arch/${ARCH}/MVEE_syscall_handler_prototypes.h
+                ${CMAKE_SOURCE_DIR}/MVEE/Inc/arch/${ARCH}/MVEE_syscall_handler_table.h
+                ${CMAKE_SOURCE_DIR}/MVEE/Inc/arch/${ARCH}/MVEE_syscall_string_table.h
+                ${CMAKE_SOURCE_DIR}/MVEE/Inc/MVEE_numcalls.h
         COMMAND ${CMAKE_SOURCE_DIR}/build_scripts/generate_syscall_tables.rb
         DEPENDS ${CMAKE_SOURCE_DIR}/MVEE/Src/MVEE_syscalls_handlers.cpp ${UNISTD_HDR}
-        COMMENT "Generating syscall tables"
 )
 
 # compile the syncagent
@@ -293,8 +305,10 @@ else()
 endif()
 # ----------------------------------------------------------------------------------------------------------------------
 
+
 # compile definitions, uncomment to set or comment to unset
 target_compile_definitions(mvee PRIVATE
+        MVEE_EMULATE_CPUID
         MVEE_EMULATE_SHARED_MEMORY
         MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
         #MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL

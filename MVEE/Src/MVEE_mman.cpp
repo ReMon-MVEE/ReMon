@@ -51,7 +51,8 @@ mmap_region_info::mmap_region_info
     region_prot_flags(prot_flags),
     region_backing_file_offset(backing_file_offset),
     region_backing_file_unsynced(false),
-    region_is_so(false)
+    region_is_so(false),
+    shadow(nullptr)
 {
     region_map_flags = map_flags & ~(MAP_FIXED);
 
@@ -164,7 +165,9 @@ mmap_table::mmap_table()
 #endif
 	  thread_group_shutting_down(false),
 	  enlarged_initial_stacks(false),
-	  mmap_base(0)
+	  mmap_base(0),
+	  monitor_mappings(),
+	  variant_mappings()
 {
     init();
     full_map.resize(mvee::numvariants);
@@ -179,6 +182,8 @@ mmap_table::mmap_table()
 	mmap_base = distr(mt) * (HIGHEST_USERMODE_ADDRESS >> 8);
 //	warnf("mmap_base is 0x" PTRSTR "\n", mmap_base);
 
+    for (int i = 0; i < mvee::numvariants; i++)
+        variant_mappings.emplace_back();
 #ifdef MVEE_MMAN_DEBUG
     print_mmap_table(mvee::logf);
 #endif
@@ -202,14 +207,44 @@ mmap_table::mmap_table(const mmap_table& parent)
 
     full_map.resize(mvee::numvariants);
 
+    warnf("\n\n\t%zu - %zu\n\n", variant_mappings.size(), monitor_mappings.size());
+
+    struct translation_record
+    {
+        shared_monitor_map_info* from;
+        shared_monitor_map_info* to;
+    };
+    std::vector<translation_record> translation;
+
+    for (auto iter: parent.monitor_mappings)
+    {
+        shared_monitor_map_info* temp;
+        warnf("\n\nhit");
+        shadow_map(iter->backing, iter->backing_access, &temp, iter->size, iter->protection, iter->flags,
+                iter->offset);
+        translation.push_back({ iter, temp });
+    }
+
     for (int i = 0; i < mvee::numvariants; ++i)
     {
 		// copy memory map
-        std::set<mmap_region_info*>::iterator it = parent.full_map[i].begin();
-
-        for (; it != parent.full_map[i].end(); ++it)
+        for (auto it = parent.full_map[i].begin(); it != parent.full_map[i].end(); ++it)
         {
-            mmap_region_info* new_region = new mmap_region_info(**it);
+            auto new_region = new mmap_region_info(**it);
+
+            if (new_region->shadow)
+            {
+                for (auto iter: translation)
+                {
+                    if (iter.from == new_region->shadow)
+                    {
+                        new_region->shadow = iter.to;
+                        break;
+                    }
+                }
+                insert_variant_shared_region(i, new_region);
+            }
+
             full_map[i].insert(new_region);
         }
     }
@@ -386,6 +421,11 @@ mmap_region_info* mmap_table::merge_regions(int variantnum, mmap_region_info* re
 #ifdef MVEE_MMAN_DEBUG
             region1->print_region_info(">>> merged region: ");
 #endif
+
+            // update shadow reference count
+            if (region1->shadow && region2->shadow)
+                merge_variant_shadow_region(variantnum, region1, region2);
+
             if (!dont_touch_maps)
             {
                 it = full_map[variantnum].find(region2);
@@ -398,6 +438,7 @@ mmap_region_info* mmap_table::merge_regions(int variantnum, mmap_region_info* re
                 if (reinsert)
                     full_map[variantnum].insert(region1);
             }
+
 
             return region1;
         }
@@ -433,6 +474,10 @@ mmap_region_info* mmap_table::split_region(int variantnum, mmap_region_info* exi
         upper_region->region_backing_file_offset = lower_region->region_backing_file_offset + lower_region->region_size;
     full_map[variantnum].insert(lower_region);
     full_map[variantnum].insert(upper_region);
+
+    // another region is referencing this shadow
+    if (upper_region->shadow)
+        split_variant_shadow_region(variantnum, existing_region);
 
 #ifdef MVEE_MMAN_DEBUG
     lower_region->print_region_info(">>> lower split: ");
@@ -951,6 +996,10 @@ bool mmap_table::mman_munmap_range_callback(mmap_table* table, mmap_region_info*
         region_info = table->split_region(__munmap_variantnum, region_info, __munmap_base + __munmap_size);
     }
 
+    // shared memory?
+    if (region_info->shadow)
+        table->munmap_variant_shadow_region(__munmap_variantnum, region_info);
+
     // delete the region from the table
     std::set<mmap_region_info*, region_sort>::iterator it =
         table->full_map[(unsigned long)callback_param].find(region_info);
@@ -982,7 +1031,9 @@ bool mmap_table::munmap_range (int variantnum, unsigned long base, unsigned long
 
     Pass NULL as the region_backing_file if we're creating an anonymous region!
 -----------------------------------------------------------------------------*/
-bool mmap_table::map_range (int variantnum, unsigned long address, unsigned long size, unsigned int map_flags, unsigned int prot_flags, fd_info* region_backing_file, unsigned int region_backing_file_offset)
+bool mmap_table::map_range (int variantnum, unsigned long address, unsigned long size, unsigned int map_flags,
+                            unsigned int prot_flags, fd_info* region_backing_file,
+                            unsigned int region_backing_file_offset, shared_monitor_map_info* shadow)
 {
     address = ROUND_DOWN(address, 4096);
     size    = ROUND_UP(size, 4096);
@@ -992,13 +1043,26 @@ bool mmap_table::map_range (int variantnum, unsigned long address, unsigned long
 
     // now we can just create a new region without having to deal with
     // overlap scenarios
-    mmap_region_info* new_region = new mmap_region_info(variantnum, address, size, prot_flags, region_backing_file, region_backing_file_offset, map_flags);
+    mmap_region_info* new_region = new mmap_region_info(variantnum, address, size, prot_flags, region_backing_file,
+            region_backing_file_offset, map_flags);
+
+    if (shadow)
+    {
+        new_region->shadow = shadow;
+        if (insert_variant_shared_region(variantnum, new_region) < 0)
+        {
+            warnf("big oopsie! - [%p; %p)\n\n",
+                  (void*) new_region->region_base_address,
+                  (void*) (new_region->region_base_address + new_region->region_size));
+        }
+    }
 //    new_region->print_region_info("inserting region: ", mvee::warnf);
     if (!full_map[variantnum].insert(new_region).second)
     {
         delete new_region;
         warnf("failed to insert new region....\n");
     }
+
     return true;
 }
 
