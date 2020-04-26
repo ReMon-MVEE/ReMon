@@ -455,18 +455,18 @@ void monitor::log_instruction_trace()
 
         fprintf(instruction_log, "\t\t\t{\n");
         fprintf(instruction_log, "\t\t\t\t\"prefixes\": \"%s\",\n", data->prefixes.prefixes);
-        fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", data->prefixes.hits);
-        fprintf(instruction_log, "\t\t\t},\n");
+        fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\"\n", data->prefixes.hits);
         tracing_data_t::prefixes_t *prefixes = data->prefixes.next;
         while (prefixes != nullptr)
         {
+            fprintf(instruction_log, "\t\t\t},\n");
             fprintf(instruction_log, "\t\t\t{\n");
             fprintf(instruction_log, "\t\t\t\t\"prefixes\": \"%s\",\n", prefixes->prefixes);
-            fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", prefixes->hits);
-            fprintf(instruction_log, "\t\t\t},\n");
+            fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\"\n", prefixes->hits);
 
             prefixes = prefixes->next;
         }
+        fprintf(instruction_log, "\t\t\t}\n");
 
         fprintf(instruction_log, "\t\t],\n");
 
@@ -475,18 +475,18 @@ void monitor::log_instruction_trace()
 
         fprintf(instruction_log, "\t\t\t{\n");
         fprintf(instruction_log, "\t\t\t\t\"modrm\": \"%s\",\n", data->modrm.modrm);
-        fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", data->modrm.hits);
-        fprintf(instruction_log, "\t\t\t},\n");
+        fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\"\n", data->modrm.hits);
         tracing_data_t::modrm_t* modrm = data->modrm.next;
         while (modrm != nullptr)
         {
+            fprintf(instruction_log, "\t\t\t},\n");
             fprintf(instruction_log, "\t\t\t{\n");
             fprintf(instruction_log, "\t\t\t\t\"modrm\": \"%s\",\n", modrm->modrm);
-            fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", modrm->hits);
-            fprintf(instruction_log, "\t\t\t},\n");
+            fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\"\n", modrm->hits);
 
             modrm = modrm->next;
         }
+        fprintf(instruction_log, "\t\t\t}\n");
 
         fprintf(instruction_log, "\t\t],\n");
 
@@ -496,19 +496,19 @@ void monitor::log_instruction_trace()
         fprintf(instruction_log, "\t\t\t{\n");
         fprintf(instruction_log, "\t\t\t\"immediate\": \"%s\",\n", data->immediate.immediate);
         fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", data->immediate.hits);
-        fprintf(instruction_log, "\t\t\t\t\"size\": \"%d\",\n", data->immediate.size);
-        fprintf(instruction_log, "\t\t\t},\n");
+        fprintf(instruction_log, "\t\t\t\t\"size\": \"%d\"\n", data->immediate.size);
         tracing_data_t::immediate_t* immediate = data->immediate.next;
         while (immediate != nullptr)
         {
+            fprintf(instruction_log, "\t\t\t},\n");
             fprintf(instruction_log, "\t\t\t{\n");
             fprintf(instruction_log, "\t\t\t\t\"immediate\": \"%s\",\n", immediate->immediate);
             fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", immediate->hits);
-            fprintf(instruction_log, "\t\t\t\t\"size\": \"%d\",\n", immediate->size);
-            fprintf(instruction_log, "\t\t\t},\n");
+            fprintf(instruction_log, "\t\t\t\t\"size\": \"%d\"\n", immediate->size);
 
             immediate = immediate->next;
         }
+        fprintf(instruction_log, "\t\t\t}\n");
 
         fprintf(instruction_log, "\t\t],\n");
 
@@ -517,23 +517,26 @@ void monitor::log_instruction_trace()
 
         fprintf(instruction_log, "\t\t\t{\n");
         fprintf(instruction_log, "\t\t\t\t\"file\": \"%s\",\n", data->files_accessed.file);
-        fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", data->files_accessed.hits);
-        fprintf(instruction_log, "\t\t\t},\n");
+        fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\"\n", data->files_accessed.hits);
         tracing_data_t::files_t *files = data->files_accessed.next;
         while (files != nullptr)
         {
+            fprintf(instruction_log, "\t\t\t},\n");
             fprintf(instruction_log, "\t\t\t{\n");
             fprintf(instruction_log, "\t\t\t\t\"file\": \"%s\",\n", files->file);
-            fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", files->hits);
-            fprintf(instruction_log, "\t\t\t},\n");
+            fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\"\n", files->hits);
 
             files = files->next;
         }
+        fprintf(instruction_log, "\t\t\t}\n");
 
         fprintf(instruction_log, "\t\t]\n");
 
         data = data->next;
-        fprintf(instruction_log, "\t},\n");
+        if (data)
+            fprintf(instruction_log, "\t},\n");
+        else
+            fprintf(instruction_log, "\t}\n");
     }
 
 
@@ -550,24 +553,27 @@ void monitor::log_instruction_trace()
 
         fprintf(instruction_log, "\t\t\t{\n");
         fprintf(instruction_log, "\t\t\t\t\"file\": \"%s\",\n", lost->files_accessed.file);
-        fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", lost->files_accessed.hits);
-        fprintf(instruction_log, "\t\t\t},\n");
+        fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\"\n", lost->files_accessed.hits);
         tracing_lost_t::files_t *files = lost->files_accessed.next;
         while (files != nullptr)
         {
+            fprintf(instruction_log, "\t\t\t},\n");
             fprintf(instruction_log, "\t\t\t{\n");
             fprintf(instruction_log, "\t\t\t\t\"file\": \"%s\",\n", files->file);
-            fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", files->hits);
-            fprintf(instruction_log, "\t\t\t},\n");
+            fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\"\n", files->hits);
 
             files = files->next;
         }
+        fprintf(instruction_log, "\t\t\t}\n");
 
         fprintf(instruction_log, "\t\t]\n");
 
 
         lost = lost->next;
-        fprintf(instruction_log, "\t},\n");
+        if (lost)
+            fprintf(instruction_log, "\t},\n");
+        else
+            fprintf(instruction_log, "\t}\n");
     }
 
     fprintf(instruction_log, "]\n");
