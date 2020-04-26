@@ -393,13 +393,11 @@ long monitor::handle_check_open_call(const std::string& full_path, int flags, in
         cache_mismatch_info("The program is trying to do direct rendering (open(%s)). This call has been denied.\n", full_path.c_str());
         return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
     }
-#ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
     else if (full_path.find("/dev/nvidia") == 0)
 	{
 		warnf("refusing nvidia diver request\n");
 		return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
 	}
-#endif
 	else
     {
         //
@@ -2774,9 +2772,9 @@ PRECALL(ioctl)
         default:
 		{
 			// TODO: Remove this. temporary whitelist of nvidia ioctls
-			fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0));
-			if (fd_info->paths[0].find("nvidia") != std::string::npos)
-				break;
+			// fd_info* fd_info = set_fd_table->get_fd_info(ARG1(0));
+			// if (fd_info->paths[0].find("nvidia") != std::string::npos)
+			// 	break;
             warnf("unknown ioctl: %u (0x%08x)\n", 
 				  (unsigned int)ARG2(0), 
 				  (unsigned int)ARG2(0));
