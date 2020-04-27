@@ -23,6 +23,7 @@
 #include "MVEE_build_config.h"
 #include "MVEE_macros.h"
 #include <json/json.h>
+#include <arch/amd64/shared_mem/shared_mem_handling.h>
 
 /*-----------------------------------------------------------------------------
     Forward Declarations
@@ -78,6 +79,19 @@ public:
 class mvee
 {
 public:
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+    static tracing_data_t*                      instruction_log_result;
+    static tracing_lost_t*                      instruction_log_lost;
+    //
+    // Used to log instructions to when building shared memory access traces
+    //
+    static FILE*                                instruction_log;
+
+    static pthread_mutex_t                      tracing_lock;
+
+    static void         log_instruction_trace           ();
+    static void         tracing_cleanup                 ();
+#endif
 
     // *************************************************************************
     // Logging Functions - These are implemented in MVEE_logging.cpp

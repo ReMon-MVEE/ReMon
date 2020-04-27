@@ -1156,14 +1156,6 @@ private:
 
     // shared memory ===================================================================================================
     intent_replay_buffer              replay_buffer;
-#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
-    tracing_data_t*                   instruction_log_result;
-    tracing_lost_t*                   instruction_log_lost;
-    //
-    // Used to log instructions to when building shared memory access traces
-    //
-    FILE*                             instruction_log;
-#endif
     // shared memory ===================================================================================================
 };
 

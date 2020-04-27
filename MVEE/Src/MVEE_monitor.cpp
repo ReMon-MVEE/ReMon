@@ -204,10 +204,6 @@ void monitor::init()
 
 monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap_table, bool shares_sighand_table, bool shares_tgid)
         : replay_buffer(this, mvee::numvariants)
-#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
-        , instruction_log_result(nullptr)
-        , instruction_log_lost(nullptr)
-#endif
 {
     init();
 
@@ -252,10 +248,6 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
 
 monitor::monitor(std::vector<pid_t>& pids)
         : replay_buffer(this, mvee::numvariants)
-#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
-        , instruction_log_result(nullptr)
-        , instruction_log_lost(nullptr)
-#endif
 {
     init();
 
@@ -989,77 +981,6 @@ nobacktrace:
 
 
     replay_buffer.~intent_replay_buffer();
-
-    printf("reached\n");
-
-#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
-    tracing_data_t* temp_data;
-    tracing_data_t::prefixes_t* data_prefixes;
-    tracing_data_t::prefixes_t* temp_data_prefixes;
-    tracing_data_t::modrm_t* data_modrm;
-    tracing_data_t::modrm_t* temp_data_modrm;
-    tracing_data_t::immediate_t* data_immediate;
-    tracing_data_t::immediate_t* temp_data_immediate;
-    tracing_data_t::files_t* data_files;
-    tracing_data_t::files_t* temp_data_files;
-
-    while (instruction_log_result)
-    {
-        data_prefixes = instruction_log_result->prefixes.next;
-        do {
-            temp_data_prefixes = data_prefixes;
-            data_prefixes = data_prefixes->next;
-            free(temp_data_prefixes);
-        } while (data_prefixes);
-
-        data_modrm = instruction_log_result->modrm.next;
-        do {
-            temp_data_modrm = data_modrm;
-            data_modrm = data_modrm->next;
-            free(temp_data_modrm);
-        } while (data_modrm);
-
-        data_immediate = instruction_log_result->immediate.next;
-        do {
-            temp_data_immediate = data_immediate;
-            data_immediate = data_immediate->next;
-            free(temp_data_immediate);
-        } while (data_immediate);
-
-        data_files = instruction_log_result->files_accessed.next;
-        do {
-            temp_data_files = data_files;
-            data_files = data_files->next;
-            free(temp_data_files);
-        } while (data_files);
-
-
-        temp_data = instruction_log_result;
-        instruction_log_result = instruction_log_result->next;
-        free(temp_data);
-    }
-
-
-    tracing_lost_t* temp_lost;
-    tracing_lost_t::files_t* lost_files;
-    tracing_lost_t::files_t* temp_lost_files;
-
-    while (instruction_log_lost)
-    {
-        lost_files = instruction_log_lost->files_accessed.next;
-        do {
-            temp_lost_files = lost_files;
-            lost_files = lost_files->next;
-            free(temp_lost_files);
-        } while (lost_files);
-
-
-        temp_lost = instruction_log_lost;
-        instruction_log_lost = instruction_log_lost->next;
-        free(temp_lost);
-    }
-#endif
-    printf("dealloc done\n");
 
     return;
 }

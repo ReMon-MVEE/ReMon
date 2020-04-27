@@ -406,19 +406,28 @@ int             intent_replay_buffer::access_data                   (unsigned in
 // =====================================================================================================================
 //      shadow maintenance
 // =====================================================================================================================
-int             mmap_table::shadow_map                              (const char* file, int access_flags,
+int             mmap_table::shadow_map                              (const char* backing_file,
+                                                                     unsigned int backing_flags, FileType type,
                                                                      shared_monitor_map_info** shadow, size_t size,
                                                                      int protection, int flags, int offset)
 {
-    if (file == nullptr)
-        warnf("\n\n\tBIG OOPSIE\n\n");
-    debugf("opening shadow mapping for %s\n", file);
+    debugf("opening shadow mapping for %s\n", backing_file);
+    unsigned int backing_file_len = strlen(backing_file);
 
     // open file
-    int fd = open(file, access_flags & ~(O_TRUNC | O_CREAT));
+    int fd = -1;
+    if (type == FT_MEMFD)
+    {
+        unsigned int added = strlen("/memfd:");
+        if (added <= backing_file_len)
+            fd = memfd_create(backing_file + added, backing_flags & (MFD_HUGETLB | MFD_ALLOW_SEALING | MFD_CLOEXEC));
+        warnf("%s - %d\n", backing_file + added, backing_flags);
+    }
+    else
+        fd = open(backing_file, backing_flags & ~(O_TRUNC | O_CREAT));
     if (fd < 0)
     {
-        warnf("could not open file %s to open shared mapping... | error %d\n", file, errno);
+        warnf("could not open file %s to open shared mapping... | error %d\n", backing_file, errno);
 #ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
         // we won't be using this anyway
         return -1;
@@ -435,7 +444,8 @@ int             mmap_table::shadow_map                              (const char*
         warnf("\tflags:      %d\n", flags);
         warnf("\tfd:         %d\n", fd);
         warnf("\toffset:     %d\n", offset);
-        warnf("could not map shared file %s | error %d\n", file, errno);
+        warnf("could not map shared file %s | error %d\n", backing_file, errno);
+        temp_shadow = nullptr;
 #ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
         // we won't be using this anyway
         close(fd);
@@ -446,14 +456,10 @@ int             mmap_table::shadow_map                              (const char*
     close(fd);
 
     // bookkeeping
-    unsigned int backing_size = strlen(file);
-    char* backing = (char*) malloc(backing_size + 1);
-    strncpy(backing, file, backing_size);
-    backing[backing_size] = 0x00;
+    char* backing = (char*) malloc(backing_file_len + 1);
+    strncpy(backing, backing_file, backing_file_len + 1);
     *shadow = (shared_monitor_map_info*) malloc((sizeof(shared_monitor_map_info)));
-    **shadow = {
-        temp_shadow, size, protection, flags, backing, access_flags, offset, 1
-    };
+    **shadow = { temp_shadow, size, 1, type };
     monitor_mappings.push_back(*shadow);
 
     // return ok
@@ -471,7 +477,7 @@ int             mmap_table::insert_variant_shared_region            (int variant
         return 0;
     }
 
-    for (auto iter = variant_mappings[variant].begin(); iter != variant_mappings[variant].end(); iter++)
+    for (auto iter = variant_mappings[variant].begin(); iter != (variant_mappings[variant].end() - 1); iter++)
     {
         if (((*iter)->region_base_address + (*iter)->region_size) <= region->region_base_address&&
                 (*(iter + 1))->region_base_address >= end)
@@ -518,7 +524,6 @@ int             mmap_table::munmap_variant_shadow_region            (int variant
         {
             if (*(monitor_mappings.begin() + i) == region_info->shadow)
             {
-                free((void*) region_info->shadow->backing);
                 free((void*) region_info->shadow);
                 monitor_mappings.erase(monitor_mappings.begin() + i);
                 erased = (int) i;
@@ -582,7 +587,7 @@ void               mmap_table::debug_shared                         ()
         output << "\tvariant " << i << ":\n";
         for (auto iter: variant_mappings[i])
             output << "[ " << iter->region_base_address << "; " << iter->region_base_address + iter->region_size
-                    << " )  -  " << iter->shadow->backing << "\n";
+                    << " )  -  " << iter->region_backing_file_path.c_str() << "\n";
     }
     output << "\n";
 
@@ -642,16 +647,23 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
         output << ";";
         output << instruction_strstream.str().c_str() << ";";
         output << std::hex << address << ";";
-        output << (variant_map_info->shadow ? variant_map_info->shadow->backing : "unknown") << ";";
-        fprintf(relevant_monitor.instruction_log, "%s\n", output.str().c_str());
+        output << relevant_monitor.monitorid << ";";
+        output << variant_map_info->region_backing_file_path << ";";
+        output << (variant_map_info->shadow->shadow_base == nullptr ? "not shadowed" : "shadowed") << ";";
+
+        pthread_mutex_lock(&mvee::tracing_lock);
+        fprintf(mvee::instruction_log, "%s\n", output.str().c_str());
+        pthread_mutex_unlock(&mvee::tracing_lock);
 #else
-        char *result_file = (char *) malloc(strlen(variant_map_info->shadow->backing) + 1);
-        strncpy(result_file, variant_map_info->shadow->backing, strlen(variant_map_info->shadow->backing) + 1);
+        unsigned int result_file_len = variant_map_info->region_backing_file_path.size() + 1;
+        char *result_file = (char*) malloc(result_file_len);
+        strncpy(result_file, variant_map_info->region_backing_file_path.c_str(), result_file_len);
 
         char* instruction_identification = (char*) malloc(instruction_strstream.str().size());
         strncpy(instruction_identification, instruction_strstream.str().c_str(), instruction_strstream.str().size());
 
-        tracing_lost_t **lost = &relevant_monitor.instruction_log_lost;
+        pthread_mutex_lock(&mvee::tracing_lock);
+        tracing_lost_t **lost = &mvee::instruction_log_lost;
         while (*lost != nullptr) {
             if (strcmp((*lost)->instruction, instruction_identification) == 0)
                 break;
@@ -664,7 +676,13 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
             (*lost)->instruction = instruction_identification;
             (*lost)->hits = 1;
             (*lost)->next = nullptr;
-            (*lost)->files_accessed = { result_file, 1, nullptr };
+            (*lost)->files_accessed =
+            {
+                    result_file,
+                    1,
+                    variant_map_info->shadow->shadow_base == nullptr ? "not shadowed" : "shadowed",
+                    nullptr
+            };
         }
         else
         {
@@ -687,9 +705,11 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
                 files->next = (tracing_lost_t::files_t *) malloc(sizeof(tracing_lost_t::files_t));
                 files->next->file = result_file;
                 files->next->hits = 1;
+                files->next->shadowed = variant_map_info->shadow->shadow_base == nullptr ? "not shadowed" : "shadowed";
                 files->next->next = nullptr;
             }
         }
+        pthread_mutex_unlock(&mvee::tracing_lock);
 #endif
     }
     else
@@ -803,19 +823,26 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
             output << (instruction[i] < 0x10 ? "0" : "") << std::hex << ((unsigned int) instruction[i] & 0xff)
                     << (i == instruction_size - 1 ? ";" : "-");
         output << std::hex << address << ";";
-        output << (variant_map_info->shadow ? variant_map_info->shadow->backing : "unknown") << ";";
-        fprintf(relevant_monitor.instruction_log, "%s\n", output.str().c_str());
+        output << relevant_monitor.monitorid << ";";
+        output << variant_map_info->region_backing_file_path << ";";
+        output << (variant_map_info->shadow->shadow_base == nullptr ? "not shadowed" : "shadowed") << ";";
+
+        pthread_mutex_lock(&mvee::tracing_lock);
+        fprintf(mvee::instruction_log, "%s\n", output.str().c_str());
+        pthread_mutex_unlock(&mvee::tracing_lock);
 
         free(prefixes);
         free(opcode);
         free(modrm);
         free(immediate);
 #else
-        char *result_file = (char *) malloc(strlen(variant_map_info->shadow->backing) + 1);
-        strncpy(result_file, variant_map_info->shadow->backing, strlen(variant_map_info->shadow->backing) + 1);
+        unsigned int result_file_len = variant_map_info->region_backing_file_path.size() + 1;
+        char *result_file = (char *) malloc(result_file_len);
+        strncpy(result_file, variant_map_info->region_backing_file_path.c_str(), result_file_len);
 
 
-        tracing_data_t **data = &relevant_monitor.instruction_log_result;
+        pthread_mutex_lock(&mvee::tracing_lock);
+        tracing_data_t **data = &mvee::instruction_log_result;
         while (*data != nullptr) {
             if (strcmp((*data)->opcode, opcode) == 0)
                 break;
@@ -838,8 +865,12 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
                     immediate, immediate_size, 1, nullptr
             };
             (*data)->hits = 1;
-            (*data)->files_accessed = {
-                    result_file, 1, nullptr
+            (*data)->files_accessed =
+            {
+                    result_file,
+                    1,
+                    variant_map_info->shadow->shadow_base == nullptr ? "not shadowed" : "shadowed",
+                    nullptr
             };
             (*data)->next = nullptr;
         }
@@ -933,9 +964,11 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
                 files->next = (tracing_data_t::files_t*) malloc(sizeof(tracing_data_t::files_t));
                 files->next->file = result_file;
                 files->next->hits = 1;
+                files->next->shadowed = variant_map_info->shadow->shadow_base == nullptr ? "not shadowed" : "shadowed";
                 files->next->next = nullptr;
             }
         }
+        pthread_mutex_unlock(&mvee::tracing_lock);
 #endif
     }
     // -----------------------------------------------------------------------------------------------------------------

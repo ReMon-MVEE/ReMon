@@ -402,7 +402,7 @@ public:
     __uint8_t       opcode                              ();
 
     /* Obtain relevant opcode byte for this instruction. */
-    int             determine_monitor_pointer           (monitor& relevant_monitor, variantstate* variant,
+    static int      determine_monitor_pointer           (monitor& relevant_monitor, variantstate* variant,
                                                          void* variant_address, void** monitor_pointer);
     // -----------------------------------------------------------------------------------------------------------------
 
@@ -465,98 +465,6 @@ struct translation_record
 
     // index to actual memory area as mapped in monitor
     unsigned long   memory_id;
-};
-
-
-// =====================================================================================================================
-//      translation table
-// =====================================================================================================================
-class shared_mem_translation_table
-{
-private:
-    std::vector<translation_record>
-                    table;
-public:
-    // map init and destruction ----------------------------------------------------------------------------------------
-                shared_mem_translation_table                        ();
-
-
-                ~shared_mem_translation_table                       ();
-    // -----------------------------------------------------------------------------------------------------------------
-
-
-    // map updating ----------------------------------------------------------------------------------------------------
-    int         add_record                                          (void* variant_base, void* variant_end,
-                                                                     unsigned long memory_id);
-
-
-    int         remove_record                                       (void* variant_base);
-    // -----------------------------------------------------------------------------------------------------------------
-
-
-    // map access ------------------------------------------------------------------------------------------------------
-    translation_record*
-                operator[]                                          (void* variant_address);
-    // -----------------------------------------------------------------------------------------------------------------
-
-
-    // debug -----------------------------------------------------------------------------------------------------------
-    void        debug_log                                           ();
-    // -----------------------------------------------------------------------------------------------------------------
-};
-
-
-// =====================================================================================================================
-//      memory mapping struct
-// =====================================================================================================================
-struct monitor_mapping
-{
-    void*           base_addr;
-    size_t          size;
-#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
-    const char*    file;
-#endif
-};
-
-
-// =====================================================================================================================
-//      monitor mapping table\
-// =====================================================================================================================
-class memory_mapping_table
-{
-private:
-    std::vector<monitor_mapping>
-                    monitor_addresses;
-    std::vector<unsigned long>
-                    free_ids;
-
-
-    void        insert_free_id                                      (unsigned long free_id);
-public:
-    // construction and destruction ------------------------------------------------------------------------------------
-                memory_mapping_table                                ();
-
-                ~memory_mapping_table                               ();
-    // -----------------------------------------------------------------------------------------------------------------
-
-
-    //updating ---------------------------------------------------------------------------------------------------------
-#ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
-    unsigned long   add                                             (void* monitor_base, size_t size);
-#else
-    unsigned long   add                                             (void* monitor_base, size_t size,
-                                                                     const std::string &file);
-#endif
-
-    int             remove                                          (void* monitor_base);
-
-    int             remove                                          (unsigned long memory_id);
-    // -----------------------------------------------------------------------------------------------------------------
-
-
-    // access ----------------------------------------------------------------------------------------------------------
-    monitor_mapping operator[]                                      (unsigned long index);
-    // -----------------------------------------------------------------------------------------------------------------
 };
 
 
@@ -656,6 +564,7 @@ struct tracing_data_t
     {
         const char* file;
         unsigned int hits;
+        const char* shadowed;
         files_t* next;
     } files_accessed;
     tracing_data_t* next;
@@ -669,6 +578,7 @@ struct tracing_lost_t
     {
         const char* file;
         unsigned int hits;
+        const char* shadowed;
         files_t* next;
     } files_accessed;
     tracing_lost_t* next;

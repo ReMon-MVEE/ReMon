@@ -7263,8 +7263,8 @@ POSTCALL(mmap)
         shared_monitor_map_info* shadow = nullptr;
         if (ARG3(0) & (PROT_READ | PROT_WRITE) && ARG4(0) & MAP_SHARED)
         {
-            if (set_mmap_table->shadow_map(info->paths[0].c_str(), info->access_flags, &shadow,
-                                           ARG2(0), ARG3(0), ARG4(0), ARG6(0)) < 0)
+            if (set_mmap_table->shadow_map(info->paths[0].c_str(), info->access_flags, info->file_type, &shadow,
+                    ARG2(0), ARG3(0), ARG4(0), ARG6(0)) < 0)
             {
                 warnf("could not create shadow mapping...\n");
                 shutdown(false);

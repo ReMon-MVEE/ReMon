@@ -18,6 +18,7 @@ target_include_directories(${LD_LOADER_LONG_NAME} PRIVATE
 target_compile_definitions(${LD_LOADER_LONG_NAME} PRIVATE
     UNISTD_HDR=<${UNISTD_HDR}>
     MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+    MVEE_EMULATE_CPUID
 )
 target_compile_options(${LD_LOADER_LONG_NAME} PRIVATE
     -std=c99

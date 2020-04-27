@@ -2068,3 +2068,85 @@ int main(int argc, char *argv[])
 
     return 0;
 }
+
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+// =====================================================================================================================
+// static init
+// =====================================================================================================================
+pthread_mutex_t mvee::tracing_lock           = PTHREAD_MUTEX_INITIALIZER;
+tracing_data_t* mvee::instruction_log_result = nullptr;
+tracing_lost_t* mvee::instruction_log_lost   = nullptr;
+FILE*           mvee::instruction_log        = nullptr;
+
+void            mvee::tracing_cleanup                 ()
+{
+    tracing_data_t* temp_data;
+    tracing_data_t::prefixes_t* data_prefixes;
+    tracing_data_t::prefixes_t* temp_data_prefixes;
+    tracing_data_t::modrm_t* data_modrm;
+    tracing_data_t::modrm_t* temp_data_modrm;
+    tracing_data_t::immediate_t* data_immediate;
+    tracing_data_t::immediate_t* temp_data_immediate;
+    tracing_data_t::files_t* data_files;
+    tracing_data_t::files_t* temp_data_files;
+
+    while (instruction_log_result)
+    {
+        data_prefixes = instruction_log_result->prefixes.next;
+        while (data_prefixes) {
+            temp_data_prefixes = data_prefixes;
+            data_prefixes = data_prefixes->next;
+            free(temp_data_prefixes);
+        }
+
+        data_modrm = instruction_log_result->modrm.next;
+        while (data_modrm) {
+            temp_data_modrm = data_modrm;
+            data_modrm = data_modrm->next;
+            free(temp_data_modrm);
+        }
+
+        data_immediate = instruction_log_result->immediate.next;
+        while (data_immediate) {
+            temp_data_immediate = data_immediate;
+            data_immediate = data_immediate->next;
+            free(temp_data_immediate);
+        }
+
+        data_files = instruction_log_result->files_accessed.next;
+        while (data_files) {
+            temp_data_files = data_files;
+            data_files = data_files->next;
+            free(temp_data_files);
+        }
+
+
+        temp_data = instruction_log_result;
+        instruction_log_result = instruction_log_result->next;
+        free(temp_data);
+    }
+
+
+    tracing_lost_t* temp_lost;
+    tracing_lost_t::files_t* lost_files;
+    tracing_lost_t::files_t* temp_lost_files;
+
+    while (instruction_log_lost)
+    {
+        lost_files = instruction_log_lost->files_accessed.next;
+        while (lost_files) {
+            temp_lost_files = lost_files;
+            lost_files = lost_files->next;
+            free(temp_lost_files);
+        }
+
+
+        temp_lost = instruction_log_lost;
+        instruction_log_lost = instruction_log_lost->next;
+        free(temp_lost);
+    }
+
+    instruction_log_result = nullptr;
+    instruction_log_lost = nullptr;
+}
+#endif
