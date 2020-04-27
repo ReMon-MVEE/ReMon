@@ -493,8 +493,10 @@ void  mvee_write_stack_and_transfer()
 
 int main (int argc, char** argv, char** envp)
 {
+#ifdef MVEE_EMULATE_CPUID
     // disable CPUID execution for this process
     syscall(__NR_arch_prctl, ARCH_SET_CPUID, 0);
+#endif
 
     int           interp_fd = 0;
     struct stat   statbuf;

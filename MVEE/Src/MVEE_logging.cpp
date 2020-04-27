@@ -399,19 +399,6 @@ void monitor::log_init()
     if (!monitor_log)
         perror("Failed to open local logfile");
 #endif
-
-#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
-  #ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING_FILE
-    #define MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING_FILE "./Logs/instruction_trace"
-  #endif
-    std::stringstream logfile;
-    logfile << MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING_FILE << monitorid << ".log";
-    instruction_log = fopen64(logfile.str().c_str(), "w");
-    if (instruction_log == nullptr)
-        warnf("could not open instruction loggin file @ %s\n", logfile.str().c_str());
-    else
-        debugf("instruction logging file opened @ %s\n", logfile.str().c_str());
-#endif
 }
 
 /*-----------------------------------------------------------------------------
@@ -424,20 +411,13 @@ void monitor::log_fini()
         fclose(monitor_log);
     monitor_log = NULL;
 #endif
-#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
-#ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL
-    log_instruction_trace();
-#endif
-    if (instruction_log)
-        fclose(instruction_log);
-#endif
 }
 
 /*-----------------------------------------------------------------------------
 
 -----------------------------------------------------------------------------*/
 #ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
-void monitor::log_instruction_trace()
+void mvee::log_instruction_trace()
 {
     fprintf(instruction_log, "[\n");
 
@@ -518,6 +498,7 @@ void monitor::log_instruction_trace()
         fprintf(instruction_log, "\t\t\t{\n");
         fprintf(instruction_log, "\t\t\t\t\"file\": \"%s\",\n", data->files_accessed.file);
         fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\"\n", data->files_accessed.hits);
+        fprintf(instruction_log, "\t\t\t\t\"shadowed\": \"%s\"\n", data->files_accessed.shadowed);
         tracing_data_t::files_t *files = data->files_accessed.next;
         while (files != nullptr)
         {
@@ -525,6 +506,7 @@ void monitor::log_instruction_trace()
             fprintf(instruction_log, "\t\t\t{\n");
             fprintf(instruction_log, "\t\t\t\t\"file\": \"%s\",\n", files->file);
             fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\"\n", files->hits);
+            fprintf(instruction_log, "\t\t\t\t\"shadowed\": \"%s\"\n", files->shadowed);
 
             files = files->next;
         }
@@ -535,14 +517,13 @@ void monitor::log_instruction_trace()
         data = data->next;
         if (data)
             fprintf(instruction_log, "\t},\n");
-        else
-            fprintf(instruction_log, "\t}\n");
     }
 
 
     tracing_lost_t* lost = instruction_log_lost;
     while (lost != nullptr)
     {
+        fprintf(instruction_log, "\t},\n");
         fprintf(instruction_log, "\t{\n");
         fprintf(instruction_log, "\t\t\"type\": \"lost\",\n");
         fprintf(instruction_log, "\t\t\"instruction\": \"%s\",\n", lost->instruction);
@@ -554,6 +535,7 @@ void monitor::log_instruction_trace()
         fprintf(instruction_log, "\t\t\t{\n");
         fprintf(instruction_log, "\t\t\t\t\"file\": \"%s\",\n", lost->files_accessed.file);
         fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\"\n", lost->files_accessed.hits);
+        fprintf(instruction_log, "\t\t\t\t\"shadowed\": \"%s\"\n", lost->files_accessed.shadowed);
         tracing_lost_t::files_t *files = lost->files_accessed.next;
         while (files != nullptr)
         {
@@ -561,6 +543,7 @@ void monitor::log_instruction_trace()
             fprintf(instruction_log, "\t\t\t{\n");
             fprintf(instruction_log, "\t\t\t\t\"file\": \"%s\",\n", files->file);
             fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\"\n", files->hits);
+            fprintf(instruction_log, "\t\t\t\t\"shadowed\": \"%s\"\n", files->shadowed);
 
             files = files->next;
         }
@@ -568,13 +551,10 @@ void monitor::log_instruction_trace()
 
         fprintf(instruction_log, "\t\t]\n");
 
-
         lost = lost->next;
-        if (lost)
-            fprintf(instruction_log, "\t},\n");
-        else
-            fprintf(instruction_log, "\t}\n");
     }
+
+    fprintf(instruction_log, "\t}\n");
 
     fprintf(instruction_log, "]\n");
 
@@ -1492,6 +1472,28 @@ void mvee::log_init()
     if (mvee::lockstats_logfile == NULL)
         perror("Failed to open lockstats log");
 #endif
+
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+#ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING_FILE
+#define MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING_FILE "./Logs/instruction_trace"
+#endif
+    std::stringstream log_name;
+    log_name << MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING_FILE;
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL
+    log_name << ".csv";
+#else
+    log_name << ".json";
+#endif
+    mvee::instruction_log = fopen64(log_name.str().c_str(), "w");
+    if (mvee::instruction_log == nullptr)
+        warnf("could not open instruction loggin file @ %s\n", log_name.str().c_str());
+    else
+    {
+        debugf("instruction logging file opened @ %s\n", log_name.str().c_str());
+        fprintf(mvee::instruction_log, "instruction pointer;decoded;prefixes;opcode;modrm;immediate;"
+                                       "immediate size;full instruction;faulting address;monitor;file;shadowed");
+    }
+#endif
 }
 
 /*-----------------------------------------------------------------------------
@@ -1528,6 +1530,15 @@ void mvee::log_fini(bool terminated)
 #ifdef MVEE_GENERATE_LOCKSTATS
     if (mvee::lockstats_logfile)
         fclose(mvee::lockstats_logfile);
+#endif
+
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+#ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL
+    mvee::log_instruction_trace();
+    mvee::tracing_cleanup();
+#endif
+    if (mvee::instruction_log)
+        fclose(mvee::instruction_log);
 #endif
 }
 

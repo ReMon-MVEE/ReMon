@@ -25,6 +25,7 @@
 #include <atomic>
 #include "MVEE_build_config.h"
 #include "MVEE_private_arch.h"
+#include "MVEE_filedesc.h"
 
 /*-----------------------------------------------------------------------------
     Enumerations
@@ -125,12 +126,9 @@ struct shared_monitor_map_info
 {
     void*       shadow_base;
     size_t      size;
-    int         protection;
-    int         flags;
-    const char* backing;
-    int         backing_access;
-    int         offset;
     int         reference_count;
+
+    FileType    shared_backing_type;
 };
 
 //
@@ -167,6 +165,7 @@ public:
     //
     shared_monitor_map_info*
                   shadow;
+    void*         original_base;
 
     //
     // Debugging/Backtracing support
@@ -356,8 +355,8 @@ public:
     //
     // Shared memory
     //
-    int                shadow_map                   (const char* file, int access_flags,
-                                                     shared_monitor_map_info** shadow, size_t size,
+    int                shadow_map                   (const char* backing_file, unsigned int backing_flags,
+                                                     FileType type, shared_monitor_map_info** shadow, size_t size,
                                                      int protection, int flags, int offset);
     int                insert_variant_shared_region (int variant, mmap_region_info* region);
     mmap_region_info*  get_shared_info              (int variant, unsigned long long address);

@@ -190,6 +190,8 @@ mmap_table::mmap_table()
 }
 
 mmap_table::mmap_table(const mmap_table& parent)
+        : monitor_mappings()
+        , variant_mappings()
 {
     init();
 
@@ -214,16 +216,9 @@ mmap_table::mmap_table(const mmap_table& parent)
         shared_monitor_map_info* from;
         shared_monitor_map_info* to;
     };
-    std::vector<translation_record> translation;
 
-    for (auto iter: parent.monitor_mappings)
-    {
-        shared_monitor_map_info* temp;
-        warnf("\n\nhit");
-        shadow_map(iter->backing, iter->backing_access, &temp, iter->size, iter->protection, iter->flags,
-                iter->offset);
-        translation.push_back({ iter, temp });
-    }
+    for (auto shadow: parent.monitor_mappings)
+        monitor_mappings.push_back(shadow);
 
     for (int i = 0; i < mvee::numvariants; ++i)
     {
@@ -231,21 +226,10 @@ mmap_table::mmap_table(const mmap_table& parent)
         for (auto it = parent.full_map[i].begin(); it != parent.full_map[i].end(); ++it)
         {
             auto new_region = new mmap_region_info(**it);
-
-            if (new_region->shadow)
-            {
-                for (auto iter: translation)
-                {
-                    if (iter.from == new_region->shadow)
-                    {
-                        new_region->shadow = iter.to;
-                        break;
-                    }
-                }
-                insert_variant_shared_region(i, new_region);
-            }
-
             full_map[i].insert(new_region);
+
+            if ((*it)->shadow)
+                insert_variant_shared_region(i, new_region);
         }
     }
 }
