@@ -122,13 +122,14 @@ public:
 //
 // Info about shared regions
 //
-struct shared_monitor_map_info
+class shared_monitor_map_info
 {
+public:
     void*       shadow_base;
     size_t      size;
-    int         reference_count;
 
-    FileType    shared_backing_type;
+                shared_monitor_map_info                 (void* shadow_base, size_t size);
+                ~shared_monitor_map_info                ();
 };
 
 //
@@ -163,7 +164,7 @@ public:
     //
     // Shared memory shadow
     //
-    shared_monitor_map_info*
+    std::shared_ptr<shared_monitor_map_info>
                   shadow;
     void*         original_base;
 
@@ -303,7 +304,7 @@ public:
     bool        map_range                   (int variantnum, unsigned long address, unsigned long size,
                                              unsigned int map_flags, unsigned int prot_flags,
                                              fd_info* region_backing_file, unsigned int region_backing_file_offset,
-                                             shared_monitor_map_info* shadow = nullptr);
+                                             std::shared_ptr<shared_monitor_map_info> shadow = nullptr);
 	unsigned long find_image_base           (int variantnum, std::string image_name);
 
     //
@@ -355,9 +356,10 @@ public:
     //
     // Shared memory
     //
-    int                shadow_map                   (const char* backing_file, unsigned int backing_flags,
-                                                     FileType type, shared_monitor_map_info** shadow, size_t size,
-                                                     int protection, int flags, int offset);
+    int                shadow_map                   (const char* backing_file,
+                                                     unsigned int backing_flags, FileType type,
+                                                     std::shared_ptr<shared_monitor_map_info>* shadow,
+                                                     size_t size, int protection, int flags, int offset);
     int                insert_variant_shared_region (int variant, mmap_region_info* region);
     mmap_region_info*  get_shared_info              (int variant, unsigned long long address);
     int                munmap_variant_shadow_region (int variant, mmap_region_info* region_info);
@@ -383,8 +385,6 @@ private:
     std::map<std::string,
              std::map<std::string, unsigned long> >
                     cached_syms;                      // maps libname -> symbol name -> symbol offset within lib
-    std::vector<shared_monitor_map_info*>
-                    monitor_mappings;
     std::vector<std::vector<mmap_region_info*>>
                     variant_mappings;
 };

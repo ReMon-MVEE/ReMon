@@ -118,7 +118,7 @@ int             instruction_intent::determine_monitor_pointer       (monitor& re
         return -1;
     }
 
-    shared_monitor_map_info* monitor_map_info = variant_map_info->shadow;
+    std::shared_ptr<shared_monitor_map_info> monitor_map_info = variant_map_info->shadow;
     if (!monitor_map_info || monitor_map_info->shadow_base == nullptr)
     {
         warnf("variant %d address %lx maps to monitor mapping that points to null or none at all...\n",
@@ -325,7 +325,8 @@ int             intent_replay_buffer::maybe_resume_leader           ()
 
 int             intent_replay_buffer::access_data                   (unsigned int variant_num,
                                                                      instruction_intent* instruction, __uint8_t** data,
-                                                                     __uint8_t data_size, void* monitor_pointer)
+                                                                     __uint8_t data_size, void* monitor_pointer,
+                                                                     __uint8_t** result, __uint8_t result_size)
 {
     // bounds check
     if (variant_num >= variant_count)
@@ -406,10 +407,20 @@ int             intent_replay_buffer::access_data                   (unsigned in
 // =====================================================================================================================
 //      shadow maintenance
 // =====================================================================================================================
+                shared_monitor_map_info::shared_monitor_map_info    (void* shadow_base, size_t size)
+{
+    this->shadow_base = shadow_base;
+    this->size = size;
+}
+                shared_monitor_map_info::~shared_monitor_map_info   ()
+{
+    munmap(this->shadow_base, this->size);
+}
+
 int             mmap_table::shadow_map                              (const char* backing_file,
                                                                      unsigned int backing_flags, FileType type,
-                                                                     shared_monitor_map_info** shadow, size_t size,
-                                                                     int protection, int flags, int offset)
+                                                                     std::shared_ptr<shared_monitor_map_info>* shadow,
+                                                                     size_t size, int protection, int flags, int offset)
 {
     debugf("opening shadow mapping for %s\n", backing_file);
     unsigned int backing_file_len = strlen(backing_file);
@@ -421,7 +432,6 @@ int             mmap_table::shadow_map                              (const char*
         unsigned int added = strlen("/memfd:");
         if (added <= backing_file_len)
             fd = memfd_create(backing_file + added, backing_flags & (MFD_HUGETLB | MFD_ALLOW_SEALING | MFD_CLOEXEC));
-        warnf("%s - %d\n", backing_file + added, backing_flags);
     }
     else
         fd = open(backing_file, backing_flags & ~(O_TRUNC | O_CREAT));
@@ -458,9 +468,10 @@ int             mmap_table::shadow_map                              (const char*
     // bookkeeping
     char* backing = (char*) malloc(backing_file_len + 1);
     strncpy(backing, backing_file, backing_file_len + 1);
-    *shadow = (shared_monitor_map_info*) malloc((sizeof(shared_monitor_map_info)));
-    **shadow = { temp_shadow, size, 1, type };
-    monitor_mappings.push_back(*shadow);
+    *shadow = std::shared_ptr<shared_monitor_map_info>(
+            (shared_monitor_map_info*) malloc((sizeof(shared_monitor_map_info))));
+    (*shadow)->shadow_base = temp_shadow;
+    (*shadow)->size = size;
 
     // return ok
     return 0;
@@ -513,27 +524,6 @@ mmap_region_info*
 
 int             mmap_table::munmap_variant_shadow_region            (int variant, mmap_region_info* region_info)
 {
-    region_info->shadow->reference_count--;
-
-    if (region_info->shadow->reference_count == 0)
-    {
-        munmap(region_info->shadow->shadow_base, region_info->shadow->size);
-
-        int erased = -1;
-        for (unsigned int i = 0; i < monitor_mappings.size(); i++)
-        {
-            if (*(monitor_mappings.begin() + i) == region_info->shadow)
-            {
-                free((void*) region_info->shadow);
-                monitor_mappings.erase(monitor_mappings.begin() + i);
-                erased = (int) i;
-                break;
-            }
-        }
-        if (erased < 0)
-            return -1;
-    }
-
     for (unsigned int i = 0; i < variant_mappings[variant].size(); i++)
     {
         if (*(variant_mappings[variant].begin() + i) == region_info)
@@ -549,7 +539,6 @@ int             mmap_table::munmap_variant_shadow_region            (int variant
 }
 int             mmap_table::split_variant_shadow_region             (int variant, mmap_region_info* region_info)
 {
-    region_info->shadow->reference_count++;
     return 0;
 }
 int             mmap_table::merge_variant_shadow_region             (int variant, mmap_region_info* region_info1,
@@ -558,7 +547,7 @@ int             mmap_table::merge_variant_shadow_region             (int variant
     if (region_info1->shadow != region_info2->shadow)
         return -1;
 
-    region_info1->shadow->reference_count--;
+    region_info1->shadow = nullptr;
 
     int to_erase = -1;
     for (unsigned int i = 0; i < variant_mappings[variant].size(); i++)
@@ -1023,12 +1012,21 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
     if (!interaction::write_all_regs(variant->variantpid, &variant->regs))
         return -1;
 
+    unsigned long long rip = variant->regs.rip;
     if (ptrace(PTRACE_SINGLESTEP, variant->variantpid, nullptr, nullptr) != 0)
         return -1;
     waitpid(variant->variantpid, &status, 0);
 
     if (!interaction::read_all_regs(variant->variantpid, &variant->regs))
         return -1;
+
+    if (rip == variant->regs.rip)
+    {
+        warnf("injecting\n\n");
+        if (!interaction::resume_until_syscall(variant->variantpid, 0))
+            return -1;
+        return 0;
+    }
     // -----------------------------------------------------------------------------------------------------------------
 
 

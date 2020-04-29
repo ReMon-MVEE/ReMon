@@ -166,7 +166,6 @@ mmap_table::mmap_table()
 	  thread_group_shutting_down(false),
 	  enlarged_initial_stacks(false),
 	  mmap_base(0),
-	  monitor_mappings(),
 	  variant_mappings()
 {
     init();
@@ -190,8 +189,7 @@ mmap_table::mmap_table()
 }
 
 mmap_table::mmap_table(const mmap_table& parent)
-        : monitor_mappings()
-        , variant_mappings()
+        : variant_mappings()
 {
     init();
 
@@ -209,16 +207,8 @@ mmap_table::mmap_table(const mmap_table& parent)
 
     full_map.resize(mvee::numvariants);
 
-    warnf("\n\n\t%zu - %zu\n\n", variant_mappings.size(), monitor_mappings.size());
-
-    struct translation_record
-    {
-        shared_monitor_map_info* from;
-        shared_monitor_map_info* to;
-    };
-
-    for (auto shadow: parent.monitor_mappings)
-        monitor_mappings.push_back(shadow);
+    for (int i = 0; i < mvee::numvariants; i++)
+        variant_mappings.emplace_back();
 
     for (int i = 0; i < mvee::numvariants; ++i)
     {
@@ -228,7 +218,7 @@ mmap_table::mmap_table(const mmap_table& parent)
             auto new_region = new mmap_region_info(**it);
             full_map[i].insert(new_region);
 
-            if ((*it)->shadow)
+            if ((*it)->shadow != nullptr)
                 insert_variant_shared_region(i, new_region);
         }
     }
@@ -1017,7 +1007,7 @@ bool mmap_table::munmap_range (int variantnum, unsigned long base, unsigned long
 -----------------------------------------------------------------------------*/
 bool mmap_table::map_range (int variantnum, unsigned long address, unsigned long size, unsigned int map_flags,
                             unsigned int prot_flags, fd_info* region_backing_file,
-                            unsigned int region_backing_file_offset, shared_monitor_map_info* shadow)
+                            unsigned int region_backing_file_offset, std::shared_ptr<shared_monitor_map_info> shadow)
 {
     address = ROUND_DOWN(address, 4096);
     size    = ROUND_UP(size, 4096);
