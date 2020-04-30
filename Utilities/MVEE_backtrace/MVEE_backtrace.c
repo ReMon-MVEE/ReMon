@@ -50,13 +50,13 @@ char* mvee_log_read_from_proc_pipe(const char* proc, int* output_length)
 
 int  main(int argc, char** argv)
 {
-    char* pid = mvee_log_read_from_proc_pipe("ps ux | grep \"\\MVEE \" | grep -v grep | sed -e 's/  */ /g' | cut -d' ' -f2", NULL);
+    char* pid = mvee_log_read_from_proc_pipe("ps ux | grep \"\\" MVEE " \" | grep -v grep | sed -e 's/  */ /g' | cut -d' ' -f2", NULL);
 
     int   i;
     for (i = 0; i < strlen(pid); ++i)
         if (pid[i] == 10 || pid[i] == 13)
             pid[i] = 0;
-    printf("PID: %s (%d)\n", pid, strlen(pid));
+    printf("PID: %s (%zu)\n", pid, strlen(pid));
     if (strlen(pid) > 0)
     {
         int _pid = atoi(pid);

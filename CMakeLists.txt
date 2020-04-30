@@ -80,8 +80,6 @@ if(DEPS_PRESENT_IN_SYSTEM)
 else()
     set(MUSL_GCC ${CMAKE_SOURCE_DIR}/deps/musl-install/bin/musl-gcc)
 endif()
-# ======================================================================================================================
-add_subdirectory(MVEE_LD_Loader)
 
 # libraries ============================================================================================================
 set(LIBC_VER 2.27.9000)
@@ -260,6 +258,7 @@ target_compile_options(mvee PRIVATE
 
 # output override
 set_target_properties(mvee PROPERTIES
+        OUTPUT_NAME mvee
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/MVEE/bin/${CMAKE_BUILD_TYPE}
 )
 
@@ -318,3 +317,5 @@ target_compile_definitions(mvee PRIVATE
         #MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL
 )
 # ======================================================================================================================
+add_subdirectory(MVEE_LD_Loader)
+add_subdirectory(Utilities)
