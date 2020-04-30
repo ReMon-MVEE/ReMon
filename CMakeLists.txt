@@ -10,6 +10,10 @@ if(DEFINED ENV{MVEE_DEPS_PRESENT_IN_SYSTEM})
         set(DEPS_PRESENT_IN_SYSTEM TRUE)
 endif()
 
+# Set the output directories
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+
 # prerun ===============================================================================================================
 # get architecture
 execute_process(
