@@ -478,6 +478,9 @@ struct intent_replay
     __uint8_t       data_size;
     // todo -- maybe dynamic allocation
     __uint8_t       data[16];
+    __uint8_t       result_size;
+    // todo -- maybe dynamic allocation
+    __uint8_t       result[16];
     void*           monitor_address;
 };
 
@@ -504,7 +507,9 @@ public:
     int             maybe_resume_leader                             ();
     int             access_data                                     (unsigned int variant_num,
                                                                      instruction_intent* instruction, __uint8_t** data,
-                                                                     __uint8_t data_size, void* monitor_pointer);
+                                                                     __uint8_t data_size, void* monitor_pointer,
+                                                                     __uint8_t** result = nullptr,
+                                                                     __uint8_t result_size = 0);
 
     /*
      * +-------------+---+---+
