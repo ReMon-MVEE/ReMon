@@ -285,6 +285,7 @@ class monitor
     friend class instruction_intent_emulation;
     friend class instruction_intent;
     friend class intent_replay_buffer;
+    friend class acquire_shm_protected_memory_for_access;
 
 #ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
     friend class instruction_tracing;
