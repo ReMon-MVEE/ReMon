@@ -588,6 +588,22 @@ struct tracing_lost_t
     } files_accessed;
     tracing_lost_t* next;
 };
+
+class mmap_region_info;
+
+class acquire_shm_protected_memory_for_access
+{
+    monitor& relevant_monitor;
+    mmap_region_info* variant_map_info;
+    variantstate* variant;
+    void* address;
+public:
+    /* We provide 2 constructors: one for where you already looked up the variant_map_info, and one which looks it up for you */
+    acquire_shm_protected_memory_for_access(monitor& relevant_monitor, mmap_region_info* variant_map_info, variantstate* variant, void* address);
+    acquire_shm_protected_memory_for_access(monitor& relevant_monitor, variantstate* variant, void* address);
+    bool acquire();
+    bool release(bool restore_registers=true);
+};
 #endif
 
 

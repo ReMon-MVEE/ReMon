@@ -977,9 +977,6 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
     temp_regs = variant->regs;
     // -----------------------------------------------------------------------------------------------------------------
 
-
-    // remove protection on mapping ------------------------------------------------------------------------------------
-    // mprotect syscall to enable shared mapping
     temp_regs.orig_rax = __NR_mprotect;
     temp_regs.rax = __NR_mprotect;
     temp_regs.rdi = variant_map_info->region_base_address;
@@ -987,34 +984,18 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
     temp_regs.rdx = variant_map_info->region_prot_flags;
     temp_regs.rip = (unsigned long long) variant->syscall_pointer;
 
-    if (!interaction::write_all_regs(variant->variantpid, &temp_regs))
-        return -1;
+    if (!interaction::write_all_regs(variant->variantpid, &temp_regs)) {
+        return false;
+    }
 
-    // have variant execute call
-    if (!interaction::resume_until_syscall(variant->variantpid, 0))
-        return -1;
-    waitpid(variant->variantpid, &status, 0);
+    acquire_shm_protected_memory_for_access shm_access(relevant_monitor, variant_map_info, variant, address);
 
-    // syscall enter
-    if (!interaction::resume_until_syscall(variant->variantpid, 0))
-        return -1;
-    waitpid(variant->variantpid, &status, 0);
-
-    // syscall exit
-    // check for mprotect result 0
-    if (!interaction::read_all_regs(variant->variantpid, &temp_regs))
-        return -1;
-    if (temp_regs.rax != 0)
-    {
-        warnf("mprotect failed while enabling - %lld\n", temp_regs.rax);
-        warnf("address: %p\n", address);
-        warnf("protection: %d\n", variant_map_info->region_prot_flags);
-        warnf("base: %p\n", (void*) variant_map_info->region_base_address);
-
-        relevant_monitor.set_mmap_table->debug_shared();
-
+    debugf("Acquiring first mapping...\n");
+    if (!shm_access.acquire()) {
+        warnf("Mapping shared memory as temporarily accessible failed!\n");
         return -1;
     }
+
     // -----------------------------------------------------------------------------------------------------------------
 
 
@@ -1029,59 +1010,20 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
     if (!interaction::read_all_regs(variant->variantpid, &variant->regs))
         return -1;
 
-    mmap_region_info* second_variant_map_info = nullptr;
     if (WIFSTOPPED(status) && WSTOPSIG(status) == 11)
     {
         siginfo_t siginfo;
         if (ptrace(PTRACE_GETSIGINFO, variant->variantpid, nullptr, &siginfo) != 0)
             return -1;
 
-        // get shared mem info
-        second_variant_map_info = relevant_monitor.set_mmap_table->get_shared_info(
-                variant->variant_num, (unsigned long long) siginfo.si_addr);
-        if (!second_variant_map_info)
-        {
-            warnf("Could not identify shared mapping...\n");
+        acquire_shm_protected_memory_for_access second_shm_access(relevant_monitor, variant, siginfo.si_addr);
+
+        debugf("Acquiring second mapping...\n");
+
+        if (!second_shm_access.acquire()) {
+            warnf("Mapping second shared memory as temporarily accessible failed!\n");
             return -1;
         }
-
-        // mprotect syscall to enable shared mapping
-        temp_regs.orig_rax = __NR_mprotect;
-        temp_regs.rax = __NR_mprotect;
-        temp_regs.rdi = second_variant_map_info->region_base_address;
-        temp_regs.rsi = second_variant_map_info->region_size;
-        temp_regs.rdx = second_variant_map_info->region_prot_flags;
-        temp_regs.rip = (unsigned long long) variant->syscall_pointer;
-
-        if (!interaction::write_all_regs(variant->variantpid, &temp_regs))
-            return -1;
-
-        // have variant execute call
-        if (!interaction::resume_until_syscall(variant->variantpid, 0))
-            return -1;
-        waitpid(variant->variantpid, &status, 0);
-
-        // syscall enter
-        if (!interaction::resume_until_syscall(variant->variantpid, 0))
-            return -1;
-        waitpid(variant->variantpid, &status, 0);
-
-        // syscall exit
-        // check for mprotect result 0
-        if (!interaction::read_all_regs(variant->variantpid, &temp_regs))
-            return -1;
-        if (temp_regs.rax != 0)
-        {
-            warnf("mprotect failed while enabling - %lld\n", temp_regs.rax);
-            warnf("address: %p\n", address);
-            warnf("protection: %d\n", second_variant_map_info->region_prot_flags);
-            warnf("base: %p\n", (void*) second_variant_map_info->region_base_address);
-
-            relevant_monitor.set_mmap_table->debug_shared();
-
-            return -1;
-        }
-
 
         // retry, actually exit if this faults
         if (!interaction::write_all_regs(variant->variantpid, &variant->regs))
@@ -1096,9 +1038,108 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
 
         if (WIFSTOPPED(status) && WSTOPSIG(status) == 11)
             return -1;
+
+        if (!second_shm_access.release(false /* the next shm_access.release will do the restore_registers */)) {
+            warnf("Mapping second shared memory as no longer acessible failed!\n");
+            return -1;
+        }
     }
     // -----------------------------------------------------------------------------------------------------------------
 
+    if (!shm_access.release()) {
+        warnf("Mapping shared memory as no longer acessible failed!\n");
+        return -1;
+    }
+
+
+    if (!interaction::resume_until_syscall(variant->variantpid, 0))
+        return -1;
+    // return ok
+    return 0;
+    // -----------------------------------------------------------------------------------------------------------------
+}
+
+acquire_shm_protected_memory_for_access::acquire_shm_protected_memory_for_access
+    (monitor& relevant_monitor, mmap_region_info* variant_map_info, variantstate* variant, void* address)
+    : relevant_monitor(relevant_monitor),
+      variant_map_info(variant_map_info),
+      variant(variant),
+      address(address)
+{
+}
+
+acquire_shm_protected_memory_for_access::acquire_shm_protected_memory_for_access
+    (monitor& relevant_monitor, variantstate* variant, void* address)
+    : relevant_monitor(relevant_monitor),
+      variant(variant),
+      address(address)
+{
+    // get shared mem info
+    variant_map_info = relevant_monitor.set_mmap_table->get_shared_info(variant->variant_num, (unsigned long long) address);
+    if (!variant_map_info)
+    {
+        warnf("Could not identify shared mapping in constructor of acquire_shm_protected_memory_for_access...\n");
+    }
+}
+
+
+bool acquire_shm_protected_memory_for_access::acquire()
+{
+    user_regs_struct temp_regs = variant->regs;
+    int status;
+
+    // remove protection on mapping ------------------------------------------------------------------------------------
+    // mprotect syscall to enable shared mapping
+    temp_regs.orig_rax = __NR_mprotect;
+    temp_regs.rax = __NR_mprotect;
+    temp_regs.rdi = variant_map_info->region_base_address;
+    temp_regs.rsi = variant_map_info->region_size;
+    temp_regs.rdx = variant_map_info->region_prot_flags;
+    temp_regs.rip = (unsigned long long) variant->syscall_pointer;
+
+    if (!interaction::write_all_regs(variant->variantpid, &temp_regs)) {
+        return false;
+    }
+
+    // have variant execute call
+    if (!interaction::resume_until_syscall(variant->variantpid, 0)) {
+        return false;
+    }
+
+    waitpid(variant->variantpid, &status, 0);
+
+    // syscall enter
+    if (!interaction::resume_until_syscall(variant->variantpid, 0)) {
+        return false;
+    }
+
+    waitpid(variant->variantpid, &status, 0);
+
+    // syscall exit
+    // check for mprotect result 0
+    if (!interaction::read_all_regs(variant->variantpid, &temp_regs)) {
+        return false;
+    }
+
+    if (temp_regs.rax != 0)
+    {
+        warnf("mprotect failed while enabling - %lld\n", temp_regs.rax);
+        warnf("address: %p\n", address);
+        warnf("protection: %d\n", variant_map_info->region_prot_flags);
+        warnf("base: %p\n", (void*) variant_map_info->region_base_address);
+
+        relevant_monitor.set_mmap_table->debug_shared();
+
+        return false;
+    }
+
+    return true;
+}
+
+bool acquire_shm_protected_memory_for_access::release(bool restore_registers)
+{
+    user_regs_struct temp_regs = variant->regs;
+    int status;
 
     // reset protection ------------------------------------------------------------------------------------------------
     // mprotect syscall to disable shared mapping
@@ -1111,79 +1152,43 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
     temp_regs.rip = (unsigned long long) variant->syscall_pointer;
 
     if (!interaction::write_all_regs(variant->variantpid, &temp_regs))
-        return -1;
+        return false;
 
     // start syscall
-    if (!interaction::resume_until_syscall(variant->variantpid, 0))
-        return -1;
+    if (!interaction::resume_until_syscall(variant->variantpid, 0)) {
+        return false;
+    }
     waitpid(variant->variantpid, &status, 0);
 
     // syscall entered
-    if (!interaction::resume_until_syscall(variant->variantpid, 0))
-        return -1;
+    if (!interaction::resume_until_syscall(variant->variantpid, 0)) {
+        return false;
+    }
     waitpid(variant->variantpid, &status, 0);
 
     // syscall exit, check for mprotect failure
-    if (!interaction::read_all_regs(variant->variantpid, &temp_regs))
-        return -1;
+    if (!interaction::read_all_regs(variant->variantpid, &temp_regs)) {
+        return false;
+    }
+
     if (temp_regs.rax != 0)
     {
         warnf("mprotect failed while disabling\n");
         warnf("accessed: %p\n", address);
         warnf("protection: %d\n", variant_map_info->region_prot_flags);
         warnf("address: %p\n", (void*) variant_map_info->region_base_address);
-        return -1;
+        return false;
     }
     // -----------------------------------------------------------------------------------------------------------------
 
-
-    // reprotect possible second mapping -------------------------------------------------------------------------------
-    if (second_variant_map_info) {
-        // mprotect syscall to disable shared mapping
-        temp_regs = variant->regs;
-        temp_regs.orig_rax = __NR_mprotect;
-        temp_regs.rax = __NR_mprotect;
-        temp_regs.rdi = second_variant_map_info->region_base_address;
-        temp_regs.rsi = second_variant_map_info->region_size;
-        temp_regs.rdx = PROT_NONE;
-        temp_regs.rip = (unsigned long long) variant->syscall_pointer;
-
-        if (!interaction::write_all_regs(variant->variantpid, &temp_regs))
-            return -1;
-
-        // start syscall
-        if (!interaction::resume_until_syscall(variant->variantpid, 0))
-            return -1;
-        waitpid(variant->variantpid, &status, 0);
-
-        // syscall entered
-        if (!interaction::resume_until_syscall(variant->variantpid, 0))
-            return -1;
-        waitpid(variant->variantpid, &status, 0);
-
-        // syscall exit, check for mprotect failure
-        if (!interaction::read_all_regs(variant->variantpid, &temp_regs))
-            return -1;
-        if (temp_regs.rax != 0) {
-            warnf("mprotect failed while disabling\n");
-            warnf("accessed: %p\n", address);
-            warnf("protection: %d\n", second_variant_map_info->region_prot_flags);
-            warnf("address: %p\n", (void *) second_variant_map_info->region_base_address);
-            return -1;
+    if (restore_registers) {
+        // prepare to resume execution as if nothing happened -------------------------------------------------------------------------
+        if (!interaction::write_all_regs(variant->variantpid, &variant->regs)) {
+            return false;
         }
     }
-    // -----------------------------------------------------------------------------------------------------------------
 
-
-    // resume execution as if nothing happened -------------------------------------------------------------------------
-    if (!interaction::write_all_regs(variant->variantpid, &variant->regs))
-        return -1;
-
-    if (!interaction::resume_until_syscall(variant->variantpid, 0))
-        return -1;
-    // return ok
-    return 0;
-    // -----------------------------------------------------------------------------------------------------------------
+    return true;
 }
 
 #endif
