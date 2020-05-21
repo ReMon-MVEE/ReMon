@@ -7259,8 +7259,8 @@ POSTCALL(mmap)
 			}
 		}
 
-#ifdef MVEE_EMULATE_SHARED_MEMORY
         std::shared_ptr<shared_monitor_map_info> shadow = nullptr;
+#ifdef MVEE_EMULATE_SHARED_MEMORY
         if (ARG3(0) & (PROT_READ | PROT_WRITE) && ARG4(0) & MAP_SHARED)
         {
             if (set_mmap_table->shadow_map(info->paths[0].c_str(), info->access_flags, info->file_type, &shadow,
