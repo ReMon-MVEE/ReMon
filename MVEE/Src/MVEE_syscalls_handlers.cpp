@@ -3403,7 +3403,12 @@ POSTCALL(rt_sigaction)
                       argument.
     * ARCH_SET_CPUID: Enables CPUID execution for a process if the second
                       argument is > 0, disables otherwise.
+    * ARCH_CET_STATUS: Get Intel CET status.
 -----------------------------------------------------------------------------*/
+// TODO: Remove if this becomes part of kernel headers?
+#ifndef ARCH_CET_STATUS
+#define ARCH_CET_STATUS 0x3001
+#endif
 LOG_ARGS(arch_prctl)
 {
 	debugf("%s - SYS_ARCH_PRCTL(%s, 0x" PTRSTR ")\n", 
@@ -3415,7 +3420,15 @@ LOG_ARGS(arch_prctl)
 PRECALL(arch_prctl)
 {
     CHECKARG(1);
-    CHECKARG(2);
+
+    if (ARG1(0) == ARCH_CET_STATUS)
+    {
+      CHECKPOINTER(2);
+    }
+    else
+    {
+      CHECKARG(2);
+    }
 
     // do not allow a monitored process to re-enable CPUID instructions
     if (ARG1(0) == ARCH_SET_CPUID && ARG2(0) > 0)
