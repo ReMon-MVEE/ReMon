@@ -27,7 +27,7 @@ typedef Elf64_Addr   Elf_Addr;
 typedef Elf64_Phdr   Elf_Phdr;
 typedef Elf64_Off    Elf_Off;
 
-#define PTRSTR              "%016lx"
+#define PTRSTR              "0x%016lx"
 #define LONGINTSTR          "%ld"
 
 #define REAL_AT_PHDR_OFFSET 0x40
