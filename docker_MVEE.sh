@@ -13,7 +13,7 @@ set -o nounset
 IMAGE=remon
 BUILD_DIR=$PWD/build
 DEPS_DIR=$PWD/deps
-SHARED_PROJECTS_DIR=$PWD/projects
+SHARED_PROJECTS_DIR=$PWD/ext
 
 build_docker() {
     if ! command -v docker &> /dev/null; then

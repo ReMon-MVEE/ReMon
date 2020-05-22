@@ -8,4 +8,4 @@ tags
 .clangd
 .vscode
 build
-projects
+/ext
