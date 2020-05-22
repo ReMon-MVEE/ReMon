@@ -54,7 +54,7 @@ unsigned long  mvee_write_stack_data(const void* data, int datalen, int padbytes
 unsigned long  mvee_write_stack_string(const char* string, int padbytes)
 {
 #ifdef MVEE_DEBUG
-  fprintf(stderr, "writing string: %s @ %x (initial_stack_depth: %d) (padbytes: %d)\n",
+  fprintf(stderr, "writing string: %s @ %lx (initial_stack_depth: %lu) (padbytes: %d)\n",
 		  string, (unsigned long)initial_stack + 8192 - initial_stack_depth, initial_stack_depth, padbytes);
 #endif
     return mvee_write_stack_data(string, strlen(string) + 1, padbytes);
@@ -191,7 +191,7 @@ void  mvee_build_initial_stack
     Elf_auxv_t* auxv = (Elf_auxv_t*) ((unsigned long) envp + (envc + 1) * sizeof(long));
     Elf_auxv_t* orig_auxv = auxv;
 #ifdef MVEE_DEBUG
-    fprintf(stderr, "reading argv0 at %x\n", argv[0]);
+    fprintf(stderr, "reading argv0 at %p\n", argv[0]);
 #endif
     unsigned long orig_argv0len = strlen(argv[0]) + 1;
     unsigned long orig_argv0    = (unsigned long)argv[0];
@@ -220,7 +220,7 @@ void  mvee_build_initial_stack
 	// =====================================================================
 
 #ifdef MVEE_DEBUG
-    fprintf(stderr, "writing execfn - stack base: 0x%016x - orig_execfn: 0x%016x\n", stack_base, orig_execfn);
+    fprintf(stderr, "writing execfn - stack base: 0x%016lx - orig_execfn: 0x%016lx\n", stack_base, orig_execfn);
 #endif
     unsigned long auxv_execfn = mvee_write_stack_string(INTERP, stack_base - orig_execfn - strlen(INTERP) - 1);
 
@@ -306,7 +306,7 @@ void  mvee_build_initial_stack
 		sizeof(long);                             // nr of bytes for argc
 
 #ifdef MVEE_DEBUG
-    fprintf(stderr, "> original stack size was: %d - new stack size will be: %d\n",
+    fprintf(stderr, "> original stack size was: %zu - new stack size will be: %zu\n",
 			original_stack_size, new_stack_size);
 #endif
 
@@ -420,7 +420,7 @@ void  mvee_build_initial_stack
 											 (unsigned long)initial_stack + 8192 - initial_stack_depth);
 	
 #ifdef MVEE_DEBUG
-    fprintf(stderr, "> New stack built. Calculated new stack pointer: %x\n",
+    fprintf(stderr, "> New stack built. Calculated new stack pointer: "PTRSTR"\n",
 		new_sp);
 #endif
 }
@@ -441,7 +441,7 @@ void  mvee_write_stack_and_transfer()
     syscall(__NR_gettid, bla);
 
 #ifdef MVEE_DEBUG
-    fprintf(stderr, "copying stack to 0x" PTRSTR "-0x" PTRSTR " (" LONGINTSTR " bytes) - then jumping to entry at 0x" PTRSTR "\n",
+    fprintf(stderr, "copying stack to " PTRSTR "-" PTRSTR " (" LONGINTSTR " bytes) - then jumping to entry at " PTRSTR "\n",
            new_sp, initial_stack_depth + new_sp, initial_stack_depth, new_entry);
 #endif
     memcpy((void*)new_sp,
@@ -560,7 +560,7 @@ int main (int argc, char** argv, char** envp)
 		stack_base = ((unsigned long)envp[j-2] + 4095) & ~4095;
 
 #ifdef MVEE_DEBUG
-		fprintf(stderr, "stack base is %p\n", stack_base);
+		fprintf(stderr, "stack base is %p\n", (void*)stack_base);
 #endif		
 	}
 
@@ -581,7 +581,7 @@ int main (int argc, char** argv, char** envp)
     }
 
 #ifdef MVEE_DEBUG
-    fprintf(stderr, "loaded interp - fd: %d - size: %d\n", interp_fd, statbuf.st_size);
+    fprintf(stderr, "loaded interp - fd: %d - size: %ld\n", interp_fd, statbuf.st_size);
 #endif
 
 	if (statbuf.st_size > sizeof(interp_buf))
@@ -698,7 +698,7 @@ int main (int argc, char** argv, char** envp)
             }
 
 #ifdef MVEE_DEBUG
-            fprintf(stderr, "> Found loadable segment. idx: %d - vaddr: 0x" PTRSTR "-0x" PTRSTR " - faddr: 0x" PTRSTR "-0x" PTRSTR "\n",
+            fprintf(stderr, "> Found loadable segment. idx: %d - vaddr: " PTRSTR "-" PTRSTR " - faddr: " PTRSTR "-" PTRSTR "\n",
                    i, segment_hdr->p_vaddr, segment_hdr->p_vaddr + segment_hdr->p_memsz,
                    segment_hdr->p_offset, segment_hdr->p_offset + segment_hdr->p_filesz);
 #endif
@@ -706,7 +706,7 @@ int main (int argc, char** argv, char** envp)
     }
 
 #ifdef MVEE_DEBUG
-    fprintf(stderr, "> Expected Load Address was: 0x" PTRSTR " - Actual Load Address was: 0x" PTRSTR "\n",
+    fprintf(stderr, "> Expected Load Address was: " PTRSTR " - Actual Load Address was: " PTRSTR "\n",
            expected_load_addr, actual_load_addr);
 #endif
 
