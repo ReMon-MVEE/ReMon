@@ -26,12 +26,13 @@
 #include "MVEE_LD_Loader.h"
 
 //#define MVEE_DEBUG
+#define STACK_SIZE 16384
 
 // we initialize everything to 1 to avoid the generation of a bss segment
 // bss segments are in the initial heap!!!
 unsigned char  interp_buf[2*1024*1024] = {1};
 unsigned char* interp_mapped[256] = {(unsigned char*)1};
-char           initial_stack[8192] = { 1 };
+char           initial_stack[STACK_SIZE] = { 1 };
 unsigned long  initial_stack_depth = 0;
 unsigned long  new_sp              = 1;
 unsigned long  new_entry           = 1;
@@ -46,16 +47,16 @@ char           INTERP[4096] = {1};
 
 unsigned long  mvee_write_stack_data(const void* data, int datalen, int padbytes)
 {    
-    memcpy((void*)((unsigned long)initial_stack + 8192 - initial_stack_depth - datalen - padbytes), data, datalen);
+    memcpy((void*)((unsigned long)initial_stack + STACK_SIZE - initial_stack_depth - datalen - padbytes), data, datalen);
     initial_stack_depth += datalen + padbytes;
-    return (unsigned long)initial_stack + 8192 - initial_stack_depth;
+    return (unsigned long)initial_stack + STACK_SIZE - initial_stack_depth;
 }
 
 unsigned long  mvee_write_stack_string(const char* string, int padbytes)
 {
 #ifdef MVEE_DEBUG
   fprintf(stderr, "writing string: %s @ %lx (initial_stack_depth: %lu) (padbytes: %d)\n",
-		  string, (unsigned long)initial_stack + 8192 - initial_stack_depth, initial_stack_depth, padbytes);
+		  string, (unsigned long)initial_stack + STACK_SIZE - initial_stack_depth, initial_stack_depth, padbytes);
 #endif
     return mvee_write_stack_data(string, strlen(string) + 1, padbytes);
 }
@@ -64,7 +65,7 @@ unsigned long  mvee_calc_initial_stack_address(unsigned long stack_base, unsigne
 {
     if (!temp_stack_ptr)
         return 0;
-    unsigned long temp_stack_offset = (unsigned long)initial_stack + 8192 - temp_stack_ptr;
+    unsigned long temp_stack_offset = (unsigned long)initial_stack + STACK_SIZE - temp_stack_ptr;
     return stack_base - temp_stack_offset;
 }
 
@@ -411,13 +412,13 @@ void  mvee_build_initial_stack
     fprintf(stderr, "> Writing argc\n");
 #endif
 
-    mvee_write_stack_data(&argc, sizeof(unsigned long), 0);
+    mvee_write_stack_data(&argc, sizeof(int), 4);
 
 	// =====================================================================
 	// FINAL STEP: Calculate new stack pointer
 	// =====================================================================	
     new_sp = mvee_calc_initial_stack_address(stack_base,
-											 (unsigned long)initial_stack + 8192 - initial_stack_depth);
+											 (unsigned long)initial_stack + STACK_SIZE - initial_stack_depth);
 	
 #ifdef MVEE_DEBUG
     fprintf(stderr, "> New stack built. Calculated new stack pointer: "PTRSTR"\n",
@@ -444,8 +445,15 @@ void  mvee_write_stack_and_transfer()
     fprintf(stderr, "copying stack to " PTRSTR "-" PTRSTR " (" LONGINTSTR " bytes) - then jumping to entry at " PTRSTR "\n",
            new_sp, initial_stack_depth + new_sp, initial_stack_depth, new_entry);
 #endif
+
+    if (STACK_SIZE < initial_stack_depth)
+    {
+        printf("Initial stack depth too large!\n");
+        exit(-1);
+    }
+
     memcpy((void*)new_sp,
-		   (void*)((unsigned long)initial_stack + 8192 - initial_stack_depth),
+		   (void*)((unsigned long)initial_stack + STACK_SIZE - initial_stack_depth),
 		   initial_stack_depth);
 
 
