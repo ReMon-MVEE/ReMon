@@ -336,9 +336,9 @@ bool monitor::handle_is_known_false_positive(const char* program_name, long call
 			return true;
 
 		// Allow MVEE_LD_Loader to open compile-time diversified variants
-		true_positive = false;
 		if (set_mmap_table->have_diversified_variants)
 		{
+			true_positive = false;
 			for (int i = 0; i < mvee::numvariants; ++i)
 			{
 				if (files[i].compare(set_mmap_table->mmap_startup_info[i].image) != 0)
