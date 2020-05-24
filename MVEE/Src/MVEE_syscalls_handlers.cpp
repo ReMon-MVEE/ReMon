@@ -10144,30 +10144,43 @@ PRECALL(utimensat)
 
     if (ARG3(0))
     {
-        unsigned char* master_times = rw::read_data(variants[0].variantpid, (void*)ARG3(0), sizeof(struct timespec)*2);
-        if (!master_times)
+        struct timespec master_times[2];
+        if (!rw::read_struct(variants[0].variantpid, (void*) ARG3(0), 2 * sizeof(struct timespec), master_times))
         {
             cache_mismatch_info("couldn't read master times\n");
             return MVEE_PRECALL_ARGS_MISMATCH(3) | MVEE_PRECALL_CALL_DENY;
         }
-        bool           mismatch     = false;
         for (int i = 1; i < mvee::numvariants; ++i)
         {
-            unsigned char* slave_times = rw::read_data(variants[i].variantpid, (void*)ARG3(i), sizeof(struct timespec)*2);
-            if (!slave_times)
+            struct timespec slave_times[2];
+            if (!rw::read_struct(variants[i].variantpid, (void*) ARG3(i), 2 * sizeof(struct timespec), slave_times))
             {
                 cache_mismatch_info("couldn't read slave times\n");
                 return MVEE_PRECALL_ARGS_MISMATCH(3) | MVEE_PRECALL_CALL_DENY;
             }
 
-            if (memcmp(master_times, slave_times, sizeof(struct timespec)*2))
-                mismatch = true;
-            SAFEDELETEARRAY(slave_times);
-        }
-        SAFEDELETEARRAY(master_times);
+            if ((master_times[0].tv_nsec != slave_times[0].tv_nsec) || (master_times[1].tv_nsec != slave_times[1].tv_nsec))
+            {
+                cache_mismatch_info("timespec.tv_nsec differs\n");
+                return MVEE_PRECALL_ARGS_MISMATCH(3) | MVEE_PRECALL_CALL_DENY;
+            }
 
-        if (mismatch)
-            return MVEE_PRECALL_ARGS_MISMATCH(3) | MVEE_PRECALL_CALL_DENY;
+            /* These special values mean the tv_sec field can be ignored */
+            if ((master_times[0].tv_nsec != UTIME_NOW) && (master_times[0].tv_nsec != UTIME_OMIT)
+                    && master_times[0].tv_sec != slave_times[0].tv_sec)
+            {
+                cache_mismatch_info("timespec.tv_sec differs\n");
+                return MVEE_PRECALL_ARGS_MISMATCH(3) | MVEE_PRECALL_CALL_DENY;
+            }
+
+            /* These special values mean the tv_sec field can be ignored */
+            if ((master_times[1].tv_nsec != UTIME_NOW) && (master_times[1].tv_nsec != UTIME_OMIT)
+                    && master_times[1].tv_sec != slave_times[1].tv_sec)
+            {
+                cache_mismatch_info("timespec.tv_sec differs\n");
+                return MVEE_PRECALL_ARGS_MISMATCH(3) | MVEE_PRECALL_CALL_DENY;
+            }
+        }
     }
 
 	if (call_do_alias_at<1, 2>() || 
