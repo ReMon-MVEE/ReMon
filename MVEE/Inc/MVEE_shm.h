@@ -202,7 +202,7 @@ struct mvee_lock_buffer_info
 	// Type of the buffer. Must be MVEE_LIBC_LOCK_BUFFER or MVEE_LIBC_LOCK_BUFFER_PARTIAL
 	unsigned char buffer_type;
 	// Pad to the next cache line boundary
-	unsigned char padding[64 - sizeof(int) * 4 - sizeof(unsigned char)];
+	unsigned char padding[64 - sizeof(int) * 4 - sizeof(unsigned char) * 2];
 };
 
 struct mvee_lock_buffer_entry
