@@ -1,1 +1,2 @@
 add_subdirectory(MVEE_backtrace)
+add_subdirectory(SyncTrace)

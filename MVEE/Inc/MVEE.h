@@ -504,6 +504,9 @@ public:
     // Number of variants we're running
     static int                      numvariants;
 
+    // The logfile when using SyncTrace
+	static std::string              synctrace_logfile;
+
 	// Spec ids for the variants we're running
 	static std::vector<std::string> variant_ids;
 

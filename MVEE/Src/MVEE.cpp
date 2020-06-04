@@ -84,6 +84,7 @@ Json::Value                            mvee::config;
 Json::Value*                           mvee::config_monitor                      = NULL;
 Json::Value*                           mvee::config_variant_global               = NULL;
 Json::Value*                           mvee::config_variant_exec                 = NULL;
+std::string                            mvee::synctrace_logfile                   = "";
 
 /*-----------------------------------------------------------------------------
     Prototypes
@@ -1758,6 +1759,7 @@ static void usage()
 	printf("> -s <variant set> : run the specified variant set. If this option is omitted, GHUMVEE will launch variant set \"default\". NOTE: This option is ignored in legacy mode.\n");
 	printf("> -f <file name>   : use the monitor config in the specified file. If this option is omitted, the config will be read from MVEE.ini. NOTE: If the MVEE is run in legacy mode, then any options in the builtin config take precedence over the settings in the config file.\n");
 	printf("> -N <number of variants> : sets the number of variants. In RAVEN mode, this option can override the number of variants specified in the config file.\n");
+	printf("> -S <SyncTrace logfile name> : use SyncTrace to find uninstrumented accesses to synchronization variables. NOTE: monitoring is disabled and only a single variant is run.\n");
 	printf("> -n : no monitoring. Variant processes are executed without supervision. Useful for benchmarking.\n");
 	printf("> -p : use performance counters to track cache and synchronization behavior of the variants.\n");
 	printf("> -o : log everything to stdout, as well as the log files. This flag is ignored if the MVEE is compiled with MVEE_BENCHMARK defined in MVEE_build_config.h\n");
@@ -1810,7 +1812,7 @@ bool mvee::process_opts(int argc, char** argv, bool add_args)
 {
 	int opt;
 	bool stop = false;
-	while ((opt = getopt(argc, argv, ":s:f:N:npoc")) != -1 && !stop)
+	while ((opt = getopt(argc, argv, ":s:f:N:npocS:")) != -1 && !stop)
 	{
 		switch(opt)
 		{
@@ -1825,6 +1827,17 @@ bool mvee::process_opts(int argc, char** argv, bool add_args)
 					usage();
 					return false;
 				}
+			case 'S':
+#ifndef SYNCTRACE_LIB
+                printf("No SyncTrace support available! Install DynamoRIO.\n");
+                usage();
+                return false;
+#else
+				mvee::synctrace_logfile = std::string(optarg);
+				mvee::numvariants = 1;
+				(*mvee::config_variant_global)["disable_syscall_checks"] = true;
+				break;
+#endif
 			case 's':
 				mvee::config_variant_set = std::string(optarg);
 				break;
@@ -1952,8 +1965,20 @@ int main(int argc, char *argv[])
 			if (!mvee::process_opts(argc, argv, false))
 				return -1;
 			
-			// Process everything after the "--" as program arguments
 			bool first_extra_arg = true;
+#ifdef SYNCTRACE_LIB
+			if (!mvee::synctrace_logfile.empty())
+			{
+				mvee::add_argv(DYNAMORIO_DIR "/bin64/drrun", true);
+				mvee::add_argv("-c", false);
+				mvee::add_argv(SYNCTRACE_LIB, false);
+				mvee::add_argv("--log_file", false);
+				mvee::add_argv(mvee::synctrace_logfile.c_str(), false);
+				mvee::add_argv("--", false);
+				first_extra_arg = false;
+			}
+#endif
+			// Process everything after the "--" as program arguments
             for (i = dash_pos + 1; i < argc; ++i)
 			{
 				mvee::add_argv(argv[i], first_extra_arg);

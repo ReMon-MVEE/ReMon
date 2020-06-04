@@ -290,6 +290,15 @@ void mvee::set_builtin_config(int builtin)
 		(*config_variant_exec)["argv"].append(input);
 		(*config_variant_exec)["argv"].append("-c");
 		(*config_variant_exec)["argv"].append(parsec_config ? parsec_config : "gcc-pthreads");	   
+#ifdef SYNCTRACE_LIB
+        if (!synctrace_logfile.empty())
+        {
+            (*config_variant_exec)["argv"].append("-s");
+            std::stringstream dynamorio_cmd;
+            dynamorio_cmd << DYNAMORIO_DIR << "/bin64/drrun -c " << SYNCTRACE_LIB << " --log_file " << synctrace_logfile << " --";
+            (*config_variant_exec)["argv"].append(dynamorio_cmd.str());
+        }
+#endif
     }
     else if (spec_bench)
     {
