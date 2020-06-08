@@ -1,5 +1,5 @@
 # fetch latest atomics definitions from gnu webpage
-lynx -width=1024 -dump "http://gcc.gnu.org/onlinedocs/gcc/_005f_005fatomic-Builtins.html" | grep ptr > atomics.txt
+lynx -width=1024 -dump "http://gcc.gnu.org/onlinedocs/gcc/_005f_005fatomic-Builtins.html" | grep ptr | egrep -v 'atomic_is_lock_free|atomic_always_lock_free' > atomics.txt
 lynx -width=1024 -dump "http://gcc.gnu.org/onlinedocs/gcc-4.4.5/gcc/Atomic-Builtins.html" | grep ptr > sync.txt
 
 # generate atomic ops enum
