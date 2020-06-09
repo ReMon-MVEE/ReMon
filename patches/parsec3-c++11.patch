@@ -121,3 +121,28 @@ diff -ur parsec-3.0/pkgs/apps/ferret/src/src/lsh/LSH_query.c parsec-3.0-patched/
  
  //	query->CC = 0;
  
+diff -ur parsec-3.0/pkgs/apps/facesim/src/Public_Library/Arrays/ARRAY.h parsec-3.0-patched/pkgs/apps/facesim/src/Public_Library/Arrays/ARRAY.h
+--- parsec-3.0/pkgs/apps/facesim/src/Public_Library/Arrays/ARRAY.h	2020-06-09 12:35:10.628114618 +0200
++++ parsec-3.0-patched/pkgs/apps/facesim/src/Public_Library/Arrays/ARRAY.h	2020-06-09 12:34:48.244011536 +0200
+@@ -92,7 +92,10 @@
+ 
+ 	void Set_Base_Pointer (T* array)
+ 	{
+-		base_pointer = array - 1;
++    if (array)
++      base_pointer = array - 1;
++    else
++      base_pointer = array;
+ 	}
+ 
+ 	T* Get_Array_Pointer() const
+@@ -102,7 +105,8 @@
+ 
+ 	void Deallocate_Base_Pointer()
+ 	{
+-		delete[] (base_pointer + 1);
++    if (base_pointer)
++      delete[] (base_pointer + 1);
+ 	}
+ 
+ 	ARRAY<T>& operator= (const ARRAY<T>& source)
