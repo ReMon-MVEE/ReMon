@@ -167,10 +167,6 @@ else()
         )
 endif()
 
-# link loader
-target_link_libraries(mvee PRIVATE
-)
-
 # system libraries
 target_link_libraries(mvee PRIVATE
         -lrt
