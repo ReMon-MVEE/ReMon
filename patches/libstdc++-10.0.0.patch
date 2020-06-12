@@ -1,0 +1,82 @@
+From 5360095b48c6db6227d3a8893cb2db38a8d7340b Mon Sep 17 00:00:00 2001
+From: babrath <bert.abrath@UGent.be>
+Date: Tue, 9 Jun 2020 16:24:49 +0200
+Subject: [PATCH 2/2] libstdc++ patch
+
+---
+ libstdc++-v3/config/abi/pre/gnu.ver | 4 ++++
+ libstdc++-v3/configure.host         | 6 ------
+ libstdc++-v3/include/bits/c++config | 2 ++
+ libstdc++-v3/libsupc++/guard.cc     | 6 +++---
+ 4 files changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/libstdc++-v3/config/abi/pre/gnu.ver b/libstdc++-v3/config/abi/pre/gnu.ver
+index edf4485e607..791893db004 100644
+--- a/libstdc++-v3/config/abi/pre/gnu.ver
++++ b/libstdc++-v3/config/abi/pre/gnu.ver
+@@ -2604,3 +2604,7 @@ CXXABI_TM_1 {
+     __cxa_tm_cleanup;
+ 
+ };
++GLIBC_2.0 {
++  global:
++    mvee_atomic_*;
++};
+\ No newline at end of file
+diff --git a/libstdc++-v3/configure.host b/libstdc++-v3/configure.host
+index 898db37d9a2..885f4bf5745 100644
+--- a/libstdc++-v3/configure.host
++++ b/libstdc++-v3/configure.host
+@@ -108,9 +108,6 @@ case "${host_cpu}" in
+   crisv32)
+     try_cpu=cris
+     ;;
+-  i[567]86 | x86_64)
+-    try_cpu=i486
+-    ;;
+   hppa*)
+     try_cpu=hppa
+     ;;
+@@ -124,9 +121,6 @@ case "${host_cpu}" in
+     try_cpu=sparc
+     ;;
+   *)
+-    if test -d ${glibcxx_srcdir}/config/cpu/${host_cpu}; then
+-      try_cpu=${host_cpu}
+-    fi
+ esac
+ 
+ 
+diff --git a/libstdc++-v3/include/bits/c++config b/libstdc++-v3/include/bits/c++config
+index b1fad59d4b3..237b6543bfb 100644
+--- a/libstdc++-v3/include/bits/c++config
++++ b/libstdc++-v3/include/bits/c++config
+@@ -583,6 +583,8 @@ namespace std
+ #undef min
+ #undef max
+ 
++#include "../../../../../mvee_atomic.h"
++
+ // N.B. these _GLIBCXX_USE_C99_XXX macros are defined unconditionally
+ // so they should be tested with #if not with #ifdef.
+ #if __cplusplus >= 201103L
+diff --git a/libstdc++-v3/libsupc++/guard.cc b/libstdc++-v3/libsupc++/guard.cc
+index 474af33ce83..3d38bf125ad 100644
+--- a/libstdc++-v3/libsupc++/guard.cc
++++ b/libstdc++-v3/libsupc++/guard.cc
+@@ -36,9 +36,9 @@
+ # include <climits>
+ # include <syscall.h>
+ # include <unistd.h>
+-# define _GLIBCXX_USE_FUTEX
+-# define _GLIBCXX_FUTEX_WAIT 0
+-# define _GLIBCXX_FUTEX_WAKE 1
++//# define _GLIBCXX_USE_FUTEX
++//# define _GLIBCXX_FUTEX_WAIT 0
++//# define _GLIBCXX_FUTEX_WAKE 1
+ #endif
+ 
+ // The IA64/generic ABI uses the first byte of the guard variable.
+-- 
+2.26.2
+
