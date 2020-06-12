@@ -1,4 +1,4 @@
-FROM ubuntu:18.04
+FROM ubuntu:20.04
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Install the required packages
@@ -7,7 +7,7 @@ RUN \
     # Required to build dependencies
     apt-get install -y gcc g++ cmake bison flex python texinfo texi2html automake zlib1g-dev ccache \
     # Required to build MVEE
-    ruby libselinux-dev musl-tools libelf-dev libdwarf-dev libgmp-dev libmpfr-dev libmpc-dev libconfig-dev libcap-dev libunwind8 libunwind8-dev liblzma5 liblzma-dev
+    ruby libselinux-dev musl-tools libelf-dev libdwarf-dev libgmp-dev libmpfr-dev libmpc-dev libconfig-dev libcap-dev libunwind8 libunwind8-dev liblzma5 liblzma-dev libjsoncpp-dev
 
 ################################################################################################################################################################
 ###################################################################### Build dependencies ######################################################################
@@ -21,23 +21,14 @@ RUN \
     /opt/source/binutils/configure --enable-plugins --enable-gold --disable-werror && \
     make -j `getconf _NPROCESSORS_ONLN`
 
-# Build libjson
-COPY deps/jsoncpp /opt/source/jsoncpp/
-RUN \
-    mkdir -p /opt/deps/jsoncpp/build && \
-    cd /opt/deps/jsoncpp/build && \
-    cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_STATIC_LIBS=ON -DBUILD_SHARED_LIBS=OFF -DCMAKE_CXX_FLAGS=-O3 \
-    -DCMAKE_INSTALL_INCLUDEDIR=include/jsoncpp -DCMAKE_INSTALL_PREFIX=/usr/ /opt/source/jsoncpp && \
-    make -j `getconf _NPROCESSORS_ONLN` install
-
 # Install ReMon LLVM
-COPY deps/llvm /opt/source/llvm/
-RUN \
-    mkdir -p /build/llvm/ && \
-    cd /build/llvm/ && \
-    cmake -DLLVM_TARGETS_TO_BUILD="X86;ARM" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/deps/llvm/build-tree/ -DLLVM_BINUTILS_INCDIR=/opt/source/binutils/include -DLLVM_CCACHE_BUILD=OFF \
-    -DLLVM_CCACHE_DIR=/build/ccache/ /opt/source/llvm/ && \
-    make -j `getconf _NPROCESSORS_ONLN` install
+#COPY deps/llvm /opt/source/llvm/
+#RUN \
+#    mkdir -p /build/llvm/ && \
+#    cd /build/llvm/ && \
+#    cmake -DLLVM_TARGETS_TO_BUILD="X86;ARM" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/deps/llvm/build-tree/ -DLLVM_BINUTILS_INCDIR=/opt/source/binutils/include -DLLVM_CCACHE_BUILD=OFF \
+#    -DLLVM_CCACHE_DIR=/build/ccache/ /opt/source/llvm/ && \
+#    make -j `getconf _NPROCESSORS_ONLN` install
 
 # Cleanup
 RUN rm -rf /opt/source/*

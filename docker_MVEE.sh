@@ -51,17 +51,8 @@ download_deps() {
         git clone https://github.com/stijn-volckaert/remon-compiler-rt.git deps/llvm/projects/compiler-rt
     fi
 
-    # download libjson
-    if [ ! -e deps/jsoncpp ]
-    then
-        git clone https://github.com/open-source-parsers/jsoncpp.git deps/jsoncpp
-        cd deps/jsoncpp
-        git reset --hard 6a15ca64429e1ce6d2fff915ff14ce1c2a96975c
-        cd -
-    fi
-
     # Set the version for the patched libc
-    ./scripts/switch_patched_binaries.sh ubuntu18
+    ./scripts/switch_patched_binaries.sh ubuntu20
 }
 
 run_docker() {
