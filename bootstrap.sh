@@ -106,6 +106,9 @@ fi
 # All done!
 printf "\033[0;32mReMon's dependencies are now installed!\033[0m\n"
 
+# Set the version for the patched libc
+$ORIG_PWD/scripts/switch_patched_binaries.sh ubuntu18
+
 # setting up build directory
 
 # variables ============================================================================================================

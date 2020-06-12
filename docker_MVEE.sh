@@ -59,6 +59,9 @@ download_deps() {
         git reset --hard 6a15ca64429e1ce6d2fff915ff14ce1c2a96975c
         cd -
     fi
+
+    # Set the version for the patched libc
+    ./scripts/switch_patched_binaries.sh ubuntu18
 }
 
 run_docker() {

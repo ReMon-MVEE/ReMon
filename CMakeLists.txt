@@ -81,59 +81,6 @@ else()
     set(MUSL_GCC ${CMAKE_SOURCE_DIR}/deps/musl-install/bin/musl-gcc)
 endif()
 
-# libraries ============================================================================================================
-set(LIBC_VER 2.27.9000)
-add_custom_command(
-        OUTPUT      ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/libc.so.6
-        COMMAND     ln -f -s libc-${LIBC_VER}.so patched_binaries/libc/${ARCH}/libc.so.6
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-)
-add_custom_command(
-        OUTPUT      ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/libpthread.so.0
-        COMMAND     ln -f -s libpthread-${LIBC_VER}.so patched_binaries/libc/${ARCH}/libpthread.so.0
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-)
-add_custom_command(
-        OUTPUT      ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/libdl.so.2
-        COMMAND     ln -f -s libdl-${LIBC_VER}.so patched_binaries/libc/${ARCH}/libdl.so.2
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-)
-add_custom_command(
-        OUTPUT      ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/librt.so.1
-        COMMAND     ln -f -s librt-${LIBC_VER}.so patched_binaries/libc/${ARCH}/librt.so.1
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-)
-add_custom_command(
-        OUTPUT      ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/libm.so.6
-        COMMAND     ln -f -s libm-${LIBC_VER}.so patched_binaries/libc/${ARCH}/libm.so.6
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-)
-add_custom_command(
-        OUTPUT      ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/libresolv.so.2
-        COMMAND     ln -f -s libresolv-${LIBC_VER}.so patched_binaries/libc/${ARCH}/libresolv.so.2
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-)
-add_custom_command(
-        OUTPUT      ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/libutil.so.1
-        COMMAND     ln -f -s libutil-${LIBC_VER}.so patched_binaries/libc/${ARCH}/libutil.so.1
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-)
-add_custom_command(
-        OUTPUT      ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/ld-linux.so
-        COMMAND     ln -f -s ld-${LIBC_VER}.so patched_binaries/libc/${ARCH}/ld-linux.so
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-)
-
-add_custom_target(linking
-        DEPENDS     ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/libc.so.6
-                    ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/libpthread.so.0
-                    ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/libdl.so.2
-                    ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/librt.so.1
-                    ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/libm.so.6
-                    ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/libresolv.so.2
-                    ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/libutil.so.1
-                    ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/ld-linux.so
-)
 # ======================================================================================================================
 
 
@@ -197,7 +144,6 @@ add_executable(mvee
 )
 
 add_dependencies(mvee
-        linking
         syscall_tables
 )
 
@@ -220,19 +166,6 @@ else()
                 ${CMAKE_SOURCE_DIR}/deps/binutils/build-tree/zlib/libz.a
         )
 endif()
-
-# link patched binaries
-target_link_libraries(mvee INTERFACE
-        ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/libc.so.6
-        ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/libpthread.so.0
-        ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/librt.so.1
-        ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/libdl.so.2
-        ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/libm.so.6
-        ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/libresolv.so.2
-        ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/libutil.so.1
-        ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/ld-linux.so
-        ${CMAKE_SOURCE_DIR}/patched_binaries/libc/${ARCH}/libclang_rt.sync-${ALT_ARCH}.so
-)
 
 # link loader
 target_link_libraries(mvee PRIVATE
