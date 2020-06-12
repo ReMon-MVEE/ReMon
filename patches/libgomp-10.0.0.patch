@@ -1,0 +1,4969 @@
+From f0c0ab1a67a018efedb32aed659c2b0caa16ecc1 Mon Sep 17 00:00:00 2001
+From: babrath <bert.abrath@UGent.be>
+Date: Tue, 9 Jun 2020 14:59:55 +0200
+Subject: [PATCH 1/2] libgomp patch
+
+---
+ libgomp/config/bsd/proc.c                     | 115 -----
+ libgomp/config/linux/affinity.c               | 456 ------------------
+ libgomp/config/linux/alpha/futex.h            | 104 ----
+ libgomp/config/linux/bar.c                    | 290 +++++++----
+ libgomp/config/linux/bar.h                    |  86 ++--
+ libgomp/config/linux/doacross.h               |   9 +-
+ libgomp/config/linux/futex.h                  |  70 ---
+ libgomp/config/linux/ia64/futex.h             |  89 ----
+ libgomp/config/linux/lock.c                   | 286 ++++++++---
+ libgomp/config/linux/mips/futex.h             |  78 ---
+ libgomp/config/linux/mutex.c                  |  71 +--
+ libgomp/config/linux/mutex.h                  |  37 +-
+ libgomp/config/linux/omp-lock.h               |  25 +-
+ .../config/{posix => linux}/plugin-suffix.h   |   2 +-
+ libgomp/config/{posix => linux}/pool.h        |   2 +-
+ libgomp/config/linux/powerpc/futex.h          |  87 ----
+ libgomp/config/linux/proc.c                   | 154 +-----
+ libgomp/config/linux/proc.h                   |  38 --
+ libgomp/config/linux/ptrlock.c                |  71 +--
+ libgomp/config/linux/ptrlock.h                |  45 +-
+ libgomp/config/linux/s390/futex.h             |  79 ---
+ libgomp/config/linux/sem.c                    | 130 +++--
+ libgomp/config/linux/sem.h                    |  92 ++--
+ libgomp/config/{posix => linux}/simple-bar.h  |   2 +-
+ libgomp/config/linux/sparc/futex.h            |  95 ----
+ .../{posix => linux}/thread-stacksize.h       |   2 +-
+ libgomp/config/linux/tile/futex.h             |  73 ---
+ libgomp/config/{mingw32 => linux}/time.c      |  48 +-
+ libgomp/config/linux/wait.h                   |  74 ---
+ libgomp/config/linux/x86/futex.h              | 131 -----
+ libgomp/config/mingw32/proc.c                 |  81 ----
+ libgomp/config/posix/bar.c                    | 299 ------------
+ libgomp/config/posix/bar.h                    | 158 ------
+ libgomp/config/posix/doacross.h               |  62 ---
+ libgomp/config/posix/lock.c                   | 305 ------------
+ libgomp/config/posix/mutex.c                  |   1 -
+ libgomp/config/posix/mutex.h                  |  58 ---
+ libgomp/config/posix/omp-lock.h               |  23 -
+ libgomp/config/posix/proc.c                   | 102 ----
+ libgomp/config/posix/ptrlock.c                |   1 -
+ libgomp/config/posix/ptrlock.h                |  66 ---
+ libgomp/config/posix/sem.c                    | 124 -----
+ libgomp/config/posix/sem.h                    |  88 ----
+ libgomp/configure                             |   5 -
+ libgomp/libgomp.h                             |   1 +
+ libgomp/libgomp.map                           |   5 +
+ 46 files changed, 691 insertions(+), 3529 deletions(-)
+ delete mode 100644 libgomp/config/bsd/proc.c
+ delete mode 100644 libgomp/config/linux/affinity.c
+ delete mode 100644 libgomp/config/linux/alpha/futex.h
+ delete mode 100644 libgomp/config/linux/futex.h
+ delete mode 100644 libgomp/config/linux/ia64/futex.h
+ delete mode 100644 libgomp/config/linux/mips/futex.h
+ rename libgomp/config/{posix => linux}/plugin-suffix.h (95%)
+ rename libgomp/config/{posix => linux}/pool.h (97%)
+ delete mode 100644 libgomp/config/linux/powerpc/futex.h
+ delete mode 100644 libgomp/config/linux/proc.h
+ delete mode 100644 libgomp/config/linux/s390/futex.h
+ rename libgomp/config/{posix => linux}/simple-bar.h (97%)
+ delete mode 100644 libgomp/config/linux/sparc/futex.h
+ rename libgomp/config/{posix => linux}/thread-stacksize.h (95%)
+ delete mode 100644 libgomp/config/linux/tile/futex.h
+ rename libgomp/config/{mingw32 => linux}/time.c (51%)
+ delete mode 100644 libgomp/config/linux/wait.h
+ delete mode 100644 libgomp/config/linux/x86/futex.h
+ delete mode 100644 libgomp/config/mingw32/proc.c
+ delete mode 100644 libgomp/config/posix/bar.c
+ delete mode 100644 libgomp/config/posix/bar.h
+ delete mode 100644 libgomp/config/posix/doacross.h
+ delete mode 100644 libgomp/config/posix/lock.c
+ delete mode 100644 libgomp/config/posix/mutex.c
+ delete mode 100644 libgomp/config/posix/mutex.h
+ delete mode 100644 libgomp/config/posix/omp-lock.h
+ delete mode 100644 libgomp/config/posix/proc.c
+ delete mode 100644 libgomp/config/posix/ptrlock.c
+ delete mode 100644 libgomp/config/posix/ptrlock.h
+ delete mode 100644 libgomp/config/posix/sem.c
+ delete mode 100644 libgomp/config/posix/sem.h
+
+diff --git a/libgomp/config/bsd/proc.c b/libgomp/config/bsd/proc.c
+deleted file mode 100644
+index 7d95847b7a3..00000000000
+--- a/libgomp/config/bsd/proc.c
++++ /dev/null
+@@ -1,115 +0,0 @@
+-/* Copyright (C) 2005-2020 Free Software Foundation, Inc.
+-   Contributed by Richard Henderson <rth@redhat.com>.
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-/* This file contains system specific routines related to counting
+-   online processors and dynamic load balancing.  It is expected that
+-   a system may well want to write special versions of each of these.
+-
+-   The following implementation uses a mix of POSIX and BSD routines.  */
+-
+-#include "libgomp.h"
+-#include <unistd.h>
+-#include <stdlib.h>
+-#ifdef HAVE_GETLOADAVG
+-# ifdef HAVE_SYS_LOADAVG_H
+-#  include <sys/loadavg.h>
+-# endif
+-#endif
+-#ifdef HAVE_SYS_SYSCTL_H
+-# include <sys/sysctl.h>
+-#endif
+-
+-static int
+-get_num_procs (void)
+-{
+-#ifdef _SC_NPROCESSORS_ONLN
+-  return sysconf (_SC_NPROCESSORS_ONLN);
+-#elif defined HW_NCPU
+-  int ncpus = 1;
+-  size_t len = sizeof(ncpus);
+-  sysctl((int[2]) {CTL_HW, HW_NCPU}, 2, &ncpus, &len, NULL, 0);
+-  return ncpus;
+-#else
+-  return 0;
+-#endif
+-}
+-
+-/* At startup, determine the default number of threads.  It would seem
+-   this should be related to the number of cpus online.  */
+-
+-void
+-gomp_init_num_threads (void)
+-{
+-  int ncpus = get_num_procs ();
+-
+-  if (ncpus > 0)
+-    gomp_global_icv.nthreads_var = ncpus;
+-}
+-
+-/* When OMP_DYNAMIC is set, at thread launch determine the number of
+-   threads we should spawn for this team.  */
+-/* ??? I have no idea what best practice for this is.  Surely some
+-   function of the number of processors that are *still* online and
+-   the load average.  Here I use the number of processors online
+-   minus the 15 minute load average.  */
+-
+-unsigned
+-gomp_dynamic_max_threads (void)
+-{
+-  unsigned n_onln, loadavg;
+-  unsigned nthreads_var = gomp_icv (false)->nthreads_var;
+-
+-  n_onln = get_num_procs ();
+-  if (!n_onln || n_onln > nthreads_var)
+-    n_onln = nthreads_var;
+-
+-  loadavg = 0;
+-#ifdef HAVE_GETLOADAVG
+-  {
+-    double dloadavg[3];
+-    if (getloadavg (dloadavg, 3) == 3)
+-      {
+-	/* Add 0.1 to get a kind of biased rounding.  */
+-	loadavg = dloadavg[2] + 0.1;
+-      }
+-  }
+-#endif
+-
+-  if (loadavg >= n_onln)
+-    return 1;
+-  else
+-    return n_onln - loadavg;
+-}
+-
+-int
+-omp_get_num_procs (void)
+-{
+-  int ncpus = get_num_procs ();
+-  if (ncpus <= 0)
+-    ncpus = gomp_icv (false)->nthreads_var;
+-  return ncpus;
+-}
+-
+-ialias (omp_get_num_procs)
+diff --git a/libgomp/config/linux/affinity.c b/libgomp/config/linux/affinity.c
+deleted file mode 100644
+index 0d6a7958b18..00000000000
+--- a/libgomp/config/linux/affinity.c
++++ /dev/null
+@@ -1,456 +0,0 @@
+-/* Copyright (C) 2006-2020 Free Software Foundation, Inc.
+-   Contributed by Jakub Jelinek <jakub@redhat.com>.
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-/* This is a Linux specific implementation of a CPU affinity setting.  */
+-
+-#ifndef _GNU_SOURCE
+-#define _GNU_SOURCE 1
+-#endif
+-#include "libgomp.h"
+-#include "proc.h"
+-#include <errno.h>
+-#include <stdlib.h>
+-#include <stdio.h>
+-#include <string.h>
+-#include <unistd.h>
+-
+-#ifdef HAVE_PTHREAD_AFFINITY_NP
+-
+-#ifndef CPU_ALLOC_SIZE
+-#define CPU_ISSET_S(idx, size, set) CPU_ISSET(idx, set)
+-#define CPU_ZERO_S(size, set) CPU_ZERO(set)
+-#define CPU_SET_S(idx, size, set) CPU_SET(idx, set)
+-#define CPU_CLR_S(idx, size, set) CPU_CLR(idx, set)
+-#endif
+-
+-void
+-gomp_init_affinity (void)
+-{
+-  if (gomp_places_list == NULL)
+-    {
+-      if (!gomp_affinity_init_level (1, ULONG_MAX, true))
+-	return;
+-    }
+-
+-  struct gomp_thread *thr = gomp_thread ();
+-  pthread_setaffinity_np (pthread_self (), gomp_cpuset_size,
+-			  (cpu_set_t *) gomp_places_list[0]);
+-  thr->place = 1;
+-  thr->ts.place_partition_off = 0;
+-  thr->ts.place_partition_len = gomp_places_list_len;
+-}
+-
+-void
+-gomp_init_thread_affinity (pthread_attr_t *attr, unsigned int place)
+-{
+-  pthread_attr_setaffinity_np (attr, gomp_cpuset_size,
+-			       (cpu_set_t *) gomp_places_list[place]);
+-}
+-
+-void **
+-gomp_affinity_alloc (unsigned long count, bool quiet)
+-{
+-  unsigned long i;
+-  void **ret;
+-  char *p;
+-
+-  if (gomp_cpusetp == NULL)
+-    {
+-      if (!quiet)
+-	gomp_error ("Could not get CPU affinity set");
+-      return NULL;
+-    }
+-
+-  ret = malloc (count * sizeof (void *) + count * gomp_cpuset_size);
+-  if (ret == NULL)
+-    {
+-      if (!quiet)
+-	gomp_error ("Out of memory trying to allocate places list");
+-      return NULL;
+-    }
+-
+-  p = (char *) (ret + count);
+-  for (i = 0; i < count; i++, p += gomp_cpuset_size)
+-    ret[i] = p;
+-  return ret;
+-}
+-
+-void
+-gomp_affinity_init_place (void *p)
+-{
+-  cpu_set_t *cpusetp = (cpu_set_t *) p;
+-  CPU_ZERO_S (gomp_cpuset_size, cpusetp);
+-}
+-
+-bool
+-gomp_affinity_add_cpus (void *p, unsigned long num,
+-			unsigned long len, long stride, bool quiet)
+-{
+-  cpu_set_t *cpusetp = (cpu_set_t *) p;
+-  unsigned long max = 8 * gomp_cpuset_size;
+-  for (;;)
+-    {
+-      if (num >= max)
+-	{
+-	  if (!quiet)
+-	    gomp_error ("Logical CPU number %lu out of range", num);
+-	  return false;
+-	}
+-      CPU_SET_S (num, gomp_cpuset_size, cpusetp);
+-      if (--len == 0)
+-	return true;
+-      if ((stride < 0 && num + stride > num)
+-	  || (stride > 0 && num + stride < num))
+-	{
+-	  if (!quiet)
+-	    gomp_error ("Logical CPU number %lu+%ld out of range",
+-			num, stride);
+-	  return false;
+-	}
+-      num += stride;
+-    }
+-}
+-
+-bool
+-gomp_affinity_remove_cpu (void *p, unsigned long num)
+-{
+-  cpu_set_t *cpusetp = (cpu_set_t *) p;
+-  if (num >= 8 * gomp_cpuset_size)
+-    {
+-      gomp_error ("Logical CPU number %lu out of range", num);
+-      return false;
+-    }
+-  if (!CPU_ISSET_S (num, gomp_cpuset_size, cpusetp))
+-    {
+-      gomp_error ("Logical CPU %lu to be removed is not in the set", num);
+-      return false;
+-    }
+-  CPU_CLR_S (num, gomp_cpuset_size, cpusetp);
+-  return true;
+-}
+-
+-bool
+-gomp_affinity_copy_place (void *p, void *q, long stride)
+-{
+-  unsigned long i, max = 8 * gomp_cpuset_size;
+-  cpu_set_t *destp = (cpu_set_t *) p;
+-  cpu_set_t *srcp = (cpu_set_t *) q;
+-
+-  CPU_ZERO_S (gomp_cpuset_size, destp);
+-  for (i = 0; i < max; i++)
+-    if (CPU_ISSET_S (i, gomp_cpuset_size, srcp))
+-      {
+-	if ((stride < 0 && i + stride > i)
+-	    || (stride > 0 && (i + stride < i || i + stride >= max)))
+-	  {
+-	    gomp_error ("Logical CPU number %lu+%ld out of range", i, stride);
+-	    return false;
+-	  }
+-	CPU_SET_S (i + stride, gomp_cpuset_size, destp);
+-      }
+-  return true;
+-}
+-
+-bool
+-gomp_affinity_same_place (void *p, void *q)
+-{
+-#ifdef CPU_EQUAL_S
+-  return CPU_EQUAL_S (gomp_cpuset_size, (cpu_set_t *) p, (cpu_set_t *) q);
+-#else
+-  return memcmp (p, q, gomp_cpuset_size) == 0;
+-#endif
+-}
+-
+-bool
+-gomp_affinity_finalize_place_list (bool quiet)
+-{
+-  unsigned long i, j;
+-
+-  for (i = 0, j = 0; i < gomp_places_list_len; i++)
+-    {
+-      cpu_set_t *cpusetp = (cpu_set_t *) gomp_places_list[i];
+-      bool nonempty = false;
+-#ifdef CPU_AND_S
+-      CPU_AND_S (gomp_cpuset_size, cpusetp, cpusetp, gomp_cpusetp);
+-      nonempty = gomp_cpuset_popcount (gomp_cpuset_size, cpusetp) != 0;
+-#else
+-      unsigned long k, max = gomp_cpuset_size / sizeof (cpusetp->__bits[0]);
+-      for (k = 0; k < max; k++)
+-	if ((cpusetp->__bits[k] &= gomp_cpusetp->__bits[k]) != 0)
+-	  nonempty = true;
+-#endif
+-      if (nonempty)
+-	gomp_places_list[j++] = gomp_places_list[i];
+-    }
+-
+-  if (j == 0)
+-    {
+-      if (!quiet)
+-	gomp_error ("None of the places contain usable logical CPUs");
+-      return false;
+-    }
+-  else if (j < gomp_places_list_len)
+-    {
+-      if (!quiet)
+-	gomp_error ("Number of places reduced from %ld to %ld because some "
+-		    "places didn't contain any usable logical CPUs",
+-		    gomp_places_list_len, j);
+-      gomp_places_list_len = j;
+-    }
+-  return true;
+-}
+-
+-static void
+-gomp_affinity_init_level_1 (int level, int this_level, unsigned long count,
+-			    cpu_set_t *copy, char *name, bool quiet)
+-{
+-  size_t prefix_len = sizeof ("/sys/devices/system/cpu/cpu") - 1;
+-  FILE *f;
+-  char *line = NULL;
+-  size_t linelen = 0;
+-  unsigned long i, max = 8 * gomp_cpuset_size;
+-
+-  for (i = 0; i < max && gomp_places_list_len < count; i++)
+-    if (CPU_ISSET_S (i, gomp_cpuset_size, copy))
+-      {
+-	sprintf (name + prefix_len, "%lu/topology/%s_siblings_list",
+-		 i, this_level == 3 ? "core" : "thread");
+-	f = fopen (name, "r");
+-	if (f == NULL)
+-	  {
+-	    CPU_CLR_S (i, gomp_cpuset_size, copy);
+-	    continue;
+-	  }
+-	if (getline (&line, &linelen, f) > 0)
+-	  {
+-	    char *p = line;
+-	    void *pl = gomp_places_list[gomp_places_list_len];
+-	    if (level == this_level)
+-	      gomp_affinity_init_place (pl);
+-	    while (*p && *p != '\n')
+-	      {
+-		unsigned long first, last;
+-		errno = 0;
+-		first = strtoul (p, &p, 10);
+-		if (errno)
+-		  break;
+-		last = first;
+-		if (*p == '-')
+-		  {
+-		    errno = 0;
+-		    last = strtoul (p + 1, &p, 10);
+-		    if (errno || last < first)
+-		      break;
+-		  }
+-		for (; first <= last; first++)
+-		  if (!CPU_ISSET_S (first, gomp_cpuset_size, copy))
+-		    continue;
+-		  else if (this_level == 3 && level < this_level)
+-		    gomp_affinity_init_level_1 (level, 2, count, copy,
+-						name, quiet);
+-		  else
+-		    {
+-		      if (level == 1)
+-			{
+-			  pl = gomp_places_list[gomp_places_list_len];
+-			  gomp_affinity_init_place (pl);
+-			}
+-		      if (gomp_affinity_add_cpus (pl, first, 1, 0, true))
+-			{
+-			  CPU_CLR_S (first, gomp_cpuset_size, copy);
+-			  if (level == 1)
+-			    gomp_places_list_len++;
+-			}
+-		    }
+-		if (*p == ',')
+-		  ++p;
+-	      }
+-	    if (level == this_level
+-		&& !CPU_ISSET_S (i, gomp_cpuset_size, copy))
+-	      gomp_places_list_len++;
+-	    CPU_CLR_S (i, gomp_cpuset_size, copy);
+-	  }
+-	fclose (f);
+-      }
+-  free (line);
+-}
+-
+-bool
+-gomp_affinity_init_level (int level, unsigned long count, bool quiet)
+-{
+-  char name[sizeof ("/sys/devices/system/cpu/cpu/topology/"
+-		    "thread_siblings_list") + 3 * sizeof (unsigned long)];
+-  cpu_set_t *copy;
+-
+-  if (gomp_cpusetp)
+-    {
+-      unsigned long maxcount
+-	= gomp_cpuset_popcount (gomp_cpuset_size, gomp_cpusetp);
+-      if (count > maxcount)
+-	count = maxcount;
+-    }
+-  gomp_places_list = gomp_affinity_alloc (count, quiet);
+-  gomp_places_list_len = 0;
+-  if (gomp_places_list == NULL)
+-    return false;
+-
+-  copy = gomp_alloca (gomp_cpuset_size);
+-  strcpy (name, "/sys/devices/system/cpu/cpu");
+-  memcpy (copy, gomp_cpusetp, gomp_cpuset_size);
+-  gomp_affinity_init_level_1 (level, 3, count, copy, name, quiet);
+-  if (gomp_places_list_len == 0)
+-    {
+-      if (!quiet)
+-	gomp_error ("Error reading core/socket topology");
+-      free (gomp_places_list);
+-      gomp_places_list = NULL;
+-      return false;
+-    }
+-  return true;
+-}
+-
+-void
+-gomp_affinity_print_place (void *p)
+-{
+-  unsigned long i, max = 8 * gomp_cpuset_size, len;
+-  cpu_set_t *cpusetp = (cpu_set_t *) p;
+-  bool notfirst = false;
+-
+-  for (i = 0, len = 0; i < max; i++)
+-    if (CPU_ISSET_S (i, gomp_cpuset_size, cpusetp))
+-      {
+-	if (len == 0)
+-	  {
+-	    if (notfirst)
+-	      fputc (',', stderr);
+-	    notfirst = true;
+-	    fprintf (stderr, "%lu", i);
+-	  }
+-	++len;
+-      }
+-    else
+-      {
+-	if (len > 1)
+-	  fprintf (stderr, ":%lu", len);
+-	len = 0;
+-      }
+-  if (len > 1)
+-    fprintf (stderr, ":%lu", len);
+-}
+-
+-int
+-omp_get_place_num_procs (int place_num)
+-{
+-  if (place_num < 0 || place_num >= gomp_places_list_len)
+-    return 0;
+-
+-  cpu_set_t *cpusetp = (cpu_set_t *) gomp_places_list[place_num];
+-  return gomp_cpuset_popcount (gomp_cpuset_size, cpusetp);
+-}
+-
+-void
+-omp_get_place_proc_ids (int place_num, int *ids)
+-{
+-  if (place_num < 0 || place_num >= gomp_places_list_len)
+-    return;
+-
+-  cpu_set_t *cpusetp = (cpu_set_t *) gomp_places_list[place_num];
+-  unsigned long i, max = 8 * gomp_cpuset_size;
+-  for (i = 0; i < max; i++)
+-    if (CPU_ISSET_S (i, gomp_cpuset_size, cpusetp))
+-      *ids++ = i;
+-}
+-
+-void
+-gomp_get_place_proc_ids_8 (int place_num, int64_t *ids)
+-{
+-  if (place_num < 0 || place_num >= gomp_places_list_len)
+-    return;
+-
+-  cpu_set_t *cpusetp = (cpu_set_t *) gomp_places_list[place_num];
+-  unsigned long i, max = 8 * gomp_cpuset_size;
+-  for (i = 0; i < max; i++)
+-    if (CPU_ISSET_S (i, gomp_cpuset_size, cpusetp))
+-      *ids++ = i;
+-}
+-
+-void
+-gomp_display_affinity_place (char *buffer, size_t size, size_t *ret,
+-			     int place)
+-{
+-  cpu_set_t *cpusetp;
+-  char buf[sizeof (long) * 3 + 4];
+-  if (place >= 0 && place < gomp_places_list_len)
+-    cpusetp = (cpu_set_t *) gomp_places_list[place];
+-  else if (gomp_cpusetp)
+-    cpusetp = gomp_cpusetp;
+-  else
+-    {
+-      if (gomp_available_cpus > 1)
+-	sprintf (buf, "0-%lu", gomp_available_cpus - 1);
+-      else
+-	strcpy (buf, "0");
+-      gomp_display_string (buffer, size, ret, buf, strlen (buf));
+-      return;
+-    }
+-
+-  unsigned long i, max = 8 * gomp_cpuset_size, start;
+-  bool prev_set = false;
+-  start = max;
+-  for (i = 0; i <= max; i++)
+-    {
+-      bool this_set;
+-      if (i == max)
+-	this_set = false;
+-      else
+-	this_set = CPU_ISSET_S (i, gomp_cpuset_size, cpusetp);
+-      if (this_set != prev_set)
+-	{
+-	  prev_set = this_set;
+-	  if (this_set)
+-	    {
+-	      char *p = buf;
+-	      if (start != max)
+-		*p++ = ',';
+-	      sprintf (p, "%lu", i);
+-	      start = i;
+-	    }
+-	  else if (i == start + 1)
+-	    continue;
+-	  else
+-	    sprintf (buf, "-%lu", i - 1);
+-	  gomp_display_string (buffer, size, ret, buf, strlen (buf));
+-	}
+-    }
+-}
+-
+-ialias(omp_get_place_num_procs)
+-ialias(omp_get_place_proc_ids)
+-
+-#else
+-
+-#include "../../affinity.c"
+-
+-#endif
+diff --git a/libgomp/config/linux/alpha/futex.h b/libgomp/config/linux/alpha/futex.h
+deleted file mode 100644
+index e99b8bc0872..00000000000
+--- a/libgomp/config/linux/alpha/futex.h
++++ /dev/null
+@@ -1,104 +0,0 @@
+-/* Copyright (C) 2005-2020 Free Software Foundation, Inc.
+-   Contributed by Richard Henderson <rth@redhat.com>.
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-/* Provide target-specific access to the futex system call.  */
+-
+-#ifndef SYS_futex
+-#define SYS_futex               394
+-#endif
+-
+-
+-static inline void
+-futex_wait (int *addr, int val)
+-{
+-  register long sc_0 __asm__("$0");
+-  register long sc_16 __asm__("$16");
+-  register long sc_17 __asm__("$17");
+-  register long sc_18 __asm__("$18");
+-  register long sc_19 __asm__("$19");
+-
+-  sc_0 = SYS_futex;
+-  sc_16 = (long) addr;
+-  sc_17 = gomp_futex_wait;
+-  sc_18 = val;
+-  sc_19 = 0;
+-  __asm volatile ("callsys"
+-		  : "=r" (sc_0), "=r"(sc_19)
+-		  : "0"(sc_0), "r" (sc_16), "r"(sc_17), "r"(sc_18), "1"(sc_19)
+-		  : "$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8",
+-		    "$22", "$23", "$24", "$25", "$27", "$28", "memory");
+-  if (__builtin_expect (sc_19, 0) && sc_0 == ENOSYS)
+-    {
+-      gomp_futex_wait &= ~FUTEX_PRIVATE_FLAG;
+-      gomp_futex_wake &= ~FUTEX_PRIVATE_FLAG;
+-      sc_0 = SYS_futex;
+-      sc_17 &= ~FUTEX_PRIVATE_FLAG;
+-      sc_19 = 0;
+-      __asm volatile ("callsys"
+-		      : "=r" (sc_0), "=r"(sc_19)
+-		      : "0"(sc_0), "r" (sc_16), "r"(sc_17), "r"(sc_18),
+-			"1"(sc_19)
+-		      : "$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8",
+-			"$22", "$23", "$24", "$25", "$27", "$28", "memory");
+-    }
+-}
+-
+-static inline void
+-futex_wake (int *addr, int count)
+-{
+-  register long sc_0 __asm__("$0");
+-  register long sc_16 __asm__("$16");
+-  register long sc_17 __asm__("$17");
+-  register long sc_18 __asm__("$18");
+-  register long sc_19 __asm__("$19");
+-
+-  sc_0 = SYS_futex;
+-  sc_16 = (long) addr;
+-  sc_17 = gomp_futex_wake;
+-  sc_18 = count;
+-  __asm volatile ("callsys"
+-		  : "=r" (sc_0), "=r"(sc_19)
+-		  : "0"(sc_0), "r" (sc_16), "r"(sc_17), "r"(sc_18)
+-		  : "$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8",
+-		    "$22", "$23", "$24", "$25", "$27", "$28", "memory");
+-  if (__builtin_expect (sc_19, 0) && sc_0 == ENOSYS)
+-    {
+-      gomp_futex_wait &= ~FUTEX_PRIVATE_FLAG;
+-      gomp_futex_wake &= ~FUTEX_PRIVATE_FLAG;
+-      sc_0 = SYS_futex;
+-      sc_17 &= ~FUTEX_PRIVATE_FLAG;
+-      __asm volatile ("callsys"
+-		      : "=r" (sc_0), "=r"(sc_19)
+-		      : "0"(sc_0), "r" (sc_16), "r"(sc_17), "r"(sc_18)
+-		      : "$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8",
+-			"$22", "$23", "$24", "$25", "$27", "$28", "memory");
+-    }
+-}
+-
+-static inline void
+-cpu_relax (void)
+-{
+-  __asm volatile ("" : : : "memory");
+-}
+diff --git a/libgomp/config/linux/bar.c b/libgomp/config/linux/bar.c
+index d57231ae61e..9cf6ebdf9c8 100644
+--- a/libgomp/config/linux/bar.c
++++ b/libgomp/config/linux/bar.c
+@@ -23,189 +23,277 @@
+    see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+    <http://www.gnu.org/licenses/>.  */
+ 
+-/* This is a Linux specific implementation of a barrier synchronization
+-   mechanism for libgomp.  This type is private to the library.  This 
+-   implementation uses atomic instructions and the futex syscall.  */
++/* This is the default implementation of a barrier synchronization mechanism
++   for libgomp.  This type is private to the library.  Note that we rely on
++   being able to adjust the barrier count while threads are blocked, so the
++   POSIX pthread_barrier_t won't work.  */
+ 
+-#include <limits.h>
+-#include "wait.h"
++#include "libgomp.h"
+ 
+ 
+ void
+-gomp_barrier_wait_end (gomp_barrier_t *bar, gomp_barrier_state_t state)
++gomp_barrier_init (gomp_barrier_t *bar, unsigned count)
+ {
+-  if (__builtin_expect (state & BAR_WAS_LAST, 0))
+-    {
+-      /* Next time we'll be awaiting TOTAL threads again.  */
+-      bar->awaited = bar->total;
+-      __atomic_store_n (&bar->generation, bar->generation + BAR_INCR,
+-			MEMMODEL_RELEASE);
+-      futex_wake ((int *) &bar->generation, INT_MAX);
+-    }
+-  else
+-    {
+-      do
+-	do_wait ((int *) &bar->generation, state);
+-      while (__atomic_load_n (&bar->generation, MEMMODEL_ACQUIRE) == state);
+-    }
++  gomp_mutex_init (&bar->mutex1);
++#ifndef HAVE_SYNC_BUILTINS
++  gomp_mutex_init (&bar->mutex2);
++#endif
++  gomp_sem_init (&bar->sem1, 0);
++  gomp_sem_init (&bar->sem2, 0);
++  bar->total = count;
++  bar->arrived = 0;
++  bar->generation = 0;
++  bar->cancellable = false;
+ }
+ 
+ void
+-gomp_barrier_wait (gomp_barrier_t *bar)
++gomp_barrier_destroy (gomp_barrier_t *bar)
+ {
+-  gomp_barrier_wait_end (bar, gomp_barrier_wait_start (bar));
++  /* Before destroying, make sure all threads have left the barrier.  */
++  gomp_mutex_lock (&bar->mutex1);
++  gomp_mutex_unlock (&bar->mutex1);
++
++  gomp_mutex_destroy (&bar->mutex1);
++#ifndef HAVE_SYNC_BUILTINS
++  gomp_mutex_destroy (&bar->mutex2);
++#endif
++  gomp_sem_destroy (&bar->sem1);
++  gomp_sem_destroy (&bar->sem2);
+ }
+ 
+-/* Like gomp_barrier_wait, except that if the encountering thread
+-   is not the last one to hit the barrier, it returns immediately.
+-   The intended usage is that a thread which intends to gomp_barrier_destroy
+-   this barrier calls gomp_barrier_wait, while all other threads
+-   call gomp_barrier_wait_last.  When gomp_barrier_wait returns,
+-   the barrier can be safely destroyed.  */
++void
++gomp_barrier_reinit (gomp_barrier_t *bar, unsigned count)
++{
++  gomp_mutex_lock (&bar->mutex1);
++  bar->total = count;
++  gomp_mutex_unlock (&bar->mutex1);
++}
+ 
+ void
+-gomp_barrier_wait_last (gomp_barrier_t *bar)
++gomp_barrier_wait_end (gomp_barrier_t *bar, gomp_barrier_state_t state)
+ {
+-  gomp_barrier_state_t state = gomp_barrier_wait_start (bar);
++  unsigned int n;
++
+   if (state & BAR_WAS_LAST)
+-    gomp_barrier_wait_end (bar, state);
++    {
++      n = --bar->arrived;
++      if (n > 0)
++	{
++	  do
++	    gomp_sem_post (&bar->sem1);
++	  while (--n != 0);
++	  gomp_sem_wait (&bar->sem2);
++	}
++      gomp_mutex_unlock (&bar->mutex1);
++    }
++  else
++    {
++      gomp_mutex_unlock (&bar->mutex1);
++      gomp_sem_wait (&bar->sem1);
++
++#ifdef HAVE_SYNC_BUILTINS
++      n = __sync_add_and_fetch (&bar->arrived, -1);
++#else
++      gomp_mutex_lock (&bar->mutex2);
++      n = --bar->arrived;
++      gomp_mutex_unlock (&bar->mutex2);
++#endif
++
++      if (n == 0)
++	gomp_sem_post (&bar->sem2);
++    }
+ }
+ 
+ void
+-gomp_team_barrier_wake (gomp_barrier_t *bar, int count)
++gomp_barrier_wait (gomp_barrier_t *barrier)
+ {
+-  futex_wake ((int *) &bar->generation, count == 0 ? INT_MAX : count);
++  gomp_barrier_wait_end (barrier, gomp_barrier_wait_start (barrier));
+ }
+ 
+ void
+ gomp_team_barrier_wait_end (gomp_barrier_t *bar, gomp_barrier_state_t state)
+ {
+-  unsigned int generation, gen;
++  unsigned int n;
+ 
+-  if (__builtin_expect (state & BAR_WAS_LAST, 0))
++  state &= ~BAR_CANCELLED;
++  if (state & BAR_WAS_LAST)
+     {
+-      /* Next time we'll be awaiting TOTAL threads again.  */
++      n = --bar->arrived;
+       struct gomp_thread *thr = gomp_thread ();
+       struct gomp_team *team = thr->ts.team;
+ 
+-      bar->awaited = bar->total;
+       team->work_share_cancelled = 0;
+-      if (__builtin_expect (team->task_count, 0))
++      if (team->task_count)
+ 	{
+ 	  gomp_barrier_handle_tasks (state);
+-	  state &= ~BAR_WAS_LAST;
++	  if (n > 0)
++	    gomp_sem_wait (&bar->sem2);
++	  gomp_mutex_unlock (&bar->mutex1);
++	  return;
+ 	}
+-      else
++
++      bar->generation = state + BAR_INCR - BAR_WAS_LAST;
++      if (n > 0)
+ 	{
+-	  state &= ~BAR_CANCELLED;
+-	  state += BAR_INCR - BAR_WAS_LAST;
+-	  __atomic_store_n (&bar->generation, state, MEMMODEL_RELEASE);
+-	  futex_wake ((int *) &bar->generation, INT_MAX);
+-	  return;
++	  do
++	    gomp_sem_post (&bar->sem1);
++	  while (--n != 0);
++	  gomp_sem_wait (&bar->sem2);
+ 	}
++      gomp_mutex_unlock (&bar->mutex1);
+     }
+-
+-  generation = state;
+-  state &= ~BAR_CANCELLED;
+-  do
++  else
+     {
+-      do_wait ((int *) &bar->generation, generation);
+-      gen = __atomic_load_n (&bar->generation, MEMMODEL_ACQUIRE);
+-      if (__builtin_expect (gen & BAR_TASK_PENDING, 0))
++      gomp_mutex_unlock (&bar->mutex1);
++      int gen;
++      do
+ 	{
+-	  gomp_barrier_handle_tasks (state);
++	  gomp_sem_wait (&bar->sem1);
+ 	  gen = __atomic_load_n (&bar->generation, MEMMODEL_ACQUIRE);
++	  if (gen & BAR_TASK_PENDING)
++	    {
++	      gomp_barrier_handle_tasks (state);
++	      gen = __atomic_load_n (&bar->generation, MEMMODEL_ACQUIRE);
++	    }
+ 	}
+-      generation |= gen & BAR_WAITING_FOR_TASK;
+-    }
+-  while (gen != state + BAR_INCR);
+-}
++      while (gen != state + BAR_INCR);
+ 
+-void
+-gomp_team_barrier_wait (gomp_barrier_t *bar)
+-{
+-  gomp_team_barrier_wait_end (bar, gomp_barrier_wait_start (bar));
+-}
++#ifdef HAVE_SYNC_BUILTINS
++      n = __sync_add_and_fetch (&bar->arrived, -1);
++#else
++      gomp_mutex_lock (&bar->mutex2);
++      n = --bar->arrived;
++      gomp_mutex_unlock (&bar->mutex2);
++#endif
+ 
+-void
+-gomp_team_barrier_wait_final (gomp_barrier_t *bar)
+-{
+-  gomp_barrier_state_t state = gomp_barrier_wait_final_start (bar);
+-  if (__builtin_expect (state & BAR_WAS_LAST, 0))
+-    bar->awaited_final = bar->total;
+-  gomp_team_barrier_wait_end (bar, state);
++      if (n == 0)
++	gomp_sem_post (&bar->sem2);
++    }
+ }
+ 
+ bool
+ gomp_team_barrier_wait_cancel_end (gomp_barrier_t *bar,
+ 				   gomp_barrier_state_t state)
+ {
+-  unsigned int generation, gen;
++  unsigned int n;
+ 
+-  if (__builtin_expect (state & BAR_WAS_LAST, 0))
++  if (state & BAR_WAS_LAST)
+     {
+-      /* Next time we'll be awaiting TOTAL threads again.  */
+-      /* BAR_CANCELLED should never be set in state here, because
+-	 cancellation means that at least one of the threads has been
+-	 cancelled, thus on a cancellable barrier we should never see
+-	 all threads to arrive.  */
++      bar->cancellable = false;
++      n = --bar->arrived;
+       struct gomp_thread *thr = gomp_thread ();
+       struct gomp_team *team = thr->ts.team;
+ 
+-      bar->awaited = bar->total;
+       team->work_share_cancelled = 0;
+-      if (__builtin_expect (team->task_count, 0))
++      if (team->task_count)
+ 	{
+ 	  gomp_barrier_handle_tasks (state);
+-	  state &= ~BAR_WAS_LAST;
++	  if (n > 0)
++	    gomp_sem_wait (&bar->sem2);
++	  gomp_mutex_unlock (&bar->mutex1);
++	  return false;
+ 	}
+-      else
++
++      bar->generation = state + BAR_INCR - BAR_WAS_LAST;
++      if (n > 0)
+ 	{
+-	  state += BAR_INCR - BAR_WAS_LAST;
+-	  __atomic_store_n (&bar->generation, state, MEMMODEL_RELEASE);
+-	  futex_wake ((int *) &bar->generation, INT_MAX);
+-	  return false;
++	  do
++	    gomp_sem_post (&bar->sem1);
++	  while (--n != 0);
++	  gomp_sem_wait (&bar->sem2);
+ 	}
++      gomp_mutex_unlock (&bar->mutex1);
+     }
+-
+-  if (__builtin_expect (state & BAR_CANCELLED, 0))
+-    return true;
+-
+-  generation = state;
+-  do
++  else
+     {
+-      do_wait ((int *) &bar->generation, generation);
+-      gen = __atomic_load_n (&bar->generation, MEMMODEL_ACQUIRE);
+-      if (__builtin_expect (gen & BAR_CANCELLED, 0))
+-	return true;
+-      if (__builtin_expect (gen & BAR_TASK_PENDING, 0))
++      if (state & BAR_CANCELLED)
+ 	{
+-	  gomp_barrier_handle_tasks (state);
++	  gomp_mutex_unlock (&bar->mutex1);
++	  return true;
++	}
++      bar->cancellable = true;
++      gomp_mutex_unlock (&bar->mutex1);
++      int gen;
++      do
++	{
++	  gomp_sem_wait (&bar->sem1);
+ 	  gen = __atomic_load_n (&bar->generation, MEMMODEL_ACQUIRE);
++	  if (gen & BAR_CANCELLED)
++	    break;
++	  if (gen & BAR_TASK_PENDING)
++	    {
++	      gomp_barrier_handle_tasks (state);
++	      gen = __atomic_load_n (&bar->generation, MEMMODEL_ACQUIRE);
++	      if (gen & BAR_CANCELLED)
++		break;
++	    }
+ 	}
+-      generation |= gen & BAR_WAITING_FOR_TASK;
+-    }
+-  while (gen != state + BAR_INCR);
++      while (gen != state + BAR_INCR);
+ 
++#ifdef HAVE_SYNC_BUILTINS
++      n = __sync_add_and_fetch (&bar->arrived, -1);
++#else
++      gomp_mutex_lock (&bar->mutex2);
++      n = --bar->arrived;
++      gomp_mutex_unlock (&bar->mutex2);
++#endif
++
++      if (n == 0)
++	gomp_sem_post (&bar->sem2);
++      if (gen & BAR_CANCELLED)
++	return true;
++    }
+   return false;
+ }
+ 
++void
++gomp_team_barrier_wait (gomp_barrier_t *barrier)
++{
++  gomp_team_barrier_wait_end (barrier, gomp_barrier_wait_start (barrier));
++}
++
++void
++gomp_team_barrier_wake (gomp_barrier_t *bar, int count)
++{
++  if (count == 0)
++    count = bar->total - 1;
++  while (count-- > 0)
++    gomp_sem_post (&bar->sem1);
++}
++
+ bool
+ gomp_team_barrier_wait_cancel (gomp_barrier_t *bar)
+ {
+-  return gomp_team_barrier_wait_cancel_end (bar, gomp_barrier_wait_start (bar));
++  gomp_barrier_state_t state = gomp_barrier_wait_cancel_start (bar);
++  return gomp_team_barrier_wait_cancel_end (bar, state);
+ }
+ 
+ void
+ gomp_team_barrier_cancel (struct gomp_team *team)
+ {
++  if (team->barrier.generation & BAR_CANCELLED)
++    return;
++  gomp_mutex_lock (&team->barrier.mutex1);
+   gomp_mutex_lock (&team->task_lock);
+   if (team->barrier.generation & BAR_CANCELLED)
+     {
+       gomp_mutex_unlock (&team->task_lock);
++      gomp_mutex_unlock (&team->barrier.mutex1);
+       return;
+     }
+   team->barrier.generation |= BAR_CANCELLED;
+   gomp_mutex_unlock (&team->task_lock);
+-  futex_wake ((int *) &team->barrier.generation, INT_MAX);
++  if (team->barrier.cancellable)
++    {
++      int n = team->barrier.arrived;
++      if (n > 0)
++	{
++	  do
++	    gomp_sem_post (&team->barrier.sem1);
++	  while (--n != 0);
++	  gomp_sem_wait (&team->barrier.sem2);
++	}
++      team->barrier.cancellable = false;
++    }
++  gomp_mutex_unlock (&team->barrier.mutex1);
+ }
+diff --git a/libgomp/config/linux/bar.h b/libgomp/config/linux/bar.h
+index 819bbafa4c9..fdd4439e2c2 100644
+--- a/libgomp/config/linux/bar.h
++++ b/libgomp/config/linux/bar.h
+@@ -23,23 +23,28 @@
+    see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+    <http://www.gnu.org/licenses/>.  */
+ 
+-/* This is a Linux specific implementation of a barrier synchronization
+-   mechanism for libgomp.  This type is private to the library.  This 
+-   implementation uses atomic instructions and the futex syscall.  */
++/* This is the default implementation of a barrier synchronization mechanism
++   for libgomp.  This type is private to the library.  Note that we rely on
++   being able to adjust the barrier count while threads are blocked, so the
++   POSIX pthread_barrier_t won't work.  */
+ 
+ #ifndef GOMP_BARRIER_H
+ #define GOMP_BARRIER_H 1
+ 
+-#include "mutex.h"
++#include <pthread.h>
+ 
+ typedef struct
+ {
+-  /* Make sure total/generation is in a mostly read cacheline, while
+-     awaited in a separate cacheline.  */
+-  unsigned total __attribute__((aligned (64)));
++  gomp_mutex_t mutex1;
++#ifndef HAVE_SYNC_BUILTINS
++  gomp_mutex_t mutex2;
++#endif
++  gomp_sem_t sem1;
++  gomp_sem_t sem2;
++  unsigned total;
++  unsigned arrived;
+   unsigned generation;
+-  unsigned awaited __attribute__((aligned (64)));
+-  unsigned awaited_final;
++  bool cancellable;
+ } gomp_barrier_t;
+ 
+ typedef unsigned int gomp_barrier_state_t;
+@@ -53,29 +58,13 @@ typedef unsigned int gomp_barrier_state_t;
+ #define BAR_CANCELLED		4
+ #define BAR_INCR		8
+ 
+-static inline void gomp_barrier_init (gomp_barrier_t *bar, unsigned count)
+-{
+-  bar->total = count;
+-  bar->awaited = count;
+-  bar->awaited_final = count;
+-  bar->generation = 0;
+-}
+-
+-static inline void gomp_barrier_reinit (gomp_barrier_t *bar, unsigned count)
+-{
+-  __atomic_add_fetch (&bar->awaited, count - bar->total, MEMMODEL_ACQ_REL);
+-  bar->total = count;
+-}
+-
+-static inline void gomp_barrier_destroy (gomp_barrier_t *bar)
+-{
+-}
++extern void gomp_barrier_init (gomp_barrier_t *, unsigned);
++extern void gomp_barrier_reinit (gomp_barrier_t *, unsigned);
++extern void gomp_barrier_destroy (gomp_barrier_t *);
+ 
+ extern void gomp_barrier_wait (gomp_barrier_t *);
+-extern void gomp_barrier_wait_last (gomp_barrier_t *);
+ extern void gomp_barrier_wait_end (gomp_barrier_t *, gomp_barrier_state_t);
+ extern void gomp_team_barrier_wait (gomp_barrier_t *);
+-extern void gomp_team_barrier_wait_final (gomp_barrier_t *);
+ extern void gomp_team_barrier_wait_end (gomp_barrier_t *,
+ 					gomp_barrier_state_t);
+ extern bool gomp_team_barrier_wait_cancel (gomp_barrier_t *);
+@@ -88,14 +77,10 @@ extern void gomp_team_barrier_cancel (struct gomp_team *);
+ static inline gomp_barrier_state_t
+ gomp_barrier_wait_start (gomp_barrier_t *bar)
+ {
+-  unsigned int ret = __atomic_load_n (&bar->generation, MEMMODEL_ACQUIRE);
+-  ret &= -BAR_INCR | BAR_CANCELLED;
+-  /* A memory barrier is needed before exiting from the various forms
+-     of gomp_barrier_wait, to satisfy OpenMP API version 3.1 section
+-     2.8.6 flush Construct, which says there is an implicit flush during
+-     a barrier region.  This is a convenient place to add the barrier,
+-     so we use MEMMODEL_ACQ_REL here rather than MEMMODEL_ACQUIRE.  */
+-  if (__atomic_add_fetch (&bar->awaited, -1, MEMMODEL_ACQ_REL) == 0)
++  unsigned int ret;
++  gomp_mutex_lock (&bar->mutex1);
++  ret = bar->generation & (-BAR_INCR | BAR_CANCELLED);
++  if (++bar->arrived == bar->total)
+     ret |= BAR_WAS_LAST;
+   return ret;
+ }
+@@ -103,21 +88,20 @@ gomp_barrier_wait_start (gomp_barrier_t *bar)
+ static inline gomp_barrier_state_t
+ gomp_barrier_wait_cancel_start (gomp_barrier_t *bar)
+ {
+-  return gomp_barrier_wait_start (bar);
++  unsigned int ret;
++  gomp_mutex_lock (&bar->mutex1);
++  ret = bar->generation & (-BAR_INCR | BAR_CANCELLED);
++  if (ret & BAR_CANCELLED)
++    return ret;
++  if (++bar->arrived == bar->total)
++    ret |= BAR_WAS_LAST;
++  return ret;
+ }
+ 
+-/* This is like gomp_barrier_wait_start, except it decrements
+-   bar->awaited_final rather than bar->awaited and should be used
+-   for the gomp_team_end barrier only.  */
+-static inline gomp_barrier_state_t
+-gomp_barrier_wait_final_start (gomp_barrier_t *bar)
++static inline void
++gomp_team_barrier_wait_final (gomp_barrier_t *bar)
+ {
+-  unsigned int ret = __atomic_load_n (&bar->generation, MEMMODEL_ACQUIRE);
+-  ret &= -BAR_INCR | BAR_CANCELLED;
+-  /* See above gomp_barrier_wait_start comment.  */
+-  if (__atomic_add_fetch (&bar->awaited_final, -1, MEMMODEL_ACQ_REL) == 0)
+-    ret |= BAR_WAS_LAST;
+-  return ret;
++  gomp_team_barrier_wait (bar);
+ }
+ 
+ static inline bool
+@@ -126,6 +110,12 @@ gomp_barrier_last_thread (gomp_barrier_state_t state)
+   return state & BAR_WAS_LAST;
+ }
+ 
++static inline void
++gomp_barrier_wait_last (gomp_barrier_t *bar)
++{
++  gomp_barrier_wait (bar);
++}
++
+ /* All the inlines below must be called with team->task_lock
+    held.  */
+ 
+diff --git a/libgomp/config/linux/doacross.h b/libgomp/config/linux/doacross.h
+index 8f1d257b1a0..0d10bccbba4 100644
+--- a/libgomp/config/linux/doacross.h
++++ b/libgomp/config/linux/doacross.h
+@@ -23,19 +23,24 @@
+    see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+    <http://www.gnu.org/licenses/>.  */
+ 
+-/* This is a Linux specific implementation of doacross spinning.  */
++/* This is a generic implementation of doacross spinning.  */
+ 
+ #ifndef GOMP_DOACROSS_H
+ #define GOMP_DOACROSS_H 1
+ 
+ #include "libgomp.h"
+ #include <errno.h>
+-#include "wait.h"
+ 
+ #ifdef HAVE_ATTRIBUTE_VISIBILITY
+ # pragma GCC visibility push(hidden)
+ #endif
+ 
++static inline void
++cpu_relax (void)
++{
++  __asm volatile ("" : : : "memory");
++}
++
+ static inline void doacross_spin (unsigned long *addr, unsigned long expected,
+ 				  unsigned long cur)
+ {
+diff --git a/libgomp/config/linux/futex.h b/libgomp/config/linux/futex.h
+deleted file mode 100644
+index fd0c7be311c..00000000000
+--- a/libgomp/config/linux/futex.h
++++ /dev/null
+@@ -1,70 +0,0 @@
+-/* Copyright (C) 2010-2020 Free Software Foundation, Inc.
+-   Contributed by ARM Ltd.
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-/* Provide target-specific access to the futex system call.  */
+-
+-/* The include file hierachy above us (wait.h) has pushed visibility
+-   hidden, this will be applied to prototypes with headers we include
+-   with the effect that we cannot link against an external function
+-   (syscall). The solution here is to push default visibility, include
+-   our required headers then reinstante the original visibility.  */
+-
+-#pragma GCC visibility push(default)
+-
+-#define _GNU_SOURCE 
+-#include <unistd.h>
+-#include <sys/syscall.h>
+-
+-#pragma GCC visibility pop
+-
+-static inline void
+-futex_wait (int *addr, int val)
+-{
+-  int err = syscall (SYS_futex, addr, gomp_futex_wait, val, NULL);
+-  if (__builtin_expect (err < 0 && errno == ENOSYS, 0))
+-    {
+-      gomp_futex_wait &= ~FUTEX_PRIVATE_FLAG;
+-      gomp_futex_wake &= ~FUTEX_PRIVATE_FLAG;
+-      syscall (SYS_futex, addr, gomp_futex_wait, val, NULL);
+-    }
+-}
+-
+-static inline void
+-futex_wake (int *addr, int count)
+-{
+-  int err = syscall (SYS_futex, addr, gomp_futex_wake, count);
+-  if (__builtin_expect (err < 0 && errno == ENOSYS, 0))
+-    {
+-      gomp_futex_wait &= ~FUTEX_PRIVATE_FLAG;
+-      gomp_futex_wake &= ~FUTEX_PRIVATE_FLAG;
+-      syscall (SYS_futex, addr, gomp_futex_wake, count);
+-    }
+-}
+-
+-static inline void
+-cpu_relax (void)
+-{
+-  __asm volatile ("" : : : "memory");
+-}
+diff --git a/libgomp/config/linux/ia64/futex.h b/libgomp/config/linux/ia64/futex.h
+deleted file mode 100644
+index c4e85f2d245..00000000000
+--- a/libgomp/config/linux/ia64/futex.h
++++ /dev/null
+@@ -1,89 +0,0 @@
+-/* Copyright (C) 2005-2020 Free Software Foundation, Inc.
+-   Contributed by Richard Henderson <rth@redhat.com>.
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-/* Provide target-specific access to the futex system call.  */
+-
+-#include <sys/syscall.h>
+-
+-
+-
+-static inline long
+-sys_futex0(int *addr, int op, int val)
+-{
+-  register long out0 asm ("out0") = (long) addr;
+-  register long out1 asm ("out1") = op;
+-  register long out2 asm ("out2") = val;
+-  register long out3 asm ("out3") = 0;
+-  register long r8 asm ("r8");
+-  register long r10 asm ("r10");
+-  register long r15 asm ("r15") = SYS_futex;
+-
+-  __asm __volatile ("break 0x100000"
+-	: "=r"(r15), "=r"(out0), "=r"(out1), "=r"(out2), "=r"(out3),
+-	  "=r"(r8), "=r"(r10)
+-	: "r"(r15), "r"(out0), "r"(out1), "r"(out2), "r"(out3)
+-	: "memory", "out4", "out5", "out6", "out7",
+-	  /* Non-stacked integer registers, minus r8, r10, r12, r15.  */
+-	  "r2", "r3", "r9", "r11", "r13", "r14", "r16", "r17", "r18",
+-	  "r19", "r20", "r21", "r22", "r23", "r24", "r25", "r26", "r27",
+-	  "r28", "r29", "r30", "r31",
+-	  /* Predicate registers.  */
+-	  "p6", "p7", "p8", "p9", "p10", "p11", "p12", "p13", "p14", "p15",
+-	  /* Non-rotating fp registers.  */
+-	  "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15",
+-	  /* Branch registers.  */
+-	  "b6");
+-  return r8 & r10;
+-}
+-
+-static inline void
+-futex_wait (int *addr, int val)
+-{
+-  long err = sys_futex0 (addr, gomp_futex_wait, val);
+-  if (__builtin_expect (err == ENOSYS, 0))
+-    {
+-      gomp_futex_wait &= ~FUTEX_PRIVATE_FLAG;
+-      gomp_futex_wake &= ~FUTEX_PRIVATE_FLAG;
+-      sys_futex0 (addr, gomp_futex_wait, val);
+-    }
+-}
+-
+-static inline void
+-futex_wake (int *addr, int count)
+-{
+-  long err = sys_futex0 (addr, gomp_futex_wake, count);
+-  if (__builtin_expect (err == ENOSYS, 0))
+-    {
+-      gomp_futex_wait &= ~FUTEX_PRIVATE_FLAG;
+-      gomp_futex_wake &= ~FUTEX_PRIVATE_FLAG;
+-      sys_futex0 (addr, gomp_futex_wake, count);
+-    }
+-}
+-
+-static inline void
+-cpu_relax (void)
+-{
+-  __asm volatile ("hint @pause" : : : "memory");
+-}
+diff --git a/libgomp/config/linux/lock.c b/libgomp/config/linux/lock.c
+index 088085cacc3..36391ae780c 100644
+--- a/libgomp/config/linux/lock.c
++++ b/libgomp/config/linux/lock.c
+@@ -23,128 +23,258 @@
+    see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+    <http://www.gnu.org/licenses/>.  */
+ 
+-/* This is a Linux specific implementation of the public OpenMP locking
+-   primitives.  This implementation uses atomic instructions and the futex
+-   syscall.  */
++/* This is the default PTHREADS implementation of the public OpenMP
++   locking primitives.
+ 
+-#include <string.h>
+-#include <unistd.h>
+-#include <sys/syscall.h>
+-#include "wait.h"
++   Because OpenMP uses different entry points for normal and recursive
++   locks, and pthreads uses only one entry point, a system may be able
++   to do better and streamline the locking as well as reduce the size
++   of the types exported.  */
+ 
+-/* Reuse the generic implementation in terms of gomp_mutex_t.  */
+-#include "../../lock.c"
++/* We need UNIX98/XPG5 extensions to get recursive locks.  Request XPG6 since
++   Solaris requires this for C99 and later.  */
++#define _XOPEN_SOURCE 600
+ 
+-#ifdef LIBGOMP_GNU_SYMBOL_VERSIONING
+-/* gomp_mutex_* can be safely locked in one thread and
+-   unlocked in another thread, so the OpenMP 2.5 and OpenMP 3.0
+-   non-nested locks can be the same.  */
+-strong_alias (gomp_init_lock_30, gomp_init_lock_25)
+-strong_alias (gomp_destroy_lock_30, gomp_destroy_lock_25)
+-strong_alias (gomp_set_lock_30, gomp_set_lock_25)
+-strong_alias (gomp_unset_lock_30, gomp_unset_lock_25)
+-strong_alias (gomp_test_lock_30, gomp_test_lock_25)
++#include "libgomp.h"
+ 
+-/* The external recursive omp_nest_lock_25_t form requires additional work.  */
++#ifdef HAVE_BROKEN_POSIX_SEMAPHORES
++void
++gomp_init_lock_30 (omp_lock_t *lock)
++{
++  pthread_mutex_init (lock, NULL);
++}
+ 
+-/* We need an integer to uniquely identify this thread.  Most generally
+-   this is the thread's TID, which ideally we'd get this straight from
+-   the TLS block where glibc keeps it.  Unfortunately, we can't get at
+-   that directly.
++void
++gomp_destroy_lock_30 (omp_lock_t *lock)
++{
++  pthread_mutex_destroy (lock);
++}
+ 
+-   If we don't support (or have disabled) TLS, one function call is as
+-   good (or bad) as any other.  Use the syscall all the time.
++void
++gomp_set_lock_30 (omp_lock_t *lock)
++{
++  pthread_mutex_lock (lock);
++}
+ 
+-   On an ILP32 system (defined here as not LP64), we can make do with
+-   any thread-local pointer.  Ideally we'd use the TLS base address,
+-   since that requires the least amount of arithmetic, but that's not
+-   always available directly.  Make do with the gomp_thread pointer
+-   since it's handy.  */
++void
++gomp_unset_lock_30 (omp_lock_t *lock)
++{
++  pthread_mutex_unlock (lock);
++}
+ 
+-# if !defined (HAVE_TLS)
+-static inline int gomp_tid (void)
++int
++gomp_test_lock_30 (omp_lock_t *lock)
+ {
+-  return syscall (SYS_gettid);
++  return pthread_mutex_trylock (lock) == 0;
+ }
+-# elif !defined(__LP64__)
+-static inline int gomp_tid (void)
++
++void
++gomp_init_nest_lock_30 (omp_nest_lock_t *lock)
+ {
+-  return (int) gomp_thread ();
++  pthread_mutex_init (&lock->lock, NULL);
++  lock->count = 0;
++  lock->owner = NULL;
+ }
+-# else
+-static __thread int tid_cache;
+-static inline int gomp_tid (void)
++
++void
++gomp_destroy_nest_lock_30 (omp_nest_lock_t *lock)
+ {
+-  int tid = tid_cache;
+-  if (__builtin_expect (tid == 0, 0))
+-    tid_cache = tid = syscall (SYS_gettid);
+-  return tid;
++  pthread_mutex_destroy (&lock->lock);
+ }
+-# endif
+ 
++void
++gomp_set_nest_lock_30 (omp_nest_lock_t *lock)
++{
++  void *me = gomp_icv (true);
++
++  if (lock->owner != me)
++    {
++      pthread_mutex_lock (&lock->lock);
++      lock->owner = me;
++    }
++  lock->count++;
++}
+ 
+ void
+-gomp_init_nest_lock_25 (omp_nest_lock_25_t *lock)
++gomp_unset_nest_lock_30 (omp_nest_lock_t *lock)
+ {
+-  memset (lock, 0, sizeof (*lock));
++  if (--lock->count == 0)
++    {
++      lock->owner = NULL;
++      pthread_mutex_unlock (&lock->lock);
++    }
+ }
+ 
++int
++gomp_test_nest_lock_30 (omp_nest_lock_t *lock)
++{
++  void *me = gomp_icv (true);
++
++  if (lock->owner != me)
++    {
++      if (pthread_mutex_trylock (&lock->lock) != 0)
++	return 0;
++      lock->owner = me;
++    }
++
++  return ++lock->count;
++}
++
++#else
++
+ void
+-gomp_destroy_nest_lock_25 (omp_nest_lock_25_t *lock)
++gomp_init_lock_30 (omp_lock_t *lock)
+ {
++  sem_init (lock, 0, 1);
+ }
+ 
+ void
+-gomp_set_nest_lock_25 (omp_nest_lock_25_t *lock)
++gomp_destroy_lock_30 (omp_lock_t *lock)
+ {
+-  int otid, tid = gomp_tid ();
++  sem_destroy (lock);
++}
++
++void
++gomp_set_lock_30 (omp_lock_t *lock)
++{
++  while (sem_wait (lock) != 0)
++    ;
++}
+ 
+-  while (1)
++void
++gomp_unset_lock_30 (omp_lock_t *lock)
++{
++  sem_post (lock);
++}
++
++int
++gomp_test_lock_30 (omp_lock_t *lock)
++{
++  return sem_trywait (lock) == 0;
++}
++
++void
++gomp_init_nest_lock_30 (omp_nest_lock_t *lock)
++{
++  sem_init (&lock->lock, 0, 1);
++  lock->count = 0;
++  lock->owner = NULL;
++}
++
++void
++gomp_destroy_nest_lock_30 (omp_nest_lock_t *lock)
++{
++  sem_destroy (&lock->lock);
++}
++
++void
++gomp_set_nest_lock_30 (omp_nest_lock_t *lock)
++{
++  void *me = gomp_icv (true);
++
++  if (lock->owner != me)
+     {
+-      otid = 0;
+-      if (__atomic_compare_exchange_n (&lock->owner, &otid, tid, false,
+-				       MEMMODEL_ACQUIRE, MEMMODEL_RELAXED))
+-	{
+-	  lock->count = 1;
+-	  return;
+-	}
+-      if (otid == tid)
+-	{
+-	  lock->count++;
+-	  return;
+-	}
+-
+-      do_wait (&lock->owner, otid);
++      while (sem_wait (&lock->lock) != 0)
++	;
++      lock->owner = me;
+     }
++  lock->count++;
+ }
+ 
+ void
+-gomp_unset_nest_lock_25 (omp_nest_lock_25_t *lock)
++gomp_unset_nest_lock_30 (omp_nest_lock_t *lock)
+ {
+-  /* ??? Validate that we own the lock here.  */
+-
+   if (--lock->count == 0)
+     {
+-      __atomic_store_n (&lock->owner, 0, MEMMODEL_RELEASE);
+-      futex_wake (&lock->owner, 1);
++      lock->owner = NULL;
++      sem_post (&lock->lock);
+     }
+ }
+ 
+ int
+-gomp_test_nest_lock_25 (omp_nest_lock_25_t *lock)
++gomp_test_nest_lock_30 (omp_nest_lock_t *lock)
+ {
+-  int otid, tid = gomp_tid ();
++  void *me = gomp_icv (true);
+ 
+-  otid = 0;
+-  if (__atomic_compare_exchange_n (&lock->owner, &otid, tid, false,
+-				   MEMMODEL_ACQUIRE, MEMMODEL_RELAXED))
++  if (lock->owner != me)
+     {
+-      lock->count = 1;
+-      return 1;
++      if (sem_trywait (&lock->lock) != 0)
++	return 0;
++      lock->owner = me;
+     }
+-  if (otid == tid)
+-    return ++lock->count;
+ 
++  return ++lock->count;
++}
++#endif
++
++#ifdef LIBGOMP_GNU_SYMBOL_VERSIONING
++void
++gomp_init_lock_25 (omp_lock_25_t *lock)
++{
++  pthread_mutex_init (lock, NULL);
++}
++
++void
++gomp_destroy_lock_25 (omp_lock_25_t *lock)
++{
++  pthread_mutex_destroy (lock);
++}
++
++void
++gomp_set_lock_25 (omp_lock_25_t *lock)
++{
++  pthread_mutex_lock (lock);
++}
++
++void
++gomp_unset_lock_25 (omp_lock_25_t *lock)
++{
++  pthread_mutex_unlock (lock);
++}
++
++int
++gomp_test_lock_25 (omp_lock_25_t *lock)
++{
++  return pthread_mutex_trylock (lock) == 0;
++}
++
++void
++gomp_init_nest_lock_25 (omp_nest_lock_25_t *lock)
++{
++  pthread_mutexattr_t attr;
++
++  pthread_mutexattr_init (&attr);
++  pthread_mutexattr_settype (&attr, PTHREAD_MUTEX_RECURSIVE);
++  pthread_mutex_init (&lock->lock, &attr);
++  lock->count = 0;
++  pthread_mutexattr_destroy (&attr);
++}
++
++void
++gomp_destroy_nest_lock_25 (omp_nest_lock_25_t *lock)
++{
++  pthread_mutex_destroy (&lock->lock);
++}
++
++void
++gomp_set_nest_lock_25 (omp_nest_lock_25_t *lock)
++{
++  pthread_mutex_lock (&lock->lock);
++  lock->count++;
++}
++
++void
++gomp_unset_nest_lock_25 (omp_nest_lock_25_t *lock)
++{
++  lock->count--;
++  pthread_mutex_unlock (&lock->lock);
++}
++
++int
++gomp_test_nest_lock_25 (omp_nest_lock_25_t *lock)
++{
++  if (pthread_mutex_trylock (&lock->lock) == 0)
++    return ++lock->count;
+   return 0;
+ }
+ 
+diff --git a/libgomp/config/linux/mips/futex.h b/libgomp/config/linux/mips/futex.h
+deleted file mode 100644
+index 1edeaa8a8b3..00000000000
+--- a/libgomp/config/linux/mips/futex.h
++++ /dev/null
+@@ -1,78 +0,0 @@
+-/* Copyright (C) 2005-2020 Free Software Foundation, Inc.
+-   Contributed by Ilie Garbacea <ilie@mips.com>, Chao-ying Fu <fu@mips.com>.
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-/* Provide target-specific access to the futex system call.  */
+-
+-#include <sys/syscall.h>
+-
+-#if !defined (SYS_futex)
+-#define SYS_futex __NR_futex
+-#endif
+-
+-#define FUTEX_WAIT 0
+-#define FUTEX_WAKE 1
+-
+-#ifdef __mips16
+-static void __attribute__((noinline,nomips16))
+-#else
+-static inline void
+-#endif
+-sys_futex0 (int *addr, int op, int val)
+-{
+-  register unsigned long __v0 asm("$2");
+-  register unsigned long __a0 asm("$4") = (unsigned long) addr;
+-  register unsigned long __a1 asm("$5") = (unsigned long) op;
+-  register unsigned long __a2 asm("$6") = (unsigned long) val;
+-  register unsigned long __a3 asm("$7") = 0;
+-
+-  __asm volatile ("li $2, %6\n\t"
+-		  "syscall"
+-		  /* returns $a3 (errno), $v0 (return value) */
+-		  : "=r" (__v0), "=r" (__a3)
+-		  /* arguments in a0-a3, and syscall number */
+-		  : "r" (__a0), "r" (__a1), "r" (__a2), "r" (__a3),
+-                    "IK" (SYS_futex)
+-		  /* clobbers at, v1, t0-t9, memory */
+-		  : "$1", "$3", "$8", "$9", "$10", "$11", "$12", "$13", "$14",
+-		    "$15", "$24", "$25", "memory");
+-}
+-
+-static inline void
+-futex_wait (int *addr, int val)
+-{
+-  sys_futex0 (addr, FUTEX_WAIT, val);
+-}
+-
+-static inline void
+-futex_wake (int *addr, int count)
+-{
+-  sys_futex0 (addr, FUTEX_WAKE, count);
+-}
+-
+-static inline void
+-cpu_relax (void)
+-{
+-  __asm volatile ("" : : : "memory");
+-}
+diff --git a/libgomp/config/linux/mutex.c b/libgomp/config/linux/mutex.c
+index e6d6282756b..39bb64da0f9 100644
+--- a/libgomp/config/linux/mutex.c
++++ b/libgomp/config/linux/mutex.c
+@@ -1,70 +1 @@
+-/* Copyright (C) 2005-2020 Free Software Foundation, Inc.
+-   Contributed by Richard Henderson <rth@redhat.com>.
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-/* This is a Linux specific implementation of a mutex synchronization
+-   mechanism for libgomp.  This type is private to the library.  This
+-   implementation uses atomic instructions and the futex syscall.  */
+-
+-#include "wait.h"
+-
+-int gomp_futex_wake = FUTEX_WAKE | FUTEX_PRIVATE_FLAG;
+-int gomp_futex_wait = FUTEX_WAIT | FUTEX_PRIVATE_FLAG;
+-
+-void
+-gomp_mutex_lock_slow (gomp_mutex_t *mutex, int oldval)
+-{
+-  /* First loop spins a while.  */
+-  while (oldval == 1)
+-    {
+-      if (do_spin (mutex, 1))
+-	{
+-	  /* Spin timeout, nothing changed.  Set waiting flag.  */
+-	  oldval = __atomic_exchange_n (mutex, -1, MEMMODEL_ACQUIRE);
+-	  if (oldval == 0)
+-	    return;
+-	  futex_wait (mutex, -1);
+-	  break;
+-	}
+-      else
+-	{
+-	  /* Something changed.  If now unlocked, we're good to go.  */
+-	  oldval = 0;
+-	  if (__atomic_compare_exchange_n (mutex, &oldval, 1, false,
+-					   MEMMODEL_ACQUIRE, MEMMODEL_RELAXED))
+-	    return;
+-	}
+-    }
+-
+-  /* Second loop waits until mutex is unlocked.  We always exit this
+-     loop with wait flag set, so next unlock will awaken a thread.  */
+-  while ((oldval = __atomic_exchange_n (mutex, -1, MEMMODEL_ACQUIRE)))
+-    do_wait (mutex, -1);
+-}
+-
+-void
+-gomp_mutex_unlock_slow (gomp_mutex_t *mutex)
+-{
+-  futex_wake (mutex, 1);
+-}
++/* Everything is in the header.  */
+diff --git a/libgomp/config/linux/mutex.h b/libgomp/config/linux/mutex.h
+index 73b73a9e47b..3d9dfdacf54 100644
+--- a/libgomp/config/linux/mutex.h
++++ b/libgomp/config/linux/mutex.h
+@@ -23,45 +23,36 @@
+    see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+    <http://www.gnu.org/licenses/>.  */
+ 
+-/* This is a Linux specific implementation of a mutex synchronization
+-   mechanism for libgomp.  This type is private to the library.  This
+-   implementation uses atomic instructions and the futex syscall.  */
++/* This is the default PTHREADS implementation of a mutex synchronization
++   mechanism for libgomp.  This type is private to the library.  */
+ 
+ #ifndef GOMP_MUTEX_H
+ #define GOMP_MUTEX_H 1
+ 
+-typedef int gomp_mutex_t;
++#include <pthread.h>
+ 
+-#define GOMP_MUTEX_INIT_0 1
++typedef pthread_mutex_t gomp_mutex_t;
+ 
+-extern void gomp_mutex_lock_slow (gomp_mutex_t *mutex, int);
+-extern void gomp_mutex_unlock_slow (gomp_mutex_t *mutex);
++#define GOMP_MUTEX_INIT_0 0
+ 
+-static inline void
+-gomp_mutex_init (gomp_mutex_t *mutex)
++static inline void gomp_mutex_init (gomp_mutex_t *mutex)
+ {
+-  *mutex = 0;
++  pthread_mutex_init (mutex, NULL);
+ }
+ 
+-static inline void
+-gomp_mutex_destroy (gomp_mutex_t *mutex)
++static inline void gomp_mutex_lock (gomp_mutex_t *mutex)
+ {
++  pthread_mutex_lock (mutex);
+ }
+ 
+-static inline void
+-gomp_mutex_lock (gomp_mutex_t *mutex)
++static inline void gomp_mutex_unlock (gomp_mutex_t *mutex)
+ {
+-  int oldval = 0;
+-  if (!__atomic_compare_exchange_n (mutex, &oldval, 1, false,
+-				    MEMMODEL_ACQUIRE, MEMMODEL_RELAXED))
+-    gomp_mutex_lock_slow (mutex, oldval);
++   pthread_mutex_unlock (mutex);
+ }
+ 
+-static inline void
+-gomp_mutex_unlock (gomp_mutex_t *mutex)
++static inline void gomp_mutex_destroy (gomp_mutex_t *mutex)
+ {
+-  int wait = __atomic_exchange_n (mutex, 0, MEMMODEL_RELEASE);
+-  if (__builtin_expect (wait < 0, 0))
+-    gomp_mutex_unlock_slow (mutex);
++  pthread_mutex_destroy (mutex);
+ }
++
+ #endif /* GOMP_MUTEX_H */
+diff --git a/libgomp/config/linux/omp-lock.h b/libgomp/config/linux/omp-lock.h
+index 2ca7c5e1d60..e51dc271f8a 100644
+--- a/libgomp/config/linux/omp-lock.h
++++ b/libgomp/config/linux/omp-lock.h
+@@ -2,11 +2,22 @@
+    alignment of the public OpenMP locks, so that we can export data
+    structures without polluting the namespace.
+ 
+-   When using the Linux futex primitive, non-recursive locks require
+-   one int.  Recursive locks require we identify the owning task
+-   and so require in addition one int and a pointer.  */
++   In this default POSIX implementation, we used to map the two locks to the
++   same PTHREADS primitive, but for OpenMP 3.0 sem_t needs to be used
++   instead, as pthread_mutex_unlock should not be called by different
++   thread than the one that called pthread_mutex_lock.  */
+ 
+-typedef int omp_lock_t;
+-typedef struct { int lock, count; void *owner; } omp_nest_lock_t;
+-typedef int omp_lock_25_t;
+-typedef struct { int owner, count; } omp_nest_lock_25_t;
++#include <pthread.h>
++#include <semaphore.h>
++
++typedef pthread_mutex_t omp_lock_25_t;
++typedef struct { pthread_mutex_t lock; int count; } omp_nest_lock_25_t;
++#ifdef HAVE_BROKEN_POSIX_SEMAPHORES
++/* If we don't have working semaphores, we'll make all explicit tasks
++   tied to the creating thread.  */
++typedef pthread_mutex_t omp_lock_t;
++typedef struct { pthread_mutex_t lock; int count; void *owner; } omp_nest_lock_t;
++#else
++typedef sem_t omp_lock_t;
++typedef struct { sem_t lock; int count; void *owner; } omp_nest_lock_t;
++#endif
+diff --git a/libgomp/config/posix/plugin-suffix.h b/libgomp/config/linux/plugin-suffix.h
+similarity index 95%
+rename from libgomp/config/posix/plugin-suffix.h
+rename to libgomp/config/linux/plugin-suffix.h
+index d111e529b84..93f9b5265c2 100644
+--- a/libgomp/config/posix/plugin-suffix.h
++++ b/libgomp/config/linux/plugin-suffix.h
+@@ -1,4 +1,4 @@
+-/* Copyright (C) 2015-2020 Free Software Foundation, Inc.
++/* Copyright (C) 2015-2017 Free Software Foundation, Inc.
+    Contributed by Jack Howarth <howarth.at.gcc@gmail.com>
+ 
+    This file is part of the GNU Offloading and Multi Processing Library
+diff --git a/libgomp/config/posix/pool.h b/libgomp/config/linux/pool.h
+similarity index 97%
+rename from libgomp/config/posix/pool.h
+rename to libgomp/config/linux/pool.h
+index c511661787f..780ad2e11ae 100644
+--- a/libgomp/config/posix/pool.h
++++ b/libgomp/config/linux/pool.h
+@@ -1,4 +1,4 @@
+-/* Copyright (C) 2005-2020 Free Software Foundation, Inc.
++/* Copyright (C) 2005-2017 Free Software Foundation, Inc.
+    Contributed by Sebastian Huber <sebastian.huber@embedded-brains.de>.
+ 
+    This file is part of the GNU Offloading and Multi Processing Library
+diff --git a/libgomp/config/linux/powerpc/futex.h b/libgomp/config/linux/powerpc/futex.h
+deleted file mode 100644
+index 484b0577b72..00000000000
+--- a/libgomp/config/linux/powerpc/futex.h
++++ /dev/null
+@@ -1,87 +0,0 @@
+-/* Copyright (C) 2005-2020 Free Software Foundation, Inc.
+-   Contributed by Richard Henderson <rth@redhat.com>.
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-/* Provide target-specific access to the futex system call.  */
+-
+-#include <sys/syscall.h>
+-
+-static inline long
+-sys_futex0 (int *addr, int op, int val)
+-{
+-  register long int r0  __asm__ ("r0");
+-  register long int r3  __asm__ ("r3");
+-  register long int r4  __asm__ ("r4");
+-  register long int r5  __asm__ ("r5");
+-  register long int r6  __asm__ ("r6");
+-
+-  r0 = SYS_futex;
+-  r3 = (long) addr;
+-  r4 = op;
+-  r5 = val;
+-  r6 = 0;
+-
+-  /* ??? The powerpc64 sysdep.h file clobbers ctr; the powerpc32 sysdep.h
+-     doesn't.  It doesn't much matter for us.  In the interest of unity,
+-     go ahead and clobber it always.  */
+-
+-  __asm volatile ("sc; mfcr %0"
+-		  : "=r"(r0), "=r"(r3), "=r"(r4), "=r"(r5), "=r"(r6)
+-		  : "r"(r0), "r"(r3), "r"(r4), "r"(r5), "r"(r6)
+-		  : "r7", "r8", "r9", "r10", "r11", "r12",
+-		    "cr0", "ctr", "memory");
+-  if (__builtin_expect (r0 & (1 << 28), 0))
+-    return r3;
+-  return 0;
+-}
+-
+-static inline void
+-futex_wait (int *addr, int val)
+-{
+-  long err = sys_futex0 (addr, gomp_futex_wait, val);
+-  if (__builtin_expect (err == ENOSYS, 0))
+-    {
+-      gomp_futex_wait &= ~FUTEX_PRIVATE_FLAG;
+-      gomp_futex_wake &= ~FUTEX_PRIVATE_FLAG;
+-      sys_futex0 (addr, gomp_futex_wait, val);
+-    }
+-}
+-
+-static inline void
+-futex_wake (int *addr, int count)
+-{
+-  long err = sys_futex0 (addr, gomp_futex_wake, count);
+-  if (__builtin_expect (err == ENOSYS, 0))
+-    {
+-      gomp_futex_wait &= ~FUTEX_PRIVATE_FLAG;
+-      gomp_futex_wake &= ~FUTEX_PRIVATE_FLAG;
+-      sys_futex0 (addr, gomp_futex_wake, count);
+-    }
+-}
+-
+-static inline void
+-cpu_relax (void)
+-{
+-  __asm volatile ("" : : : "memory");
+-}
+diff --git a/libgomp/config/linux/proc.c b/libgomp/config/linux/proc.c
+index d7b65d93609..1165d4b077c 100644
+--- a/libgomp/config/linux/proc.c
++++ b/libgomp/config/linux/proc.c
+@@ -1,5 +1,5 @@
+ /* Copyright (C) 2005-2020 Free Software Foundation, Inc.
+-   Contributed by Jakub Jelinek <jakub@redhat.com>.
++   Contributed by Richard Henderson <rth@redhat.com>.
+ 
+    This file is part of the GNU Offloading and Multi Processing Library
+    (libgomp).
+@@ -24,55 +24,20 @@
+    <http://www.gnu.org/licenses/>.  */
+ 
+ /* This file contains system specific routines related to counting
+-   online processors and dynamic load balancing.  */
++   online processors and dynamic load balancing.  It is expected that
++   a system may well want to write special versions of each of these.
++
++   The following implementation uses a mix of POSIX and BSD routines.  */
+ 
+-#ifndef _GNU_SOURCE
+-#define _GNU_SOURCE 1
+-#endif
+ #include "libgomp.h"
+-#include "proc.h"
+-#include <errno.h>
+-#include <stdlib.h>
+ #include <unistd.h>
++#include <stdlib.h>
+ #ifdef HAVE_GETLOADAVG
+ # ifdef HAVE_SYS_LOADAVG_H
+ #  include <sys/loadavg.h>
+ # endif
+ #endif
+ 
+-#ifdef HAVE_PTHREAD_AFFINITY_NP
+-unsigned long gomp_cpuset_size;
+-static unsigned long gomp_get_cpuset_size;
+-cpu_set_t *gomp_cpusetp;
+-
+-unsigned long
+-gomp_cpuset_popcount (unsigned long cpusetsize, cpu_set_t *cpusetp)
+-{
+-#ifdef CPU_COUNT_S
+-  /* glibc 2.7 and above provide a macro for this.  */
+-  return CPU_COUNT_S (cpusetsize, cpusetp);
+-#else
+-#ifdef CPU_COUNT
+-  if (cpusetsize == sizeof (cpu_set_t))
+-    /* glibc 2.6 and above provide a macro for this.  */
+-    return CPU_COUNT (cpusetp);
+-#endif
+-  size_t i;
+-  unsigned long ret = 0;
+-  extern int check[sizeof (cpusetp->__bits[0]) == sizeof (unsigned long int)
+-		   ? 1 : -1] __attribute__((unused));
+-
+-  for (i = 0; i < cpusetsize / sizeof (cpusetp->__bits[0]); i++)
+-    {
+-      unsigned long int mask = cpusetp->__bits[i];
+-      if (mask == 0)
+-	continue;
+-      ret += __builtin_popcountl (mask);
+-    }
+-  return ret;
+-#endif
+-}
+-#endif
+ 
+ /* At startup, determine the default number of threads.  It would seem
+    this should be related to the number of cpus online.  */
+@@ -80,103 +45,11 @@ gomp_cpuset_popcount (unsigned long cpusetsize, cpu_set_t *cpusetp)
+ void
+ gomp_init_num_threads (void)
+ {
+-#ifdef HAVE_PTHREAD_AFFINITY_NP
+-#if defined (_SC_NPROCESSORS_CONF) && defined (CPU_ALLOC_SIZE)
+-  gomp_cpuset_size = sysconf (_SC_NPROCESSORS_CONF);
+-  gomp_cpuset_size = CPU_ALLOC_SIZE (gomp_cpuset_size);
+-#else
+-  gomp_cpuset_size = sizeof (cpu_set_t);
+-#endif
+-
+-  gomp_cpusetp = (cpu_set_t *) gomp_malloc (gomp_cpuset_size);
+-  do
+-    {
+-      int ret = pthread_getaffinity_np (pthread_self (), gomp_cpuset_size,
+-					gomp_cpusetp);
+-      if (ret == 0)
+-	{
+-	  /* Count only the CPUs this process can use.  */
+-	  gomp_global_icv.nthreads_var
+-	    = gomp_cpuset_popcount (gomp_cpuset_size, gomp_cpusetp);
+-	  if (gomp_global_icv.nthreads_var == 0)
+-	    break;
+-	  gomp_get_cpuset_size = gomp_cpuset_size;
+-#ifdef CPU_ALLOC_SIZE
+-	  unsigned long i;
+-	  for (i = gomp_cpuset_size * 8; i; i--)
+-	    if (CPU_ISSET_S (i - 1, gomp_cpuset_size, gomp_cpusetp))
+-	      break;
+-	  gomp_cpuset_size = CPU_ALLOC_SIZE (i);
+-#endif
+-	  return;
+-	}
+-      if (ret != EINVAL)
+-	break;
+-#ifdef CPU_ALLOC_SIZE
+-      if (gomp_cpuset_size < sizeof (cpu_set_t))
+-	gomp_cpuset_size = sizeof (cpu_set_t);
+-      else
+-	gomp_cpuset_size = gomp_cpuset_size * 2;
+-      if (gomp_cpuset_size < 8 * sizeof (cpu_set_t))
+-	gomp_cpusetp
+-	  = (cpu_set_t *) gomp_realloc (gomp_cpusetp, gomp_cpuset_size);
+-      else
+-	{
+-	  /* Avoid gomp_fatal if too large memory allocation would be
+-	     requested, e.g. kernel returning EINVAL all the time.  */
+-	  void *p = realloc (gomp_cpusetp, gomp_cpuset_size);
+-	  if (p == NULL)
+-	    break;
+-	  gomp_cpusetp = (cpu_set_t *) p;
+-	}
+-#else
+-      break;
+-#endif
+-    }
+-  while (1);
+-  gomp_cpuset_size = 0;
+-  gomp_global_icv.nthreads_var = 1;
+-  free (gomp_cpusetp);
+-  gomp_cpusetp = NULL;
+-#endif
+ #ifdef _SC_NPROCESSORS_ONLN
+   gomp_global_icv.nthreads_var = sysconf (_SC_NPROCESSORS_ONLN);
+ #endif
+ }
+ 
+-static int
+-get_num_procs (void)
+-{
+-#ifdef HAVE_PTHREAD_AFFINITY_NP
+-  if (gomp_places_list == NULL)
+-    {
+-      /* Count only the CPUs this process can use.  */
+-      if (gomp_cpusetp
+-	  && pthread_getaffinity_np (pthread_self (), gomp_get_cpuset_size,
+-				     gomp_cpusetp) == 0)
+-	{
+-	  int ret = gomp_cpuset_popcount (gomp_get_cpuset_size, gomp_cpusetp);
+-	  return ret != 0 ? ret : 1;
+-	}
+-    }
+-  else
+-    {
+-      /* We can't use pthread_getaffinity_np in this case
+-	 (we have changed it ourselves, it binds to just one CPU).
+-	 Count instead the number of different CPUs we are
+-	 using.  gomp_init_affinity updated gomp_available_cpus to
+-	 the number of CPUs in the GOMP_AFFINITY mask that we are
+-	 allowed to use though.  */
+-      return gomp_available_cpus;
+-    }
+-#endif
+-#ifdef _SC_NPROCESSORS_ONLN
+-  return sysconf (_SC_NPROCESSORS_ONLN);
+-#else
+-  return gomp_icv (false)->nthreads_var;
+-#endif
+-}
+-
+ /* When OMP_DYNAMIC is set, at thread launch determine the number of
+    threads we should spawn for this team.  */
+ /* ??? I have no idea what best practice for this is.  Surely some
+@@ -187,11 +60,16 @@ get_num_procs (void)
+ unsigned
+ gomp_dynamic_max_threads (void)
+ {
+-  unsigned n_onln, loadavg, nthreads_var = gomp_icv (false)->nthreads_var;
++  unsigned n_onln, loadavg;
++  unsigned nthreads_var = gomp_icv (false)->nthreads_var;
+ 
+-  n_onln = get_num_procs ();
++#ifdef _SC_NPROCESSORS_ONLN
++  n_onln = sysconf (_SC_NPROCESSORS_ONLN);
+   if (n_onln > nthreads_var)
+     n_onln = nthreads_var;
++#else
++  n_onln = nthreads_var;
++#endif
+ 
+   loadavg = 0;
+ #ifdef HAVE_GETLOADAVG
+@@ -214,7 +92,11 @@ gomp_dynamic_max_threads (void)
+ int
+ omp_get_num_procs (void)
+ {
+-  return get_num_procs ();
++#ifdef _SC_NPROCESSORS_ONLN
++  return sysconf (_SC_NPROCESSORS_ONLN);
++#else
++  return gomp_icv (false)->nthreads_var;
++#endif
+ }
+ 
+ ialias (omp_get_num_procs)
+diff --git a/libgomp/config/linux/proc.h b/libgomp/config/linux/proc.h
+deleted file mode 100644
+index d841673dda4..00000000000
+--- a/libgomp/config/linux/proc.h
++++ /dev/null
+@@ -1,38 +0,0 @@
+-/* Copyright (C) 2011-2020 Free Software Foundation, Inc.
+-   Contributed by Uros Bizjak <ubizjak@gmail.com>
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-#ifndef GOMP_PROC_H
+-#define GOMP_PROC_H 1
+-
+-#include <sched.h>
+-
+-#ifdef HAVE_PTHREAD_AFFINITY_NP
+-extern unsigned long gomp_cpuset_size attribute_hidden;
+-extern cpu_set_t *gomp_cpusetp attribute_hidden;
+-extern unsigned long gomp_cpuset_popcount (unsigned long, cpu_set_t *)
+-     attribute_hidden;
+-#endif
+-
+-#endif /* GOMP_PROC_H */
+diff --git a/libgomp/config/linux/ptrlock.c b/libgomp/config/linux/ptrlock.c
+index 970c84b3ef9..39bb64da0f9 100644
+--- a/libgomp/config/linux/ptrlock.c
++++ b/libgomp/config/linux/ptrlock.c
+@@ -1,70 +1 @@
+-/* Copyright (C) 2008-2020 Free Software Foundation, Inc.
+-   Contributed by Jakub Jelinek <jakub@redhat.com>.
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-/* This is a Linux specific implementation of a mutex synchronization
+-   mechanism for libgomp.  This type is private to the library.  This
+-   implementation uses atomic instructions and the futex syscall.  */
+-
+-#include <endian.h>
+-#include <limits.h>
+-#include "wait.h"
+-
+-void *
+-gomp_ptrlock_get_slow (gomp_ptrlock_t *ptrlock)
+-{
+-  int *intptr;
+-  uintptr_t oldval = 1;
+-
+-  __atomic_compare_exchange_n (ptrlock, &oldval, 2, false,
+-			       MEMMODEL_RELAXED, MEMMODEL_RELAXED);
+-
+-  /* futex works on ints, not pointers.
+-     But a valid work share pointer will be at least
+-     8 byte aligned, so it is safe to assume the low
+-     32-bits of the pointer won't contain values 1 or 2.  */
+-  __asm volatile ("" : "=r" (intptr) : "0" (ptrlock));
+-#if __BYTE_ORDER == __BIG_ENDIAN
+-  if (sizeof (*ptrlock) > sizeof (int))
+-    intptr += (sizeof (*ptrlock) / sizeof (int)) - 1;
+-#endif
+-  do
+-    do_wait (intptr, 2);
+-  while (__atomic_load_n (intptr, MEMMODEL_RELAXED) == 2);
+-  __asm volatile ("" : : : "memory");
+-  return (void *) __atomic_load_n (ptrlock, MEMMODEL_ACQUIRE);
+-}
+-
+-void
+-gomp_ptrlock_set_slow (gomp_ptrlock_t *ptrlock)
+-{
+-  int *intptr;
+-
+-  __asm volatile ("" : "=r" (intptr) : "0" (ptrlock));
+-#if __BYTE_ORDER == __BIG_ENDIAN
+-  if (sizeof (*ptrlock) > sizeof (int))
+-    intptr += (sizeof (*ptrlock) / sizeof (int)) - 1;
+-#endif
+-  futex_wake (intptr, INT_MAX);
+-}
++/* Everything is in the header.  */
+diff --git a/libgomp/config/linux/ptrlock.h b/libgomp/config/linux/ptrlock.h
+index 0f99943bbb3..1a3096c15b3 100644
+--- a/libgomp/config/linux/ptrlock.h
++++ b/libgomp/config/linux/ptrlock.h
+@@ -23,54 +23,41 @@
+    see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+    <http://www.gnu.org/licenses/>.  */
+ 
+-/* This is a Linux specific implementation of a mutex synchronization
+-   mechanism for libgomp.  This type is private to the library.  This
+-   implementation uses atomic instructions and the futex syscall.
+-
+-   A ptrlock has four states:
+-   0/NULL Initial
+-   1      Owned by me, I get to write a pointer to ptrlock.
+-   2      Some thread is waiting on the ptrlock.
+-   >2     Ptrlock contains a valid pointer.
+-   It is not valid to gain the ptrlock and then write a NULL to it.  */
++/* This is a generic POSIX implementation of a mutex synchronization
++   mechanism for libgomp.  This type is private to the library.  */
+ 
+ #ifndef GOMP_PTRLOCK_H
+ #define GOMP_PTRLOCK_H 1
+ 
+-typedef void *gomp_ptrlock_t;
++typedef struct { void *ptr; gomp_mutex_t lock; } gomp_ptrlock_t;
+ 
+ static inline void gomp_ptrlock_init (gomp_ptrlock_t *ptrlock, void *ptr)
+ {
+-  *ptrlock = ptr;
++  ptrlock->ptr = ptr;
++  gomp_mutex_init (&ptrlock->lock);
+ }
+ 
+-extern void *gomp_ptrlock_get_slow (gomp_ptrlock_t *ptrlock);
+ static inline void *gomp_ptrlock_get (gomp_ptrlock_t *ptrlock)
+ {
+-  uintptr_t oldval;
+-
+-  uintptr_t v = (uintptr_t) __atomic_load_n (ptrlock, MEMMODEL_ACQUIRE);
+-  if (v > 2)
+-    return (void *) v;
+-
+-  oldval = 0;
+-  if (__atomic_compare_exchange_n (ptrlock, &oldval, 1, false,
+-				   MEMMODEL_ACQUIRE, MEMMODEL_ACQUIRE))
+-    return NULL;
+-
+-  return gomp_ptrlock_get_slow (ptrlock);
++  gomp_mutex_lock (&ptrlock->lock);
++  if (ptrlock->ptr != NULL)
++    {
++      gomp_mutex_unlock (&ptrlock->lock);
++      return ptrlock->ptr;
++    }
++
++  return NULL;
+ }
+ 
+-extern void gomp_ptrlock_set_slow (gomp_ptrlock_t *ptrlock);
+ static inline void gomp_ptrlock_set (gomp_ptrlock_t *ptrlock, void *ptr)
+ {
+-  void *wait = __atomic_exchange_n (ptrlock, ptr, MEMMODEL_RELEASE);
+-  if ((uintptr_t) wait != 1)
+-    gomp_ptrlock_set_slow (ptrlock);
++  ptrlock->ptr = ptr;
++  gomp_mutex_unlock (&ptrlock->lock);
+ }
+ 
+ static inline void gomp_ptrlock_destroy (gomp_ptrlock_t *ptrlock)
+ {
++  gomp_mutex_destroy (&ptrlock->lock);
+ }
+ 
+ #endif /* GOMP_PTRLOCK_H */
+diff --git a/libgomp/config/linux/s390/futex.h b/libgomp/config/linux/s390/futex.h
+deleted file mode 100644
+index 6bc24c19875..00000000000
+--- a/libgomp/config/linux/s390/futex.h
++++ /dev/null
+@@ -1,79 +0,0 @@
+-/* Copyright (C) 2005-2020 Free Software Foundation, Inc.
+-   Contributed by Jakub Jelinek <jakub@redhat.com>.
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-/* Provide target-specific access to the futex system call.  */
+-
+-#include <sys/syscall.h>
+-
+-static inline long
+-sys_futex0 (int *addr, int op, int val)
+-{
+-  register long int gpr2  __asm__ ("2");
+-  register long int gpr3  __asm__ ("3");
+-  register long int gpr4  __asm__ ("4");
+-  register long int gpr5  __asm__ ("5");
+-
+-  gpr2 = (long) addr;
+-  gpr3 = op;
+-  gpr4 = val;
+-  gpr5 = 0;
+-
+-  __asm volatile ("svc %b1"
+-		  : "=d" (gpr2)
+-		  : "i" (SYS_futex),
+-		    "0" (gpr2), "d" (gpr3), "d" (gpr4), "d" (gpr5)
+-		  : "memory");
+-  return gpr2;
+-}
+-
+-static inline void
+-futex_wait (int *addr, int val)
+-{
+-  long err = sys_futex0 (addr, gomp_futex_wait, val);
+-  if (__builtin_expect (err == -ENOSYS, 0))
+-    {
+-      gomp_futex_wait &= ~FUTEX_PRIVATE_FLAG;
+-      gomp_futex_wake &= ~FUTEX_PRIVATE_FLAG;
+-      sys_futex0 (addr, gomp_futex_wait, val);
+-    }
+-}
+-
+-static inline void
+-futex_wake (int *addr, int count)
+-{
+-  long err = sys_futex0 (addr, gomp_futex_wake, count);
+-  if (__builtin_expect (err == -ENOSYS, 0))
+-    {
+-      gomp_futex_wait &= ~FUTEX_PRIVATE_FLAG;
+-      gomp_futex_wake &= ~FUTEX_PRIVATE_FLAG;
+-      sys_futex0 (addr, gomp_futex_wake, count);
+-    }
+-}
+-
+-static inline void
+-cpu_relax (void)
+-{
+-  __asm volatile ("" : : : "memory");
+-}
+diff --git a/libgomp/config/linux/sem.c b/libgomp/config/linux/sem.c
+index 5728fafcf5b..e43bcf6c9e7 100644
+--- a/libgomp/config/linux/sem.c
++++ b/libgomp/config/linux/sem.c
+@@ -23,62 +23,102 @@
+    see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+    <http://www.gnu.org/licenses/>.  */
+ 
+-/* This is a Linux specific implementation of a semaphore synchronization
+-   mechanism for libgomp.  This type is private to the library.  This 
+-   implementation uses atomic instructions and the futex syscall.  */
++/* This is the default POSIX 1003.1b implementation of a semaphore
++   synchronization mechanism for libgomp.  This type is private to
++   the library.
+ 
+-#include "wait.h"
++   This is a bit heavy weight for what we need, in that we're not
++   interested in sem_wait as a cancelation point, but it's not too
++   bad for a default.  */
+ 
+-void
+-gomp_sem_wait_slow (gomp_sem_t *sem, int count)
++#include "libgomp.h"
++
++#ifdef HAVE_BROKEN_POSIX_SEMAPHORES
++#include <stdlib.h>
++
++void gomp_sem_init (gomp_sem_t *sem, int value)
+ {
+-  /* First loop spins a while.  */
+-  while (count == 0)
+-    if (do_spin (sem, 0)
+-	/* Spin timeout, nothing changed.  Set waiting flag.  */
+-	&& __atomic_compare_exchange_n (sem, &count, SEM_WAIT, false,
+-					MEMMODEL_ACQUIRE, MEMMODEL_RELAXED))
+-      {
+-	futex_wait (sem, SEM_WAIT);
+-	count = *sem;
+-	break;
+-      }
+-  /* Something changed.  If it wasn't the wait flag, we're good to go.  */
+-    else if (__builtin_expect (((count = *sem) & SEM_WAIT) == 0 && count != 0,
+-			       1))
+-      {
+-	if (__atomic_compare_exchange_n (sem, &count, count - SEM_INC, false,
+-					 MEMMODEL_ACQUIRE, MEMMODEL_RELAXED))
+-	  return;
+-      }
++  int ret;
++
++  ret = pthread_mutex_init (&sem->mutex, NULL);
++  if (ret)
++    return;
++
++  ret = pthread_cond_init (&sem->cond, NULL);
++  if (ret)
++    return;
++
++  sem->value = value;
++}
++
++void gomp_sem_wait (gomp_sem_t *sem)
++{
++  int ret;
++
++  ret = pthread_mutex_lock (&sem->mutex);
++  if (ret)
++    return;
+ 
+-  /* Second loop waits until semaphore is posted.  We always exit this
+-     loop with wait flag set, so next post will awaken a thread.  */
+-  while (1)
++  if (sem->value > 0)
+     {
+-      unsigned int wake = count & ~SEM_WAIT;
+-      int newval = SEM_WAIT;
++      sem->value--;
++      ret = pthread_mutex_unlock (&sem->mutex);
++      return;
++    }
+ 
+-      if (wake != 0)
+-	newval |= wake - SEM_INC;
+-      if (__atomic_compare_exchange_n (sem, &count, newval, false,
+-				       MEMMODEL_ACQUIRE, MEMMODEL_RELAXED))
++  while (sem->value <= 0)
++    {
++      ret = pthread_cond_wait (&sem->cond, &sem->mutex);
++      if (ret)
+ 	{
+-	  if (wake != 0)
+-	    {
+-	      /* If we can wake more threads, do so now.  */
+-	      if (wake > SEM_INC)
+-		gomp_sem_post_slow (sem);
+-	      break;
+-	    }
+-	  do_wait (sem, SEM_WAIT);
+-	  count = *sem;
++	  pthread_mutex_unlock (&sem->mutex);
++	  return;
+ 	}
+     }
++
++  sem->value--;
++  ret = pthread_mutex_unlock (&sem->mutex);
++  return;
++}
++
++void gomp_sem_post (gomp_sem_t *sem)
++{
++  int ret;
++
++  ret = pthread_mutex_lock (&sem->mutex);
++  if (ret)
++    return;
++
++  sem->value++;
++
++  ret = pthread_mutex_unlock (&sem->mutex);
++  if (ret)
++    return;
++
++  ret = pthread_cond_signal (&sem->cond);
++
++  return;
+ }
+ 
++void gomp_sem_destroy (gomp_sem_t *sem)
++{
++  int ret;
++
++  ret = pthread_mutex_destroy (&sem->mutex);
++  if (ret)
++    return;
++
++  ret = pthread_cond_destroy (&sem->cond);
++
++  return;
++}
++#else /* HAVE_BROKEN_POSIX_SEMAPHORES  */
+ void
+-gomp_sem_post_slow (gomp_sem_t *sem)
++gomp_sem_wait (gomp_sem_t *sem)
+ {
+-  futex_wake (sem, 1);
++  /* With POSIX, the wait can be canceled by signals.  We don't want that.
++     It is expected that the return value here is -1 and errno is EINTR.  */
++  while (sem_wait (sem) != 0)
++    continue;
+ }
++#endif
+diff --git a/libgomp/config/linux/sem.h b/libgomp/config/linux/sem.h
+index 2e26a917a92..64d4f1ec1d6 100644
+--- a/libgomp/config/linux/sem.h
++++ b/libgomp/config/linux/sem.h
+@@ -23,66 +23,66 @@
+    see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+    <http://www.gnu.org/licenses/>.  */
+ 
+-/* This is a Linux specific implementation of a semaphore synchronization
+-   mechanism for libgomp.  This type is private to the library.  This 
+-   counting semaphore implementation uses atomic instructions and the
+-   futex syscall, and a single 32-bit int to store semaphore state.
+-   The low 31 bits are the count, the top bit is a flag set when some
+-   threads may be waiting.  */
++/* This is the default POSIX 1003.1b implementation of a semaphore
++   synchronization mechanism for libgomp.  This type is private to
++   the library.
++
++   This is a bit heavy weight for what we need, in that we're not
++   interested in sem_wait as a cancelation point, but it's not too
++   bad for a default.  */
+ 
+ #ifndef GOMP_SEM_H
+ #define GOMP_SEM_H 1
+ 
+-#include <limits.h> /* For INT_MIN */
++#ifdef HAVE_ATTRIBUTE_VISIBILITY
++# pragma GCC visibility push(default)
++#endif
++
++#include <semaphore.h>
+ 
+-typedef int gomp_sem_t;
+-#define SEM_WAIT INT_MIN
+-#define SEM_INC 1
++#ifdef HAVE_ATTRIBUTE_VISIBILITY
++# pragma GCC visibility pop
++#endif
+ 
+-extern void gomp_sem_wait_slow (gomp_sem_t *, int);
+-extern void gomp_sem_post_slow (gomp_sem_t *);
++#ifdef HAVE_BROKEN_POSIX_SEMAPHORES
++#include <pthread.h>
+ 
+-static inline void
+-gomp_sem_init (gomp_sem_t *sem, int value)
++struct gomp_sem
+ {
+-  *sem = value * SEM_INC;
+-}
++  pthread_mutex_t	mutex;
++  pthread_cond_t	cond;
++  int			value;
++};
++
++typedef struct gomp_sem gomp_sem_t;
++
++extern void gomp_sem_init (gomp_sem_t *sem, int value);
++
++extern void gomp_sem_wait (gomp_sem_t *sem);
+ 
+-static inline void
+-gomp_sem_destroy (gomp_sem_t *sem)
++extern void gomp_sem_post (gomp_sem_t *sem);
++
++extern void gomp_sem_destroy (gomp_sem_t *sem);
++
++#else /* HAVE_BROKEN_POSIX_SEMAPHORES  */
++
++typedef sem_t gomp_sem_t;
++
++static inline void gomp_sem_init (gomp_sem_t *sem, int value)
+ {
++  sem_init (sem, 0, value);
+ }
+ 
+-static inline void
+-gomp_sem_wait (gomp_sem_t *sem)
+-{
+-  int count = *sem;
++extern void gomp_sem_wait (gomp_sem_t *sem);
+ 
+-  while ((count & ~SEM_WAIT) != 0)
+-    if (__atomic_compare_exchange_n (sem, &count, count - SEM_INC, true,
+-				     MEMMODEL_ACQUIRE, MEMMODEL_RELAXED))
+-      return;
+-  gomp_sem_wait_slow (sem, count);
++static inline void gomp_sem_post (gomp_sem_t *sem)
++{
++  sem_post (sem);
+ }
+ 
+-static inline void
+-gomp_sem_post (gomp_sem_t *sem)
++static inline void gomp_sem_destroy (gomp_sem_t *sem)
+ {
+-  int count = *sem;
+-
+-  /* Clear SEM_WAIT here so that if there are no more waiting threads
+-     we transition back to the uncontended state that does not make
+-     futex syscalls.  If there are waiting threads then when one is
+-     awoken it will set SEM_WAIT again, so other waiting threads are
+-     woken on a future gomp_sem_post.  Furthermore, the awoken thread
+-     will wake other threads in case gomp_sem_post was called again
+-     before it had time to set SEM_WAIT.  */
+-  while (!__atomic_compare_exchange_n (sem, &count,
+-				       (count + SEM_INC) & ~SEM_WAIT, true,
+-				       MEMMODEL_RELEASE, MEMMODEL_RELAXED))
+-    continue;
+-
+-  if (__builtin_expect (count & SEM_WAIT, 0))
+-    gomp_sem_post_slow (sem);
++  sem_destroy (sem);
+ }
+-#endif /* GOMP_SEM_H */
++#endif /* doesn't HAVE_BROKEN_POSIX_SEMAPHORES  */
++#endif /* GOMP_SEM_H  */
+diff --git a/libgomp/config/posix/simple-bar.h b/libgomp/config/linux/simple-bar.h
+similarity index 97%
+rename from libgomp/config/posix/simple-bar.h
+rename to libgomp/config/linux/simple-bar.h
+index 1a5662ac61e..fb0233b3f4a 100644
+--- a/libgomp/config/posix/simple-bar.h
++++ b/libgomp/config/linux/simple-bar.h
+@@ -1,4 +1,4 @@
+-/* Copyright (C) 2015-2020 Free Software Foundation, Inc.
++/* Copyright (C) 2015-2017 Free Software Foundation, Inc.
+    Contributed by Alexander Monakov <amonakov@ispras.ru>
+ 
+    This file is part of the GNU Offloading and Multi Processing Library
+diff --git a/libgomp/config/linux/sparc/futex.h b/libgomp/config/linux/sparc/futex.h
+deleted file mode 100644
+index 162c6c2b33b..00000000000
+--- a/libgomp/config/linux/sparc/futex.h
++++ /dev/null
+@@ -1,95 +0,0 @@
+-/* Copyright (C) 2005-2020 Free Software Foundation, Inc.
+-   Contributed by Jakub Jelinek <jakub@redhat.com>.
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-/* Provide target-specific access to the futex system call.  */
+-
+-#include <sys/syscall.h>
+-
+-static inline long
+-sys_futex0 (int *addr, int op, int val)
+-{
+-  register long int g1  __asm__ ("g1");
+-  register long int o0  __asm__ ("o0");
+-  register long int o1  __asm__ ("o1");
+-  register long int o2  __asm__ ("o2");
+-  register long int o3  __asm__ ("o3");
+-
+-  g1 = SYS_futex;
+-  o0 = (long) addr;
+-  o1 = op;
+-  o2 = val;
+-  o3 = 0;
+-
+-#ifdef __arch64__
+-# define SYSCALL_STRING "ta\t0x6d; bcs,a,pt %%xcc, 1f; sub %%g0, %%o0, %%o0; 1:"
+-#else
+-# define SYSCALL_STRING "ta\t0x10; bcs,a 1f; sub %%g0, %%o0, %%o0; 1:"
+-#endif
+-
+-  __asm volatile (SYSCALL_STRING
+-		  : "=r" (g1), "=r" (o0)
+-		  : "0" (g1), "1" (o0), "r" (o1), "r" (o2), "r" (o3)
+-		  : "g2", "g3", "g4", "g5", "g6",
+-		    "f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7",
+-		    "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15",
+-		    "f16", "f17", "f18", "f19", "f20", "f21", "f22", "f23",
+-		    "f24", "f25", "f26", "f27", "f28", "f29", "f30", "f31",
+-#ifdef __arch64__
+-		    "f32", "f34", "f36", "f38", "f40", "f42", "f44", "f46",
+-		    "f48", "f50", "f52", "f54", "f56", "f58", "f60", "f62",
+-#endif
+-		    "cc", "memory");
+-  return o0;
+-}
+-
+-static inline void
+-futex_wait (int *addr, int val)
+-{
+-  long err = sys_futex0 (addr, gomp_futex_wait, val);
+-  if (__builtin_expect (err == ENOSYS, 0))
+-    {
+-      gomp_futex_wait &= ~FUTEX_PRIVATE_FLAG;
+-      gomp_futex_wake &= ~FUTEX_PRIVATE_FLAG;
+-      sys_futex0 (addr, gomp_futex_wait, val);
+-    }
+-}
+-
+-static inline void
+-futex_wake (int *addr, int count)
+-{
+-  long err = sys_futex0 (addr, gomp_futex_wake, count);
+-  if (__builtin_expect (err == ENOSYS, 0))
+-    {
+-      gomp_futex_wait &= ~FUTEX_PRIVATE_FLAG;
+-      gomp_futex_wake &= ~FUTEX_PRIVATE_FLAG;
+-      sys_futex0 (addr, gomp_futex_wake, count);
+-    }
+-}
+-
+-static inline void
+-cpu_relax (void)
+-{
+-  __asm volatile ("rd %%ccr, %%g0" : : : "memory");
+-}
+diff --git a/libgomp/config/posix/thread-stacksize.h b/libgomp/config/linux/thread-stacksize.h
+similarity index 95%
+rename from libgomp/config/posix/thread-stacksize.h
+rename to libgomp/config/linux/thread-stacksize.h
+index f674305dfde..570c486394b 100644
+--- a/libgomp/config/posix/thread-stacksize.h
++++ b/libgomp/config/linux/thread-stacksize.h
+@@ -1,4 +1,4 @@
+-/* Copyright (C) 2017-2020 Free Software Foundation, Inc.
++/* Copyright (C) 2017 Free Software Foundation, Inc.
+    Contributed by Jakub Jelinek <jakub@redhat.com>
+ 
+    This file is part of the GNU Offloading and Multi Processing Library
+diff --git a/libgomp/config/linux/tile/futex.h b/libgomp/config/linux/tile/futex.h
+deleted file mode 100644
+index 700bbd863ad..00000000000
+--- a/libgomp/config/linux/tile/futex.h
++++ /dev/null
+@@ -1,73 +0,0 @@
+-/* Copyright (C) 2011-2020 Free Software Foundation, Inc.
+-   Contributed by Walter Lee (walt@tilera.com)
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-/* Provide target-specific access to the futex system call.  */
+-
+-#include <sys/syscall.h>
+-#include <linux/futex.h>
+-
+-static inline void
+-sys_futex0 (int *addr, int op, int val)
+-{
+-  long _sys_result;
+-  long _clobber_r2, _clobber_r3, _clobber_r4, _clobber_r5, _clobber_r10;
+-  int err;
+-
+-  __asm__ __volatile__ (
+-    "swint1"
+-    : "=R00" (_sys_result), "=R01" (err), "=R02" (_clobber_r2),
+-      "=R03" (_clobber_r3), "=R04" (_clobber_r4), "=R05" (_clobber_r5),
+-      "=R10" (_clobber_r10)
+-    : "R10" (SYS_futex), "R00" (addr), "R01" (op), "R02" (val),
+-      "R03" (0)
+-    :  "r6",  "r7",
+-       "r8",  "r9",        "r11", "r12", "r13", "r14", "r15",
+-      "r16", "r17", "r18", "r19", "r20", "r21", "r22", "r23",
+-      "r24", "r25", "r26", "r27", "r28", "r29", "memory");
+-}
+-
+-static inline void
+-futex_wait (int *addr, int val)
+-{
+-  sys_futex0 (addr, FUTEX_WAIT, val);
+-}
+-
+-static inline void
+-futex_wake (int *addr, int count)
+-{
+-  sys_futex0 (addr, FUTEX_WAKE, count);
+-}
+-
+-static inline void
+-cpu_relax (void)
+-{
+-  __asm volatile ("" : : : "memory");
+-}
+-
+-static inline void
+-atomic_write_barrier (void)
+-{
+-  __sync_synchronize ();
+-}
+diff --git a/libgomp/config/mingw32/time.c b/libgomp/config/linux/time.c
+similarity index 51%
+rename from libgomp/config/mingw32/time.c
+rename to libgomp/config/linux/time.c
+index 836702189ff..02f022b0985 100644
+--- a/libgomp/config/mingw32/time.c
++++ b/libgomp/config/linux/time.c
+@@ -1,5 +1,5 @@
+-/* Copyright (C) 2006-2020 Free Software Foundation, Inc.
+-   Contributed by Francois-Xavier Coudert <coudert@clipper.ens.fr>
++/* Copyright (C) 2005-2017 Free Software Foundation, Inc.
++   Contributed by Richard Henderson <rth@redhat.com>.
+ 
+    This file is part of the GNU Offloading and Multi Processing Library
+    (libgomp).
+@@ -23,24 +23,56 @@
+    see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+    <http://www.gnu.org/licenses/>.  */
+ 
+-/* This file contains timer routines for mingw32.  */
++/* This file contains system specific timer routines.  It is expected that
++   a system may well want to write special versions of each of these.
++
++   The following implementation uses the most simple POSIX routines.
++   If present, POSIX 4 clocks should be used instead.  */
+ 
+ #include "libgomp.h"
+ #include <unistd.h>
+-#include <sys/timeb.h>
++#if TIME_WITH_SYS_TIME
++# include <sys/time.h>
++# include <time.h>
++#else
++# if HAVE_SYS_TIME_H
++#  include <sys/time.h>
++# else
++#  include <time.h>
++# endif
++#endif
++
+ 
+ double
+ omp_get_wtime (void)
+ {
+-  struct _timeb timebuf;
+-  _ftime (&timebuf);
+-  return (timebuf.time + (long)(timebuf.millitm) / 1e3);
++#ifdef HAVE_CLOCK_GETTIME
++  struct timespec ts;
++# ifdef CLOCK_MONOTONIC
++  if (clock_gettime (CLOCK_MONOTONIC, &ts) < 0)
++# endif
++    clock_gettime (CLOCK_REALTIME, &ts);
++  return ts.tv_sec + ts.tv_nsec / 1e9;
++#else
++  struct timeval tv;
++  gettimeofday (&tv, NULL);
++  return tv.tv_sec + tv.tv_usec / 1e6;
++#endif
+ }
+ 
+ double
+ omp_get_wtick (void)
+ {
+-  return 1e-3;
++#ifdef HAVE_CLOCK_GETTIME
++  struct timespec ts;
++# ifdef CLOCK_MONOTONIC
++  if (clock_getres (CLOCK_MONOTONIC, &ts) < 0)
++# endif
++    clock_getres (CLOCK_REALTIME, &ts);
++  return ts.tv_sec + ts.tv_nsec / 1e9;
++#else
++  return 1.0 / sysconf(_SC_CLK_TCK);
++#endif
+ }
+ 
+ ialias (omp_get_wtime)
+diff --git a/libgomp/config/linux/wait.h b/libgomp/config/linux/wait.h
+deleted file mode 100644
+index e2af81f60a5..00000000000
+--- a/libgomp/config/linux/wait.h
++++ /dev/null
+@@ -1,74 +0,0 @@
+-/* Copyright (C) 2008-2020 Free Software Foundation, Inc.
+-   Contributed by Jakub Jelinek <jakub@redhat.com>.
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-/* This is a Linux specific implementation of a mutex synchronization
+-   mechanism for libgomp.  This type is private to the library.  This
+-   implementation uses atomic instructions and the futex syscall.  */
+-
+-#ifndef GOMP_WAIT_H
+-#define GOMP_WAIT_H 1
+-
+-#include "libgomp.h"
+-#include <errno.h>
+-
+-#define FUTEX_WAIT	0
+-#define FUTEX_WAKE	1
+-#define FUTEX_PRIVATE_FLAG	128
+-
+-#ifdef HAVE_ATTRIBUTE_VISIBILITY
+-# pragma GCC visibility push(hidden)
+-#endif
+-
+-extern int gomp_futex_wait, gomp_futex_wake;
+-
+-#include <futex.h>
+-
+-static inline int do_spin (int *addr, int val)
+-{
+-  unsigned long long i, count = gomp_spin_count_var;
+-
+-  if (__builtin_expect (__atomic_load_n (&gomp_managed_threads,
+-                                         MEMMODEL_RELAXED)
+-                        > gomp_available_cpus, 0))
+-    count = gomp_throttled_spin_count_var;
+-  for (i = 0; i < count; i++)
+-    if (__builtin_expect (__atomic_load_n (addr, MEMMODEL_RELAXED) != val, 0))
+-      return 0;
+-    else
+-      cpu_relax ();
+-  return 1;
+-}
+-
+-static inline void do_wait (int *addr, int val)
+-{
+-  if (do_spin (addr, val))
+-    futex_wait (addr, val);
+-}
+-
+-#ifdef HAVE_ATTRIBUTE_VISIBILITY
+-# pragma GCC visibility pop
+-#endif
+-
+-#endif /* GOMP_WAIT_H */
+diff --git a/libgomp/config/linux/x86/futex.h b/libgomp/config/linux/x86/futex.h
+deleted file mode 100644
+index ead74d14967..00000000000
+--- a/libgomp/config/linux/x86/futex.h
++++ /dev/null
+@@ -1,131 +0,0 @@
+-/* Copyright (C) 2005-2020 Free Software Foundation, Inc.
+-   Contributed by Richard Henderson <rth@redhat.com>.
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-/* Provide target-specific access to the futex system call.  */
+-
+-#ifdef __x86_64__
+-# ifndef SYS_futex
+-#  define SYS_futex	202
+-# endif
+-
+-static inline void
+-futex_wait (int *addr, int val)
+-{
+-  long res;
+-
+-  register long r10 __asm__("%r10") = 0;
+-  __asm volatile ("syscall"
+-		  : "=a" (res)
+-		  : "0" (SYS_futex), "D" (addr), "S" (gomp_futex_wait),
+-		    "d" (val), "r" (r10)
+-		  : "r11", "rcx", "memory");
+-  if (__builtin_expect (res == -ENOSYS, 0))
+-    {
+-      gomp_futex_wait &= ~FUTEX_PRIVATE_FLAG;
+-      gomp_futex_wake &= ~FUTEX_PRIVATE_FLAG;
+-      __asm volatile ("syscall"
+-		      : "=a" (res)
+-		      : "0" (SYS_futex), "D" (addr), "S" (gomp_futex_wait),
+-			"d" (val), "r" (r10)
+-		      : "r11", "rcx", "memory");
+-    }
+-}
+-
+-static inline void
+-futex_wake (int *addr, int count)
+-{
+-  long res;
+-
+-  __asm volatile ("syscall"
+-		  : "=a" (res)
+-		  : "0" (SYS_futex), "D" (addr), "S" (gomp_futex_wake),
+-		    "d" (count)
+-		  : "r11", "rcx", "memory");
+-  if (__builtin_expect (res == -ENOSYS, 0))
+-    {
+-      gomp_futex_wait &= ~FUTEX_PRIVATE_FLAG;
+-      gomp_futex_wake &= ~FUTEX_PRIVATE_FLAG;
+-      __asm volatile ("syscall"
+-		      : "=a" (res)
+-		      : "0" (SYS_futex), "D" (addr), "S" (gomp_futex_wake),
+-			"d" (count)
+-		      : "r11", "rcx", "memory");
+-    }
+-}
+-#else
+-# ifndef SYS_futex
+-#  define SYS_futex	240
+-# endif
+-
+-static inline void
+-futex_wait (int *addr, int val)
+-{
+-  long res;
+-
+-  __asm volatile ("int $0x80"
+-		  : "=a" (res)
+-		  : "0" (SYS_futex), "b" (addr), "c" (gomp_futex_wait),
+-		    "d" (val), "S" (0)
+-		  : "memory");
+-  if (__builtin_expect (res == -ENOSYS, 0))
+-    {
+-      gomp_futex_wait &= ~FUTEX_PRIVATE_FLAG;
+-      gomp_futex_wake &= ~FUTEX_PRIVATE_FLAG;
+-      __asm volatile ("int $0x80"
+-		      : "=a" (res)
+-		      : "0" (SYS_futex), "b" (addr), "c" (gomp_futex_wait),
+-		        "d" (val), "S" (0)
+-		      : "memory");
+-    }
+-}
+-
+-static inline void
+-futex_wake (int *addr, int count)
+-{
+-  long res;
+-
+-  __asm volatile ("int $0x80"
+-		  : "=a" (res)
+-		  : "0" (SYS_futex), "b" (addr), "c" (gomp_futex_wake),
+-		    "d" (count)
+-		  : "memory");
+-  if (__builtin_expect (res == -ENOSYS, 0))
+-    {
+-      gomp_futex_wait &= ~FUTEX_PRIVATE_FLAG;
+-      gomp_futex_wake &= ~FUTEX_PRIVATE_FLAG;
+-      __asm volatile ("int $0x80"
+-		      : "=a" (res)
+-		      : "0" (SYS_futex), "b" (addr), "c" (gomp_futex_wake),
+-		        "d" (count)
+-		      : "memory");
+-    }
+-}
+-#endif /* __x86_64__ */
+-
+-static inline void
+-cpu_relax (void)
+-{
+-  __builtin_ia32_pause ();
+-}
+diff --git a/libgomp/config/mingw32/proc.c b/libgomp/config/mingw32/proc.c
+deleted file mode 100644
+index e9ce2fc5ba3..00000000000
+--- a/libgomp/config/mingw32/proc.c
++++ /dev/null
+@@ -1,81 +0,0 @@
+-/* Copyright (C) 2007-2020 Free Software Foundation, Inc.
+-   Contributed by Danny Smith <dannysmith@users.sourceforge.net>
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-/* This file contains system specific routines related to counting
+-   online processors and dynamic load balancing.  It is expected that
+-   a system may well want to write special versions of each of these.
+-
+-   The following implementation uses win32 API routines.  */
+-
+-#include "libgomp.h"
+-#include <windows.h>
+-
+-/* Count the CPU's currently available to this process.  */
+-static unsigned int
+-count_avail_process_cpus ()
+-{
+-  DWORD_PTR process_cpus;
+-  DWORD_PTR system_cpus;
+-
+-  if (GetProcessAffinityMask (GetCurrentProcess (),
+-			      &process_cpus, &system_cpus))
+-    {
+-      unsigned int count;
+-      for (count = 0; process_cpus != 0; process_cpus >>= 1)  
+-	if (process_cpus & 1)
+-	  count++;
+-      return count;
+-    }
+-  return 1;
+-}
+-
+-/* At startup, determine the default number of threads.  It would seem
+-   this should be related to the number of cpus available to the process.  */
+-
+-void
+-gomp_init_num_threads (void)
+-{
+-  gomp_global_icv.nthreads_var = count_avail_process_cpus ();
+-}
+-
+-/* When OMP_DYNAMIC is set, at thread launch determine the number of
+-   threads we should spawn for this team.  FIXME:  How do we adjust for
+-   load average on MS Windows?  */
+-
+-unsigned
+-gomp_dynamic_max_threads (void)
+-{
+-  unsigned int n_onln = count_avail_process_cpus ();
+-  unsigned int nthreads_var = gomp_icv (false)->nthreads_var;
+-  return n_onln > nthreads_var ? nthreads_var : n_onln;
+-}
+-
+-int
+-omp_get_num_procs (void)
+-{
+-  return count_avail_process_cpus ();
+-}
+-
+-ialias (omp_get_num_procs)
+diff --git a/libgomp/config/posix/bar.c b/libgomp/config/posix/bar.c
+deleted file mode 100644
+index 9cf6ebdf9c8..00000000000
+--- a/libgomp/config/posix/bar.c
++++ /dev/null
+@@ -1,299 +0,0 @@
+-/* Copyright (C) 2005-2020 Free Software Foundation, Inc.
+-   Contributed by Richard Henderson <rth@redhat.com>.
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-/* This is the default implementation of a barrier synchronization mechanism
+-   for libgomp.  This type is private to the library.  Note that we rely on
+-   being able to adjust the barrier count while threads are blocked, so the
+-   POSIX pthread_barrier_t won't work.  */
+-
+-#include "libgomp.h"
+-
+-
+-void
+-gomp_barrier_init (gomp_barrier_t *bar, unsigned count)
+-{
+-  gomp_mutex_init (&bar->mutex1);
+-#ifndef HAVE_SYNC_BUILTINS
+-  gomp_mutex_init (&bar->mutex2);
+-#endif
+-  gomp_sem_init (&bar->sem1, 0);
+-  gomp_sem_init (&bar->sem2, 0);
+-  bar->total = count;
+-  bar->arrived = 0;
+-  bar->generation = 0;
+-  bar->cancellable = false;
+-}
+-
+-void
+-gomp_barrier_destroy (gomp_barrier_t *bar)
+-{
+-  /* Before destroying, make sure all threads have left the barrier.  */
+-  gomp_mutex_lock (&bar->mutex1);
+-  gomp_mutex_unlock (&bar->mutex1);
+-
+-  gomp_mutex_destroy (&bar->mutex1);
+-#ifndef HAVE_SYNC_BUILTINS
+-  gomp_mutex_destroy (&bar->mutex2);
+-#endif
+-  gomp_sem_destroy (&bar->sem1);
+-  gomp_sem_destroy (&bar->sem2);
+-}
+-
+-void
+-gomp_barrier_reinit (gomp_barrier_t *bar, unsigned count)
+-{
+-  gomp_mutex_lock (&bar->mutex1);
+-  bar->total = count;
+-  gomp_mutex_unlock (&bar->mutex1);
+-}
+-
+-void
+-gomp_barrier_wait_end (gomp_barrier_t *bar, gomp_barrier_state_t state)
+-{
+-  unsigned int n;
+-
+-  if (state & BAR_WAS_LAST)
+-    {
+-      n = --bar->arrived;
+-      if (n > 0)
+-	{
+-	  do
+-	    gomp_sem_post (&bar->sem1);
+-	  while (--n != 0);
+-	  gomp_sem_wait (&bar->sem2);
+-	}
+-      gomp_mutex_unlock (&bar->mutex1);
+-    }
+-  else
+-    {
+-      gomp_mutex_unlock (&bar->mutex1);
+-      gomp_sem_wait (&bar->sem1);
+-
+-#ifdef HAVE_SYNC_BUILTINS
+-      n = __sync_add_and_fetch (&bar->arrived, -1);
+-#else
+-      gomp_mutex_lock (&bar->mutex2);
+-      n = --bar->arrived;
+-      gomp_mutex_unlock (&bar->mutex2);
+-#endif
+-
+-      if (n == 0)
+-	gomp_sem_post (&bar->sem2);
+-    }
+-}
+-
+-void
+-gomp_barrier_wait (gomp_barrier_t *barrier)
+-{
+-  gomp_barrier_wait_end (barrier, gomp_barrier_wait_start (barrier));
+-}
+-
+-void
+-gomp_team_barrier_wait_end (gomp_barrier_t *bar, gomp_barrier_state_t state)
+-{
+-  unsigned int n;
+-
+-  state &= ~BAR_CANCELLED;
+-  if (state & BAR_WAS_LAST)
+-    {
+-      n = --bar->arrived;
+-      struct gomp_thread *thr = gomp_thread ();
+-      struct gomp_team *team = thr->ts.team;
+-
+-      team->work_share_cancelled = 0;
+-      if (team->task_count)
+-	{
+-	  gomp_barrier_handle_tasks (state);
+-	  if (n > 0)
+-	    gomp_sem_wait (&bar->sem2);
+-	  gomp_mutex_unlock (&bar->mutex1);
+-	  return;
+-	}
+-
+-      bar->generation = state + BAR_INCR - BAR_WAS_LAST;
+-      if (n > 0)
+-	{
+-	  do
+-	    gomp_sem_post (&bar->sem1);
+-	  while (--n != 0);
+-	  gomp_sem_wait (&bar->sem2);
+-	}
+-      gomp_mutex_unlock (&bar->mutex1);
+-    }
+-  else
+-    {
+-      gomp_mutex_unlock (&bar->mutex1);
+-      int gen;
+-      do
+-	{
+-	  gomp_sem_wait (&bar->sem1);
+-	  gen = __atomic_load_n (&bar->generation, MEMMODEL_ACQUIRE);
+-	  if (gen & BAR_TASK_PENDING)
+-	    {
+-	      gomp_barrier_handle_tasks (state);
+-	      gen = __atomic_load_n (&bar->generation, MEMMODEL_ACQUIRE);
+-	    }
+-	}
+-      while (gen != state + BAR_INCR);
+-
+-#ifdef HAVE_SYNC_BUILTINS
+-      n = __sync_add_and_fetch (&bar->arrived, -1);
+-#else
+-      gomp_mutex_lock (&bar->mutex2);
+-      n = --bar->arrived;
+-      gomp_mutex_unlock (&bar->mutex2);
+-#endif
+-
+-      if (n == 0)
+-	gomp_sem_post (&bar->sem2);
+-    }
+-}
+-
+-bool
+-gomp_team_barrier_wait_cancel_end (gomp_barrier_t *bar,
+-				   gomp_barrier_state_t state)
+-{
+-  unsigned int n;
+-
+-  if (state & BAR_WAS_LAST)
+-    {
+-      bar->cancellable = false;
+-      n = --bar->arrived;
+-      struct gomp_thread *thr = gomp_thread ();
+-      struct gomp_team *team = thr->ts.team;
+-
+-      team->work_share_cancelled = 0;
+-      if (team->task_count)
+-	{
+-	  gomp_barrier_handle_tasks (state);
+-	  if (n > 0)
+-	    gomp_sem_wait (&bar->sem2);
+-	  gomp_mutex_unlock (&bar->mutex1);
+-	  return false;
+-	}
+-
+-      bar->generation = state + BAR_INCR - BAR_WAS_LAST;
+-      if (n > 0)
+-	{
+-	  do
+-	    gomp_sem_post (&bar->sem1);
+-	  while (--n != 0);
+-	  gomp_sem_wait (&bar->sem2);
+-	}
+-      gomp_mutex_unlock (&bar->mutex1);
+-    }
+-  else
+-    {
+-      if (state & BAR_CANCELLED)
+-	{
+-	  gomp_mutex_unlock (&bar->mutex1);
+-	  return true;
+-	}
+-      bar->cancellable = true;
+-      gomp_mutex_unlock (&bar->mutex1);
+-      int gen;
+-      do
+-	{
+-	  gomp_sem_wait (&bar->sem1);
+-	  gen = __atomic_load_n (&bar->generation, MEMMODEL_ACQUIRE);
+-	  if (gen & BAR_CANCELLED)
+-	    break;
+-	  if (gen & BAR_TASK_PENDING)
+-	    {
+-	      gomp_barrier_handle_tasks (state);
+-	      gen = __atomic_load_n (&bar->generation, MEMMODEL_ACQUIRE);
+-	      if (gen & BAR_CANCELLED)
+-		break;
+-	    }
+-	}
+-      while (gen != state + BAR_INCR);
+-
+-#ifdef HAVE_SYNC_BUILTINS
+-      n = __sync_add_and_fetch (&bar->arrived, -1);
+-#else
+-      gomp_mutex_lock (&bar->mutex2);
+-      n = --bar->arrived;
+-      gomp_mutex_unlock (&bar->mutex2);
+-#endif
+-
+-      if (n == 0)
+-	gomp_sem_post (&bar->sem2);
+-      if (gen & BAR_CANCELLED)
+-	return true;
+-    }
+-  return false;
+-}
+-
+-void
+-gomp_team_barrier_wait (gomp_barrier_t *barrier)
+-{
+-  gomp_team_barrier_wait_end (barrier, gomp_barrier_wait_start (barrier));
+-}
+-
+-void
+-gomp_team_barrier_wake (gomp_barrier_t *bar, int count)
+-{
+-  if (count == 0)
+-    count = bar->total - 1;
+-  while (count-- > 0)
+-    gomp_sem_post (&bar->sem1);
+-}
+-
+-bool
+-gomp_team_barrier_wait_cancel (gomp_barrier_t *bar)
+-{
+-  gomp_barrier_state_t state = gomp_barrier_wait_cancel_start (bar);
+-  return gomp_team_barrier_wait_cancel_end (bar, state);
+-}
+-
+-void
+-gomp_team_barrier_cancel (struct gomp_team *team)
+-{
+-  if (team->barrier.generation & BAR_CANCELLED)
+-    return;
+-  gomp_mutex_lock (&team->barrier.mutex1);
+-  gomp_mutex_lock (&team->task_lock);
+-  if (team->barrier.generation & BAR_CANCELLED)
+-    {
+-      gomp_mutex_unlock (&team->task_lock);
+-      gomp_mutex_unlock (&team->barrier.mutex1);
+-      return;
+-    }
+-  team->barrier.generation |= BAR_CANCELLED;
+-  gomp_mutex_unlock (&team->task_lock);
+-  if (team->barrier.cancellable)
+-    {
+-      int n = team->barrier.arrived;
+-      if (n > 0)
+-	{
+-	  do
+-	    gomp_sem_post (&team->barrier.sem1);
+-	  while (--n != 0);
+-	  gomp_sem_wait (&team->barrier.sem2);
+-	}
+-      team->barrier.cancellable = false;
+-    }
+-  gomp_mutex_unlock (&team->barrier.mutex1);
+-}
+diff --git a/libgomp/config/posix/bar.h b/libgomp/config/posix/bar.h
+deleted file mode 100644
+index fdd4439e2c2..00000000000
+--- a/libgomp/config/posix/bar.h
++++ /dev/null
+@@ -1,158 +0,0 @@
+-/* Copyright (C) 2005-2020 Free Software Foundation, Inc.
+-   Contributed by Richard Henderson <rth@redhat.com>.
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-/* This is the default implementation of a barrier synchronization mechanism
+-   for libgomp.  This type is private to the library.  Note that we rely on
+-   being able to adjust the barrier count while threads are blocked, so the
+-   POSIX pthread_barrier_t won't work.  */
+-
+-#ifndef GOMP_BARRIER_H
+-#define GOMP_BARRIER_H 1
+-
+-#include <pthread.h>
+-
+-typedef struct
+-{
+-  gomp_mutex_t mutex1;
+-#ifndef HAVE_SYNC_BUILTINS
+-  gomp_mutex_t mutex2;
+-#endif
+-  gomp_sem_t sem1;
+-  gomp_sem_t sem2;
+-  unsigned total;
+-  unsigned arrived;
+-  unsigned generation;
+-  bool cancellable;
+-} gomp_barrier_t;
+-
+-typedef unsigned int gomp_barrier_state_t;
+-
+-/* The generation field contains a counter in the high bits, with a few
+-   low bits dedicated to flags.  Note that TASK_PENDING and WAS_LAST can
+-   share space because WAS_LAST is never stored back to generation.  */
+-#define BAR_TASK_PENDING	1
+-#define BAR_WAS_LAST		1
+-#define BAR_WAITING_FOR_TASK	2
+-#define BAR_CANCELLED		4
+-#define BAR_INCR		8
+-
+-extern void gomp_barrier_init (gomp_barrier_t *, unsigned);
+-extern void gomp_barrier_reinit (gomp_barrier_t *, unsigned);
+-extern void gomp_barrier_destroy (gomp_barrier_t *);
+-
+-extern void gomp_barrier_wait (gomp_barrier_t *);
+-extern void gomp_barrier_wait_end (gomp_barrier_t *, gomp_barrier_state_t);
+-extern void gomp_team_barrier_wait (gomp_barrier_t *);
+-extern void gomp_team_barrier_wait_end (gomp_barrier_t *,
+-					gomp_barrier_state_t);
+-extern bool gomp_team_barrier_wait_cancel (gomp_barrier_t *);
+-extern bool gomp_team_barrier_wait_cancel_end (gomp_barrier_t *,
+-					       gomp_barrier_state_t);
+-extern void gomp_team_barrier_wake (gomp_barrier_t *, int);
+-struct gomp_team;
+-extern void gomp_team_barrier_cancel (struct gomp_team *);
+-
+-static inline gomp_barrier_state_t
+-gomp_barrier_wait_start (gomp_barrier_t *bar)
+-{
+-  unsigned int ret;
+-  gomp_mutex_lock (&bar->mutex1);
+-  ret = bar->generation & (-BAR_INCR | BAR_CANCELLED);
+-  if (++bar->arrived == bar->total)
+-    ret |= BAR_WAS_LAST;
+-  return ret;
+-}
+-
+-static inline gomp_barrier_state_t
+-gomp_barrier_wait_cancel_start (gomp_barrier_t *bar)
+-{
+-  unsigned int ret;
+-  gomp_mutex_lock (&bar->mutex1);
+-  ret = bar->generation & (-BAR_INCR | BAR_CANCELLED);
+-  if (ret & BAR_CANCELLED)
+-    return ret;
+-  if (++bar->arrived == bar->total)
+-    ret |= BAR_WAS_LAST;
+-  return ret;
+-}
+-
+-static inline void
+-gomp_team_barrier_wait_final (gomp_barrier_t *bar)
+-{
+-  gomp_team_barrier_wait (bar);
+-}
+-
+-static inline bool
+-gomp_barrier_last_thread (gomp_barrier_state_t state)
+-{
+-  return state & BAR_WAS_LAST;
+-}
+-
+-static inline void
+-gomp_barrier_wait_last (gomp_barrier_t *bar)
+-{
+-  gomp_barrier_wait (bar);
+-}
+-
+-/* All the inlines below must be called with team->task_lock
+-   held.  */
+-
+-static inline void
+-gomp_team_barrier_set_task_pending (gomp_barrier_t *bar)
+-{
+-  bar->generation |= BAR_TASK_PENDING;
+-}
+-
+-static inline void
+-gomp_team_barrier_clear_task_pending (gomp_barrier_t *bar)
+-{
+-  bar->generation &= ~BAR_TASK_PENDING;
+-}
+-
+-static inline void
+-gomp_team_barrier_set_waiting_for_tasks (gomp_barrier_t *bar)
+-{
+-  bar->generation |= BAR_WAITING_FOR_TASK;
+-}
+-
+-static inline bool
+-gomp_team_barrier_waiting_for_tasks (gomp_barrier_t *bar)
+-{
+-  return (bar->generation & BAR_WAITING_FOR_TASK) != 0;
+-}
+-
+-static inline bool
+-gomp_team_barrier_cancelled (gomp_barrier_t *bar)
+-{
+-  return __builtin_expect ((bar->generation & BAR_CANCELLED) != 0, 0);
+-}
+-
+-static inline void
+-gomp_team_barrier_done (gomp_barrier_t *bar, gomp_barrier_state_t state)
+-{
+-  bar->generation = (state & -BAR_INCR) + BAR_INCR;
+-}
+-
+-#endif /* GOMP_BARRIER_H */
+diff --git a/libgomp/config/posix/doacross.h b/libgomp/config/posix/doacross.h
+deleted file mode 100644
+index 0d10bccbba4..00000000000
+--- a/libgomp/config/posix/doacross.h
++++ /dev/null
+@@ -1,62 +0,0 @@
+-/* Copyright (C) 2015-2020 Free Software Foundation, Inc.
+-   Contributed by Jakub Jelinek <jakub@redhat.com>.
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-/* This is a generic implementation of doacross spinning.  */
+-
+-#ifndef GOMP_DOACROSS_H
+-#define GOMP_DOACROSS_H 1
+-
+-#include "libgomp.h"
+-#include <errno.h>
+-
+-#ifdef HAVE_ATTRIBUTE_VISIBILITY
+-# pragma GCC visibility push(hidden)
+-#endif
+-
+-static inline void
+-cpu_relax (void)
+-{
+-  __asm volatile ("" : : : "memory");
+-}
+-
+-static inline void doacross_spin (unsigned long *addr, unsigned long expected,
+-				  unsigned long cur)
+-{
+-  /* FIXME: back off depending on how large expected - cur is.  */
+-  do
+-    {
+-      cpu_relax ();
+-      cur = __atomic_load_n (addr, MEMMODEL_RELAXED);
+-      if (expected < cur)
+-	return;
+-    }
+-  while (1);
+-}
+-
+-#ifdef HAVE_ATTRIBUTE_VISIBILITY
+-# pragma GCC visibility pop
+-#endif
+-
+-#endif /* GOMP_DOACROSS_H */
+diff --git a/libgomp/config/posix/lock.c b/libgomp/config/posix/lock.c
+deleted file mode 100644
+index 36391ae780c..00000000000
+--- a/libgomp/config/posix/lock.c
++++ /dev/null
+@@ -1,305 +0,0 @@
+-/* Copyright (C) 2005-2020 Free Software Foundation, Inc.
+-   Contributed by Richard Henderson <rth@redhat.com>.
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-/* This is the default PTHREADS implementation of the public OpenMP
+-   locking primitives.
+-
+-   Because OpenMP uses different entry points for normal and recursive
+-   locks, and pthreads uses only one entry point, a system may be able
+-   to do better and streamline the locking as well as reduce the size
+-   of the types exported.  */
+-
+-/* We need UNIX98/XPG5 extensions to get recursive locks.  Request XPG6 since
+-   Solaris requires this for C99 and later.  */
+-#define _XOPEN_SOURCE 600
+-
+-#include "libgomp.h"
+-
+-#ifdef HAVE_BROKEN_POSIX_SEMAPHORES
+-void
+-gomp_init_lock_30 (omp_lock_t *lock)
+-{
+-  pthread_mutex_init (lock, NULL);
+-}
+-
+-void
+-gomp_destroy_lock_30 (omp_lock_t *lock)
+-{
+-  pthread_mutex_destroy (lock);
+-}
+-
+-void
+-gomp_set_lock_30 (omp_lock_t *lock)
+-{
+-  pthread_mutex_lock (lock);
+-}
+-
+-void
+-gomp_unset_lock_30 (omp_lock_t *lock)
+-{
+-  pthread_mutex_unlock (lock);
+-}
+-
+-int
+-gomp_test_lock_30 (omp_lock_t *lock)
+-{
+-  return pthread_mutex_trylock (lock) == 0;
+-}
+-
+-void
+-gomp_init_nest_lock_30 (omp_nest_lock_t *lock)
+-{
+-  pthread_mutex_init (&lock->lock, NULL);
+-  lock->count = 0;
+-  lock->owner = NULL;
+-}
+-
+-void
+-gomp_destroy_nest_lock_30 (omp_nest_lock_t *lock)
+-{
+-  pthread_mutex_destroy (&lock->lock);
+-}
+-
+-void
+-gomp_set_nest_lock_30 (omp_nest_lock_t *lock)
+-{
+-  void *me = gomp_icv (true);
+-
+-  if (lock->owner != me)
+-    {
+-      pthread_mutex_lock (&lock->lock);
+-      lock->owner = me;
+-    }
+-  lock->count++;
+-}
+-
+-void
+-gomp_unset_nest_lock_30 (omp_nest_lock_t *lock)
+-{
+-  if (--lock->count == 0)
+-    {
+-      lock->owner = NULL;
+-      pthread_mutex_unlock (&lock->lock);
+-    }
+-}
+-
+-int
+-gomp_test_nest_lock_30 (omp_nest_lock_t *lock)
+-{
+-  void *me = gomp_icv (true);
+-
+-  if (lock->owner != me)
+-    {
+-      if (pthread_mutex_trylock (&lock->lock) != 0)
+-	return 0;
+-      lock->owner = me;
+-    }
+-
+-  return ++lock->count;
+-}
+-
+-#else
+-
+-void
+-gomp_init_lock_30 (omp_lock_t *lock)
+-{
+-  sem_init (lock, 0, 1);
+-}
+-
+-void
+-gomp_destroy_lock_30 (omp_lock_t *lock)
+-{
+-  sem_destroy (lock);
+-}
+-
+-void
+-gomp_set_lock_30 (omp_lock_t *lock)
+-{
+-  while (sem_wait (lock) != 0)
+-    ;
+-}
+-
+-void
+-gomp_unset_lock_30 (omp_lock_t *lock)
+-{
+-  sem_post (lock);
+-}
+-
+-int
+-gomp_test_lock_30 (omp_lock_t *lock)
+-{
+-  return sem_trywait (lock) == 0;
+-}
+-
+-void
+-gomp_init_nest_lock_30 (omp_nest_lock_t *lock)
+-{
+-  sem_init (&lock->lock, 0, 1);
+-  lock->count = 0;
+-  lock->owner = NULL;
+-}
+-
+-void
+-gomp_destroy_nest_lock_30 (omp_nest_lock_t *lock)
+-{
+-  sem_destroy (&lock->lock);
+-}
+-
+-void
+-gomp_set_nest_lock_30 (omp_nest_lock_t *lock)
+-{
+-  void *me = gomp_icv (true);
+-
+-  if (lock->owner != me)
+-    {
+-      while (sem_wait (&lock->lock) != 0)
+-	;
+-      lock->owner = me;
+-    }
+-  lock->count++;
+-}
+-
+-void
+-gomp_unset_nest_lock_30 (omp_nest_lock_t *lock)
+-{
+-  if (--lock->count == 0)
+-    {
+-      lock->owner = NULL;
+-      sem_post (&lock->lock);
+-    }
+-}
+-
+-int
+-gomp_test_nest_lock_30 (omp_nest_lock_t *lock)
+-{
+-  void *me = gomp_icv (true);
+-
+-  if (lock->owner != me)
+-    {
+-      if (sem_trywait (&lock->lock) != 0)
+-	return 0;
+-      lock->owner = me;
+-    }
+-
+-  return ++lock->count;
+-}
+-#endif
+-
+-#ifdef LIBGOMP_GNU_SYMBOL_VERSIONING
+-void
+-gomp_init_lock_25 (omp_lock_25_t *lock)
+-{
+-  pthread_mutex_init (lock, NULL);
+-}
+-
+-void
+-gomp_destroy_lock_25 (omp_lock_25_t *lock)
+-{
+-  pthread_mutex_destroy (lock);
+-}
+-
+-void
+-gomp_set_lock_25 (omp_lock_25_t *lock)
+-{
+-  pthread_mutex_lock (lock);
+-}
+-
+-void
+-gomp_unset_lock_25 (omp_lock_25_t *lock)
+-{
+-  pthread_mutex_unlock (lock);
+-}
+-
+-int
+-gomp_test_lock_25 (omp_lock_25_t *lock)
+-{
+-  return pthread_mutex_trylock (lock) == 0;
+-}
+-
+-void
+-gomp_init_nest_lock_25 (omp_nest_lock_25_t *lock)
+-{
+-  pthread_mutexattr_t attr;
+-
+-  pthread_mutexattr_init (&attr);
+-  pthread_mutexattr_settype (&attr, PTHREAD_MUTEX_RECURSIVE);
+-  pthread_mutex_init (&lock->lock, &attr);
+-  lock->count = 0;
+-  pthread_mutexattr_destroy (&attr);
+-}
+-
+-void
+-gomp_destroy_nest_lock_25 (omp_nest_lock_25_t *lock)
+-{
+-  pthread_mutex_destroy (&lock->lock);
+-}
+-
+-void
+-gomp_set_nest_lock_25 (omp_nest_lock_25_t *lock)
+-{
+-  pthread_mutex_lock (&lock->lock);
+-  lock->count++;
+-}
+-
+-void
+-gomp_unset_nest_lock_25 (omp_nest_lock_25_t *lock)
+-{
+-  lock->count--;
+-  pthread_mutex_unlock (&lock->lock);
+-}
+-
+-int
+-gomp_test_nest_lock_25 (omp_nest_lock_25_t *lock)
+-{
+-  if (pthread_mutex_trylock (&lock->lock) == 0)
+-    return ++lock->count;
+-  return 0;
+-}
+-
+-omp_lock_symver (omp_init_lock)
+-omp_lock_symver (omp_destroy_lock)
+-omp_lock_symver (omp_set_lock)
+-omp_lock_symver (omp_unset_lock)
+-omp_lock_symver (omp_test_lock)
+-omp_lock_symver (omp_init_nest_lock)
+-omp_lock_symver (omp_destroy_nest_lock)
+-omp_lock_symver (omp_set_nest_lock)
+-omp_lock_symver (omp_unset_nest_lock)
+-omp_lock_symver (omp_test_nest_lock)
+-
+-#else
+-
+-ialias (omp_init_lock)
+-ialias (omp_init_nest_lock)
+-ialias (omp_destroy_lock)
+-ialias (omp_destroy_nest_lock)
+-ialias (omp_set_lock)
+-ialias (omp_set_nest_lock)
+-ialias (omp_unset_lock)
+-ialias (omp_unset_nest_lock)
+-ialias (omp_test_lock)
+-ialias (omp_test_nest_lock)
+-
+-#endif
+diff --git a/libgomp/config/posix/mutex.c b/libgomp/config/posix/mutex.c
+deleted file mode 100644
+index 39bb64da0f9..00000000000
+--- a/libgomp/config/posix/mutex.c
++++ /dev/null
+@@ -1 +0,0 @@
+-/* Everything is in the header.  */
+diff --git a/libgomp/config/posix/mutex.h b/libgomp/config/posix/mutex.h
+deleted file mode 100644
+index 3d9dfdacf54..00000000000
+--- a/libgomp/config/posix/mutex.h
++++ /dev/null
+@@ -1,58 +0,0 @@
+-/* Copyright (C) 2005-2020 Free Software Foundation, Inc.
+-   Contributed by Richard Henderson <rth@redhat.com>.
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-/* This is the default PTHREADS implementation of a mutex synchronization
+-   mechanism for libgomp.  This type is private to the library.  */
+-
+-#ifndef GOMP_MUTEX_H
+-#define GOMP_MUTEX_H 1
+-
+-#include <pthread.h>
+-
+-typedef pthread_mutex_t gomp_mutex_t;
+-
+-#define GOMP_MUTEX_INIT_0 0
+-
+-static inline void gomp_mutex_init (gomp_mutex_t *mutex)
+-{
+-  pthread_mutex_init (mutex, NULL);
+-}
+-
+-static inline void gomp_mutex_lock (gomp_mutex_t *mutex)
+-{
+-  pthread_mutex_lock (mutex);
+-}
+-
+-static inline void gomp_mutex_unlock (gomp_mutex_t *mutex)
+-{
+-   pthread_mutex_unlock (mutex);
+-}
+-
+-static inline void gomp_mutex_destroy (gomp_mutex_t *mutex)
+-{
+-  pthread_mutex_destroy (mutex);
+-}
+-
+-#endif /* GOMP_MUTEX_H */
+diff --git a/libgomp/config/posix/omp-lock.h b/libgomp/config/posix/omp-lock.h
+deleted file mode 100644
+index e51dc271f8a..00000000000
+--- a/libgomp/config/posix/omp-lock.h
++++ /dev/null
+@@ -1,23 +0,0 @@
+-/* This header is used during the build process to find the size and 
+-   alignment of the public OpenMP locks, so that we can export data
+-   structures without polluting the namespace.
+-
+-   In this default POSIX implementation, we used to map the two locks to the
+-   same PTHREADS primitive, but for OpenMP 3.0 sem_t needs to be used
+-   instead, as pthread_mutex_unlock should not be called by different
+-   thread than the one that called pthread_mutex_lock.  */
+-
+-#include <pthread.h>
+-#include <semaphore.h>
+-
+-typedef pthread_mutex_t omp_lock_25_t;
+-typedef struct { pthread_mutex_t lock; int count; } omp_nest_lock_25_t;
+-#ifdef HAVE_BROKEN_POSIX_SEMAPHORES
+-/* If we don't have working semaphores, we'll make all explicit tasks
+-   tied to the creating thread.  */
+-typedef pthread_mutex_t omp_lock_t;
+-typedef struct { pthread_mutex_t lock; int count; void *owner; } omp_nest_lock_t;
+-#else
+-typedef sem_t omp_lock_t;
+-typedef struct { sem_t lock; int count; void *owner; } omp_nest_lock_t;
+-#endif
+diff --git a/libgomp/config/posix/proc.c b/libgomp/config/posix/proc.c
+deleted file mode 100644
+index 1165d4b077c..00000000000
+--- a/libgomp/config/posix/proc.c
++++ /dev/null
+@@ -1,102 +0,0 @@
+-/* Copyright (C) 2005-2020 Free Software Foundation, Inc.
+-   Contributed by Richard Henderson <rth@redhat.com>.
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-/* This file contains system specific routines related to counting
+-   online processors and dynamic load balancing.  It is expected that
+-   a system may well want to write special versions of each of these.
+-
+-   The following implementation uses a mix of POSIX and BSD routines.  */
+-
+-#include "libgomp.h"
+-#include <unistd.h>
+-#include <stdlib.h>
+-#ifdef HAVE_GETLOADAVG
+-# ifdef HAVE_SYS_LOADAVG_H
+-#  include <sys/loadavg.h>
+-# endif
+-#endif
+-
+-
+-/* At startup, determine the default number of threads.  It would seem
+-   this should be related to the number of cpus online.  */
+-
+-void
+-gomp_init_num_threads (void)
+-{
+-#ifdef _SC_NPROCESSORS_ONLN
+-  gomp_global_icv.nthreads_var = sysconf (_SC_NPROCESSORS_ONLN);
+-#endif
+-}
+-
+-/* When OMP_DYNAMIC is set, at thread launch determine the number of
+-   threads we should spawn for this team.  */
+-/* ??? I have no idea what best practice for this is.  Surely some
+-   function of the number of processors that are *still* online and
+-   the load average.  Here I use the number of processors online
+-   minus the 15 minute load average.  */
+-
+-unsigned
+-gomp_dynamic_max_threads (void)
+-{
+-  unsigned n_onln, loadavg;
+-  unsigned nthreads_var = gomp_icv (false)->nthreads_var;
+-
+-#ifdef _SC_NPROCESSORS_ONLN
+-  n_onln = sysconf (_SC_NPROCESSORS_ONLN);
+-  if (n_onln > nthreads_var)
+-    n_onln = nthreads_var;
+-#else
+-  n_onln = nthreads_var;
+-#endif
+-
+-  loadavg = 0;
+-#ifdef HAVE_GETLOADAVG
+-  {
+-    double dloadavg[3];
+-    if (getloadavg (dloadavg, 3) == 3)
+-      {
+-	/* Add 0.1 to get a kind of biased rounding.  */
+-	loadavg = dloadavg[2] + 0.1;
+-      }
+-  }
+-#endif
+-
+-  if (loadavg >= n_onln)
+-    return 1;
+-  else
+-    return n_onln - loadavg;
+-}
+-
+-int
+-omp_get_num_procs (void)
+-{
+-#ifdef _SC_NPROCESSORS_ONLN
+-  return sysconf (_SC_NPROCESSORS_ONLN);
+-#else
+-  return gomp_icv (false)->nthreads_var;
+-#endif
+-}
+-
+-ialias (omp_get_num_procs)
+diff --git a/libgomp/config/posix/ptrlock.c b/libgomp/config/posix/ptrlock.c
+deleted file mode 100644
+index 39bb64da0f9..00000000000
+--- a/libgomp/config/posix/ptrlock.c
++++ /dev/null
+@@ -1 +0,0 @@
+-/* Everything is in the header.  */
+diff --git a/libgomp/config/posix/ptrlock.h b/libgomp/config/posix/ptrlock.h
+deleted file mode 100644
+index 66f4db9189c..00000000000
+--- a/libgomp/config/posix/ptrlock.h
++++ /dev/null
+@@ -1,66 +0,0 @@
+-/* Copyright (C) 2008-2020 Free Software Foundation, Inc.
+-   Contributed by Jakub Jelinek <jakub@redhat.com>.
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-/* This is a generic POSIX implementation of a mutex synchronization
+-   mechanism for libgomp.  This type is private to the library.  */
+-
+-#ifndef GOMP_PTRLOCK_H
+-#define GOMP_PTRLOCK_H 1
+-
+-typedef struct { void *ptr; gomp_mutex_t lock; } gomp_ptrlock_t;
+-
+-static inline void gomp_ptrlock_init (gomp_ptrlock_t *ptrlock, void *ptr)
+-{
+-  ptrlock->ptr = ptr;
+-  gomp_mutex_init (&ptrlock->lock);
+-}
+-
+-static inline void *gomp_ptrlock_get (gomp_ptrlock_t *ptrlock)
+-{
+-  if (ptrlock->ptr != NULL)
+-    return ptrlock->ptr;
+-
+-  gomp_mutex_lock (&ptrlock->lock);
+-  if (ptrlock->ptr != NULL)
+-    {
+-      gomp_mutex_unlock (&ptrlock->lock);
+-      return ptrlock->ptr;
+-    }
+-
+-  return NULL;
+-}
+-
+-static inline void gomp_ptrlock_set (gomp_ptrlock_t *ptrlock, void *ptr)
+-{
+-  ptrlock->ptr = ptr;
+-  gomp_mutex_unlock (&ptrlock->lock);
+-}
+-
+-static inline void gomp_ptrlock_destroy (gomp_ptrlock_t *ptrlock)
+-{
+-  gomp_mutex_destroy (&ptrlock->lock);
+-}
+-
+-#endif /* GOMP_PTRLOCK_H */
+diff --git a/libgomp/config/posix/sem.c b/libgomp/config/posix/sem.c
+deleted file mode 100644
+index e43bcf6c9e7..00000000000
+--- a/libgomp/config/posix/sem.c
++++ /dev/null
+@@ -1,124 +0,0 @@
+-/* Copyright (C) 2005-2020 Free Software Foundation, Inc.
+-   Contributed by Richard Henderson <rth@redhat.com>.
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-/* This is the default POSIX 1003.1b implementation of a semaphore
+-   synchronization mechanism for libgomp.  This type is private to
+-   the library.
+-
+-   This is a bit heavy weight for what we need, in that we're not
+-   interested in sem_wait as a cancelation point, but it's not too
+-   bad for a default.  */
+-
+-#include "libgomp.h"
+-
+-#ifdef HAVE_BROKEN_POSIX_SEMAPHORES
+-#include <stdlib.h>
+-
+-void gomp_sem_init (gomp_sem_t *sem, int value)
+-{
+-  int ret;
+-
+-  ret = pthread_mutex_init (&sem->mutex, NULL);
+-  if (ret)
+-    return;
+-
+-  ret = pthread_cond_init (&sem->cond, NULL);
+-  if (ret)
+-    return;
+-
+-  sem->value = value;
+-}
+-
+-void gomp_sem_wait (gomp_sem_t *sem)
+-{
+-  int ret;
+-
+-  ret = pthread_mutex_lock (&sem->mutex);
+-  if (ret)
+-    return;
+-
+-  if (sem->value > 0)
+-    {
+-      sem->value--;
+-      ret = pthread_mutex_unlock (&sem->mutex);
+-      return;
+-    }
+-
+-  while (sem->value <= 0)
+-    {
+-      ret = pthread_cond_wait (&sem->cond, &sem->mutex);
+-      if (ret)
+-	{
+-	  pthread_mutex_unlock (&sem->mutex);
+-	  return;
+-	}
+-    }
+-
+-  sem->value--;
+-  ret = pthread_mutex_unlock (&sem->mutex);
+-  return;
+-}
+-
+-void gomp_sem_post (gomp_sem_t *sem)
+-{
+-  int ret;
+-
+-  ret = pthread_mutex_lock (&sem->mutex);
+-  if (ret)
+-    return;
+-
+-  sem->value++;
+-
+-  ret = pthread_mutex_unlock (&sem->mutex);
+-  if (ret)
+-    return;
+-
+-  ret = pthread_cond_signal (&sem->cond);
+-
+-  return;
+-}
+-
+-void gomp_sem_destroy (gomp_sem_t *sem)
+-{
+-  int ret;
+-
+-  ret = pthread_mutex_destroy (&sem->mutex);
+-  if (ret)
+-    return;
+-
+-  ret = pthread_cond_destroy (&sem->cond);
+-
+-  return;
+-}
+-#else /* HAVE_BROKEN_POSIX_SEMAPHORES  */
+-void
+-gomp_sem_wait (gomp_sem_t *sem)
+-{
+-  /* With POSIX, the wait can be canceled by signals.  We don't want that.
+-     It is expected that the return value here is -1 and errno is EINTR.  */
+-  while (sem_wait (sem) != 0)
+-    continue;
+-}
+-#endif
+diff --git a/libgomp/config/posix/sem.h b/libgomp/config/posix/sem.h
+deleted file mode 100644
+index 64d4f1ec1d6..00000000000
+--- a/libgomp/config/posix/sem.h
++++ /dev/null
+@@ -1,88 +0,0 @@
+-/* Copyright (C) 2005-2020 Free Software Foundation, Inc.
+-   Contributed by Richard Henderson <rth@redhat.com>.
+-
+-   This file is part of the GNU Offloading and Multi Processing Library
+-   (libgomp).
+-
+-   Libgomp is free software; you can redistribute it and/or modify it
+-   under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 3, or (at your option)
+-   any later version.
+-
+-   Libgomp is distributed in the hope that it will be useful, but WITHOUT ANY
+-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+-   more details.
+-
+-   Under Section 7 of GPL version 3, you are granted additional
+-   permissions described in the GCC Runtime Library Exception, version
+-   3.1, as published by the Free Software Foundation.
+-
+-   You should have received a copy of the GNU General Public License and
+-   a copy of the GCC Runtime Library Exception along with this program;
+-   see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+-   <http://www.gnu.org/licenses/>.  */
+-
+-/* This is the default POSIX 1003.1b implementation of a semaphore
+-   synchronization mechanism for libgomp.  This type is private to
+-   the library.
+-
+-   This is a bit heavy weight for what we need, in that we're not
+-   interested in sem_wait as a cancelation point, but it's not too
+-   bad for a default.  */
+-
+-#ifndef GOMP_SEM_H
+-#define GOMP_SEM_H 1
+-
+-#ifdef HAVE_ATTRIBUTE_VISIBILITY
+-# pragma GCC visibility push(default)
+-#endif
+-
+-#include <semaphore.h>
+-
+-#ifdef HAVE_ATTRIBUTE_VISIBILITY
+-# pragma GCC visibility pop
+-#endif
+-
+-#ifdef HAVE_BROKEN_POSIX_SEMAPHORES
+-#include <pthread.h>
+-
+-struct gomp_sem
+-{
+-  pthread_mutex_t	mutex;
+-  pthread_cond_t	cond;
+-  int			value;
+-};
+-
+-typedef struct gomp_sem gomp_sem_t;
+-
+-extern void gomp_sem_init (gomp_sem_t *sem, int value);
+-
+-extern void gomp_sem_wait (gomp_sem_t *sem);
+-
+-extern void gomp_sem_post (gomp_sem_t *sem);
+-
+-extern void gomp_sem_destroy (gomp_sem_t *sem);
+-
+-#else /* HAVE_BROKEN_POSIX_SEMAPHORES  */
+-
+-typedef sem_t gomp_sem_t;
+-
+-static inline void gomp_sem_init (gomp_sem_t *sem, int value)
+-{
+-  sem_init (sem, 0, value);
+-}
+-
+-extern void gomp_sem_wait (gomp_sem_t *sem);
+-
+-static inline void gomp_sem_post (gomp_sem_t *sem)
+-{
+-  sem_post (sem);
+-}
+-
+-static inline void gomp_sem_destroy (gomp_sem_t *sem)
+-{
+-  sem_destroy (sem);
+-}
+-#endif /* doesn't HAVE_BROKEN_POSIX_SEMAPHORES  */
+-#endif /* GOMP_SEM_H  */
+diff --git a/libgomp/configure b/libgomp/configure
+index d8d98f182d4..02616318985 100755
+--- a/libgomp/configure
++++ b/libgomp/configure
+@@ -16722,11 +16722,6 @@ rm -f core conftest.err conftest.$ac_objext \
+ fi
+ { $as_echo "$as_me:${as_lineno-$LINENO}: result: $libgomp_cv_have_sync_builtins" >&5
+ $as_echo "$libgomp_cv_have_sync_builtins" >&6; }
+-  if test $libgomp_cv_have_sync_builtins = yes; then
+-
+-$as_echo "#define HAVE_SYNC_BUILTINS 1" >>confdefs.h
+-
+-  fi
+ 
+ XCFLAGS="$XCFLAGS$XPCFLAGS"
+ 
+diff --git a/libgomp/libgomp.h b/libgomp/libgomp.h
+index f5415bb156c..8101ea27198 100644
+--- a/libgomp/libgomp.h
++++ b/libgomp/libgomp.h
+@@ -36,6 +36,7 @@
+ #ifndef LIBGOMP_H 
+ #define LIBGOMP_H 1
+ 
++#include "../mvee_atomic.h"
+ #ifndef _LIBGOMP_CHECKING_
+ /* Define to 1 to perform internal sanity checks.  */
+ #define _LIBGOMP_CHECKING_ 0
+diff --git a/libgomp/libgomp.map b/libgomp/libgomp.map
+index c7268bfc8e7..3e949ebfb45 100644
+--- a/libgomp/libgomp.map
++++ b/libgomp/libgomp.map
+@@ -543,3 +543,8 @@ GOMP_PLUGIN_1.3 {
+ 	GOMP_PLUGIN_goacc_profiling_dispatch;
+ 	GOMP_PLUGIN_goacc_thread;
+ } GOMP_PLUGIN_1.2;
++
++GLIBC_2.0 {
++  global:
++    mvee_atomic_*;
++};
+-- 
+2.26.2
+
