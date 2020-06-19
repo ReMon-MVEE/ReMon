@@ -10922,6 +10922,7 @@ void mvee::init_syslocks()
     DONTNEED PRECALL(shmdt)
 	DONTNEED PRECALL(rt_sigtimedwait)
     DONTNEED PRECALL(mlock)
+    DONTNEED PRECALL(clock_nanosleep)
     ALIAS mmap mmap2
     ALIAS fcntl fcntl64
     ALIAS rt_sigaction sigaction
