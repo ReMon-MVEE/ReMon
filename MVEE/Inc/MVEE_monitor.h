@@ -284,7 +284,7 @@ class monitor
 	friend class mvee;
     friend class instruction_intent_emulation;
     friend class instruction_intent;
-    friend class intent_replay_buffer;
+    friend class replay_buffer;
     friend class acquire_shm_protected_memory_for_access;
 
 #ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
@@ -1156,7 +1156,7 @@ private:
 	std::stringstream mismatch_info;                          // cached mismatch info
 
     // shared memory ===================================================================================================
-    intent_replay_buffer              replay_buffer;
+    replay_buffer                     replay_buffer;
     // shared memory ===================================================================================================
 };
 

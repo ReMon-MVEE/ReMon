@@ -1023,6 +1023,8 @@ bool mmap_table::map_range (int variantnum, unsigned long address, unsigned long
     if (shadow)
     {
         new_region->shadow = shadow;
+        new_region->shadow->mmap();
+
         if (insert_variant_shared_region(variantnum, new_region) < 0)
         {
             warnf("big oopsie! - [%p; %p)\n\n",

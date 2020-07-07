@@ -12,7 +12,7 @@
 //      set macros
 // =====================================================================================================================
 
-#define SET_ROUND_CODE(instruction, round)                                                                             \
+#define SET_EFFECTIVE_OPCODE(instruction, round)                                                                       \
 instruction.extra_info &= ~EXTRA_INFO_ROUND_CODE_MASK;                                                                 \
 instruction.extra_info |= (round << EXTRA_INFO_ROUND_CODE_OFFSET) & EXTRA_INFO_ROUND_CODE_MASK;                        \
                                                                                                                        \
@@ -94,8 +94,21 @@ int         instruction_intent_emulation::rest_check                (instruction
 // BYTE_LOADER_IMPL(0x00)
 
 
-/* Not implemented - blocked */
-// BYTE_LOADER_IMPL(0x01)
+/* Valid in first round */
+BYTE_LOADER_IMPL(0x01)
+{
+    if (round == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        // set efective opcode
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_FIRST_LEVEL)
+
+        // decode following modrm byte
+        LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */
@@ -170,15 +183,7 @@ BYTE_LOADER_IMPL(0x10)
 {
     if (round == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
-        // set round code
-        instruction.extra_info &= ~EXTRA_INFO_ROUND_CODE_MASK;
-        instruction.extra_info |= (INSTRUCTION_DECODING_SECOND_LEVEL << EXTRA_INFO_ROUND_CODE_OFFSET)
-                & EXTRA_INFO_ROUND_CODE_MASK;
-
-        // set opcode index
-        instruction.effective_opcode_index = instruction.byte_accessed;
-
-        // check instruction length for rest of instruction
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_SECOND_LEVEL)
         LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
     }
     // illegal otherwise
@@ -192,9 +197,7 @@ BYTE_LOADER_IMPL(0x11)
     // valid
     if (round == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
-        SET_ROUND_CODE(instruction, INSTRUCTION_DECODING_SECOND_LEVEL)
-
-        // check instruction length for rest of instruction
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_SECOND_LEVEL)
         LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
     }
     // illegal access
@@ -295,8 +298,24 @@ BYTE_LOADER_IMPL(0x11)
 // BYTE_LOADER_IMPL(0x28)
 
 
-/* Not implemented - blocked */
-// BYTE_LOADER_IMPL(0x29)
+/* Valid in second round */
+BYTE_LOADER_IMPL(0x29)
+{
+    if (round == INSTRUCTION_DECODING_SECOND_LEVEL)
+    {
+        // illegal if REPZ or REPNZ prefix present
+        if (PREFIXES_GRP_ONE_PRESENT(instruction) &&
+                (PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE ||
+                 PREFIXES_GRP_ONE(instruction) == REPNZ_PREFIX_CODE))
+            return -1;
+
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_SECOND_LEVEL)
+        LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */
@@ -815,8 +834,19 @@ BYTE_LOADER_IMPL(0x4f)
 // BYTE_LOADER_IMPL(0x62)
 
 
-/* Not implemented - blocked */
-// BYTE_LOADER_IMPL(0x63)
+/* Allowed in first round */
+BYTE_LOADER_IMPL(0x63)
+{
+    // movsxd Gv, Ev
+    if (round == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_FIRST_LEVEL)
+        LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */
@@ -835,7 +865,6 @@ BYTE_LOADER_IMPL(0x66)
         // set group 3 prefix
         instruction.prefixes |= (PREFIXES_GRP_THREE_PRESENT_MASK);
 
-        // go to next byte, same level
         LOAD_NEXT_INSTRUCTION_BYTE(INSTRUCTION_DECODING_FIRST_LEVEL)
     }
     else
@@ -855,7 +884,6 @@ BYTE_LOADER_IMPL(0x67)
         // set group 4 prefix
         instruction.prefixes |= (PREFIXES_GRP_FOUR_PRESENT_MASK);
 
-        // go to next byte, same level
         LOAD_NEXT_INSTRUCTION_BYTE(INSTRUCTION_DECODING_FIRST_LEVEL)
     }
     else
@@ -897,17 +925,10 @@ BYTE_LOADER_IMPL(0x6f)
     // valid in second round, done for now
     if (round == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
-        // set round code in instruction
-        instruction.extra_info &= ~EXTRA_INFO_ROUND_CODE_MASK;
-        instruction.extra_info |= (INSTRUCTION_DECODING_SECOND_LEVEL << EXTRA_INFO_ROUND_CODE_OFFSET)
-                & EXTRA_INFO_ROUND_CODE_MASK;
-
-        // set opcode index
-        instruction.effective_opcode_index = instruction.byte_accessed;
-
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_SECOND_LEVEL)
         LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
     }
-    // ilegal instruction
+    // illegal instruction
     else
         return ILLEGAL_ACCESS_TERMINATION;
 }
@@ -935,15 +956,7 @@ BYTE_LOADER_IMPL(0x74)
     // valid in second round, done for now
     if (round == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
-        // set as valid in second round
-        instruction.extra_info &= ~EXTRA_INFO_ROUND_CODE_MASK;
-        instruction.extra_info |= (INSTRUCTION_DECODING_SECOND_LEVEL << EXTRA_INFO_ROUND_CODE_OFFSET) &
-                EXTRA_INFO_ROUND_CODE_MASK;
-
-        // set opcode index
-        instruction.effective_opcode_index = instruction.byte_accessed;
-
-
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_SECOND_LEVEL)
         LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
     }
     // illegal otherwise
@@ -998,47 +1011,58 @@ BYTE_LOADER_IMPL(0x7f)
     // valid in second round, done for now
     if (round == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_SECOND_LEVEL)
         LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
     }
+
     // illegal access in other rounds
-    else
-        return ILLEGAL_ACCESS_TERMINATION;
+    return ILLEGAL_ACCESS_TERMINATION;
 }
 
 
 /* Valid in first round */
 BYTE_LOADER_IMPL(0x80)
 {
-    // done for now
     if (round == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        // set as valid in first round
-        instruction.extra_info &= ~EXTRA_INFO_ROUND_CODE_MASK;
-        instruction.extra_info |= (INSTRUCTION_DECODING_FIRST_LEVEL << EXTRA_INFO_ROUND_CODE_OFFSET)
-                & EXTRA_INFO_ROUND_CODE_MASK;
-
-        // set opcode index
-        instruction.effective_opcode_index = instruction.byte_accessed;
-
-
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_FIRST_LEVEL)
         LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 1)
     }
     // illegal instruction
-    else
-        return ILLEGAL_ACCESS_TERMINATION;
+    return ILLEGAL_ACCESS_TERMINATION;
 }
 
 
 /* Not implemented - blocked */
-// BYTE_LOADER_IMPL(0x81)
+BYTE_LOADER_IMPL(0x81)
+{
+    if (round == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_FIRST_LEVEL)
+        LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, (PREFIXES_GRP_THREE_PRESENT(instruction) ? 2 : 4))
+    }
+
+    // illegal access otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */
 // BYTE_LOADER_IMPL(0x82)
 
 
-/* Not implemented - blocked */
-// BYTE_LOADER_IMPL(0x83)
+/* Valid in first round */
+BYTE_LOADER_IMPL(0x83)
+{
+    if (round == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_FIRST_LEVEL)
+        LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 1)
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */
@@ -1063,14 +1087,7 @@ BYTE_LOADER_IMPL(0x88)
     // done for now
     if (round & INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        // set round code
-        instruction.extra_info &= ~EXTRA_INFO_ROUND_CODE_MASK;
-        instruction.extra_info |= (INSTRUCTION_DECODING_FIRST_LEVEL << EXTRA_INFO_ROUND_CODE_OFFSET)
-                & EXTRA_INFO_ROUND_CODE_MASK;
-
-        // set opcode index
-        instruction.effective_opcode_index = instruction.byte_accessed;
-
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_FIRST_LEVEL)
         LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
     }
     // illegal access instruction
@@ -1085,14 +1102,7 @@ BYTE_LOADER_IMPL(0x89)
     // done for now
     if (round & INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        // set round code
-        instruction.extra_info &= ~EXTRA_INFO_ROUND_CODE_MASK;
-        instruction.extra_info |= (INSTRUCTION_DECODING_FIRST_LEVEL << EXTRA_INFO_ROUND_CODE_OFFSET)
-                & EXTRA_INFO_ROUND_CODE_MASK;
-
-        // set opcode index
-        instruction.effective_opcode_index = instruction.byte_accessed;
-
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_FIRST_LEVEL)
         LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
     }
     // illegal access
@@ -1107,14 +1117,7 @@ BYTE_LOADER_IMPL(0x8a)
     // done for now
     if (round & INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        // set round code
-        instruction.extra_info &= ~EXTRA_INFO_ROUND_CODE_MASK;
-        instruction.extra_info |= (INSTRUCTION_DECODING_FIRST_LEVEL << EXTRA_INFO_ROUND_CODE_OFFSET)
-                & EXTRA_INFO_ROUND_CODE_MASK;
-
-        // set opcode index
-        instruction.effective_opcode_index = instruction.byte_accessed;
-
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_FIRST_LEVEL)
         LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
     }
     else
@@ -1128,14 +1131,7 @@ BYTE_LOADER_IMPL(0x8b)
     // done for now
     if (round & INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        // set round code
-        instruction.extra_info &= ~EXTRA_INFO_ROUND_CODE_MASK;
-        instruction.extra_info |= (INSTRUCTION_DECODING_FIRST_LEVEL << EXTRA_INFO_ROUND_CODE_OFFSET)
-                & EXTRA_INFO_ROUND_CODE_MASK;
-
-        // set opcode index
-        instruction.effective_opcode_index = instruction.byte_accessed;
-
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_FIRST_LEVEL)
         LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
     }
     // illegal access instruction
@@ -1150,14 +1146,7 @@ BYTE_LOADER_IMPL(0x8c)
     // done for now
     if (round & INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        // set round code
-        instruction.extra_info &= ~EXTRA_INFO_ROUND_CODE_MASK;
-        instruction.extra_info |= (INSTRUCTION_DECODING_FIRST_LEVEL << EXTRA_INFO_ROUND_CODE_OFFSET)
-                & EXTRA_INFO_ROUND_CODE_MASK;
-
-        // set opcode index
-        instruction.effective_opcode_index = instruction.byte_accessed;
-
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_FIRST_LEVEL)
         LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
     }
     // illegal access instruction
@@ -1176,14 +1165,7 @@ BYTE_LOADER_IMPL(0x8e)
     // done for now
     if (round & INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        // set round code
-        instruction.extra_info &= ~EXTRA_INFO_ROUND_CODE_MASK;
-        instruction.extra_info |= (INSTRUCTION_DECODING_FIRST_LEVEL << EXTRA_INFO_ROUND_CODE_OFFSET)
-                & EXTRA_INFO_ROUND_CODE_MASK;
-
-        // set opcode index
-        instruction.effective_opcode_index = instruction.byte_accessed;
-
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_FIRST_LEVEL)
         LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
     }
         // illegal access instruction
@@ -1273,7 +1255,7 @@ BYTE_LOADER_IMPL(0xa2)
 {
     if (round == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
-        SET_ROUND_CODE(instruction, round)
+        SET_EFFECTIVE_OPCODE(instruction, round)
 
         // update instruction size
         instruction.size++;
@@ -1291,8 +1273,23 @@ BYTE_LOADER_IMPL(0xa2)
 // BYTE_LOADER_IMPL(0xa3)
 
 
-/* Not implemented - blocked */
-// BYTE_LOADER_IMPL(0xa4)
+/* Valid in first round */
+BYTE_LOADER_IMPL(0xa4)
+{
+    // movsb
+    if (round == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        // set effective opcode index
+        SET_EFFECTIVE_OPCODE(instruction, round)
+        instruction.size++;
+
+        // no modrm follows, this is all there's to it
+        return ACCESS_OK_TERMINATION;
+    }
+
+    // illegal otherwise
+    return ILLEGAL_ACCESS_TERMINATION;
+}
 
 
 /* Not implemented - blocked */
@@ -1319,8 +1316,21 @@ BYTE_LOADER_IMPL(0xa2)
 // BYTE_LOADER_IMPL(0xaa)
 
 
-/* Not implemented - blocked */
-// BYTE_LOADER_IMPL(0xab)
+/* Valid in first round */
+BYTE_LOADER_IMPL(0xab)
+{
+    if (round == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        SET_EFFECTIVE_OPCODE(instruction, round)
+
+        // update instruction size
+        instruction.size++;
+        return ACCESS_OK_TERMINATION;
+    }
+
+    // illegal otherwise
+    return ILLEGAL_ACCESS_TERMINATION;
+}
 
 
 /* Not implemented - blocked */
@@ -1343,8 +1353,17 @@ BYTE_LOADER_IMPL(0xa2)
 // BYTE_LOADER_IMPL(0xb0)
 
 
-/* Not implemented - blocked */
-// BYTE_LOADER_IMPL(0xb1)
+/* Valid in second round */
+BYTE_LOADER_IMPL(0xb1)
+{
+    if (round == INSTRUCTION_DECODING_SECOND_LEVEL)
+    {
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_SECOND_LEVEL)
+        LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
+    }
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */
@@ -1369,14 +1388,7 @@ BYTE_LOADER_IMPL(0xb6)
     // done for now
     if (round & INSTRUCTION_DECODING_SECOND_LEVEL)
     {
-        // set valid in second round
-        instruction.extra_info &= ~EXTRA_INFO_ROUND_CODE_MASK;
-        instruction.extra_info |= (INSTRUCTION_DECODING_SECOND_LEVEL << EXTRA_INFO_ROUND_CODE_OFFSET)
-                & EXTRA_INFO_ROUND_CODE_MASK;
-
-        // set current index as opcode index
-        instruction.effective_opcode_index = instruction.byte_accessed;
-
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_SECOND_LEVEL)
         LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
     }
     // other rounds are not allowed
@@ -1391,6 +1403,7 @@ BYTE_LOADER_IMPL(0xb7)
     // done for now
     if (round & INSTRUCTION_DECODING_SECOND_LEVEL)
     {
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_SECOND_LEVEL)
         LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
     }
     // other rounds are not allowed
@@ -1423,8 +1436,19 @@ BYTE_LOADER_IMPL(0xb7)
 // BYTE_LOADER_IMPL(0xbd)
 
 
-/* Not implemented - blocked */
-// BYTE_LOADER_IMPL(0xbe)
+/* Valid in second round */
+BYTE_LOADER_IMPL(0xbe)
+{
+    // movsx Gv, Eb
+    if (round == INSTRUCTION_DECODING_SECOND_LEVEL)
+    {
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_SECOND_LEVEL)
+        LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */
@@ -1435,8 +1459,18 @@ BYTE_LOADER_IMPL(0xb7)
 // BYTE_LOADER_IMPL(0xc0)
 
 
-/* Not implemented - blocked */
-// BYTE_LOADER_IMPL(0xc1)
+/* Valid in first round */
+BYTE_LOADER_IMPL(0xc1)
+{
+    if (round == INSTRUCTION_DECODING_SECOND_LEVEL)
+    {
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_SECOND_LEVEL)
+        LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */
@@ -1450,6 +1484,7 @@ BYTE_LOADER_IMPL(0xb7)
 /* blocked - AVX block */
 BYTE_LOADER_IMPL(0xc4)
 {
+    return ILLEGAL_ACCESS_TERMINATION;
     // VEX+2 byte
     if (round == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
@@ -1546,6 +1581,7 @@ BYTE_LOADER_IMPL(0xc4)
 /* blocked - AVX block */
 BYTE_LOADER_IMPL(0xc5)
 {
+    return ILLEGAL_ACCESS_TERMINATION;
     // VEX+1 byte
     if (round == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
@@ -1616,8 +1652,7 @@ BYTE_LOADER_IMPL(0xc6)
     // MOVE Eb, Ib, done for now
     if (round == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        SET_ROUND_CODE(instruction, INSTRUCTION_DECODING_FIRST_LEVEL)
-
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_FIRST_LEVEL)
         LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 1)
     }
     // illegal access
@@ -1626,8 +1661,18 @@ BYTE_LOADER_IMPL(0xc6)
 }
 
 
-/* Not implemented - blocked */
-// BYTE_LOADER_IMPL(0xc7)
+/* Valid in first round */
+BYTE_LOADER_IMPL(0xc7)
+{
+    if (round == REPLAY_BUFFER_RETURN_FIRST)
+    {
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_FIRST_LEVEL)
+        LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, (PREFIXES_GRP_THREE_PRESENT(instruction) ? 2 : 4))
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */
@@ -1708,14 +1753,7 @@ BYTE_LOADER_IMPL(0xda)
     // pminub mm, mm/m64 | pminub xmm, xmm/m128
     if (round == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
-        // set round code
-        instruction.extra_info &= ~EXTRA_INFO_ROUND_CODE_MASK;
-        instruction.extra_info |= (INSTRUCTION_DECODING_SECOND_LEVEL << EXTRA_INFO_ROUND_CODE_OFFSET)
-                & EXTRA_INFO_ROUND_CODE_MASK;
-
-        // set opcode index
-        instruction.effective_opcode_index = instruction.byte_accessed;
-
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_SECOND_LEVEL)
         LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
     }
     // illegal access
@@ -1808,8 +1846,25 @@ BYTE_LOADER_IMPL(0xda)
 // BYTE_LOADER_IMPL(0xef)
 
 
-/* Not implemented - blocked */
-// BYTE_LOADER_IMPL(0xf0)
+/* Valid in first round */
+BYTE_LOADER_IMPL(0xf0)
+{
+    if (round == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        // set group one prefix as used
+        instruction.prefixes |= PREFIXES_GRP_ONE_PRESENT_MASK;
+
+        // set LOCK prefix code
+        instruction.prefixes &= ~PREFIXES_GRP_ONE_VALUES_MASK;
+        instruction.prefixes |= (LOCK_PREFIX_CODE << PREFIXES_GRP_ONE_VALUES_OFFSET) & PREFIXES_GRP_ONE_VALUES_MASK;
+
+        // go to next byte, same level
+        LOAD_NEXT_INSTRUCTION_BYTE(INSTRUCTION_DECODING_FIRST_LEVEL)
+    }
+        // other rounds: return illegal access
+    else
+        return ILLEGAL_ACCESS_TERMINATION;
+}
 
 
 /* Not implemented - blocked */

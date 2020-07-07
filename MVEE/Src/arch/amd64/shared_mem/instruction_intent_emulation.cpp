@@ -8,6 +8,7 @@
 #include <MVEE_interaction.h>
 #include <MVEE_monitor.h>
 #include <arch/amd64/shared_mem/shared_mem_reg_access.h>
+#include <sys/mman.h>
 #include "instruction_intent_emulation.h"
 
 
@@ -45,10 +46,12 @@ if (GET_MOD_CODE((unsigned) modrm) == 0b11u)                                    
 if (instruction.determine_monitor_pointer(relevant_monitor, variant, instruction.effective_address, &pointer) < 0)     \
     return -1;
 
+
 #define LOAD_REG_CODE(pointer, lookup)                                                                                 \
 __uint8_t reg_rex_extra = PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_R(instruction) ?                     \
         0b1000u : 0;                                                                                                   \
 pointer = shared_mem_register_access::lookup[reg_rex_extra | GET_REG_CODE((unsigned) modrm)](regs_struct);
+
 
 #define LOAD_REG_CODE_BYTE(pointer, lookup)                                                                            \
 __uint8_t reg_code = GET_REG_CODE((unsigned) modrm);                                                                   \
@@ -66,7 +69,7 @@ if (!instruction.immediate_operand_index)                                       
     return -1;                                                                                                         \
 pointer = &instruction.instruction[instruction.immediate_operand_index];
 
-
+/*
 #define CHECK_FROM_SHARED_MEMORY(size)                                                                                 \
 int result;                                                                                                            \
 if ((result = relevant_monitor.replay_buffer.access_data(variant->variant_num, &instruction,                           \
@@ -86,16 +89,101 @@ if (variant->variant_num != 0)                                                  
             return -1;                                                                                                 \
     return 0;                                                                                                          \
 }
+ */
 
 
-#define EMULATE_TO_SHARED_MEMORY(size)                                                                                 \
-__uint8_t intermediate[size];                                                                                          \
-auto result = relevant_monitor.replay_buffer.access_data(variant->variant_num, &instruction,                           \
-        (__uint8_t**) &destination, size, destination);                                                                \
-if (result != 0)                                                                                                       \
-    return result;                                                                                                     \
+#define COMPARE_BUFFERS(first, second, size)                                                                           \
 for (int i = 0; i < size; i++)                                                                                         \
-    intermediate[i] = ((__uint8_t*) destination)[i];
+    if (((__uint8_t*) first)[i] != ((__uint8_t*) second)[i])                                                           \
+        return -1;
+
+
+#define COPY_BUFFER(first, second, size)                                                                               \
+for (int i = 0; i < size; i++)                                                                                         \
+    ((__uint8_t*) first)[i] = ((__uint8_t*) second)[i];                                                                \
+
+
+#define REPLAY_BUFFER_ADVANCE                                                                                          \
+if (relevant_monitor.replay_buffer.advance(variant->variant_num) != 0)                                                 \
+    return -1;
+
+
+#define GET_BUFFER_RAW(monitor_pointer, size)                                                                          \
+void* buffer;                                                                                                          \
+int result = relevant_monitor.replay_buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,          \
+        &buffer, size);                                                                                                \
+if (result < 0)                                                                                                        \
+    return result;
+
+
+#define GET_NULL_BUFFER(monitor_pointer)                                                                               \
+int result = relevant_monitor.replay_buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,          \
+        nullptr, 0);                                                                                                   \
+if (result < 0)                                                                                                        \
+    return result;                                                                                                     \
+else if (result != REPLAY_BUFFER_RETURN_FIRST)                                                                         \
+{                                                                                                                      \
+    REPLAY_BUFFER_ADVANCE                                                                                              \
+    return 0;                                                                                                          \
+}
+
+
+#define GET_BUFFER_CHECK_OR_FILL(monitor_pointer, source, size)                                                        \
+void* buffer;                                                                                                          \
+int result = relevant_monitor.replay_buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,          \
+        &buffer, size);                                                                                                \
+if (result < 0)                                                                                                        \
+    return result;                                                                                                     \
+if (result == REPLAY_BUFFER_RETURN_FIRST)                                                                              \
+{                                                                                                                      \
+    COPY_BUFFER(buffer, source, size)                                                                                  \
+}                                                                                                                      \
+else                                                                                                                   \
+{                                                                                                                      \
+    COMPARE_BUFFERS(buffer, source, size)                                                                              \
+    REPLAY_BUFFER_ADVANCE                                                                                              \
+    return 0;                                                                                                          \
+}
+
+
+#define GET_BUFFER_REPLACE(monitor_pointer, size)                                                                      \
+void* buffer;                                                                                                          \
+int result = relevant_monitor.replay_buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,          \
+        &buffer, size);                                                                                                \
+if (result < 0)                                                                                                        \
+    return result;                                                                                                     \
+if (result == REPLAY_BUFFER_RETURN_FIRST)                                                                              \
+{                                                                                                                      \
+    COPY_BUFFER(buffer, monitor_pointer, size)                                                                         \
+}                                                                                                                      \
+monitor_pointer = buffer;
+
+
+#define GET_BUFFER_IMITATE_RESULT(monitor_pointer, destination_buffer, size)                                           \
+void* buffer;                                                                                                          \
+int result = relevant_monitor.replay_buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,          \
+        &buffer, size);                                                                                                \
+if (result < 0)                                                                                                        \
+    return result;                                                                                                     \
+if (result != REPLAY_BUFFER_RETURN_FIRST)                                                                              \
+{                                                                                                                      \
+    COPY_BUFFER(destination_buffer, buffer, size)                                                                      \
+    REPLAY_BUFFER_ADVANCE                                                                                              \
+    return 0;                                                                                                          \
+}                                                                                                                      \
+monitor_pointer = buffer;
+
+
+/*
+#define EMULATE_TO_SHARED_MEMORY(size)                                                                                 \
+if (variant->variant_num != 0)                                                                                         \
+{                                                                                                                      \
+    auto access_result = relevant_monitor.replay_buffer.access_data(variant->variant_num, &instruction,                \
+            (__uint8_t**) &destination, size, destination);                                                            \
+    if (access_result != 0)                                                                                            \
+        return access_result;                                                                                          \
+}
+*/
 
 
 
@@ -113,8 +201,69 @@ int         instruction_intent_emulation::block_emulator            BYTE_EMULATO
 // BYTE_EMULATOR_IMPL(0x00)
 
 
-/* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0x01)
+/* Valid in first round */
+BYTE_EMULATOR_IMPL(0x01)
+{
+    // add r/m(16, 32, 64), r(16, 32, 64)
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+
+        // lock forced here
+        // 64-bit
+        if (PREFIXES_REX_PRESENT(instruction))
+        {
+            GET_BUFFER_CHECK_OR_FILL(destination, source, 8)
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "mov rdx, QWORD PTR [rdx];"
+                    "lock add QWORD PTR [rax], rdx;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "a" (destination), [src] "d" (source)
+                    :
+            );
+        }
+        // 16-bit
+        else if (PREFIXES_GRP_THREE_PRESENT(instruction))
+        {
+            GET_BUFFER_CHECK_OR_FILL(destination, source, 2)
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "mov dx, WORD PTR [rdx];"
+                    "lock add WORD PTR [rax], dx;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "a" (destination), [src] "d" (source)
+                    :
+            );
+        }
+        // 32-bit
+        else
+        {
+            GET_BUFFER_CHECK_OR_FILL(destination, source, 4)
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "mov edx, DWORD PTR [rdx];"
+                    "lock add DWORD PTR [rax], edx;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "a" (destination), [src] "d" (source)
+                    :
+            );
+        }
+
+        // no need to do any write backs here, only general purpose registers changed
+        REPLAY_BUFFER_ADVANCE
+        return 0;
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */
@@ -183,7 +332,7 @@ BYTE_EMULATOR_IMPL(0x10)
         // movups xmm, xmm/m128
         LOAD_SRC_AND_DST(DEFINE_FPREGS_STRUCT, xmm_lookup, LOAD_REG_CODE, LOAD_RM_CODE)
 
-        CHECK_FROM_SHARED_MEMORY(16)
+        GET_BUFFER_REPLACE(source, 16)
 
         // perform operation
         __asm
@@ -199,7 +348,10 @@ BYTE_EMULATOR_IMPL(0x10)
 
         // writeback required
         if (interaction::write_all_fpregs(*instruction.variant_pid, regs_struct))
+        {
+            REPLAY_BUFFER_ADVANCE
             return 0;
+        }
     }
 
     // illegal otherwise
@@ -219,7 +371,7 @@ BYTE_EMULATOR_IMPL(0x11)
         // movups xmm/m128, xmm
         LOAD_SRC_AND_DST(DEFINE_FPREGS_STRUCT, xmm_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
 
-        CHECK_TO_SHARED_MEMORY(16)
+        GET_BUFFER_CHECK_OR_FILL(destination, source, 16)
 
         // perform operation
         __asm
@@ -233,7 +385,9 @@ BYTE_EMULATOR_IMPL(0x11)
                 : "xmm0"
         );
 
+
         // no writeback needed
+        REPLAY_BUFFER_ADVANCE
         return 0;
     }
 
@@ -334,8 +488,53 @@ BYTE_EMULATOR_IMPL(0x11)
 // BYTE_EMULATOR_IMPL(0x28)
 
 
-/* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0x29)
+/* Valid in second round */
+BYTE_EMULATOR_IMPL(0x29)
+{
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
+    {
+        // size and register type is the same, regardless of prefix
+        LOAD_SRC_AND_DST(DEFINE_FPREGS_STRUCT, xmm_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+
+        GET_BUFFER_CHECK_OR_FILL(destination, source, 16)
+
+        // movapd xmm/m128, xmm
+        if (PREFIXES_GRP_THREE_PRESENT(instruction))
+        {
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "movups xmm0, XMMWORD PTR [rdx];"
+                    "movapd XMMWORD PTR [rax], xmm0;"
+                    ".att_syntax"
+                    :
+                    : [dst] "a" (destination), [src] "d" (source)
+                    : "xmm0"
+            );
+        }
+        // movaps xmm/m128, xmm
+        else
+        {
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "movups xmm0, XMMWORD PTR [rdx];"
+                    "movaps XMMWORD PTR [rax], xmm0;"
+                    ".att_syntax"
+                    :
+                    : [dst] "a" (destination), [src] "d" (source)
+                    : "xmm0"
+            );
+        }
+
+        // source is register, no write back needed
+        REPLAY_BUFFER_ADVANCE
+        return 0;
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */
@@ -566,8 +765,43 @@ BYTE_EMULATOR_IMPL(0x11)
 // BYTE_EMULATOR_IMPL(0x62)
 
 
-/* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0x63)
+/* Valid in first round */
+BYTE_EMULATOR_IMPL(0x63)
+{
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_REG_CODE, LOAD_RM_CODE)
+
+        // movsxd r64, r/m32
+        if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
+        {
+            GET_BUFFER_REPLACE(source, 32)
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "movsxd rdx, DWORD PTR[rdx];"
+                    "mov QWORD PTR[rax], rdx;"
+                    ".att_syntax;"
+                    :
+                    : "a" (destination), "d" (source)
+                    :
+            );
+        }
+        // movsxd r32, r/m32 | movsxd r16, r/m16
+        else
+        {
+            // these aren't behaving well
+            return -1;
+        }
+
+        // general purpose regs will be written back by default
+        REPLAY_BUFFER_ADVANCE
+        return 0;
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */
@@ -617,14 +851,14 @@ BYTE_EMULATOR_IMPL(0x11)
 /* Valid in second round */
 BYTE_EMULATOR_IMPL(0x6f)
 {
-    if (EXTRA_INFO_ROUND_CODE(instruction))
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
         LOAD_SRC_AND_DST(DEFINE_FPREGS_STRUCT, xmm_lookup, LOAD_REG_CODE, LOAD_RM_CODE)
 
         // movdqu xmm, xmm/m128 if f3 prefix is present
         if (PREFIXES_GRP_ONE_PRESENT(instruction) && PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE)
         {
-            CHECK_FROM_SHARED_MEMORY(16)
+            GET_BUFFER_REPLACE(source, 16)
 
             // perform operation
             __asm__
@@ -642,7 +876,7 @@ BYTE_EMULATOR_IMPL(0x6f)
         // implemented as movdqu because it's not behaving
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            CHECK_FROM_SHARED_MEMORY(16)
+            GET_BUFFER_REPLACE(source, 16)
 
             // perform operation
             __asm__
@@ -656,10 +890,16 @@ BYTE_EMULATOR_IMPL(0x6f)
                     : "xmm0"
             );
         }
+        else
+            return -1;
+
 
         // write back regs, always needed here
         if (interaction::write_all_fpregs(*instruction.variant_pid, regs_struct))
+        {
+            REPLAY_BUFFER_ADVANCE
             return 0;
+        }
     }
 
     // invalid otherwise
@@ -708,10 +948,7 @@ BYTE_EMULATOR_IMPL(0x74)
             // destination reg
             LOAD_REG_CODE(destination, xmm_lookup)
 
-            CHECK_FROM_SHARED_MEMORY(16)
-            __uint8_t temp[16];
-            for (int byte = 0; byte < 16; byte++)
-                temp[byte] = ((__uint8_t*) source)[byte];
+            GET_BUFFER_REPLACE(source, 16)
 
             // perform operation
             __asm(
@@ -734,8 +971,7 @@ BYTE_EMULATOR_IMPL(0x74)
             // destination reg
             LOAD_REG_CODE(destination, mm_lookup)
 
-            CHECK_FROM_SHARED_MEMORY(8)
-
+            GET_BUFFER_REPLACE(source, 8)
 
             // perform operation
             __asm(
@@ -750,11 +986,12 @@ BYTE_EMULATOR_IMPL(0x74)
             );
         }
 
-
         // we always write to a register, so we have to write it back
         if (interaction::write_all_fpregs(*instruction.variant_pid, regs_struct))
+        {
+            REPLAY_BUFFER_ADVANCE
             return 0;
-
+        }
     }
     // illegal otherwise
     return -1;
@@ -811,11 +1048,9 @@ BYTE_EMULATOR_IMPL(0x80)
     // Immediate Grp 1 Eb, Ib
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        // temporary ModR/M copy
-        __uint8_t modrm = instruction[instruction.effective_opcode_index + 1];
+        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_RM_CODE, LOAD_IMM)
 
-        // uses general purpose registers
-        DEFINE_REGS_STRUCT
+        GET_BUFFER_IMITATE_RESULT(destination, &(regs_struct->eflags), 8)
 
         // ModR/M reg field used as opcode extension
         switch (GET_REG_CODE(modrm))
@@ -824,24 +1059,34 @@ BYTE_EMULATOR_IMPL(0x80)
             case 0b001u: // OR  - not yet implemented
             case 0b010u: // ADC - not yet implemented
             case 0b011u: // SBB - not yet implemented
-            case 0b100u: // AND - not yet implemented
+                return -1;
+            case 0b100u: // AND - and r/m8, imm8
+            {
+                // perform operation, note that the flags register is also changed here
+                __asm
+                (
+                        ".intel_syntax noprefix;"
+                        "pushfq;"
+                        "push QWORD PTR [rcx];"
+                        "popfq;"
+                        "mov r15b, BYTE PTR [rdx];"
+                        "and BYTE PTR [rax], r15b;"
+                        "pushfq;"
+                        "pop QWORD PTR [rcx];"
+                        "popfq;"
+                        ".att_syntax;"
+                        :
+                        : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
+                        : "r15"
+                );
+
+                break;
+            }
             case 0b101u: // SUB - not yet implemented
             case 0b110u: // XOR - not yet implemented
                 return -1;
             case 0b111u: // CMP - CMP r/m8, imm8
             {
-                // source is immediate operand
-                void* source = (void*) &instruction.instruction[instruction.immediate_operand_index];
-
-                // destination operand is decided by modrm
-                void* destination;
-                LOAD_RM_CODE(destination, general_purpose_lookup)
-
-                // current flags
-                void* flags = &(regs_struct->eflags);
-
-                EMULATE_TO_SHARED_MEMORY(1)
-
                 // perform operation, note that the flags register is also changed here
                 __asm
                 (
@@ -856,7 +1101,7 @@ BYTE_EMULATOR_IMPL(0x80)
                         "popfq;"
                         ".att_syntax;"
                         :
-                        : [dst] "a" (intermediate), [src] "d" (source), [flags] "c" (flags)
+                        : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
                         : "r15"
                 );
 
@@ -867,8 +1112,179 @@ BYTE_EMULATOR_IMPL(0x80)
                 return -1;
         }
 
+        COPY_BUFFER(buffer, &(regs_struct->eflags), 8)
 
         // registers will be written back with rip
+        REPLAY_BUFFER_ADVANCE
+        return 0;
+    }
+
+    // illegal otherwise
+    return -1;
+}
+
+
+/* Valid in first round */
+BYTE_EMULATOR_IMPL(0x81)
+{
+    // immediate grp 1 Ev, Iz
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+
+        GET_BUFFER_IMITATE_RESULT(destination, &(regs_struct->eflags), 8)
+
+        switch (GET_REG_CODE(modrm))
+        {
+            case 0b000u: // ADD - not yet implemented
+            case 0b001u: // OR  - not yet implemented
+            case 0b010u: // ADC - not yet implemented
+            case 0b011u: // SBB - not yet implemented
+                return -1;
+            case 0b100u: // AND - and r/m(16,32,64), imm(16,32,32)
+            {
+                // perform operation, note that the flags register is also changed here
+                // and r/m64, imm32
+                if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
+                {
+                    __asm
+                    (
+                            ".intel_syntax noprefix;"
+                            "pushfq;"
+                            "push QWORD PTR [rcx];"
+                            "popfq;"
+                            "xor r15, r15;"
+                            "mov r15d, DWORD PTR [rdx];"
+                            "and QWORD PTR [rax], r15;"
+                            "pushfq;"
+                            "pop QWORD PTR [rcx];"
+                            "popfq;"
+                            ".att_syntax;"
+                            :
+                            : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
+                            : "r15"
+                    );
+                }
+                // and r/m16, imm16
+                else if (PREFIXES_GRP_THREE_PRESENT(instruction))
+                {
+                    __asm
+                    (
+                            ".intel_syntax noprefix;"
+                            "pushfq;"
+                            "push QWORD PTR [rcx];"
+                            "popfq;"
+                            "mov dx, WORD PTR [rdx];"
+                            "and WORD PTR [rax], dx;"
+                            "pushfq;"
+                            "pop QWORD PTR [rcx];"
+                            "popfq;"
+                            ".att_syntax;"
+                            :
+                            : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
+                            :
+                    );
+                }
+                // and r/m32, imm32
+                else
+                {
+                    __asm
+                    (
+                            ".intel_syntax noprefix;"
+                            "pushfq;"
+                            "push QWORD PTR [rcx];"
+                            "popfq;"
+                            "mov edx, DWORD PTR [rdx];"
+                            "and DWORD PTR [rax], edx;"
+                            "pushfq;"
+                            "pop QWORD PTR [rcx];"
+                            "popfq;"
+                            ".att_syntax;"
+                            :
+                            : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
+                            :
+                    );
+                }
+
+                break;
+            }
+            case 0b101u: // SUB - not yet implemented
+            case 0b110u: // XOR - not yet implemented
+                return -1;
+            case 0b111u: // CMP - CMP r/m8, imm8
+            {
+                // cmp r/m64, imm32
+                if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
+                {
+                    __asm
+                    (
+                            ".intel_syntax noprefix;"
+                            "pushfq;"
+                            "push QWORD PTR [rcx];"
+                            "popfq;"
+                            "movsxd rdx, DWORD PTR [rdx];"
+                            "cmp QWORD PTR [rax], rdx;"
+                            "pushfq;"
+                            "pop QWORD PTR [rcx];"
+                            "popfq;"
+                            ".att_syntax;"
+                            :
+                            : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
+                            :
+                    );
+                }
+                // cmp r/m16, imm16
+                else if (PREFIXES_GRP_THREE_PRESENT(instruction))
+                {
+                    __asm
+                    (
+                            ".intel_syntax noprefix;"
+                            "pushfq;"
+                            "push QWORD PTR [rcx];"
+                            "popfq;"
+                            "mov dx, WORD PTR [rdx];"
+                            "cmp WORD PTR [rax], dx;"
+                            "pushfq;"
+                            "pop QWORD PTR [rcx];"
+                            "popfq;"
+                            ".att_syntax;"
+                            :
+                            : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
+                            :
+                    );
+                }
+                // cmp r/m32, imm32
+                else
+                {
+                    __asm
+                    (
+                            ".intel_syntax noprefix;"
+                            "pushfq;"
+                            "push QWORD PTR [rcx];"
+                            "popfq;"
+                            "mov edx, DWORD PTR [rdx];"
+                            "cmp DWORD PTR [rax], edx;"
+                            "pushfq;"
+                            "pop QWORD PTR [rcx];"
+                            "popfq;"
+                            ".att_syntax;"
+                            :
+                            : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
+                            :
+                    );
+                }
+
+                break;
+            }
+
+            default:
+                return -1;
+        }
+
+        COPY_BUFFER(buffer, &(regs_struct->eflags), 8)
+
+        // general purpose registers will be written back by default
+        REPLAY_BUFFER_ADVANCE
         return 0;
     }
 
@@ -878,15 +1294,174 @@ BYTE_EMULATOR_IMPL(0x80)
 
 
 /* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0x81)
-
-
-/* Not implemented - blocked */
 // BYTE_EMULATOR_IMPL(0x82)
 
 
-/* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0x83)
+/* Valid in first round */
+BYTE_EMULATOR_IMPL(0x83)
+{
+    // grp 1 r/m(16,32,64), imm8
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_RM_CODE, LOAD_IMM)
+
+        GET_BUFFER_IMITATE_RESULT(destination, &(regs_struct->eflags), 8)
+
+        switch (GET_REG_CODE((unsigned ) instruction[instruction.effective_opcode_index + 1]))
+        {
+            case 0b000u: // ADD - add r/m(16,32,64), imm8
+            {
+                // perform operation, note that the flags register is also changed here
+                // add r/m64, imm8
+                if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
+                {
+                    __asm
+                    (
+                            ".intel_syntax noprefix;"
+                            "pushfq;"
+                            "push QWORD PTR [rcx];"
+                            "popfq;"
+                            "movsx rdx, BYTE PTR [rdx];"
+                            "add QWORD PTR [rax], rdx;"
+                            "pushfq;"
+                            "pop QWORD PTR [rcx];"
+                            "popfq;"
+                            ".att_syntax;"
+                            :
+                            : [dst] "a"(destination), [src] "d"(source), [flags] "c"(&(regs_struct->eflags))
+                            :
+                    );
+                }
+                // add r/m16, imm8
+                else if (PREFIXES_GRP_THREE_PRESENT(instruction))
+                {
+                    __asm
+                    (
+                            ".intel_syntax noprefix;"
+                            "pushfq;"
+                            "push QWORD PTR [rcx];"
+                            "popfq;"
+                            "movsx dx, BYTE PTR [rdx];"
+                            "add WORD PTR [rax], dx;"
+                            "pushfq;"
+                            "pop QWORD PTR [rcx];"
+                            "popfq;"
+                            ".att_syntax;"
+                            :
+                            : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
+                            :
+                    );
+                }
+                // add r/m32, imm8
+                else
+                {
+                    __asm
+                    (
+                            ".intel_syntax noprefix;"
+                            "pushfq;"
+                            "push QWORD PTR [rcx];"
+                            "popfq;"
+                            "movsx edx, BYTE PTR [rdx];"
+                            "add DWORD PTR [rax], edx;"
+                            "pushfq;"
+                            "pop QWORD PTR [rcx];"
+                            "popfq;"
+                            ".att_syntax;"
+                            :
+                            : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
+                            :
+                    );
+                }
+
+                break;
+            }
+            case 0b001u: // OR  - not yet implemented
+            case 0b010u: // ADC - not yet implemented
+            case 0b011u: // SBB - not yet implemented
+            case 0b100u: // AND - not yet implemented
+            case 0b101u: // SUB - not yet implemented
+            case 0b110u: // XOR - not yet implemented
+                return -1;
+            case 0b111u: // CMP - cmp r/m(16,32,64), imm8
+            {
+                // perform operation, note that the flags register is also changed here
+                // cmp r/m64, imm8
+                if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
+                {
+                    __asm
+                    (
+                            ".intel_syntax noprefix;"
+                            "pushfq;"
+                            "push QWORD PTR [rcx];"
+                            "popfq;"
+                            "movsx rdx, BYTE PTR [rdx];"
+                            "cmp QWORD PTR [rax], rdx;"
+                            "pushfq;"
+                            "pop QWORD PTR [rcx];"
+                            "popfq;"
+                            ".att_syntax;"
+                            :
+                            : [dst] "a"(destination), [src] "d"(source), [flags] "c"(&(regs_struct->eflags))
+                            :
+                    );
+                }
+                // cmp r/m16, imm8
+                else if (PREFIXES_GRP_THREE_PRESENT(instruction))
+                {
+                    __asm
+                    (
+                            ".intel_syntax noprefix;"
+                            "pushfq;"
+                            "push QWORD PTR [rcx];"
+                            "popfq;"
+                            "movsx dx, BYTE PTR [rdx];"
+                            "cmp WORD PTR [rax], dx;"
+                            "pushfq;"
+                            "pop QWORD PTR [rcx];"
+                            "popfq;"
+                            ".att_syntax;"
+                            :
+                            : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
+                            :
+                    );
+                }
+                // cmp r/m32, imm8
+                else
+                {
+                    __asm
+                    (
+                            ".intel_syntax noprefix;"
+                            "pushfq;"
+                            "push QWORD PTR [rcx];"
+                            "popfq;"
+                            "movsx edx, BYTE PTR [rdx];"
+                            "cmp DWORD PTR [rax], edx;"
+                            "pushfq;"
+                            "pop QWORD PTR [rcx];"
+                            "popfq;"
+                            ".att_syntax;"
+                            :
+                            : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
+                            :
+                    );
+                }
+
+                break;
+            }
+            default:
+                return -1;
+        }
+
+        COPY_BUFFER(buffer, &(regs_struct->eflags), 8)
+
+        // general purpose registers will be written back by default
+        REPLAY_BUFFER_ADVANCE
+        return 0;
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */
@@ -917,7 +1492,7 @@ BYTE_EMULATOR_IMPL(0x88)
         if (!PREFIXES_REX_PRESENT(instruction) && GET_REG_CODE((unsigned) modrm) & 0b100u)
             source = (void*) ((unsigned long long) source + 1);
 
-        CHECK_TO_SHARED_MEMORY(1)
+        GET_BUFFER_CHECK_OR_FILL(destination, source, 1)
 
         // execute operation
         __asm
@@ -932,6 +1507,7 @@ BYTE_EMULATOR_IMPL(0x88)
         );
 
         // we don't have to write anything back here, destination shouldn't be able to be a register
+        REPLAY_BUFFER_ADVANCE
         return 0;
     }
 
@@ -949,25 +1525,41 @@ BYTE_EMULATOR_IMPL(0x89)
         LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
 
         // 64-bit implementation
-        if (PREFIXES_REX_FIELD_W(instruction))
+        if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            CHECK_TO_SHARED_MEMORY(8)
+            GET_BUFFER_CHECK_OR_FILL(destination, source, 8)
 
             __asm
             (
-            ".intel_syntax noprefix;"
-            "mov rdx, QWORD PTR [rdx];"
-            "mov QWORD PTR [rax], rdx;"
-            ".att_syntax;"
-            :
-            : [dst] "a" (destination), [src] "d" (source)
-            :
+                    ".intel_syntax noprefix;"
+                    "mov rdx, QWORD PTR [rdx];"
+                    "mov QWORD PTR [rax], rdx;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "a" (destination), [src] "d" (source)
+                    :
+            );
+        }
+        // 16-bit
+        else if (PREFIXES_GRP_THREE_PRESENT(instruction))
+        {
+            GET_BUFFER_CHECK_OR_FILL(destination, source, 2)
+
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "mov dx, WORD PTR [rdx];"
+                    "mov WORD PTR [rax], dx;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "a" (destination), [src] "d" (source)
+                    :
             );
         }
         // default 32-bit
         else
         {
-            CHECK_TO_SHARED_MEMORY(4)
+            GET_BUFFER_CHECK_OR_FILL(destination, source, 4)
 
             __asm
             (
@@ -981,9 +1573,8 @@ BYTE_EMULATOR_IMPL(0x89)
             );
         }
 
-        warnf("reached by %d\n\n", variant->variant_num);
-
         // no need to write back any registers
+        REPLAY_BUFFER_ADVANCE
         return 0;
     }
 
@@ -1004,7 +1595,7 @@ BYTE_EMULATOR_IMPL(0x8a)
         if (!PREFIXES_REX_PRESENT(instruction) && GET_REG_CODE((unsigned) modrm) & 0b100u)
             destination = (void*) ((unsigned long long) destination + 1);
 
-        CHECK_FROM_SHARED_MEMORY(1)
+        GET_BUFFER_REPLACE(source, 1)
 
         __asm
         (
@@ -1013,11 +1604,12 @@ BYTE_EMULATOR_IMPL(0x8a)
                 "mov BYTE PTR [rax], dl;"
                 ".att_syntax;"
                 :
-                : [dst] "a" (destination), [src] "d" (source)
+                : [dst] "a" (destination), [src] "d" (buffer)
                 :
         );
 
         // registers will be written back with rip
+        REPLAY_BUFFER_ADVANCE
         return 0;
     }
 
@@ -1037,37 +1629,54 @@ BYTE_EMULATOR_IMPL(0x8b)
         // 64-bit version
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            CHECK_FROM_SHARED_MEMORY(8)
+            GET_BUFFER_REPLACE(source, 8)
 
             __asm
             (
-            ".intel_syntax noprefix;"
-            "mov rdx, QWORD PTR [rdx];"
-            "mov QWORD PTR [rax], rdx;"
-            ".att_syntax;"
-            :
-            : [dst] "a" (destination), [src] "d" (source)
-            :
+                    ".intel_syntax noprefix;"
+                    "mov rdx, QWORD PTR [rdx];"
+                    "mov QWORD PTR [rax], rdx;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "a" (destination), [src] "d" (source)
+                    :
+            );
+        }
+        // 16-bit version
+        else if (PREFIXES_GRP_THREE_PRESENT(instruction))
+        {
+            GET_BUFFER_REPLACE(source, 2)
+
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "mov dx, WORD PTR [rdx];"
+                    "mov WORD PTR [rax], dx;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "a" (destination), [src] "d" (source)
+                    :
             );
         }
         // 32-bit version
         else
         {
-            CHECK_FROM_SHARED_MEMORY(4)
+            GET_BUFFER_REPLACE(source, 4)
 
             __asm
             (
-            ".intel_syntax noprefix;"
-            "mov edx, DWORD PTR [rdx];"
-            "mov DWORD PTR [rax], edx;"
-            ".att_syntax;"
-            :
-            : [dst] "a" (destination), [src] "d" (source)
-            :
+                    ".intel_syntax noprefix;"
+                    "mov edx, DWORD PTR [rdx];"
+                    "mov DWORD PTR [rax], edx;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "a" (destination), [src] "d" (source)
+                    :
             );
         }
 
         // registers will be written back with rip
+        REPLAY_BUFFER_ADVANCE
         return 0;
     }
 
@@ -1079,6 +1688,7 @@ BYTE_EMULATOR_IMPL(0x8b)
 /* Not implemented - blocked in first round */
 BYTE_EMULATOR_IMPL(0x8c)
 {
+    warnf("0x8c not actually implemented right now\n");
     // ignoring for now
     return -1;
 }
@@ -1091,6 +1701,7 @@ BYTE_EMULATOR_IMPL(0x8c)
 /* Not implemented - blocked in first round */
 BYTE_EMULATOR_IMPL(0x8e)
 {
+    warnf("0x8e not actually implemented right now\n");
     // ignoring for now
     return -1;
 }
@@ -1219,7 +1830,168 @@ BYTE_EMULATOR_IMPL(0xa2)
 
 
 /* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0xa4)
+BYTE_EMULATOR_IMPL(0xa4)
+{
+    // movsb
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        // gonna be using general purpose registers
+        DEFINE_REGS_STRUCT
+
+        void* source;
+        void* destination;
+        bool src_spoof = false;
+        bool dst_spoof = false;
+        unsigned long long size = PREFIXES_GRP_ONE_PRESENT(instruction) &&
+                (PREFIXES_GRP_ONE(instruction) == REPNZ_PREFIX_CODE ||
+                 PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE) ? regs_struct->rcx : 1;
+
+        // source is known to be shared memory
+        if ((void*) regs_struct->rsi == instruction.effective_address)
+        {
+            // source to monitor pointer
+            if (instruction_intent::determine_monitor_pointer(relevant_monitor, variant,
+                    instruction.effective_address, &source, size) < 0)
+                return -1;
+
+            // check if destination is shared memory, or regular variant memory
+            int result = instruction_intent::determine_monitor_pointer(relevant_monitor, variant,
+                    (void*) regs_struct->rdi, &destination, size);
+            if (result == NO_REGION_INFO)
+            {
+                destination = (void*) regs_struct->rdi;
+                dst_spoof = true;
+            }
+            else if (result < 0)
+                return -1;
+        }
+        // destination is known shared memory
+        else if ((void*) regs_struct->rdi == instruction.effective_address)
+        {
+            // destination to monitor pointer
+            if (instruction_intent::determine_monitor_pointer(relevant_monitor, variant,
+                    instruction.effective_address, &destination, size) < 0)
+                return -1;
+
+            // check if source is shared memory, or regular variant memory
+            int result = instruction_intent::determine_monitor_pointer(relevant_monitor, variant,
+                    (void*) regs_struct->rsi, &source, size);
+            if (result == NO_REGION_INFO)
+            {
+                source = (void*) regs_struct->rsi;
+                src_spoof = true;
+            }
+            else if (result < 0)
+                return -1;
+        }
+        // we would expect one of the two to be known shared memory
+        else
+            return -1;
+
+
+        // replay and spoofing
+        GET_BUFFER_RAW((src_spoof ? destination : source),
+                       ((!src_spoof && !dst_spoof) ? sizeof(void*) : (dst_spoof ? size : 0)) +
+                       (sizeof(unsigned long long) * 2))
+        auto rcx_result = (unsigned long long*) buffer;
+        auto efalgs_result = (unsigned long long*) ((unsigned long long) buffer + sizeof(unsigned long long));
+        void** actual_buffer = src_spoof ? nullptr :
+                (void**) ((unsigned long long) buffer + (sizeof(unsigned long long) * 2));
+
+        // imitate
+        if (result != REPLAY_BUFFER_RETURN_FIRST)
+        {
+            if (!dst_spoof && !src_spoof && destination != *actual_buffer)
+            {
+                warnf("second address mismatch\n");
+                return -1;
+            }
+            else if (dst_spoof && !interaction::write_memory(variant->variantpid, destination, (long long) size,
+                    actual_buffer))
+            {
+                warnf("could not write data to variant\n");
+                return -1;
+            }
+
+            *rcx_result    = regs_struct->rcx;
+            *efalgs_result = regs_struct->eflags;
+
+            REPLAY_BUFFER_ADVANCE
+            return 0;
+        }
+
+
+        // spoof
+        void* spoof = src_spoof ? malloc(size) : actual_buffer;
+        if (src_spoof)
+        {
+            if (!spoof)
+            {
+                warnf("problem setting up spoof buffer\n");
+                return -1;
+            }
+
+            if (!interaction::read_memory(variant->variantpid, source, (signed long long) size, spoof))
+            {
+                warnf("could not read source to spoof\n");
+                return -1;
+            }
+        }
+
+
+        // different option for repeating
+        if (PREFIXES_GRP_ONE_PRESENT(instruction) &&
+            (PREFIXES_GRP_ONE(instruction) == REPNZ_PREFIX_CODE ||
+             PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE))
+        {
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "pushf;"
+                    "push QWORD PTR [rbx];"
+                    "popf;"
+                    "mov r8, rcx;"
+                    "mov rcx, QWORD PTR [r8];"
+                    "mov rsi, rdx;"
+                    "mov rdi, rax;"
+                    "rep movsb;"
+                    "mov QWORD PTR [r8], rcx;"
+                    "pushf;"
+                    "pop QWORD PTR [rbx];"
+                    "popf;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "a" (dst_spoof ? spoof : destination), [src] "d" (src_spoof ? spoof : source),
+                            [count] "c" (&regs_struct->rcx), [flags] "b" (&regs_struct->eflags)
+                    : "r8"
+            );
+
+            if (dst_spoof && !interaction::write_memory(variant->variantpid, destination, (long) size, spoof))
+            {
+                warnf("movsb could not write back destination\n");
+                return -1;
+            }
+            if (src_spoof)
+                free(spoof);
+
+            *rcx_result    = regs_struct->rcx;
+            *efalgs_result = regs_struct->eflags;
+            if (!src_spoof && !dst_spoof)
+                *actual_buffer = destination;
+
+            REPLAY_BUFFER_ADVANCE
+            return 0;
+        }
+        // non repeating
+        else
+        {
+            return -1;
+        }
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */
@@ -1246,8 +2018,130 @@ BYTE_EMULATOR_IMPL(0xa2)
 // BYTE_EMULATOR_IMPL(0xaa)
 
 
-/* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0xab)
+/* Valid in first round */
+BYTE_EMULATOR_IMPL(0xab)
+{
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        // we're in need of rax as source
+        DEFINE_REGS_STRUCT
+
+        void* monitor_pointer;
+        if (instruction_intent::determine_monitor_pointer(relevant_monitor, variant, instruction.effective_address,
+                                                          &monitor_pointer) != 0)
+            return -1;
+        void* source = shared_mem_register_access::ACCESS_GENERAL_NAME(rax)(regs_struct);
+
+        // stos m64
+        if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
+        {
+            GET_BUFFER_RAW(monitor_pointer, 8)
+            if (result == REPLAY_BUFFER_RETURN_FIRST)
+                *(__uint64_t*) buffer = *(__uint64_t*) source;
+            else if (*(__uint64_t*) buffer == *(__uint64_t*) source)
+            {
+                if (regs_struct->eflags & (0b1u << 10u))
+                    regs_struct->rdi -= 8;
+                else
+                    regs_struct->rdi += 8;
+
+                REPLAY_BUFFER_ADVANCE
+                return 0;
+            }
+            else
+                return -1;
+
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "mov rdi, rdx;"
+                    "stosq;"
+                    ".att_syntax;"
+                    :
+                    : "a" (*(__uint64_t*) source), "d" (monitor_pointer)
+            );
+
+            if (regs_struct->eflags & (0b1u << 10u))
+                regs_struct->rdi -= 8;
+            else
+                regs_struct->rdi += 8;
+        }
+        // stos m16
+        else if (PREFIXES_GRP_THREE_PRESENT(instruction))
+        {
+            GET_BUFFER_RAW(monitor_pointer, 2)
+            if (result == REPLAY_BUFFER_RETURN_FIRST)
+                *(__uint16_t*) buffer = *(__uint16_t*) source;
+            else if (*(__uint16_t*) buffer == *(__uint16_t*) source)
+            {
+                if (regs_struct->eflags & (0b1u << 10u))
+                    regs_struct->rdi -= 2;
+                else
+                    regs_struct->rdi += 2;
+
+                REPLAY_BUFFER_ADVANCE
+                return 0;
+            }
+            else
+                return -1;
+
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "mov rdi, rdx;"
+                    "stosw;"
+                    ".att_syntax;"
+                    :
+                    : "a" (*(__uint16_t*) source), "d" (monitor_pointer)
+            );
+
+            if (regs_struct->eflags & (0b1u << 10u))
+                regs_struct->rdi -= 2;
+            else
+                regs_struct->rdi += 2;
+        }
+        // stos m32
+        else
+        {
+            GET_BUFFER_RAW(monitor_pointer, 2)
+            if (result == REPLAY_BUFFER_RETURN_FIRST)
+                *(__uint32_t*) buffer = *(__uint32_t*) source;
+            else if (*(__uint32_t*) buffer == *(__uint32_t*) source)
+            {
+                if (regs_struct->eflags & (0b1u << 10u))
+                    regs_struct->rdi -= 2;
+                else
+                    regs_struct->rdi += 2;
+
+                REPLAY_BUFFER_ADVANCE
+                return 0;
+            }
+            else
+                return -1;
+
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "mov rdi, rdx;"
+                    "stosd;"
+                    ".att_syntax;"
+                    :
+                    : "a" (*(__uint32_t*) source), "d" (monitor_pointer)
+            );
+
+            if (regs_struct->eflags & (0b1u << 10u))
+                regs_struct->rdi -= 2;
+            else
+                regs_struct->rdi += 2;
+        }
+
+        REPLAY_BUFFER_ADVANCE
+        return 0;
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */
@@ -1270,8 +2164,124 @@ BYTE_EMULATOR_IMPL(0xa2)
 // BYTE_EMULATOR_IMPL(0xb0)
 
 
-/* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0xb1)
+/* Valid in second round */
+BYTE_EMULATOR_IMPL(0xb1)
+{
+    // cmpxchg Ev, Gv
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
+    {
+        // affects flags as well
+        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+
+        // we're saving the source to compare later, the result to imitate it later, and the eflags to imitate as well
+        GET_BUFFER_RAW(destination, (sizeof(unsigned long long) * 4))
+        auto buffer_source   = (unsigned long long*) buffer;
+        auto buffer_orig_rax = (unsigned long long*) buffer + 1;
+        auto buffer_rax      = (unsigned long long*) buffer + 2;
+        auto buffer_eflags   = (unsigned long long*) buffer + 3;
+
+        if (result == REPLAY_BUFFER_RETURN_FIRST)
+        {
+            *buffer_orig_rax = variant->regs.rax;
+            *buffer_source = *(unsigned long long*) source;
+        }
+        else if (result != REPLAY_BUFFER_RETURN_FIRST)
+        {
+            if (*buffer_source != *(unsigned long long*) source && regs_struct->rax != *buffer_orig_rax)
+                return -1;
+            unsigned long long mask = (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction)) ?
+                    0xffffffffffffffff : (PREFIXES_GRP_THREE_PRESENT(instruction) ? 0xffff : 0xffffffff);
+            regs_struct->rax &= ~mask;
+            regs_struct->rax |= mask & *buffer_rax;
+            regs_struct->eflags = *buffer_eflags;
+
+            REPLAY_BUFFER_ADVANCE
+            return 0;
+        }
+
+
+        // 64-bit
+        if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
+        {
+            // todo - always executed with LOCK for now, might not be the best
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "pushfq;"
+                    "push QWORD PTR [rbx];"
+                    "popfq;"
+                    "mov rcx, QWORD PTR [rcx];"
+                    "mov rax, QWORD PTR [rsi];"
+                    "lock cmpxchg QWORD PTR [rdx], rcx;"
+                    "mov QWORD PTR [rsi], rax;"
+                    "pushfq;"
+                    "pop QWORD PTR [rbx];"
+                    "popfq;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "d" (destination), [src] "c" (source),
+                        [flags] "b" (&regs_struct->eflags), "S" (&regs_struct->rax)
+                    :
+            );
+        }
+        // 16-bit
+        else if (PREFIXES_GRP_THREE_PRESENT(instruction))
+        {
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "pushfq;"
+                    "push QWORD PTR [rbx];"
+                    "popfq;"
+                    "mov cx, WORD PTR [rcx];"
+                    "mov ax, WORD PTR [rsi];"
+                    "lock cmpxchg WORD PTR [rdx], cx;"
+                    "mov WORD PTR [rsi], ax;"
+                    "pushfq;"
+                    "pop QWORD PTR [rbx];"
+                    "popfq;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "d" (destination), [src] "c" (source),
+                            [flags] "b" (&regs_struct->eflags), "S" (&regs_struct->rax)
+                    :
+            );
+        }
+        // 32-bit
+        else
+        {
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "pushfq;"
+                    "push QWORD PTR [rbx];"
+                    "popfq;"
+                    "mov ecx, DWORD PTR [rcx];"
+                    "mov eax, DWORD PTR [rsi];"
+                    "lock cmpxchg DWORD PTR [rdx], ecx;"
+                    "mov DWORD PTR [rsi], eax;"
+                    "pushfq;"
+                    "pop QWORD PTR [rbx];"
+                    "popfq;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "d" (destination), [src] "c" (source),
+                        [flags] "b" (&regs_struct->eflags), "S" (&regs_struct->rax)
+                    :
+            );
+        }
+
+        *buffer_rax = regs_struct->rax;
+        *buffer_eflags = regs_struct->eflags;
+
+        // general purpose registers are written back with rip by default
+        REPLAY_BUFFER_ADVANCE
+        return 0;
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */
@@ -1298,18 +2308,32 @@ BYTE_EMULATOR_IMPL(0xb6)
         // movzx Gv, Eb
         LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_REG_CODE, LOAD_RM_CODE)
 
-        CHECK_FROM_SHARED_MEMORY(1)
+        GET_BUFFER_REPLACE(source, 1)
 
         // 64-bit size
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-
             // perform operation
             __asm__
             (
                     ".intel_syntax noprefix;"
                     "movzx r15, BYTE PTR [rdx];"
                     "mov QWORD PTR [rax], r15;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "a" (destination), [src] "d" (source)
+                    : "r15"
+            );
+        }
+        // 16-bit size
+        else if (PREFIXES_GRP_THREE_PRESENT(instruction))
+        {
+            // perform operation
+            __asm__
+            (
+                    ".intel_syntax noprefix;"
+                    "movzx r15, BYTE PTR [rdx];"
+                    "mov WORD PTR [rax], r15w;"
                     ".att_syntax;"
                     :
                     : [dst] "a" (destination), [src] "d" (source)
@@ -1333,7 +2357,8 @@ BYTE_EMULATOR_IMPL(0xb6)
         }
 
         // registers will be written back with rip
-            return 0;
+        REPLAY_BUFFER_ADVANCE
+        return 0;
     }
 
     // illegal operation otherwise
@@ -1346,10 +2371,10 @@ BYTE_EMULATOR_IMPL(0xb7)
 {
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
-        // movzx Gv, Eq
+        // movzx Gv, Ew
         LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_REG_CODE, LOAD_RM_CODE)
 
-        CHECK_FROM_SHARED_MEMORY(2)
+        GET_BUFFER_REPLACE(source, 2)
 
         // 64-bit size
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
@@ -1366,7 +2391,22 @@ BYTE_EMULATOR_IMPL(0xb7)
                     : "r15"
             );
         }
-            // 32-bit size
+        // 16-bit size
+        else if (PREFIXES_GRP_THREE_PRESENT(instruction))
+        {
+            // perform operation
+            __asm__
+            (
+                    ".intel_syntax noprefix;"
+                    "movzx r15d, WORD PTR [rdx];"
+                    "mov WORD PTR [rax], r15w;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "a" (destination), [src] "d" (source)
+                    : "r15"
+            );
+        }
+        // 32-bit size
         else
         {
             // perform operation
@@ -1383,6 +2423,7 @@ BYTE_EMULATOR_IMPL(0xb7)
         }
 
         // registers will be written back with rip
+        REPLAY_BUFFER_ADVANCE
         return 0;
     }
 
@@ -1415,8 +2456,68 @@ BYTE_EMULATOR_IMPL(0xb7)
 // BYTE_EMULATOR_IMPL(0xbd)
 
 
-/* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0xbe)
+/* Valid in second round */
+BYTE_EMULATOR_IMPL(0xbe)
+{
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
+    {
+        // movsx Gv, Eb
+        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_REG_CODE, LOAD_RM_CODE)
+
+        // always byte
+        GET_BUFFER_REPLACE(source, 2)
+
+        // 64-bit
+        if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
+        {
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "movsx r15, BYTE PTR [rdx];"
+                    "mov QWORD PTR [rax], r15;"
+                    ".att_syntax;"
+                    :
+                    : "a" (destination), "d" (source)
+                    : "r15"
+            );
+        }
+        // 16-bit
+        else if (PREFIXES_GRP_THREE_PRESENT(instruction))
+        {
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "movsx r15w, BYTE PTR [rdx];"
+                    "mov WORD PTR [rax], r15w;"
+                    ".att_syntax;"
+                    :
+                    : "a" (destination), "d" (source)
+                    : "r15"
+            );
+        }
+        // 32-bit
+        else
+        {
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "movsx r15d, BYTE PTR [rdx];"
+                    "mov DWORD PTR [rax], r15d;"
+                    ".att_syntax;"
+                    :
+                    : "a" (destination), "d" (source)
+                    : "r15"
+            );
+        }
+
+        // registers written back by default
+        REPLAY_BUFFER_ADVANCE
+        return 0;
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */
@@ -1427,8 +2528,125 @@ BYTE_EMULATOR_IMPL(0xb7)
 // BYTE_EMULATOR_IMPL(0xc0)
 
 
-/* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0xc1)
+/* Valid in second round */
+BYTE_EMULATOR_IMPL(0xc1)
+{
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
+    {
+        // xadd Ev, Gv
+        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+
+        // 64-bit size
+        if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
+        {
+            GET_BUFFER_RAW(destination, (sizeof(__uint64_t) * 2))
+            auto source_original  = (__uint64_t*) buffer;
+            auto source_overwrite = ((__uint64_t*) buffer) + 1;
+
+            if (result != REPLAY_BUFFER_RETURN_FIRST)
+            {
+                if (*((__uint64_t*) source) != *source_original)
+                    return -1;
+                *((__uint64_t*) source) = *source_overwrite;
+
+                REPLAY_BUFFER_ADVANCE
+                return 0;
+            }
+
+            *source_original = *((__uint64_t*) source);
+
+            // perform operation
+            __asm__
+            (
+                    ".intel_syntax noprefix;"
+                    "mov r15, QWORD PTR [rdx];"
+                    "xadd QWORD PTR [rax], r15;"
+                    "mov QWORD PTR [rdx], r15;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "a" (destination), [src] "d" (source)
+                    : "r15"
+            );
+
+            *source_overwrite = *((__uint64_t*) source);
+        }
+        // 16-bit size
+        else if (PREFIXES_GRP_THREE_PRESENT(instruction))
+        {
+            GET_BUFFER_RAW(destination, (sizeof(__uint16_t) * 2))
+            auto source_original  = (__uint16_t*) buffer;
+            auto source_overwrite = ((__uint16_t*) buffer) + 1;
+
+            if (result != REPLAY_BUFFER_RETURN_FIRST)
+            {
+                if (*((__uint16_t*) source) != *source_original)
+                    return -1;
+                *((__uint16_t*) source) = *source_overwrite;
+
+                REPLAY_BUFFER_ADVANCE
+                return 0;
+            }
+
+            *source_original = *((__uint16_t*) source);
+
+            // perform operation
+            __asm__
+            (
+                    ".intel_syntax noprefix;"
+                    "mov r15w, WORD PTR [rdx];"
+                    "xadd WORD PTR [rax], r15w;"
+                    "mov WORD PTR [rdx], r15w;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "a" (destination), [src] "d" (source)
+                    : "r15"
+            );
+
+            *source_overwrite = *((__uint16_t*) source);
+        }
+        // 32-bit size
+        else
+        {
+            GET_BUFFER_RAW(destination, (sizeof(__uint32_t) * 2))
+            auto source_original  = (__uint32_t*) buffer;
+            auto source_overwrite = ((__uint32_t*) buffer) + 1;
+
+            if (result != REPLAY_BUFFER_RETURN_FIRST)
+            {
+                if (*((__uint32_t*) source) != *source_original)
+                    return -1;
+                *((__uint32_t*) source) = *source_overwrite;
+
+                REPLAY_BUFFER_ADVANCE
+                return 0;
+            }
+
+            *source_original = *((__uint32_t*) source);
+
+            // perform operation
+            __asm__
+            (
+                    ".intel_syntax noprefix;"
+                    "mov r15d, DWORD PTR [rdx];"
+                    "xadd DWORD PTR [rax], r15d;"
+                    "mov DWORD PTR [rdx], r15d;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "a" (destination), [src] "d" (source)
+                    : "r15"
+            );
+
+            *source_overwrite = *((__uint32_t*) source);
+        }
+
+        // registers will be written back in a bit
+        REPLAY_BUFFER_ADVANCE
+        return 0;
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */
@@ -1464,7 +2682,14 @@ BYTE_EMULATOR_IMPL(0xc6)
         void* destination;
         LOAD_RM_CODE(destination, ignored_anyway)
 
-        CHECK_TO_SHARED_MEMORY(1)
+        GET_BUFFER_RAW(destination, 1)
+
+        if (result != REPLAY_BUFFER_RETURN_FIRST)
+        {
+            // nothing to do here, it's fine if the buffer obtaining passes
+            REPLAY_BUFFER_ADVANCE
+            return 0;
+        }
 
         // perform operation
         __asm
@@ -1479,6 +2704,7 @@ BYTE_EMULATOR_IMPL(0xc6)
         );
 
         // no writeback needed
+        REPLAY_BUFFER_ADVANCE
         return 0;
     }
 
@@ -1487,8 +2713,71 @@ BYTE_EMULATOR_IMPL(0xc6)
 }
 
 
-/* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0xc7)
+/* Valid in first round */
+BYTE_EMULATOR_IMPL(0xc7)
+{
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        void* destination;
+        __uint8_t modrm = instruction[instruction.effective_opcode_index + 1];
+        LOAD_RM_CODE(destination, ignore)
+
+        void* source;
+        LOAD_IMM(source, ignore)
+
+        GET_NULL_BUFFER(destination)
+
+        // 64-bit
+        if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
+        {
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "movsxd r15, DWORD PTR [rdx];"
+                    "mov QWORD PTR [rax], r15;"
+                    ".att_syntax;"
+                    :
+                    : "a" (destination), "d" (source)
+                    : "r15"
+            );
+        }
+        // 16-bit
+        else if (PREFIXES_GRP_THREE_PRESENT(instruction))
+        {
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "mov r15w, WORD PTR [rdx];"
+                    "mov WORD PTR [rax], r15w;"
+                    ".att_syntax;"
+                    :
+                    : "a" (destination), "d" (source)
+                    : "r15"
+            );
+        }
+        // 32-bit
+        else
+        {
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "mov r15d, DWORD PTR [rdx];"
+                    "mov DWORD PTR [rax], r15d;"
+                    ".att_syntax;"
+                    :
+                    : "a" (destination), "d" (source)
+                    : "r15"
+            );
+        }
+
+        // no register writeback needed
+        REPLAY_BUFFER_ADVANCE
+        return 0;
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */
@@ -1587,7 +2876,7 @@ BYTE_EMULATOR_IMPL(0xda)
             void* destination;
             LOAD_RM_CODE(destination, xmm_lookup)
 
-            CHECK_FROM_SHARED_MEMORY(16)
+            GET_BUFFER_REPLACE(source, 16)
 
             // execute operation
             __asm
@@ -1614,7 +2903,7 @@ BYTE_EMULATOR_IMPL(0xda)
             void* destination;
             LOAD_RM_CODE(destination, mm_lookup)
 
-            CHECK_FROM_SHARED_MEMORY(8)
+            GET_BUFFER_REPLACE(source, 8)
 
             // execute operation
             __asm
@@ -1633,7 +2922,10 @@ BYTE_EMULATOR_IMPL(0xda)
 
         // we have to write the registers back
         if (interaction::write_all_fpregs(*instruction.variant_pid, regs_struct))
+        {
+            REPLAY_BUFFER_ADVANCE
             return 0;
+        }
     }
 
     // illegal access
