@@ -163,12 +163,38 @@ warnf("\n%s\n", output.str().c_str());
 // ---------------------------------------------------------------------------------------------------------------------
 
 
-// reaply intent buffer masks and offsets ------------------------------------------------------------------------------
-#define LEADER_WAITING_OFFSET                   0x00u
-#define VARIANTS_WAITING_OFFSET                 0x01u
+// replay intent buffer constants --------------------------------------------------------------------------------------
+#ifndef REPLAY_BUFFER_SIZE_DEFAULT
+  #define REPLAY_BUFFER_SIZE_DEFAULT            10u
+#endif
+#ifndef REPLAY_ENTRY_STATIC_BUFFER_SIZE
+  #define REPLAY_ENTRY_STATIC_BUFFER_SIZE       16u
+#endif
 
-#define LEADER_WAITING_MASK                     (0x01u << LEADER_WAITING_OFFSET)
-#define VARIANTS_WAITING_MASK                   (0x01u << VARIANTS_WAITING_OFFSET)
+// buffer states
+#define VARIANTS_WAITING_OFFSET                 0x00u
+
+#define REPLAY_BUFFER_VARIANTS_WAITING          (0x01u << VARIANTS_WAITING_OFFSET)
+
+// entry states
+#define REPLAY_ENTRY_EMPTY_STATE                0x00u
+#define REPLAY_ENTRY_FILLED_STATE               0x01u
+
+// variant states
+#define REPLAY_STATE_RUNNING                    0x00u
+#define REPLAY_STATE_EXPECTING_EMPTY            0x01u
+#define REPLAY_STATE_WAITING                    0x02u
+
+// returns for buffer obtaining
+#define REPLAY_BUFFER_RETURN_WAIT               -2
+#define REPLAY_BUFFER_RETURN_ERROR              -1
+#define REPLAY_BUFFER_RETURN_OK                 0
+#define REPLAY_BUFFER_RETURN_FIRST              1
+// ---------------------------------------------------------------------------------------------------------------------
+
+
+// stuff to return information to prevent re-executing some stuff ------------------------------------------------------
+#define NO_REGION_INFO                          -2
 // ---------------------------------------------------------------------------------------------------------------------
 
 
@@ -239,7 +265,7 @@ class instruction_intent
 {
     friend class instruction_intent_emulation;
     friend class monitor;
-    friend class intent_replay_buffer;
+    friend class replay_buffer;
 private:
     /**/
     uint8_t                             instruction[MAX_INSTRUCTION_SIZE] = { 0 };
@@ -403,7 +429,8 @@ public:
 
     /* Obtain relevant opcode byte for this instruction. */
     static int      determine_monitor_pointer           (monitor& relevant_monitor, variantstate* variant,
-                                                         void* variant_address, void** monitor_pointer);
+                                                         void* variant_address, void** monitor_pointer,
+                                                         unsigned long long size=0);
     // -----------------------------------------------------------------------------------------------------------------
 
 
@@ -471,23 +498,51 @@ struct translation_record
 // =====================================================================================================================
 //      intent replaying data
 // =====================================================================================================================
+/*
 struct intent_replay
 {
     __uint8_t       instruction[MAX_INSTRUCTION_SIZE];
     __uint8_t       instruction_size;
-    __uint8_t       data_size;
-    // todo -- maybe dynamic allocation
-    __uint8_t       data[16];
-    __uint8_t       result_size;
-    // todo -- maybe dynamic allocation
-    __uint8_t       result[16];
+    __uint8_t       extra;
+    unsigned long long
+                    data_size;
+    __uint8_t*      data;
+    __uint8_t       data_buffer[REPLAY_DATA_BUFFER_SIZE];
+    unsigned long long
+                    result_size;
+    __uint8_t*      result;
+    __uint8_t       result_buffer[REPLAY_DATA_BUFFER_SIZE];
     void*           monitor_address;
+};
+*/
+
+struct replay_entry
+{
+    __uint8_t       instruction[MAX_INSTRUCTION_SIZE];
+    __uint8_t       instruction_size;
+
+    __uint8_t*      buffer;
+    __uint8_t       static_buffer[REPLAY_ENTRY_STATIC_BUFFER_SIZE];
+    unsigned long long
+                    buffer_size;
+
+    void*           monitor_pointer;
+    unsigned int    variants_passed;
+    __uint8_t       entry_state;
+};
+
+
+struct replay_state
+{
+    __uint8_t       state;
+    unsigned int    current_index;
 };
 
 
 // =====================================================================================================================
 // intent replaying buffer
 // =====================================================================================================================
+/*
 #ifndef INTENT_REPLAY_BUFFER_SIZE
 #define INTENT_REPLAY_BUFFER_SIZE               10
 #endif
@@ -507,11 +562,15 @@ public:
     int             maybe_resume_leader                             ();
     int             access_data                                     (unsigned int variant_num,
                                                                      instruction_intent* instruction, __uint8_t** data,
-                                                                     __uint8_t data_size, void* monitor_pointer,
+                                                                     unsigned long long data_size,
+                                                                     void* monitor_pointer,
                                                                      __uint8_t** result = nullptr,
-                                                                     __uint8_t result_size = 0);
+                                                                     unsigned long long result_size = 0,
+                                                                     unsigned int extra_options=0);
+    int             advance                                         (unsigned int variant_num);
+    void            print_count                                     ();
 
-    /*
+     *
      * +-------------+---+---+
      * | X X X X X X | _ | _ |
      * +-------------+---+---+
@@ -525,9 +584,39 @@ public:
      * |      |                 | has to be done to see if all variants are caught up. Only then can the leader resume.
      * |      |                 |
      * | 0x01 | variant waiting | set if a variant is currently waiting to resume intent handling
-     * | 0x02 | unused          |
-     */
+     * | 0x02 | second mem op   | result pointer references a second pointer to a memory mapping
+     *
     __uint8_t       extra;
+};
+*/
+
+class replay_buffer
+{
+private:
+    replay_entry*   buffer;
+    unsigned int    buffer_size;
+    replay_state*   variant_states;
+    unsigned int    variant_count;
+    unsigned int    head;
+    __uint8_t       state;
+    monitor*        relevant_monitor;
+
+    // helper methods --------------------------------------------------------------------------------------------------
+    // int          continue_variant                    (unsigned int variant_num);
+    // helper methods --------------------------------------------------------------------------------------------------
+public:
+    // construction ----------------------------------------------------------------------------------------------------
+                    replay_buffer                       (monitor* relevant_monitor,
+                                                         unsigned int replay_buffer_size=REPLAY_BUFFER_SIZE_DEFAULT);
+                    ~replay_buffer                      ();
+    // construction ----------------------------------------------------------------------------------------------------
+
+    // access and updating ---------------------------------------------------------------------------------------------
+    int             obtain_buffer                       (unsigned int variant_num, void* monitor_pointer,
+                                                         instruction_intent &instruction, void** requested,
+                                                         unsigned long long requested_size);
+    int             advance                             (unsigned int variant_num);
+    // access and updating ---------------------------------------------------------------------------------------------
 };
 
 
@@ -545,6 +634,7 @@ public:
 struct tracing_data_t
 {
     const char* opcode;
+    unsigned int hits;
     struct prefixes_t
     {
         const char* prefixes;
@@ -564,7 +654,6 @@ struct tracing_data_t
         unsigned int hits;
         immediate_t* next;
     } immediate;
-    unsigned int hits;
     struct files_t
     {
         const char* file;
@@ -572,6 +661,14 @@ struct tracing_data_t
         const char* shadowed;
         files_t* next;
     } files_accessed;
+    struct instruction_t
+    {
+        const char* full;
+        unsigned long long instruction_pointer;
+        unsigned int size;
+        unsigned int hits;
+        instruction_t* next;
+    } instructions;
     tracing_data_t* next;
 };
 
@@ -586,6 +683,14 @@ struct tracing_lost_t
         const char* shadowed;
         files_t* next;
     } files_accessed;
+    struct instruction_t
+    {
+        const char* full;
+        unsigned long long instruction_pointer;
+        unsigned int size;
+        unsigned int hits;
+        instruction_t* next;
+    } instructions;
     tracing_lost_t* next;
 };
 

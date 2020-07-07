@@ -17,6 +17,13 @@
 #include <pthread.h>
 #include "MVEE_build_config.h"
 #include "MVEE_shm.h"
+#include "MVEE_mman.h"
+
+/*-----------------------------------------------------------------------------
+    Forward definition
+-----------------------------------------------------------------------------*/
+class shared_monitor_map_info;
+
 
 /*-----------------------------------------------------------------------------
     Constants
@@ -60,6 +67,8 @@ public:
 	bool                       unlinked;              // set to true when the file has been unlinked from the file system
     ssize_t                    original_file_size;    // for shared mappings that we changed to private, we need to know the original file size!!!
 	FileType                   file_type;
+    std::shared_ptr<shared_monitor_map_info>
+                               shadow;                // pointer to the shadow mapped region
 
     void print_fd_info();
     fd_info();

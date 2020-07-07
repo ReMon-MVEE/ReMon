@@ -127,9 +127,12 @@ class shared_monitor_map_info
 public:
     void*       shadow_base;
     size_t      size;
+    int         active_shadow_users;
 
                 shared_monitor_map_info                 (void* shadow_base, size_t size);
                 ~shared_monitor_map_info                ();
+    int         mmap                                    ();
+    int         unmap                                   ();
 };
 
 //
@@ -356,8 +359,7 @@ public:
     //
     // Shared memory
     //
-    int                shadow_map                   (const char* backing_file,
-                                                     unsigned int backing_flags, FileType type,
+    int                shadow_map                   (variantstate* variant, fd_info* info,
                                                      std::shared_ptr<shared_monitor_map_info>* shadow,
                                                      size_t size, int protection, int flags, int offset);
     int                insert_variant_shared_region (int variant, mmap_region_info* region);

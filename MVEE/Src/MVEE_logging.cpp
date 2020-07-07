@@ -497,7 +497,7 @@ void mvee::log_instruction_trace()
 
         fprintf(instruction_log, "\t\t\t{\n");
         fprintf(instruction_log, "\t\t\t\t\"file\": \"%s\",\n", data->files_accessed.file);
-        fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\"\n", data->files_accessed.hits);
+        fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", data->files_accessed.hits);
         fprintf(instruction_log, "\t\t\t\t\"shadowed\": \"%s\"\n", data->files_accessed.shadowed);
         tracing_data_t::files_t *files = data->files_accessed.next;
         while (files != nullptr)
@@ -505,10 +505,36 @@ void mvee::log_instruction_trace()
             fprintf(instruction_log, "\t\t\t},\n");
             fprintf(instruction_log, "\t\t\t{\n");
             fprintf(instruction_log, "\t\t\t\t\"file\": \"%s\",\n", files->file);
-            fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\"\n", files->hits);
+            fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", files->hits);
             fprintf(instruction_log, "\t\t\t\t\"shadowed\": \"%s\"\n", files->shadowed);
 
             files = files->next;
+        }
+        fprintf(instruction_log, "\t\t\t}\n");
+
+        fprintf(instruction_log, "\t\t],\n");
+
+
+        fprintf(instruction_log, "\t\t\"instructions\": [\n");
+
+        fprintf(instruction_log, "\t\t\t{\n");
+        fprintf(instruction_log, "\t\t\t\t\"instruction\": \"%s\",\n", data->instructions.full);
+        fprintf(instruction_log, "\t\t\t\t\"instruction pointer\": \"%p\",\n",
+                (void*) data->instructions.instruction_pointer);
+        fprintf(instruction_log, "\t\t\t\t\"size\": \"%u\",\n", data->instructions.size);
+        fprintf(instruction_log, "\t\t\t\t\"hits\": \"%u\"\n", data->instructions.hits);
+        tracing_data_t::instruction_t *instructions = data->instructions.next;
+        while (instructions != nullptr)
+        {
+            fprintf(instruction_log, "\t\t\t},\n");
+            fprintf(instruction_log, "\t\t\t{\n");
+            fprintf(instruction_log, "\t\t\t\t\"instruction\": \"%s\",\n", instructions->full);
+            fprintf(instruction_log, "\t\t\t\t\"instruction pointer\": \"%p\",\n",
+                    (void*) instructions->instruction_pointer);
+            fprintf(instruction_log, "\t\t\t\t\"size\": \"%u\",\n", instructions->size);
+            fprintf(instruction_log, "\t\t\t\t\"hits\": \"%u\"\n", instructions->hits);
+
+            instructions = instructions->next;
         }
         fprintf(instruction_log, "\t\t\t}\n");
 
@@ -534,7 +560,7 @@ void mvee::log_instruction_trace()
 
         fprintf(instruction_log, "\t\t\t{\n");
         fprintf(instruction_log, "\t\t\t\t\"file\": \"%s\",\n", lost->files_accessed.file);
-        fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\"\n", lost->files_accessed.hits);
+        fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", lost->files_accessed.hits);
         fprintf(instruction_log, "\t\t\t\t\"shadowed\": \"%s\"\n", lost->files_accessed.shadowed);
         tracing_lost_t::files_t *files = lost->files_accessed.next;
         while (files != nullptr)
@@ -542,10 +568,36 @@ void mvee::log_instruction_trace()
             fprintf(instruction_log, "\t\t\t},\n");
             fprintf(instruction_log, "\t\t\t{\n");
             fprintf(instruction_log, "\t\t\t\t\"file\": \"%s\",\n", files->file);
-            fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\"\n", files->hits);
+            fprintf(instruction_log, "\t\t\t\t\"hits\": \"%d\",\n", files->hits);
             fprintf(instruction_log, "\t\t\t\t\"shadowed\": \"%s\"\n", files->shadowed);
 
             files = files->next;
+        }
+        fprintf(instruction_log, "\t\t\t}\n");
+
+        fprintf(instruction_log, "\t\t],\n");
+
+
+        fprintf(instruction_log, "\t\t\"instructions\": [\n");
+
+        fprintf(instruction_log, "\t\t\t{\n");
+        fprintf(instruction_log, "\t\t\t\t\"instruction\": \"%s\",\n", lost->instructions.full);
+        fprintf(instruction_log, "\t\t\t\t\"instruction pointer\": \"%p\",\n",
+                (void*) lost->instructions.instruction_pointer);
+        fprintf(instruction_log, "\t\t\t\t\"size\": \"%u\",\n", lost->instructions.size);
+        fprintf(instruction_log, "\t\t\t\t\"hits\": \"%u\"\n", lost->instructions.hits);
+        tracing_lost_t::instruction_t *instructions = lost->instructions.next;
+        while (instructions != nullptr)
+        {
+            fprintf(instruction_log, "\t\t\t},\n");
+            fprintf(instruction_log, "\t\t\t{\n");
+            fprintf(instruction_log, "\t\t\t\t\"instruction\": \"%s\",\n", instructions->full);
+            fprintf(instruction_log, "\t\t\t\t\"instruction pointer\": \"%p\",\n",
+                    (void*) instructions->instruction_pointer);
+            fprintf(instruction_log, "\t\t\t\t\"size\": \"%u\",\n", instructions->size);
+            fprintf(instruction_log, "\t\t\t\t\"hits\": \"%u\"\n", instructions->hits);
+
+            instructions = instructions->next;
         }
         fprintf(instruction_log, "\t\t\t}\n");
 
@@ -1490,8 +1542,11 @@ void mvee::log_init()
     else
     {
         debugf("instruction logging file opened @ %s\n", log_name.str().c_str());
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL
         fprintf(mvee::instruction_log, "instruction pointer;decoded;prefixes;opcode;modrm;immediate;"
-                                       "immediate size;full instruction;faulting address;monitor;file;shadowed");
+                                       "immediate size;full instruction;faulting address;monitor;file;shadowed;"
+                                       "binary;original_base;regions_base\n");
+#endif
     }
 #endif
 }

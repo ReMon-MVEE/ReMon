@@ -11,6 +11,7 @@
 #include <MVEE_mman.h>
 #include <sys/mman.h>
 #include <arch/amd64/hde.h>
+#include <sys/stat.h>
 #include "shared_mem_reg_access.h"
 #include "MVEE_interaction.h"
 
@@ -42,7 +43,7 @@
 int             instruction_intent::update                          (void* new_instruction_pointer,
                                                                      void* new_effective_address)
 {
-    // overwrite instruction pointer
+    // overwrite instruction pointer and address accessed
     instruction_pointer = new_instruction_pointer;
     effective_address   = new_effective_address;
 
@@ -106,20 +107,21 @@ __uint8_t       instruction_intent::opcode                          ()
 }
 
 int             instruction_intent::determine_monitor_pointer       (monitor& relevant_monitor, variantstate* variant,
-                                                                     void* variant_address, void** monitor_pointer)
+                                                                     void* variant_address, void** monitor_pointer,
+                                                                     unsigned long long size)
 {
     // translate variant address to monitor address
     mmap_region_info* variant_map_info = relevant_monitor.set_mmap_table->get_shared_info(variant->variant_num,
             (unsigned long long) variant_address);
     if (!variant_map_info)
     {
-        warnf("variant %d address %lx does not have an associated monitor mapping\n",
+        debugf("variant %d address %lx does not have an associated monitor mapping\n",
               variant->variant_num, (unsigned long) variant_address);
-        return -1;
+        return NO_REGION_INFO;
     }
 
     std::shared_ptr<shared_monitor_map_info> monitor_map_info = variant_map_info->shadow;
-    if (!monitor_map_info || monitor_map_info->shadow_base == nullptr)
+    if (!monitor_map_info || !monitor_map_info->shadow_base)
     {
         warnf("variant %d address %lx maps to monitor mapping that points to null or none at all...\n",
               variant->variant_num, (unsigned long)variant_address);
@@ -134,6 +136,14 @@ int             instruction_intent::determine_monitor_pointer       (monitor& re
         warnf("Variant effective address 0x%p does not fall between mapping in variant: [0x%p, 0x%p).\n",
               variant_address, (void*) variant_map_info->region_base_address,
               (void*) (variant_map_info->region_base_address + variant_map_info->region_size));
+        return -1;
+    }
+
+    if (size > 0 && ((unsigned long long) variant_address + size) >
+            variant_map_info->region_base_address + variant_map_info->region_size)
+    {
+        warnf("Instruction, %p + %llx, will go out of range of shared mapping.\n",
+              variant_address, size);
         return -1;
     }
 
@@ -236,12 +246,14 @@ void            instruction_intent::debug_print                     ()
     // wrap up
     output << "\t+------+  > 0x" << std::hex << (unsigned long long) instruction_pointer + MAX_INSTRUCTION_SIZE << "\n";
     output << "\n";
-    output << "size: ";
+    output << "size:   ";
     output << ((int) this->size) << "\n";
+    output << "opcode: 0x";
+    output << std::hex << (this->instruction[this->effective_opcode_index] & 0xffu) << "\n";
     output << "==========================================\n";
 
     // print output
-    mvee::logf("%s", output.str().c_str());
+    debugf("%s", output.str().c_str());
 #endif
 }
 
@@ -265,6 +277,7 @@ void instruction_intent::debug_print_minimal                        ()
 // =====================================================================================================================
 // intent replaying buffer
 // =====================================================================================================================
+/*
                 intent_replay_buffer::intent_replay_buffer          (monitor* relevant_monitor, int variant_count)
 {
     this->variant_count = variant_count;
@@ -289,7 +302,7 @@ int             intent_replay_buffer::continue_access               (unsigned in
     variant_indexes[variant_num]--;
 
     if (instruction_intent_emulation::lookup_table[variant->instruction.opcode()].emulator
-            (variant->instruction, *relevant_monitor, variant) < 0)
+            (variant->instruction, *relevant_monitor, variant) != 0)
         return -1;
 
     variant->regs.rip += variant->instruction.size;
@@ -297,6 +310,8 @@ int             intent_replay_buffer::continue_access               (unsigned in
         return -1;
 
     relevant_monitor->call_resume((int) variant_num);
+    warnf("variant %d supposedly resumed | %llx\n", variant_num, (unsigned long long) variant->instruction.opcode()
+            & 0xffu);
     return 0;
 }
 
@@ -325,8 +340,10 @@ int             intent_replay_buffer::maybe_resume_leader           ()
 
 int             intent_replay_buffer::access_data                   (unsigned int variant_num,
                                                                      instruction_intent* instruction, __uint8_t** data,
-                                                                     __uint8_t data_size, void* monitor_pointer,
-                                                                     __uint8_t** result, __uint8_t result_size)
+                                                                     unsigned long long data_size,
+                                                                     void* monitor_pointer,
+                                                                     __uint8_t** result, unsigned long long result_size,
+                                                                     unsigned int extra_options)
 {
     // bounds check
     if (variant_num >= variant_count)
@@ -350,26 +367,64 @@ int             intent_replay_buffer::access_data                   (unsigned in
 
         // fill in data in intent_replay
         intent_replay* entry = &buffer[variant_indexes[variant_num]];
+        entry->extra = 0;
 
         for (unsigned int i = 0; i < instruction->size; i++)
             entry->instruction[i] = instruction->instruction[i];
         entry->instruction_size = instruction->size;
 
+        // check for previous dynamic allocation
+        if (entry->data != entry->data_buffer && entry->data)
+            free(entry->data);
+        if (entry->result != entry->result_buffer && (entry->extra & SECOND_MEMORY_OPERAND_MASK) && entry->result)
+            free(entry->result);
+
         // todo -- check if this causes race conditions when mapping is being updated, maybe use single instructions.
-        for (unsigned int i = 0; i < data_size; i++)
-            entry->data[i] = (*data)[i];
+        if (data)
+        {
+            if (data_size <= REPLAY_DATA_BUFFER_SIZE)
+            {
+                entry->data = entry->data_buffer;
+                if (!(extra_options & REPLAY_EXTRA_OBTAIN_BUFFER))
+                    for (unsigned int i = 0; i < data_size; i++)
+                        entry->data[i] = (*data)[i];
+
+                // we'll be using the buffer copy, since the monitor runs single threaded, this shouldn't be an issue
+                *data = entry->data;
+            }
+            else
+            {
+                if (extra_options & REPLAY_EXTRA_OBTAIN_BUFFER)
+                    *data = (__uint8_t*) malloc(data_size);
+                entry->data = *data;
+            }
+        }
+        else
+            entry->data = nullptr;
         entry->data_size = data_size;
         entry->monitor_address = monitor_pointer;
 
-        if (*result)
+        if (result && *result)
         {
-            for (unsigned int i = 0; i < result_size; i++)
-                entry->result[i] = (*result)[i];
-            entry->result_size = result_size;
+            if (extra_options & REPLAY_EXTRA_SECOND_MEMORY_OPERAND)
+            {
+                entry->extra |= SECOND_MEMORY_OPERAND_MASK;
+                entry->result = *result;
+            }
+            else if (result_size <= REPLAY_DATA_BUFFER_SIZE)
+            {
+                entry->result = entry->data_buffer;
+                for (unsigned int i = 0; i < result_size; i++)
+                    entry->result[i] = (*result)[i];
+            }
+            else
+            {
+                if (extra_options & REPLAY_EXTRA_OBTAIN_BUFFER)
+                    *result = (__uint8_t*) malloc(result_size);
+                entry->result = *result;
+            }
         }
-
-        // we'll be using the buffer copy, since the monitor runs single threaded, this shouldn't be an issue
-        *data = buffer[variant_indexes[variant_num]].data;
+        entry->result_size = result_size;
 
         // move along to next slot in buffer, this can safely be done
         variant_indexes[variant_num]++;
@@ -394,22 +449,259 @@ int             intent_replay_buffer::access_data                   (unsigned in
     variant_indexes[variant_num] %= INTENT_REPLAY_BUFFER_SIZE;
     if (variant_indexes[variant_num] == variant_indexes[0])
     {
+        instruction->debug_print();
         // make variant wait for more data
         extra |= VARIANTS_WAITING_MASK;
+        warnf("index: %d\n", variant_indexes[variant_num]);
         variant_indexes[variant_num]+=INTENT_REPLAY_BUFFER_SIZE;
+        warnf("index: %d\n\n", variant_indexes[variant_num]);
         return 1;
     }
-    else if (monitor_pointer != buffer[variant_indexes[variant_num]].monitor_address)
+
+    intent_replay* entry = &buffer[variant_indexes[variant_num]];
+    if (monitor_pointer != entry->monitor_address)
         // The same instruction is accessing different memory in the monitor mapping
-        {warnf("%p - %p\n", monitor_pointer, buffer[variant_indexes[variant_num]].monitor_address); return -1;}
+    {
+        warnf("memory operand mismatch %p - %p\n",
+                monitor_pointer, entry->monitor_address);
+        return -1;
+    }
+    else if (entry->data_size != data_size)
+    {
+        warnf("primary size mismatch\n");
+        return -1;
+    }
+    else if (entry->extra & SECOND_MEMORY_OPERAND_MASK)
+    {
+        if (!result || !*result)
+        {
+            warnf("second memory operand expected here\n");
+            return -1;
+        }
+        else if (*result != entry->result)
+        {
+            warnf("second memory operand mismatch | %p - %p\n", (void *) *result, (void *) entry->result);
+            return -1;
+        }
+    }
 
     // we'll be using the buffer copy, since the monitor runs single threaded, this shouldn't be an issue
-    *data = buffer[variant_indexes[variant_num]].data;
-    if (*result)
-        *result = buffer[variant_indexes[variant_num]].result;
+    if (data)
+        *data = entry->data;
+    if (result && *result)
+        *result = entry->result;
 
     // tell variant to proceed
     return 0;
+}
+
+
+int             intent_replay_buffer::advance                       (unsigned int variant_num)
+{
+    // leader
+    if (variant_num == 0)
+    {
+
+    }
+    // followers
+    else
+    {
+
+    }
+
+    return 0;
+}
+*/
+
+
+// construction --------------------------------------------------------------------------------------------------------
+                replay_buffer::replay_buffer                        (monitor* relevant_monitor,
+                                                                     unsigned int replay_buffer_size)
+{
+    // init
+    this->buffer           = (replay_entry*) malloc(replay_buffer_size * sizeof(replay_entry));
+    this->buffer_size      = replay_buffer_size;
+    this->variant_states   = (replay_state*) malloc(mvee::numvariants * sizeof(replay_state));
+    this->variant_count    = mvee::numvariants;
+    this->head             = 0;
+    this->state            = 0;
+    this->relevant_monitor = relevant_monitor;
+
+    // set default values
+    for (unsigned int i = 0; i < this->buffer_size; i++)
+    {
+        this->buffer[i].entry_state     = REPLAY_ENTRY_EMPTY_STATE;
+        this->buffer[i].buffer          = this->buffer[i].static_buffer;
+        this->buffer[i].variants_passed = this->variant_count;
+    }
+    for (unsigned int i = 0; i < this->variant_count; i++)
+    {
+        this->variant_states[i].state         = REPLAY_STATE_RUNNING;
+        this->variant_states[i].current_index = 0;
+    }
+}
+
+
+                replay_buffer::~replay_buffer                       ()
+{
+    for (unsigned int i = 0; i < this->buffer_size; i++)
+        if (this->buffer[i].buffer != this->buffer[i].static_buffer)
+            free(this->buffer[i].buffer);
+    free(this->buffer);
+    free(this->variant_states);
+}
+
+// access and updating -------------------------------------------------------------------------------------------------
+int             replay_buffer::obtain_buffer                        (unsigned int variant_num, void* monitor_pointer,
+                                                                     instruction_intent &instruction, void** requested,
+                                                                     unsigned long long requested_size)
+{
+    if (variant_num >= this->variant_count)
+        return REPLAY_BUFFER_RETURN_ERROR;
+
+    // get current state and entry
+    replay_state* current_state = &this->variant_states[variant_num];
+    replay_entry* current_entry = &this->buffer[current_state->current_index];
+
+    // entry currently empty
+    if (current_entry->entry_state == REPLAY_ENTRY_EMPTY_STATE)
+    {
+        // fill entry
+        for (int i = 0; i < instruction.size; i++)
+            current_entry->instruction[i] = instruction.instruction[i];
+        current_entry->instruction_size = instruction.size;
+
+        if (requested)
+        {
+            if (requested_size > REPLAY_ENTRY_STATIC_BUFFER_SIZE)
+            {
+                current_entry->buffer = (__uint8_t*) malloc(requested_size);
+                if (!current_entry->buffer)
+                {
+                    warnf("could not allocate buffer of size %llu\n", requested_size);
+                    return REPLAY_BUFFER_RETURN_ERROR;
+                }
+            }
+            else
+                current_entry->buffer = current_entry->static_buffer;
+            *requested = current_entry->buffer;
+            current_entry->buffer_size = requested_size;
+        }
+        else
+        {
+            current_entry->buffer      = nullptr;
+            current_entry->buffer_size = 0;
+        }
+
+        current_entry->monitor_pointer = monitor_pointer;
+        current_entry->variants_passed = 0;
+        current_entry->entry_state     = REPLAY_ENTRY_FILLED_STATE;
+
+        // set head
+        this->head = current_state->current_index;
+        return REPLAY_BUFFER_RETURN_FIRST;
+    }
+    // entry not empty, are we leading, i.e. waiting for an empty?
+    else if (current_state->state == REPLAY_STATE_EXPECTING_EMPTY)
+    {
+        this->state |= REPLAY_BUFFER_VARIANTS_WAITING;
+        current_state->state = REPLAY_STATE_WAITING;
+        return REPLAY_BUFFER_RETURN_WAIT;
+    }
+    // this is the entry we're looking for
+    else
+    {
+        // compare instruction
+        if (instruction.size != current_entry->instruction_size)
+            return REPLAY_BUFFER_RETURN_ERROR;
+        for (int i = 0; i < current_entry->instruction_size; i++)
+            if (current_entry->instruction[i] != instruction.instruction[i])
+                return REPLAY_BUFFER_RETURN_ERROR;
+
+        // compare monitor pointer
+        if (current_entry->monitor_pointer != monitor_pointer)
+            return REPLAY_BUFFER_RETURN_ERROR;
+
+        // return buffer
+        if (requested)
+        {
+            if (current_entry->buffer_size != requested_size)
+                return REPLAY_BUFFER_RETURN_ERROR;
+            *requested = current_entry->buffer;
+        }
+        // ok
+        return REPLAY_BUFFER_RETURN_OK;
+    }
+}
+
+
+int             replay_buffer::advance                              (unsigned int variant_num)
+{
+    if (variant_num >= this->variant_count)
+        return REPLAY_BUFFER_RETURN_ERROR;
+
+    // get current state and entry
+    replay_state* current_state = &this->variant_states[variant_num];
+    replay_entry* current_entry = &this->buffer[current_state->current_index];
+    // int temp = current_state->current_index;
+
+    // advance
+    bool change_lead = current_state->current_index == this->head;
+    current_state->current_index = (current_state->current_index + 1) % this->buffer_size;
+    if (change_lead)
+    {
+        // warnf("changing lead\n");
+        for (unsigned int i = 0; i < this->variant_count; i++)
+        {
+            if (variant_states[i].state == REPLAY_STATE_EXPECTING_EMPTY &&
+                    variant_states[i].current_index != current_state->current_index)
+            {
+                variant_states[i].state = REPLAY_STATE_RUNNING;
+            }
+        }
+        current_state->state = REPLAY_STATE_EXPECTING_EMPTY;
+    }
+
+    // entry should be emptied?
+    current_entry->variants_passed++;
+    if (current_entry->variants_passed >= this->variant_count)
+    {
+        if (current_entry->buffer != current_entry->static_buffer)
+            free(current_entry->buffer);
+
+        current_entry->variants_passed = 0;
+        current_entry->entry_state     = REPLAY_ENTRY_EMPTY_STATE;
+
+        // check if variants were waiting for this
+        if (this->state & REPLAY_BUFFER_VARIANTS_WAITING)
+        {
+            this->state &= ~REPLAY_BUFFER_VARIANTS_WAITING;
+
+            for (unsigned int i = 0; i < this->variant_count; i++)
+            {
+                if (this->variant_states[i].state == REPLAY_STATE_WAITING)
+                {
+                    variantstate* variant = &this->relevant_monitor->variants[i];
+                    if (current_state->current_index == this->head)
+                        this->variant_states[i].state = REPLAY_STATE_EXPECTING_EMPTY;
+                    else
+                        this->variant_states[i].state = REPLAY_STATE_RUNNING;
+
+                    if (instruction_intent_emulation::lookup_table[variant->instruction.opcode()].emulator(
+                            variant->instruction, *this->relevant_monitor, variant) != 0)
+                        return REPLAY_BUFFER_RETURN_ERROR;
+
+                    variant->regs.rip += variant->instruction.size;
+                    if (!interaction::write_all_regs(variant->variantpid, &variant->regs))
+                        return REPLAY_BUFFER_RETURN_ERROR;
+
+                    this->relevant_monitor->call_resume((int) i);
+                }
+            }
+        }
+    }
+
+    return REPLAY_BUFFER_RETURN_OK;
 }
 
 
@@ -417,6 +709,7 @@ int             intent_replay_buffer::access_data                   (unsigned in
 //      shadow maintenance
 // =====================================================================================================================
                 shared_monitor_map_info::shared_monitor_map_info    (void* shadow_base, size_t size)
+        : active_shadow_users(0)
 {
     this->shadow_base = shadow_base;
     this->size = size;
@@ -427,32 +720,60 @@ int             intent_replay_buffer::access_data                   (unsigned in
         munmap(this->shadow_base, this->size);
 }
 
-int             mmap_table::shadow_map                              (const char* backing_file,
-                                                                     unsigned int backing_flags, FileType type,
+    int         shared_monitor_map_info::mmap                       ()
+{
+    if (!shadow_base)
+        return -1;
+
+    this->active_shadow_users++;
+    return 0;
+}
+
+    int         shared_monitor_map_info::unmap                      ()
+{
+    this->active_shadow_users--;
+
+    if (this->shadow_base && this->active_shadow_users <= 0)
+        if (munmap(this->shadow_base, this->size))
+            return errno;
+
+    return 0;
+}
+
+int             mmap_table::shadow_map                              (variantstate* variant, fd_info* info,
                                                                      std::shared_ptr<shared_monitor_map_info>* shadow,
                                                                      size_t size, int protection, int flags, int offset)
 {
-    debugf("opening shadow mapping for %s\n", backing_file);
-    unsigned int backing_file_len = strlen(backing_file);
+    // warnf("opening shadow mapping for %s | flags: %d\n", backing_file, backing_flags);
 
     // open file
     int fd = -1;
-    if (type == FT_MEMFD)
+    if (info->file_type == FT_MEMFD)
     {
-        unsigned int added = strlen("/memfd:");
-        if (added <= backing_file_len)
-            fd = memfd_create(backing_file + added, backing_flags & (MFD_HUGETLB | MFD_ALLOW_SEALING | MFD_CLOEXEC));
+        if (info->shadow && info->shadow->size == size)
+        {
+            debugf("This file is already shadow mapped");
+            *shadow = info->shadow;
+            return 0;
+        }
+
+        std::stringstream memfd_file_path;
+        memfd_file_path << "/proc/" << variant->variantpid << "/fd/" << info->fds[0];
+        fd = open(memfd_file_path.str().c_str(), info->access_flags & ~(O_TRUNC | O_CREAT));
     }
     else
-        fd = open(backing_file, backing_flags & ~(O_TRUNC | O_CREAT));
+        fd = open(info->paths[0].c_str(), info->access_flags & ~(O_TRUNC | O_CREAT));
+
+
     if (fd < 0)
     {
-        warnf("could not open file %s to open shared mapping... | error %d\n", backing_file, errno);
+        warnf("could not open file %s to open shared mapping... | error %d\n", info->paths[0].c_str(), errno);
 #ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
-        // we won't be using this anyway
+        // we won't be using this anyway if we're logging
         return -1;
 #endif
     }
+
 
     // map shadow
     errno = 0;
@@ -464,10 +785,11 @@ int             mmap_table::shadow_map                              (const char*
         warnf("\tflags:      %d\n", flags);
         warnf("\tfd:         %d\n", fd);
         warnf("\toffset:     %d\n", offset);
-        warnf("could not map shared file %s | error %d\n", backing_file, errno);
+        warnf("could not map shared file %s | error %d\n", info->paths[0].c_str(), errno);
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
         temp_shadow = nullptr;
-#ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
-        // we won't be using this anyway
+#else
+        // we won't be using this anyway if we're logging
         close(fd);
         return -1;
 #endif
@@ -476,10 +798,8 @@ int             mmap_table::shadow_map                              (const char*
     close(fd);
 
     // bookkeeping
-    char* backing = (char*) malloc(backing_file_len + 1);
-    strncpy(backing, backing_file, backing_file_len + 1);
     *shadow = std::shared_ptr<shared_monitor_map_info>(
-            (shared_monitor_map_info*) malloc((sizeof(shared_monitor_map_info))));
+            (shared_monitor_map_info*) malloc(sizeof(shared_monitor_map_info)));
     (*shadow)->shadow_base = temp_shadow;
     (*shadow)->size = size;
 
@@ -543,12 +863,14 @@ int             mmap_table::munmap_variant_shadow_region            (int variant
         }
     }
 
+    region_info->shadow->unmap();
     region_info->shadow = nullptr;
 
     return 0;
 }
 int             mmap_table::split_variant_shadow_region             (int variant, mmap_region_info* region_info)
 {
+    region_info->shadow->mmap();
     return 0;
 }
 int             mmap_table::merge_variant_shadow_region             (int variant, mmap_region_info* region_info1,
@@ -557,6 +879,7 @@ int             mmap_table::merge_variant_shadow_region             (int variant
     if (region_info1->shadow != region_info2->shadow)
         return -1;
 
+    region_info1->shadow->unmap();
     region_info1->shadow = nullptr;
 
     int to_erase = -1;
@@ -584,9 +907,13 @@ void               mmap_table::debug_shared                         ()
     for (int i = 0; i < mvee::numvariants; i++)
     {
         output << "\tvariant " << i << ":\n";
-        for (auto iter: variant_mappings[i])
-            output << "[ " << iter->region_base_address << "; " << iter->region_base_address + iter->region_size
-                    << " )  -  " << iter->region_backing_file_path.c_str() << "\n";
+        for (auto iter: this->full_map[i])
+            if (iter && iter->shadow)
+                output << "\t  > variant: [ " << std::hex << iter->region_base_address << "; "
+                        << std::hex << iter->region_base_address + iter->region_size << " ) => "
+                        << " monitor: [ " << std::hex << iter->shadow->shadow_base << "; "
+                        << std::hex << (unsigned long long) iter->shadow->shadow_base + iter->shadow->size << " ) "
+                        << "\n\t\t-  " << iter->region_backing_file_path.c_str() << "\n";
     }
     output << "\n";
 
@@ -604,7 +931,6 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
 {
     // temporary local variables
     int status;
-    user_regs_struct temp_regs;
 
 
     // logging stage ---------------------------------------------------------------------------------------------------
@@ -625,17 +951,28 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
     }
 
 
+    std::stringstream instruction_strstream;
+    for (int i = 0; i < MAX_INSTRUCTION_SIZE; i++)
+        instruction_strstream << (instruction[i] < 0x10 ? "0" : "") << std::hex <<
+                              ((unsigned int) instruction[i] & 0xffu) << ((i == MAX_INSTRUCTION_SIZE - 1) ? "" : "-");
+    instruction_strstream << (char) 0x00;
+    char* full_instruction = static_cast<char *>(malloc(instruction_strstream.str().size()));
+    strncpy(full_instruction, instruction_strstream.str().c_str(), instruction_strstream.str().size());
+
+
     if (disassembled.flags & (F_ERROR | F_ERROR_OPCODE | F_ERROR_LENGTH | F_ERROR_LOCK | F_ERROR_OPERAND) ||
             instruction_size == 0)
     {
-        std::stringstream instruction_strstream;
-        for (int i = 0; i < MAX_INSTRUCTION_SIZE; i++)
-            instruction_strstream << (instruction[i] < 0x10 ? "0" : "") << std::hex <<
-                    ((unsigned int) instruction[i] & 0xffu) << ((i == MAX_INSTRUCTION_SIZE - 1) ? "" : "-");
-        instruction_strstream << (char) 0x00;
-
         // log instruction
 #ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL
+        // determine binary
+        mmap_region_info* binary = relevant_monitor.set_mmap_table->get_region_info(variant->variant_num,
+                variant->regs.rip);
+        if (!binary)
+        {
+            warnf("no binary could be determined\n");
+        }
+
         std::stringstream output;
         output << std::hex << variant->regs.rip << ";";
         output << "false;";
@@ -649,6 +986,9 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
         output << relevant_monitor.monitorid << ";";
         output << variant_map_info->region_backing_file_path << ";";
         output << (variant_map_info->shadow->shadow_base == nullptr ? "not shadowed" : "shadowed") << ";";
+        output << binary->region_backing_file_path.c_str() << ";";
+        output << std::hex << (unsigned long long) binary->original_base << ";";
+        output << std::hex << (unsigned long long) binary->region_base_address;
 
         pthread_mutex_lock(&mvee::tracing_lock);
         fprintf(mvee::instruction_log, "%s\n", output.str().c_str());
@@ -682,6 +1022,14 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
                     variant_map_info->shadow->shadow_base == nullptr ? "not shadowed" : "shadowed",
                     nullptr
             };
+            (*lost)->instructions =
+            {
+                    full_instruction,
+                    variant->regs.rip,
+                    instruction_size,
+                    1,
+                    nullptr
+            };
         }
         else
         {
@@ -706,6 +1054,33 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
                 files->next->hits = 1;
                 files->next->shadowed = variant_map_info->shadow->shadow_base == nullptr ? "not shadowed" : "shadowed";
                 files->next->next = nullptr;
+            }
+
+
+            // full instruction
+            tracing_lost_t::instruction_t* instructions = &(*lost)->instructions;
+            bool already_seen = false;
+            do {
+                if (strcmp(instructions->full, full_instruction) == 0) {
+                    already_accessed = true;
+                    break;
+                }
+                if (instructions->next == nullptr)
+                    break;
+                instructions = instructions->next;
+            } while (true);
+
+            if (already_seen)
+                instructions->hits++;
+            else
+            {
+                instructions->next =
+                        static_cast<tracing_lost_t::instruction_t*>(malloc(sizeof(tracing_lost_t::instruction_t)));
+                instructions->next->full = full_instruction;
+                instructions->next->instruction_pointer = variant->regs.rip;
+                instructions->next->size = instruction_size;
+                instructions->next->hits = 1;
+                instructions->next->next = nullptr;
             }
         }
         pthread_mutex_unlock(&mvee::tracing_lock);
@@ -761,16 +1136,20 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
                     << std::hex << ((unsigned int) disassembled.modrm);
         if (disassembled.flags & F_SIB)
             modrm_strstream << "-" << (disassembled.sib < 0x10 ? "0" : "")
-                    << std::hex << ((unsigned int) disassembled.sib) << "-";
+                    << std::hex << ((unsigned int) disassembled.sib);
         if (disassembled.flags & F_DISP8)
             modrm_strstream << "-" << (disassembled.disp.disp8 < 0x10 ? "0" : "")
-                    << std::hex << ((unsigned int) disassembled.disp.disp8);
+                    << std::hex << ((unsigned int) disassembled.disp.disp8 & 0xffu);
         else if (disassembled.flags & F_DISP16)
-            modrm_strstream << "-" << (disassembled.disp.disp16 < 0x10 ? "0" : "")
-                    << std::hex << ((unsigned int) disassembled.disp.disp16);
+            for (unsigned int i = 0; i < 2; i++)
+                modrm_strstream << "-"
+                        << ((((unsigned) disassembled.disp.disp16 >> (i * 8u)) & 0xffu) < 0x10 ? "0" : "")
+                        << std::hex << (((unsigned) disassembled.disp.disp16 >> (i * 8u)) & 0xffu);
         else if (disassembled.flags & F_DISP32)
-            modrm_strstream << "-" << (disassembled.disp.disp32 < 0x10 ? "0" : "")
-                    << std::hex << ((unsigned int) disassembled.disp.disp32);
+            for (unsigned int i = 0; i < 4; i++)
+                modrm_strstream << "-"
+                        << ((((unsigned) disassembled.disp.disp32 >> (i * 8u)) & 0xffu) < 0x10 ? "0" : "")
+                        << std::hex << (((unsigned) disassembled.disp.disp32 >> (i * 8u)) & 0xffu);
         modrm_strstream << (char) 0x00;
 
         char *modrm = (char *) malloc(modrm_strstream.str().size());
@@ -810,6 +1189,14 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
 
         // log instruction
 #ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL
+        // determine binary
+        mmap_region_info* binary = relevant_monitor.set_mmap_table->get_region_info(variant->variant_num,
+                                                                                    variant->regs.rip);
+        if (!binary)
+        {
+            warnf("no binary could be determined\n");
+        }
+
         std::stringstream output;
         output << std::hex << variant->regs.rip << ";";
         output << "true;";
@@ -825,6 +1212,9 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
         output << relevant_monitor.monitorid << ";";
         output << variant_map_info->region_backing_file_path << ";";
         output << (variant_map_info->shadow->shadow_base == nullptr ? "not shadowed" : "shadowed") << ";";
+        output << binary->region_backing_file_path.c_str() << ";";
+        output << std::hex << (unsigned long long) binary->original_base << ";";
+        output << std::hex << (unsigned long long) binary->region_base_address;
 
         pthread_mutex_lock(&mvee::tracing_lock);
         fprintf(mvee::instruction_log, "%s\n", output.str().c_str());
@@ -869,6 +1259,14 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
                     result_file,
                     1,
                     variant_map_info->shadow->shadow_base == nullptr ? "not shadowed" : "shadowed",
+                    nullptr
+            };
+            (*data)->instructions =
+            {
+                    full_instruction,
+                    variant->regs.rip,
+                    instruction_size,
+                    1,
                     nullptr
             };
             (*data)->next = nullptr;
@@ -966,33 +1364,45 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
                 files->next->shadowed = variant_map_info->shadow->shadow_base == nullptr ? "not shadowed" : "shadowed";
                 files->next->next = nullptr;
             }
+
+
+            // full instruction
+            tracing_data_t::instruction_t* instructions = &(*data)->instructions;
+            bool already_seen = false;
+            do {
+                if (strcmp(instructions->full, full_instruction) == 0) {
+                    already_accessed = true;
+                    break;
+                }
+                if (instructions->next == nullptr)
+                    break;
+                instructions = instructions->next;
+            } while (true);
+
+            if (already_seen)
+                instructions->hits++;
+            else
+            {
+                instructions->next =
+                        static_cast<tracing_data_t::instruction_t*>(malloc(sizeof(tracing_data_t::instruction_t)));
+                instructions->next->full = full_instruction;
+                instructions->next->instruction_pointer = variant->regs.rip;
+                instructions->next->size = instruction_size;
+                instructions->next->hits = 1;
+                instructions->next->next = nullptr;
+            }
         }
         pthread_mutex_unlock(&mvee::tracing_lock);
 #endif
     }
     // -----------------------------------------------------------------------------------------------------------------
 
-
-    // user local register struct --------------------------------------------------------------------------------------
-    temp_regs = variant->regs;
-    // -----------------------------------------------------------------------------------------------------------------
-
-    temp_regs.orig_rax = __NR_mprotect;
-    temp_regs.rax = __NR_mprotect;
-    temp_regs.rdi = variant_map_info->region_base_address;
-    temp_regs.rsi = variant_map_info->region_size;
-    temp_regs.rdx = variant_map_info->region_prot_flags;
-    temp_regs.rip = (unsigned long long) variant->syscall_pointer;
-
-    if (!interaction::write_all_regs(variant->variantpid, &temp_regs)) {
-        return false;
-    }
-
     acquire_shm_protected_memory_for_access shm_access(relevant_monitor, variant_map_info, variant, address);
 
     debugf("Acquiring first mapping...\n");
+    debugf("%p\n", (void*) address);
     if (!shm_access.acquire()) {
-        warnf("Mapping shared memory as temporarily accessible failed!\n");
+        warnf("Mapping shared memory as temporarily accessible failed! - make sure LD_LOADER is configured\n");
         return -1;
     }
 
@@ -1010,7 +1420,7 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
     if (!interaction::read_all_regs(variant->variantpid, &variant->regs))
         return -1;
 
-    if (WIFSTOPPED(status) && WSTOPSIG(status) == 11)
+    if (WIFSTOPPED(status) && WSTOPSIG(status) == SIGSEGV)
     {
         siginfo_t siginfo;
         if (ptrace(PTRACE_GETSIGINFO, variant->variantpid, nullptr, &siginfo) != 0)
@@ -1036,11 +1446,11 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
         if (!interaction::read_all_regs(variant->variantpid, &variant->regs))
             return -1;
 
-        if (WIFSTOPPED(status) && WSTOPSIG(status) == 11)
+        if (WIFSTOPPED(status) && WSTOPSIG(status) == SIGSEGV)
             return -1;
 
         if (!second_shm_access.release(false /* the next shm_access.release will do the restore_registers */)) {
-            warnf("Mapping second shared memory as no longer acessible failed!\n");
+            warnf("Mapping second shared memory as no longer accessible failed!\n");
             return -1;
         }
     }
@@ -1075,7 +1485,8 @@ acquire_shm_protected_memory_for_access::acquire_shm_protected_memory_for_access
       address(address)
 {
     // get shared mem info
-    variant_map_info = relevant_monitor.set_mmap_table->get_shared_info(variant->variant_num, (unsigned long long) address);
+    variant_map_info = relevant_monitor.set_mmap_table->get_shared_info(variant->variant_num,
+            (unsigned long long) address);
     if (!variant_map_info)
     {
         warnf("Could not identify shared mapping in constructor of acquire_shm_protected_memory_for_access...\n");
@@ -1127,6 +1538,7 @@ bool acquire_shm_protected_memory_for_access::acquire()
         warnf("address: %p\n", address);
         warnf("protection: %d\n", variant_map_info->region_prot_flags);
         warnf("base: %p\n", (void*) variant_map_info->region_base_address);
+        warnf("make sure LD_LOADER is configured for tracing");
 
         relevant_monitor.set_mmap_table->debug_shared();
 
@@ -1143,7 +1555,6 @@ bool acquire_shm_protected_memory_for_access::release(bool restore_registers)
 
     // reset protection ------------------------------------------------------------------------------------------------
     // mprotect syscall to disable shared mapping
-    temp_regs = variant->regs;
     temp_regs.orig_rax = __NR_mprotect;
     temp_regs.rax = __NR_mprotect;
     temp_regs.rdi = variant_map_info->region_base_address;
@@ -1173,16 +1584,17 @@ bool acquire_shm_protected_memory_for_access::release(bool restore_registers)
 
     if (temp_regs.rax != 0)
     {
-        warnf("mprotect failed while disabling\n");
-        warnf("accessed: %p\n", address);
+        warnf("mprotect failed while disabling - %lld\n", temp_regs.rax);
+        warnf("accessed:   %p\n", address);
         warnf("protection: %d\n", variant_map_info->region_prot_flags);
-        warnf("address: %p\n", (void*) variant_map_info->region_base_address);
+        warnf("address:    %p\n", (void*) variant_map_info->region_base_address);
+        warnf("returned:   %d\n", (int) temp_regs.rax);
         return false;
     }
     // -----------------------------------------------------------------------------------------------------------------
 
     if (restore_registers) {
-        // prepare to resume execution as if nothing happened -------------------------------------------------------------------------
+        // prepare to resume execution as if nothing happened ----------------------------------------------------------
         if (!interaction::write_all_regs(variant->variantpid, &variant->regs)) {
             return false;
         }

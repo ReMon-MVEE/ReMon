@@ -338,7 +338,7 @@ bool monitor::handle_is_known_false_positive(const char* program_name, long call
 		// Allow MVEE_LD_Loader to open compile-time diversified variants
 		if (set_mmap_table->have_diversified_variants)
 		{
-			true_positive = false;
+            true_positive = false;
 			for (int i = 0; i < mvee::numvariants; ++i)
 			{
 				if (files[i].compare(set_mmap_table->mmap_startup_info[i].image) != 0)
@@ -4798,18 +4798,21 @@ POSTCALL(recvmsg)
 {
     REPLICATEMSGVECTOR(2);
 
-	fd_info* info = set_fd_table->get_fd_info(ARG1(0));
-	if (info && info->paths[0].find("domainsock:") == 0)
-	{
-		std::set<int> fds = call_get_fd_set_from_domain_msgvector((struct msghdr*) ARG2(0));
-		for (auto fd : fds)
-		{
-			debugf("%s - SYS_RECVMSG received fd from domain socket: %d\n",
-				   call_get_variant_pidstr(0).c_str(), fd);
+    // I get the feeling this should only execute if the call succeeded. If this is not the case, the message length
+    // causes a segfault
+    if (!call_succeeded)
+        return 0;
 
-			set_fd_table->create_master_fd_info_from_proc(fd, variants[0].variantpid);
-		}
-	}
+    fd_info *info = set_fd_table->get_fd_info(ARG1(0));
+    if (info && info->paths[0].find("domainsock:") == 0) {
+        std::set<int> fds = call_get_fd_set_from_domain_msgvector((struct msghdr *) ARG2(0));
+        for (auto fd : fds) {
+            debugf("%s - SYS_RECVMSG received fd from domain socket: %d\n",
+                   call_get_variant_pidstr(0).c_str(), fd);
+
+            set_fd_table->create_master_fd_info_from_proc(fd, variants[0].variantpid);
+        }
+    }
 	
     return 0;
 }
@@ -6999,10 +7002,19 @@ PRECALL(mmap)
         flags &= ~MAP_SHARED;
         flags |= MAP_PRIVATE;
 #endif
+        fd_info* info = set_fd_table->get_fd_info(ARG5(0));
+
         for (int variant_num = 0; variant_num < mvee::numvariants; variant_num++)
         {
             // remove shared mapping option from flags for all variants, making each mapping private
-            SETARG4(variant_num, flags);
+            if (variant_num != 0 && info->master_file)
+            {
+                SETARG4(variant_num, flags | MAP_ANONYMOUS);
+                SETARG5(variant_num, -1);
+                SETARG6(variant_num, 0);
+            }
+            else
+                SETARG4(variant_num, flags);
             // set none mapping
             SETARG3(variant_num, PROT_NONE);
         }
@@ -7276,8 +7288,7 @@ POSTCALL(mmap)
 #ifdef MVEE_EMULATE_SHARED_MEMORY
         if (ARG3(0) & (PROT_READ | PROT_WRITE) && ARG4(0) & MAP_SHARED)
         {
-            if (set_mmap_table->shadow_map(info->paths[0].c_str(), info->access_flags, info->file_type, &shadow,
-                    ARG2(0), ARG3(0), ARG4(0), ARG6(0)) < 0)
+            if (set_mmap_table->shadow_map(&variants[0], info, &shadow, ARG2(0), ARG3(0), ARG4(0), ARG6(0)) < 0)
             {
                 warnf("could not create shadow mapping...\n");
                 shutdown(false);
@@ -7389,12 +7400,27 @@ POSTCALL(mmap)
 			}
 		}
 
+        std::shared_ptr<shared_monitor_map_info> shadow = nullptr;
+#ifdef MVEE_EMULATE_SHARED_MEMORY
+        if (ARG3(variantnum) & (PROT_READ | PROT_WRITE) && ARG4(variantnum) & MAP_SHARED)
+        {
+            if (set_mmap_table->shadow_map(&variants[0], info, &shadow, ARG2(variantnum), ARG3(variantnum),
+                    ARG4(variantnum), ARG6(variantnum)) < 0)
+            {
+                warnf("could not create shadow mapping...\n");
+                shutdown(false);
+                return 0;
+            }
+        }
+#endif
+
 		unsigned int actual_offset = ARG6(variantnum);
 #ifdef __NR_mmap2
 		if (variants[variantnum].prevcallnum == __NR_mmap2)
 			actual_offset *= 4096;
 #endif
-		set_mmap_table->map_range(variantnum, result, ARG2(variantnum), ARG4(variantnum), ARG3(variantnum), info, actual_offset);
+		set_mmap_table->map_range(variantnum, result, ARG2(variantnum), ARG4(variantnum), ARG3(variantnum), info,
+		        actual_offset, shadow);
 		set_mmap_table->verify_mman_table(variantnum, variants[variantnum].variantpid);
 
 // old code that did fast forwarding to the entry point

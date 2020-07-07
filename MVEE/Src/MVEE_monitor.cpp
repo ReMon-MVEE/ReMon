@@ -203,7 +203,7 @@ void monitor::init()
 }
 
 monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap_table, bool shares_sighand_table, bool shares_tgid)
-        : replay_buffer(this, mvee::numvariants)
+        : replay_buffer(this)
 {
     init();
 
@@ -247,7 +247,7 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
 }
 
 monitor::monitor(std::vector<pid_t>& pids)
-        : replay_buffer(this, mvee::numvariants)
+        : replay_buffer(this)
 {
     init();
 
@@ -980,7 +980,7 @@ nobacktrace:
 	}
 
 
-    replay_buffer.~intent_replay_buffer();
+    replay_buffer.~replay_buffer();
 
     return;
 }
@@ -2174,31 +2174,36 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                 return;
                 // log instruction =====================================================================================
 #endif
-
                 // update the intent for the faulting variant
                 instruction_intent* instruction = &variant->instruction;
                 instruction->update((void*) variant->regs.rip, siginfo.si_addr);
-                // if (variantnum == 0)
-                //     instruction->debug_print_minimal();
-
 
                 int result;
                 if ((result = instruction_intent_emulation::lookup_table[instruction->opcode()].emulator(*instruction,
                         *this, variant)) != 0)
                 {
-                    if (result < 0)
+                    if (result == REPLAY_BUFFER_RETURN_WAIT)
+                    {
+                        debugf("variant %d asked to wait\n\n", variantnum);
+                        return;
+                    }
+                    else if (result < 0)
                     {
 #ifdef JNS_DEBUG
                         variant->instruction.debug_print();
+                        mmap_region_info* region =this->set_mmap_table->get_region_info(variantnum,
+                                variants[variantnum].regs.rip, 0);
+                        if (!region)
+                            debugf("could not find location of instruction\n");
+                        else
+                        {
+                            debugf("instruction in %s at offset %llx\n",
+                                    region->region_backing_file_path.c_str(),
+                                   variants[variantnum].regs.rip - region->region_base_address);
+                        }
 #endif
                         warnf("something went wrong\n");
                         signal_shutdown();
-                        return;
-                    }
-
-                    if (result > 0)
-                    {
-                        // warnf("variant %d asked to wait\n\n", variantnum);
                         return;
                     }
                 }
@@ -2209,15 +2214,6 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                 if (!interaction::write_all_regs(variant->variantpid, &variant->regs))
                     warnf("\n\n\nerror\n\n\n");
 
-                // quick check if the leader is waiting
-                if (replay_buffer.extra & LEADER_WAITING_MASK)
-                    if (replay_buffer.maybe_resume_leader())
-                    {
-                        warnf("could not resume leader.\n");
-                        signal_shutdown();
-                        return;
-                    }
-
                 call_resume(variantnum);
                 return;
             }
@@ -2226,12 +2222,6 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
 
             std::string caller_info = set_mmap_table->get_caller_info(variantnum, variants[variantnum].variantpid, ip, 0);
 
-#ifndef MVEE_BENCHMARK
-			debugf("%s - variant crashed - trapping ins: %s\n", 
-				   call_get_variant_pidstr(variantnum).c_str(), caller_info.c_str());
-			if (caller_info.find("mvee_log_stack at") != std::string::npos)
-				skip_segv = true;
-#endif
 
 			// check for cpuid exception
 #ifdef MVEE_EMULATE_CPUID
@@ -2252,6 +2242,13 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                 call_resume(variantnum);
                 return;
             }
+#endif
+
+#ifndef MVEE_BENCHMARK
+            debugf("%s - variant crashed - trapping ins: %s\n",
+                   call_get_variant_pidstr(variantnum).c_str(), caller_info.c_str());
+            if (caller_info.find("mvee_log_stack at") != std::string::npos)
+                skip_segv = true;
 #endif
 
 			if (caller_info.find("rb_xcheck at") != std::string::npos)
