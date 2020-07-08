@@ -1156,7 +1156,7 @@ private:
 	std::stringstream mismatch_info;                          // cached mismatch info
 
     // shared memory ===================================================================================================
-    replay_buffer                     replay_buffer;
+    replay_buffer                     buffer;
     // shared memory ===================================================================================================
 };
 

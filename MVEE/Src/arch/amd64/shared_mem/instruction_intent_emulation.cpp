@@ -104,20 +104,20 @@ for (int i = 0; i < size; i++)                                                  
 
 
 #define REPLAY_BUFFER_ADVANCE                                                                                          \
-if (relevant_monitor.replay_buffer.advance(variant->variant_num) != 0)                                                 \
+if (relevant_monitor.buffer.advance(variant->variant_num) != 0)                                                 \
     return -1;
 
 
 #define GET_BUFFER_RAW(monitor_pointer, size)                                                                          \
 void* buffer;                                                                                                          \
-int result = relevant_monitor.replay_buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,          \
+int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,          \
         &buffer, size);                                                                                                \
 if (result < 0)                                                                                                        \
     return result;
 
 
 #define GET_NULL_BUFFER(monitor_pointer)                                                                               \
-int result = relevant_monitor.replay_buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,          \
+int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,          \
         nullptr, 0);                                                                                                   \
 if (result < 0)                                                                                                        \
     return result;                                                                                                     \
@@ -130,7 +130,7 @@ else if (result != REPLAY_BUFFER_RETURN_FIRST)                                  
 
 #define GET_BUFFER_CHECK_OR_FILL(monitor_pointer, source, size)                                                        \
 void* buffer;                                                                                                          \
-int result = relevant_monitor.replay_buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,          \
+int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,          \
         &buffer, size);                                                                                                \
 if (result < 0)                                                                                                        \
     return result;                                                                                                     \
@@ -148,7 +148,7 @@ else                                                                            
 
 #define GET_BUFFER_REPLACE(monitor_pointer, size)                                                                      \
 void* buffer;                                                                                                          \
-int result = relevant_monitor.replay_buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,          \
+int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,          \
         &buffer, size);                                                                                                \
 if (result < 0)                                                                                                        \
     return result;                                                                                                     \
@@ -161,7 +161,7 @@ monitor_pointer = buffer;
 
 #define GET_BUFFER_IMITATE_RESULT(monitor_pointer, destination_buffer, size)                                           \
 void* buffer;                                                                                                          \
-int result = relevant_monitor.replay_buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,          \
+int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,          \
         &buffer, size);                                                                                                \
 if (result < 0)                                                                                                        \
     return result;                                                                                                     \
