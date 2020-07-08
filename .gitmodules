@@ -1,0 +1,7 @@
+[submodule "deps/llvm"]
+	path = deps/llvm
+	url = https://github.com/csl-ugent/ReMon-llvm-project.git
+	branch = ReMon
+[submodule "deps/binutils"]
+	path = deps/binutils
+	url = https://sourceware.org/git/binutils-gdb.git

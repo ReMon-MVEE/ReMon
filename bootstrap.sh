@@ -3,22 +3,16 @@ set -e
 
 ORIG_PWD=$(pwd)
 
-mkdir -p deps
-
 # Install the necessary ubuntu packages
 if [ -e /usr/bin/apt ]
 then
     sudo apt install ruby gcc g++ libselinux-dev musl-tools libelf-dev libdwarf-dev libgmp-dev libmpfr-dev libmpc-dev libconfig-dev libcap-dev cmake bison flex git texinfo texi2html zlib1g-dev libunwind8 libunwind8-dev liblzma5 liblzma-dev automake
 fi
 
-# Download & Install binutils
-if [ ! -e deps/binutils ]
-then
-    wget ftp://sourceware.org/pub/binutils/snapshots/binutils-2.30.90.tar.xz
-    tar xJf binutils-2.30.90.tar.xz
-    mv binutils-2.30.90 deps/binutils
-    #	git clone git://sourceware.org/git/binutils-gdb.git deps/binutils
-fi
+# Download submodules
+git submodule update --init --recursive
+
+# Install binutils
 if [ ! -e deps/binutils/build-tree ]
 then
     mkdir -p deps/binutils/build-tree
@@ -28,11 +22,7 @@ then
     cd ../../../
 fi
 
-# Download & Install ReMon LLVM
-if [ ! -e deps/llvm ]
-then
-    git clone https://github.com/csl-ugent/ReMon-llvm-project.git deps/llvm
-fi
+# Install ReMon LLVM
 if [ ! -e deps/llvm/build-tree ]
 then
     mkdir -p deps/llvm/build-tree

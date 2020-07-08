@@ -25,23 +25,7 @@ build_docker() {
 }
 
 download_deps() {
-    mkdir -p deps
-
-    # download binutils
-    if [ ! -e deps/binutils ]
-    then
-        wget ftp://sourceware.org/pub/binutils/snapshots/binutils-2.30.90.tar.xz
-        tar xJf binutils-2.30.90.tar.xz
-        mv binutils-2.30.90 deps/binutils
-        #	git clone git://sourceware.org/git/binutils-gdb.git deps/binutils
-        rm binutils-2.30.90.tar.xz
-    fi
-
-    # download remon llvm
-    if [ ! -e deps/llvm ]
-    then
-        git clone https://github.com/csl-ugent/ReMon-llvm-project.git deps/llvm
-    fi
+    git submodule update --init --recursive
 
     # Set the version for the patched libc
     ./scripts/switch_patched_binaries.sh ubuntu20
