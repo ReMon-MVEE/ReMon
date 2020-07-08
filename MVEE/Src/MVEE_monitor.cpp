@@ -203,7 +203,7 @@ void monitor::init()
 }
 
 monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap_table, bool shares_sighand_table, bool shares_tgid)
-        : replay_buffer(this)
+        : buffer(this)
 {
     init();
 
@@ -247,7 +247,7 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
 }
 
 monitor::monitor(std::vector<pid_t>& pids)
-        : replay_buffer(this)
+        : buffer(this)
 {
     init();
 
@@ -980,7 +980,7 @@ nobacktrace:
 	}
 
 
-    replay_buffer.~replay_buffer();
+    buffer.~replay_buffer();
 
     return;
 }
