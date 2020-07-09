@@ -23,6 +23,7 @@
 class monitor;
 class variantstate;
 class instruction_intent_emulation;
+class mmap_region_info;
 
 
 // =====================================================================================================================
@@ -628,7 +629,8 @@ class instruction_tracing
 {
 public:
     static int      log_shared_instruction                          (monitor &relevant_monitor,
-                                                                     variantstate* variant, void* address);
+                                                                     variantstate* variant, void* address,
+                                                                     mmap_region_info* variant_map_info);
 };
 
 struct tracing_data_t

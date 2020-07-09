@@ -7,8 +7,8 @@
 
 #include <ios>
 #include <MVEE.h>
-#include <MVEE_monitor.h>
 #include <MVEE_mman.h>
+#include <MVEE_monitor.h>
 #include <sys/mman.h>
 #include <arch/amd64/hde.h>
 #include <sys/stat.h>
@@ -927,7 +927,8 @@ void               mmap_table::debug_shared                         ()
 // =====================================================================================================================
 #ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
 int             instruction_tracing::log_shared_instruction         (monitor &relevant_monitor,
-                                                                     variantstate* variant, void* address)
+                                                                     variantstate* variant, void* address,
+                                                                     mmap_region_info* variant_map_info)
 {
     // temporary local variables
     int status;
@@ -940,15 +941,6 @@ int             instruction_tracing::log_shared_instruction         (monitor &re
         return -1;
     hde64s disassembled;
     unsigned int instruction_size = hde64_disasm(instruction, &disassembled);
-
-    // get shared mem info
-    mmap_region_info* variant_map_info = relevant_monitor.set_mmap_table->get_shared_info(variant->variant_num,
-            (unsigned long long) address);
-    if (!variant_map_info)
-    {
-        warnf("Could not identify shared mapping...\n");
-        return -1;
-    }
 
 
     std::stringstream instruction_strstream;

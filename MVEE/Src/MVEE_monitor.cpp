@@ -2169,11 +2169,30 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
             {
 #ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
                 // log instruction =====================================================================================
-                if (instruction_tracing::log_shared_instruction(*this, variant, siginfo.si_addr) < 0)
-                    signal_shutdown();
-                return;
+                mmap_region_info* variant_map_info = set_mmap_table->get_shared_info(variant->variant_num,
+                        (unsigned long long) siginfo.si_addr);
+                if (variant_map_info)
+                {
+                    if (instruction_tracing::log_shared_instruction(*this, variant, siginfo.si_addr,
+                        variant_map_info) < 0)
+                    {
+                        // set_mmap_table->print_mmap_table(warnf);
+                        mmap_region_info* region = set_mmap_table->get_region_info(variantnum, variant->regs.rip,
+                                0);
+                        if (region)
+                            warnf("segfault in %s at offset %p\n", region->region_backing_file_path.c_str(),
+                                  (void*) (variant->regs.rip - region->region_base_address));
+                        else
+                            warnf("no region could be determined\n");
+                        instruction_intent* instruction = &variant->instruction;
+                        instruction->update((void*) variant->regs.rip, siginfo.si_addr);
+                        instruction->debug_print_minimal();
+                        signal_shutdown();
+                    }
+                    return;
+                }
                 // log instruction =====================================================================================
-#endif
+#else
                 // update the intent for the faulting variant
                 instruction_intent* instruction = &variant->instruction;
                 instruction->update((void*) variant->regs.rip, siginfo.si_addr);
@@ -2216,6 +2235,8 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
 
                 call_resume(variantnum);
                 return;
+
+#endif
             }
             // shared memory access ====================================================================================
 #endif
