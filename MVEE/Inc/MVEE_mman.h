@@ -170,6 +170,8 @@ public:
     std::shared_ptr<shared_monitor_map_info>
                   shadow;
     void*         original_base;
+    mmap_region_info*
+                  connected;
 
     //
     // Debugging/Backtracing support
@@ -307,7 +309,8 @@ public:
     bool        map_range                   (int variantnum, unsigned long address, unsigned long size,
                                              unsigned int map_flags, unsigned int prot_flags,
                                              fd_info* region_backing_file, unsigned int region_backing_file_offset,
-                                             std::shared_ptr<shared_monitor_map_info> shadow = nullptr);
+                                             std::shared_ptr<shared_monitor_map_info> shadow = nullptr,
+                                             mmap_region_info* connected = nullptr);
 	unsigned long find_image_base           (int variantnum, std::string image_name);
 
     //

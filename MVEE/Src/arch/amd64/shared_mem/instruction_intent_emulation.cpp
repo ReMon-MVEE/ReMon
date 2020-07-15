@@ -44,7 +44,7 @@ if (GET_MOD_CODE((unsigned) modrm) == 0b11u)                                    
     return -1;                                                                                                         \
 /* memory reference otherwise, so determine the monitor relevant pointer */                                            \
 if (instruction.determine_monitor_pointer(relevant_monitor, variant, instruction.effective_address, &pointer) < 0)     \
-    return -1;
+    return UNKNOWN_MEMORY_TERMINATION;
 
 
 #define LOAD_REG_CODE(pointer, lookup)                                                                                 \
@@ -68,28 +68,6 @@ pointer = shared_mem_register_access::lookup[reg_code](regs_struct);
 if (!instruction.immediate_operand_index)                                                                              \
     return -1;                                                                                                         \
 pointer = &instruction.instruction[instruction.immediate_operand_index];
-
-/*
-#define CHECK_FROM_SHARED_MEMORY(size)                                                                                 \
-int result;                                                                                                            \
-if ((result = relevant_monitor.replay_buffer.access_data(variant->variant_num, &instruction,                           \
-        (__uint8_t**) &source, size, source)) != 0)                                                                    \
-    return result;
-
-#define CHECK_TO_SHARED_MEMORY(size)                                                                                   \
-void* intermediate = source;                                                                                           \
-auto result = relevant_monitor.replay_buffer.access_data(variant->variant_num, &instruction,                           \
-        (__uint8_t**) &intermediate, size, destination);                                                               \
-if (result != 0)                                                                                                       \
-    return result;                                                                                                     \
-if (variant->variant_num != 0)                                                                                         \
-{                                                                                                                      \
-    for (int i = 0; i < size; i++)                                                                                     \
-        if (((__uint8_t*) intermediate)[i] != ((__uint8_t*) source)[i])                                                \
-            return -1;                                                                                                 \
-    return 0;                                                                                                          \
-}
- */
 
 
 #define COMPARE_BUFFERS(first, second, size)                                                                           \
@@ -117,7 +95,7 @@ if (result < 0)                                                                 
 
 
 #define GET_NULL_BUFFER(monitor_pointer)                                                                               \
-int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,          \
+int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,                 \
         nullptr, 0);                                                                                                   \
 if (result < 0)                                                                                                        \
     return result;                                                                                                     \
@@ -128,19 +106,19 @@ else if (result != REPLAY_BUFFER_RETURN_FIRST)                                  
 }
 
 
-#define GET_BUFFER_CHECK_OR_FILL(monitor_pointer, source, size)                                                        \
+#define GET_BUFFER_CHECK_OR_FILL(monitor_pointer, to_check, size)                                                      \
 void* buffer;                                                                                                          \
-int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,          \
+int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,                 \
         &buffer, size);                                                                                                \
 if (result < 0)                                                                                                        \
     return result;                                                                                                     \
 if (result == REPLAY_BUFFER_RETURN_FIRST)                                                                              \
 {                                                                                                                      \
-    COPY_BUFFER(buffer, source, size)                                                                                  \
+    COPY_BUFFER(buffer, to_check, size)                                                                                \
 }                                                                                                                      \
 else                                                                                                                   \
 {                                                                                                                      \
-    COMPARE_BUFFERS(buffer, source, size)                                                                              \
+    COMPARE_BUFFERS(buffer, to_check, size)                                                                            \
     REPLAY_BUFFER_ADVANCE                                                                                              \
     return 0;                                                                                                          \
 }
@@ -148,8 +126,7 @@ else                                                                            
 
 #define GET_BUFFER_REPLACE(monitor_pointer, size)                                                                      \
 void* buffer;                                                                                                          \
-int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,          \
-        &buffer, size);                                                                                                \
+int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction, &buffer, size); \
 if (result < 0)                                                                                                        \
     return result;                                                                                                     \
 if (result == REPLAY_BUFFER_RETURN_FIRST)                                                                              \
@@ -161,8 +138,7 @@ monitor_pointer = buffer;
 
 #define GET_BUFFER_IMITATE_RESULT(monitor_pointer, destination_buffer, size)                                           \
 void* buffer;                                                                                                          \
-int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,          \
-        &buffer, size);                                                                                                \
+int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction, &buffer, size); \
 if (result < 0)                                                                                                        \
     return result;                                                                                                     \
 if (result != REPLAY_BUFFER_RETURN_FIRST)                                                                              \
@@ -172,19 +148,6 @@ if (result != REPLAY_BUFFER_RETURN_FIRST)                                       
     return 0;                                                                                                          \
 }                                                                                                                      \
 monitor_pointer = buffer;
-
-
-/*
-#define EMULATE_TO_SHARED_MEMORY(size)                                                                                 \
-if (variant->variant_num != 0)                                                                                         \
-{                                                                                                                      \
-    auto access_result = relevant_monitor.replay_buffer.access_data(variant->variant_num, &instruction,                \
-            (__uint8_t**) &destination, size, destination);                                                            \
-    if (access_result != 0)                                                                                            \
-        return access_result;                                                                                          \
-}
-*/
-
 
 
 // =====================================================================================================================
@@ -1477,7 +1440,121 @@ BYTE_EMULATOR_IMPL(0x83)
 
 
 /* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0x87)
+BYTE_EMULATOR_IMPL(0x87)
+{
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        instruction.debug_print_minimal();
+        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+
+        // 64-bit
+        if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
+        {
+            GET_BUFFER_RAW(destination, 2 * sizeof(__uint64_t))
+            auto orig_src = (__uint64_t*) buffer;
+            auto repl_src = ((__uint64_t*) buffer) + 1;
+
+            if (result != REPLAY_BUFFER_RETURN_FIRST)
+            {
+                if (*orig_src != *(__uint64_t*) source)
+                    return -1;
+
+                *(__uint64_t*) source = *repl_src;
+
+                REPLAY_BUFFER_ADVANCE
+                return 0;
+            }
+
+            *orig_src = *(__uint64_t*) source;
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "mov r15, QWORD PTR [rdx];"
+                    "lock xchg QWORD PTR [rax], r15;"
+                    "mov QWORD PTR [rdx], r15;"
+                    ".att_syntax;"
+                    :
+                    : "a" (destination), "d" (source)
+                    : "r15"
+            );
+            *repl_src = *(__uint64_t*) source;
+            warnf("64-bit %llx -> %llx\n", ((unsigned long long) *orig_src), ((unsigned long long) *repl_src));
+        }
+        // 16-bit
+        else if (PREFIXES_GRP_THREE_PRESENT(instruction))
+        {
+            GET_BUFFER_RAW(destination, 2 * sizeof(__uint16_t))
+            auto orig_src = (__uint16_t*) buffer;
+            auto repl_src = ((__uint16_t*) buffer) + 1;
+
+            if (result != REPLAY_BUFFER_RETURN_FIRST)
+            {
+                if (*orig_src != *(__uint16_t*) source)
+                    return -1;
+
+                *(__uint16_t*) source = *repl_src;
+
+                REPLAY_BUFFER_ADVANCE
+                return 0;
+            }
+
+            *orig_src = *(__uint16_t*) source;
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "mov r15w, WORD PTR [rdx];"
+                    "lock xchg WORD PTR [rax], r15w;"
+                    "mov WORD PTR [rdx], r15w;"
+                    ".att_syntax;"
+                    :
+                    : "a" (destination), "d" (source)
+                    : "r15"
+            );
+            *repl_src = *(__uint16_t*) source;
+            warnf("16-bit %llx -> %llx\n", ((unsigned long long) *orig_src) & 0xffffu, ((unsigned long long) *repl_src) & 0xffffu);
+        }
+        // 32-bit
+        else
+        {
+            GET_BUFFER_RAW(destination, 2 * sizeof(__uint32_t))
+            auto orig_src = (__uint32_t*) buffer;
+            auto repl_src = ((__uint32_t*) buffer) + 1;
+
+            if (result != REPLAY_BUFFER_RETURN_FIRST)
+            {
+                if (*orig_src != *(__uint32_t*) source)
+                    return -1;
+
+                *(__uint32_t*) source = *repl_src;
+
+                REPLAY_BUFFER_ADVANCE
+                return 0;
+            }
+
+            *orig_src = *(__uint32_t*) source;
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "mov r15d, DWORD PTR [rdx];"
+                    "lock xchg DWORD PTR [rax], r15d;"
+                    "mov DWORD PTR [rdx], r15d;"
+                    ".att_syntax;"
+                    :
+                    : "a" (destination), "d" (source)
+                    : "r15"
+            );
+            *repl_src = *(__uint32_t*) source;
+            warnf("32-bit %llx -> %llx\n", ((unsigned long long) *orig_src) & 0xffffffffu, ((unsigned long long) *repl_src) & 0xffffffffu);
+        }
+
+        // no need to write back registers here
+        REPLAY_BUFFER_ADVANCE
+        return 0;
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Valid in first round */

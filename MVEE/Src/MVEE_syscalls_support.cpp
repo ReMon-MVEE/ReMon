@@ -218,6 +218,14 @@ bool monitor::call_compare_variant_buffers(std::vector<const unsigned char*>& bu
 
 		if (memcmp(buf1, buf2, size) != 0)
         {
+            /* little address sensitive hack for mplayer */
+            /*
+            std::string first_buf((char*) buf1, size);
+            std::string second_buf((char*) buf2, size);
+            match = !first_buf.find("[mov,mp4,m4a,3gp,3g2,mj2 @ ") &&
+                    !second_buf.find("[mov,mp4,m4a,3gp,3g2,mj2 @ ");
+            */
+            /* little address sensitive hack for mplayer */
             match = false;
             break;
         }

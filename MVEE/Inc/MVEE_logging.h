@@ -22,6 +22,8 @@
 #define LOCALLOGNAME         "%s/Logs/MVEE_%d.log"
 #define LOGDIR               "./Logs/"
 #define LOGNAME              "./Logs/MVEE.log"
+#define NON_INSTRUMENTED_LOGNAME                                                                                       \
+                             "./Logs/non-instrumented.csv"
 #define PTRACE_LOGNAME       "./Logs/MVEE_ptrace.log"
 #define DATATRANSFER_LOGNAME "./Logs/MVEE_datatransfer.log"
 #define LOCKSTATS_LOGNAME    "./Logs/MVEE_lockstats.log"

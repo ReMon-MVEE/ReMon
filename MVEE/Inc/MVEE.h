@@ -488,6 +488,15 @@ public:
     //
     static void                    lock ();
     static void                    unlock ();
+    //
+    // logs non instrumented instruction
+    //
+#ifdef MVEE_LOG_NON_INSTRUMENTED_INSTRUCTION
+    static void                    log_non_instrumented (variantstate* variant, monitor* relevant_monitor,
+                                                         instruction_intent* instruction);
+
+    static void                    flush_non_instrumented_log ();
+#endif
 
 	// 
 	// Syscall bitmask support 
@@ -727,6 +736,12 @@ private:
     static FILE*                                lockstats_logfile;
     static double                               startup_time;
     static pthread_mutex_t                      loglock;
+
+#ifdef MVEE_LOG_NON_INSTRUMENTED_INSTRUCTION
+    static FILE*                                non_instrumented_logfile;
+    static std::string                          non_instrumented_instructions;
+    static pthread_mutex_t                      non_instrumented_lock;
+#endif
 };
 
 
