@@ -261,7 +261,7 @@ warnf("\n%s\n", output.str().c_str());
 // ugly syscall shared pointer redirection -----------------------------------------------------------------------------
 #define REPLACE_SHARED_POINTER_ARG(variant, arg)                                                                       \
 {                                                                                                                      \
-    mmap_region_info* region = set_mmap_table->get_region_info(0, ARG1(0), 0);                                         \
+    mmap_region_info* region = set_mmap_table->get_region_info(0, ARG##arg(0), 0);                                     \
     if (region && region->shadow)                                                                                      \
     {                                                                                                                  \
         REPLACE_ARG##arg(variant) = (unsigned long long) ARG##arg(variant);                                            \
