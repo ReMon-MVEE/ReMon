@@ -89,6 +89,7 @@ variantstate::variantstate()
     , orig_controllen (0)
     , config (NULL)
     , instruction (&this->variantpid, &this->variant_num)
+    , connected_mapping(nullptr)
 #ifdef __NR_socketcall
     , orig_arg1 (0)
 #endif
@@ -230,7 +231,6 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
         init_variant(i, parent_monitor->variants[i].pendingpid,
 					 shares_tgid ? parent_monitor->variants[i].varianttgid : 
 					 parent_monitor->variants[i].pendingpid);
-
 #ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
         variants[i].syscall_pointer = parent_monitor->variants[i].syscall_pointer;
 #endif
@@ -789,6 +789,10 @@ void monitor::set_should_check_multithread_state()
 -----------------------------------------------------------------------------*/
 void monitor::shutdown(bool success)
 {
+#ifdef MVEE_LOG_NON_INSTRUMENTED_INSTRUCTION
+    mvee::flush_non_instrumented_log();
+#endif
+
 #ifndef MVEE_BENCHMARK
 	bool should_log = false;
 #endif
@@ -940,7 +944,7 @@ nobacktrace:
 	}
     else
 	{
-		pthread_mutex_lock(&monitor_lock);        
+		pthread_mutex_lock(&monitor_lock);
 		if (!should_shutdown)
 			pthread_cond_wait(&monitor_cond, &monitor_lock);
         pthread_mutex_unlock(&monitor_lock);
@@ -2197,45 +2201,65 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                 instruction_intent* instruction = &variant->instruction;
                 instruction->update((void*) variant->regs.rip, siginfo.si_addr);
 
-                int result;
-                if ((result = instruction_intent_emulation::lookup_table[instruction->opcode()].emulator(*instruction,
-                        *this, variant)) != 0)
+                mvee::log_non_instrumented(variant, this, instruction);
+
+                switch (instruction_intent_emulation::lookup_table[instruction->opcode()].emulator(*instruction,
+                        *this, variant))
                 {
-                    if (result == REPLAY_BUFFER_RETURN_WAIT)
+                    case 0:
                     {
-                        debugf("variant %d asked to wait\n\n", variantnum);
+                        // update instruction pointer to skip instruction
+                        warnf("rip before: %llx\n", variant->regs.rip);
+                        variant->regs.rip += variant->instruction.size;
+                        warnf("rip after:  %llx\n", variant->regs.rip);
+                        if (!interaction::write_all_regs(variant->variantpid, &variant->regs))
+                            warnf("\n\n\nerror\n\n\n");
+
+                        call_resume(variantnum);
                         return;
                     }
-                    else if (result < 0)
+                    case ILLEGAL_ACCESS_TERMINATION:
                     {
 #ifdef JNS_DEBUG
                         variant->instruction.debug_print();
-                        mmap_region_info* region =this->set_mmap_table->get_region_info(variantnum,
+                        mmap_region_info* region = this->set_mmap_table->get_region_info(variantnum,
                                 variants[variantnum].regs.rip, 0);
                         if (!region)
                             debugf("could not find location of instruction\n");
                         else
                         {
                             debugf("instruction in %s at offset %llx\n",
-                                    region->region_backing_file_path.c_str(),
+                                   region->region_backing_file_path.c_str(),
                                    variants[variantnum].regs.rip - region->region_base_address);
                         }
+                        mmap_region_info* accessed_region = this->set_mmap_table->get_region_info(variantnum,
+                                (unsigned long long) siginfo.si_addr, 0);
+                        if (!accessed_region)
+                            debugf("could not find location of access\n");
+                        else
+                        {
+                            debugf("access in %s at offset %llx\n",
+                                   accessed_region->region_backing_file_path.c_str(),
+                                   (unsigned long long) siginfo.si_addr - accessed_region->region_base_address);
+                        }
 #endif
-                        warnf("something went wrong\n");
-                        signal_shutdown();
+                        shutdown(false);
                         return;
                     }
+                    case REPLAY_BUFFER_RETURN_WAIT:
+                    {
+                        debugf("variant %d asked to wait\n\n", variantnum);
+                        return;
+                    }
+                    case UNKNOWN_MEMORY_TERMINATION:
+                        break;
+                    default:
+                    {
+                        warnf("unexpected emulation result\n");
+                        instruction->debug_print_minimal();
+                        shutdown(true);
+                    }
                 }
-
-
-                // update instruction pointer to skip instruction
-                variant->regs.rip += variant->instruction.size;
-                if (!interaction::write_all_regs(variant->variantpid, &variant->regs))
-                    warnf("\n\n\nerror\n\n\n");
-
-                call_resume(variantnum);
-                return;
-
 #endif
             }
             // shared memory access ====================================================================================
@@ -3351,7 +3375,7 @@ void* monitor::thread(void* param)
 					{
 						if (interaction::wait(mon->variants[i].variantpid, status, true, true) &&
 							status.reason != STOP_NOTSTOPPED)
-							mon->handle_event(status);									
+                            mon->handle_event(status);
 					}
 				}			
 			}

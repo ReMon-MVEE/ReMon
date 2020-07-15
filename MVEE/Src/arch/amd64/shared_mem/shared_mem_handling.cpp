@@ -125,7 +125,7 @@ int             instruction_intent::determine_monitor_pointer       (monitor& re
     {
         warnf("variant %d address %lx maps to monitor mapping that points to null or none at all...\n",
               variant->variant_num, (unsigned long)variant_address);
-        return -1;
+        return NO_REGION_INFO;
     }
 
     if ((unsigned long long) variant_address >=
@@ -1497,7 +1497,8 @@ bool acquire_shm_protected_memory_for_access::acquire()
     temp_regs.rax = __NR_mprotect;
     temp_regs.rdi = variant_map_info->region_base_address;
     temp_regs.rsi = variant_map_info->region_size;
-    temp_regs.rdx = variant_map_info->region_prot_flags;
+    temp_regs.rdx = variant_map_info->connected ?
+            variant_map_info->connected->region_prot_flags : variant_map_info->region_prot_flags;
     temp_regs.rip = (unsigned long long) variant->syscall_pointer;
 
     if (!interaction::write_all_regs(variant->variantpid, &temp_regs)) {
@@ -1527,10 +1528,14 @@ bool acquire_shm_protected_memory_for_access::acquire()
     if (temp_regs.rax != 0)
     {
         warnf("mprotect failed while enabling - %lld\n", temp_regs.rax);
-        warnf("address: %p\n", address);
-        warnf("protection: %d\n", variant_map_info->region_prot_flags);
-        warnf("base: %p\n", (void*) variant_map_info->region_base_address);
-        warnf("make sure LD_LOADER is configured for tracing");
+        warnf("address:    %p\n", address);
+        warnf("protection: %d\n", variant_map_info->connected ?
+                variant_map_info->connected->region_prot_flags : variant_map_info->region_prot_flags);
+        warnf("base:       %p\n", (void*) variant_map_info->region_base_address);
+        warnf("size:       %p\n", (void*) variant_map_info->region_size);
+        warnf("backing:    %s\n", (void*) variant_map_info->region_backing_file_path.c_str());
+        warnf("returned:   %d\n", (int) temp_regs.rax);
+        warnf("make sure LD_LOADER is configured for tracing\n");
 
         relevant_monitor.set_mmap_table->debug_shared();
 
@@ -1576,10 +1581,12 @@ bool acquire_shm_protected_memory_for_access::release(bool restore_registers)
 
     if (temp_regs.rax != 0)
     {
-        warnf("mprotect failed while disabling - %lld\n", temp_regs.rax);
-        warnf("accessed:   %p\n", address);
+        warnf("mprotect failed while disabling\n");
+        warnf("address:    %p\n", address);
         warnf("protection: %d\n", variant_map_info->region_prot_flags);
-        warnf("address:    %p\n", (void*) variant_map_info->region_base_address);
+        warnf("base:       %p\n", (void*) variant_map_info->region_base_address);
+        warnf("size:       %p\n", (void*) variant_map_info->region_size);
+        warnf("backing:    %s\n", (void*) variant_map_info->region_backing_file_path.c_str());
         warnf("returned:   %d\n", (int) temp_regs.rax);
         return false;
     }

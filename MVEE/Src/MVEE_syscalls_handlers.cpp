@@ -6998,25 +6998,26 @@ PRECALL(mmap)
     if (ARG3(0) & (PROT_READ | PROT_WRITE) && ARG4(0) & MAP_SHARED)
     {
         unsigned long long flags = ARG4(0);
-#ifndef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
-        flags &= ~MAP_SHARED;
-        flags |= MAP_PRIVATE;
-#endif
         fd_info* info = set_fd_table->get_fd_info(ARG5(0));
-
         for (int variant_num = 0; variant_num < mvee::numvariants; variant_num++)
         {
+            call_check_regs(variant_num);
+            variants[variant_num].replace_regs = variants[variant_num].regs;
+            variants[variant_num].replace_regs.rax = __NR_mmap;
+            variants[variant_num].replace_regs.orig_rax = __NR_mmap;
+
             // remove shared mapping option from flags for all variants, making each mapping private
             if (variant_num != 0 && info->master_file)
             {
-                SETARG4(variant_num, flags | MAP_ANONYMOUS);
-                SETARG5(variant_num, -1);
-                SETARG6(variant_num, 0);
+                variants[variant_num].replace_regs.r10 = flags | MAP_ANONYMOUS;
+                variants[variant_num].replace_regs.r8  = -1;
+                variants[variant_num].replace_regs.r9  = 0;
             }
             else
-                SETARG4(variant_num, flags);
+                variants[variant_num].replace_regs.r10 = flags;
             // set none mapping
-            SETARG3(variant_num, PROT_NONE);
+            variants[variant_num].replace_regs.rdx = PROT_NONE;
+            variants[variant_num].replace_regs.rip -= 2;
         }
     }
 #endif
@@ -7286,9 +7287,10 @@ POSTCALL(mmap)
 
         std::shared_ptr<shared_monitor_map_info> shadow = nullptr;
 #ifdef MVEE_EMULATE_SHARED_MEMORY
-        if (ARG3(0) & (PROT_READ | PROT_WRITE) && ARG4(0) & MAP_SHARED)
+        if (variants[0].connected_mapping)
         {
-            if (set_mmap_table->shadow_map(&variants[0], info, &shadow, ARG2(0), ARG3(0), ARG4(0), ARG6(0)) < 0)
+            if (set_mmap_table->shadow_map(&variants[0], info, &shadow, ARG2(0),
+                    variants[0].connected_mapping->region_prot_flags, ARG4(0), ARG6(0)) < 0)
             {
                 warnf("could not create shadow mapping...\n");
                 shutdown(false);
@@ -7304,7 +7306,23 @@ POSTCALL(mmap)
 			if (variants[0].prevcallnum == __NR_mmap2)
 				actual_offset *= 4096;
 #endif
-			set_mmap_table->map_range(i, results[i], ARG2(0), ARG4(0), ARG3(0), info, actual_offset, shadow);
+			set_mmap_table->map_range(i, results[i], ARG2(0), ARG4(0), ARG3(0), info, actual_offset, shadow, variants[i].connected_mapping);
+
+#ifdef MVEE_EMULATE_SHARED_MEMORY
+            mmap_region_info* region = set_mmap_table->get_region_info(i, results[i], ARG2(variantnum));
+            if (ARG3(i) & (PROT_READ | PROT_WRITE) && ARG4(i) & MAP_SHARED)
+            {
+                variants[i].connected_mapping = region;
+                variants[i].regs = variants[i].replace_regs;
+                if (!interaction::write_all_regs(variants[i].variantpid, &variants[i].replace_regs))
+                {
+                    warnf("could not write registers for next syscall\n");
+                    shutdown(true);
+                }
+            }
+            else if (variants[i].connected_mapping)
+                variants[i].connected_mapping = nullptr;
+#endif
 		}
 
 		//
@@ -7402,10 +7420,10 @@ POSTCALL(mmap)
 
         std::shared_ptr<shared_monitor_map_info> shadow = nullptr;
 #ifdef MVEE_EMULATE_SHARED_MEMORY
-        if (ARG3(variantnum) & (PROT_READ | PROT_WRITE) && ARG4(variantnum) & MAP_SHARED)
+        if (variants[variantnum].connected_mapping)
         {
-            if (set_mmap_table->shadow_map(&variants[0], info, &shadow, ARG2(variantnum), ARG3(variantnum),
-                    ARG4(variantnum), ARG6(variantnum)) < 0)
+            if (set_mmap_table->shadow_map(&variants[variantnum], info, &shadow, ARG2(variantnum),
+                    variants[variantnum].connected_mapping->region_prot_flags, ARG4(variantnum), ARG6(variantnum)) < 0)
             {
                 warnf("could not create shadow mapping...\n");
                 shutdown(false);
@@ -7420,8 +7438,25 @@ POSTCALL(mmap)
 			actual_offset *= 4096;
 #endif
 		set_mmap_table->map_range(variantnum, result, ARG2(variantnum), ARG4(variantnum), ARG3(variantnum), info,
-		        actual_offset, shadow);
+		        actual_offset, shadow, variants[variantnum].connected_mapping);
 		set_mmap_table->verify_mman_table(variantnum, variants[variantnum].variantpid);
+
+#ifdef MVEE_EMULATE_SHARED_MEMORY
+		mmap_region_info* region = set_mmap_table->get_region_info(variantnum, result,
+		        ARG2(variantnum));
+        if (ARG3(variantnum) & (PROT_READ | PROT_WRITE) && ARG4(variantnum) & MAP_SHARED)
+        {
+            variants[variantnum].connected_mapping = region;
+            variants[variantnum].regs = variants[variantnum].replace_regs;
+            if (!interaction::write_all_regs(variants[variantnum].variantpid, &variants[variantnum].replace_regs))
+            {
+                warnf("could not write registers for next syscall\n");
+                shutdown(true);
+            }
+        }
+        else if (variants[variantnum].connected_mapping)
+            variants[variantnum].connected_mapping = nullptr;
+#endif
 
 // old code that did fast forwarding to the entry point
 #if 0
@@ -8337,6 +8372,8 @@ PRECALL(futex)
     if (ARG2(0) == MVEE_FUTEX_WAIT_TID)
         SETARG2(0, FUTEX_WAIT);
 
+    REPLACE_SHARED_POINTER_ARG(0, 1)
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 #else
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
@@ -8379,6 +8416,7 @@ POSTCALL(futex)
 		}
 	}
 #endif
+    RESET_SHARED_POINTER_ARG(0, 1)
     return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 }
 

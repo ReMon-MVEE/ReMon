@@ -268,6 +268,10 @@ public:
 #ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
     void*         syscall_pointer;
 #endif
+    user_regs_struct
+                  replace_regs;
+    mmap_region_info*
+                  connected_mapping;
     // -----------------------------------------------------------------------------------------------------------------
 
     variantstate();

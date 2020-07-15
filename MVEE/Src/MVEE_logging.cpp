@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <numeric>
 #include <execinfo.h>
+#include <sys/mman.h>
 #include "MVEE.h"
 #include "MVEE_monitor.h"
 #include "MVEE_fake_syscall.h"
@@ -42,6 +43,11 @@ FILE*             mvee::lockstats_logfile    = nullptr;
 double            mvee::startup_time         = 0.0;
 pthread_mutex_t   mvee::loglock              = PTHREAD_MUTEX_INITIALIZER;
 
+#ifdef MVEE_LOG_NON_INSTRUMENTED_INSTRUCTION
+FILE*             mvee::non_instrumented_logfile      = nullptr;
+std::string       mvee::non_instrumented_instructions;
+pthread_mutex_t   mvee::non_instrumented_lock         = PTHREAD_MUTEX_INITIALIZER;
+#endif
 /*-----------------------------------------------------------------------------
     cache_mismatch_info
 -----------------------------------------------------------------------------*/
@@ -1502,6 +1508,13 @@ void mvee::log_init()
         perror("Failed to open monitor log");
 #endif
 
+#ifdef MVEE_LOG_NON_INSTRUMENTED_INSTRUCTION
+    printf("Opening log for non-instrumented instructions @ %s\n", NON_INSTRUMENTED_LOGNAME);
+    mvee::non_instrumented_logfile = fopen64(NON_INSTRUMENTED_LOGNAME, "w");
+    if (mvee::logfile == NULL)
+        warnf("Failed to non instrumented instruction log");
+#endif
+
     struct timeval tv;
     gettimeofday(&tv, NULL);
     mvee::startup_time          = tv.tv_sec + tv.tv_usec / 1000000.0;
@@ -1594,6 +1607,14 @@ void mvee::log_fini(bool terminated)
 #endif
     if (mvee::instruction_log)
         fclose(mvee::instruction_log);
+#endif
+
+#ifdef MVEE_LOG_NON_INSTRUMENTED_INSTRUCTION
+    if (mvee::non_instrumented_logfile)
+    {
+        fflush(mvee::non_instrumented_logfile);
+        fclose(mvee::non_instrumented_logfile);
+    }
 #endif
 }
 
@@ -1959,6 +1980,145 @@ void mvee::log_sigaction(struct sigaction* action)
     debugf("> SIGACTION sa_flags     : 0x%08x (= %s)\n",       action->sa_flags,   getTextualSigactionFlags(action->sa_flags).c_str());
     debugf("> SIGACTION sa_mask      : %s\n",                  getTextualSigSet(action->sa_mask).c_str());
 #endif
+}
+
+
+/*-----------------------------------------------------------------------------
+  log_non_instrumented - log non-instrumented instruction
+-----------------------------------------------------------------------------*/
+void mvee::log_non_instrumented(variantstate* variant, monitor* relevant_monitor,
+                                instruction_intent* instruction)
+{
+    if (variant->variant_num != 0)
+        return;
+
+    std::stringstream     ss;
+    std::string           caller_info;
+    mmap_addr2line_proc*  addr2line_proc;
+    mmap_region_info*     found_region = nullptr;
+
+    std::stringstream     line;
+    for (int i = 0; i < instruction->size; i++)
+        line << ((instruction->instruction[i] & 0xff) < 0x10 ? "0" : "")
+                << std::hex << (instruction->instruction[i] & 0xff)
+                << (i + 1 == instruction->size ? ";" : "");
+
+    pthread_mutex_lock(&mvee::non_instrumented_lock);
+
+    if (!instruction->instruction_pointer)
+    {
+        line << "somehow instruction at address 0x0000000000000000";
+        if (mvee::non_instrumented_instructions.find(line.str()) == std::string::npos)
+        {
+            non_instrumented_instructions.append(line.str());
+            non_instrumented_instructions.append("\n");
+            fprintf(mvee::non_instrumented_logfile, "%s\n", line.str().c_str());
+        }
+        pthread_mutex_unlock(&mvee::non_instrumented_lock);
+        return;
+    }
+
+
+    found_region = relevant_monitor->set_mmap_table->get_region_info(variant->variant_num,
+            (unsigned long long) instruction->instruction_pointer);
+
+    // with the code path this should be called at, this if should always fail
+    if (!found_region)
+    {
+        line << "invalid @ " << STDPTRSTR(instruction->instruction_pointer);
+        if (mvee::non_instrumented_instructions.find(line.str()) == std::string::npos)
+        {
+            non_instrumented_instructions.append(line.str());
+            non_instrumented_instructions.append("\n");
+            fprintf(mvee::non_instrumented_logfile, "%s\n", line.str().c_str());
+        }
+        pthread_mutex_unlock(&mvee::non_instrumented_lock);
+        return;
+    }
+
+
+    // Now perform the lookup. We don't need to calculate the offsets yet
+    unsigned long lib_start_address = found_region->region_base_address;
+    unsigned long file_pc           = found_region->map_memory_pc_to_file_pc(variant->variant_num,
+            variant->variantpid,
+            (unsigned long long) instruction->instruction_pointer - found_region->region_base_address);
+
+    //warnf("found region => %s => 0x%08x\n", found_region->region_backing_file_path, found_region->region_base_address);
+
+    addr2line_proc                = found_region->get_addr2line_proc(variant->variant_num, variant->variantpid);
+    ss << STDPTRSTR(file_pc);
+    caller_info                   = addr2line_proc->read_from_addr2line_pipe(ss.str(), variant->variant_num);
+
+    ss.str(std::string());
+    ss.clear();
+
+    // source line
+    if (caller_info.find("couldn't get") == 0)
+        line << ";";
+    else
+    {
+        auto replace_prefix = caller_info.find(' ');
+        if (replace_prefix != std::string::npos)
+            caller_info.replace(0, replace_prefix + 1, "");
+
+        auto replace_at = caller_info.find(" at ");
+        if (replace_at != std::string::npos)
+            caller_info.replace(replace_at, sizeof(" at ") - 1, "@");
+
+        auto replace_binary = caller_info.find(' ');
+        if (replace_binary != std::string::npos)
+            caller_info.replace(replace_binary, std::string::npos, "");
+        line << caller_info.c_str() << ";";
+    }
+
+    if (caller_info.find("mvee_log_stack@") != std::string::npos)
+    {
+        pthread_mutex_unlock(&mvee::non_instrumented_lock);
+        return;
+    }
+
+
+    // binary and offset
+    if (found_region->region_backing_file_path == "[vdso]")
+    {
+        unsigned long syscall_no;
+        if (!interaction::fetch_syscall_no(variant->variantpid, syscall_no))
+            line << "vdso syscall:unknown;"
+                 << STDPTRSTR((unsigned long long) instruction->instruction_pointer - lib_start_address);
+        else
+            line << "vdso syscall:" << syscall_no << ";"
+                 << STDPTRSTR((unsigned long long) instruction->instruction_pointer - lib_start_address);
+    }
+    else if (found_region->region_backing_file_path == "[anonymous]" &&
+             (found_region->region_prot_flags & PROT_EXEC))
+    {
+        line << "JIT:" << STDPTRSTR((unsigned long long) instruction->instruction_pointer - lib_start_address);
+    }
+    else
+    {
+        line << found_region->region_backing_file_path.c_str() << ";";
+        line << std::hex << found_region->map_memory_pc_to_file_pc(variant->variant_num, variant->variantpid,
+                (unsigned long long) instruction->instruction_pointer -
+                        found_region->region_base_address);
+    }
+
+
+    if (mvee::non_instrumented_instructions.find(line.str()) == std::string::npos)
+    {
+        non_instrumented_instructions.append(line.str());
+        non_instrumented_instructions.append("\n");
+        fprintf(mvee::non_instrumented_logfile, "%s\n", line.str().c_str());
+    }
+    pthread_mutex_unlock(&mvee::non_instrumented_lock);
+}
+
+/*-----------------------------------------------------------------------------
+  flush_non_instrumented_log - fluches non-instrumented log file
+-----------------------------------------------------------------------------*/
+void mvee::flush_non_instrumented_log()
+{
+    if (mvee::non_instrumented_logfile)
+        fflush(mvee::non_instrumented_logfile);
 }
 
 /*-----------------------------------------------------------------------------
