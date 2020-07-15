@@ -259,31 +259,31 @@ warnf("\n%s\n", output.str().c_str());
 
 
 // ugly syscall shared pointer redirection -----------------------------------------------------------------------------
-#define REPLACE_SHARED_POINTER_ARG(variant, arg)                                                                       \
+#define REPLACE_SHARED_POINTER_ARG(var, arg)                                                                           \
 {                                                                                                                      \
-    mmap_region_info* region = set_mmap_table->get_region_info(0, ARG##arg(0), 0);                                     \
+    mmap_region_info* region = set_mmap_table->get_region_info(var, ARG##arg(var));                                    \
     if (region && region->shadow)                                                                                      \
     {                                                                                                                  \
-        REPLACE_ARG##arg(variant) = (unsigned long long) ARG##arg(variant);                                            \
-        SETARG##arg(variant, region->connected->region_base_address +                                                  \
-                (ARG##arg(variant) - region->region_base_address));                                                    \
+        REPLACE_ARG##arg(var) = (unsigned long long) ARG##arg(var);                                                    \
+        SETARG##arg(var, region->connected->region_base_address +                                                      \
+                (ARG##arg(var) - region->region_base_address));                                                        \
     }                                                                                                                  \
     else                                                                                                               \
-        REPLACE_ARG##arg(variant) = 0;                                                                                 \
+        REPLACE_ARG##arg(var) = 0;                                                                                     \
 }
 
 
-#define RESET_SHARED_POINTER_ARG(variant, arg)                                                                         \
-if (REPLACE_ARG##arg(variant))                                                                                         \
-    SETARG##arg(variant, REPLACE_ARG##arg(variant));                                                                   \
+#define RESET_SHARED_POINTER_ARG(var, arg)                                                                             \
+if (REPLACE_ARG##arg(var))                                                                                             \
+    SETARG##arg(var, REPLACE_ARG##arg(var));                                                                           \
 
 
-#define REPLACE_ARG1(variant)                   variants[variant].replace_regs.rdi
-#define REPLACE_ARG2(variant)                   variants[variant].replace_regs.rsi
-#define REPLACE_ARG3(variant)                   variants[variant].replace_regs.rdx
-#define REPLACE_ARG4(variant)                   variants[variant].replace_regs.r10
-#define REPLACE_ARG5(variant)                   variants[variant].replace_regs.r8
-#define REPLACE_ARG6(variant)                   variants[variant].replace_regs.r9
+#define REPLACE_ARG1(var)                   variants[var].replace_regs.rdi
+#define REPLACE_ARG2(var)                   variants[var].replace_regs.rsi
+#define REPLACE_ARG3(var)                   variants[var].replace_regs.rdx
+#define REPLACE_ARG4(var)                   variants[var].replace_regs.r10
+#define REPLACE_ARG5(var)                   variants[var].replace_regs.r8
+#define REPLACE_ARG6(var)                   variants[var].replace_regs.r9
 // ugly syscall shared pointer redirection -----------------------------------------------------------------------------
 
 
