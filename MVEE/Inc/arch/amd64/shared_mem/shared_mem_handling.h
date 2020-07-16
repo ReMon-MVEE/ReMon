@@ -287,6 +287,18 @@ if (REPLACE_ARG##arg(var))                                                      
 // ugly syscall shared pointer redirection -----------------------------------------------------------------------------
 
 
+// syscall arg logging pointer redirection -----------------------------------------------------------------------------
+#define LOGGING_SHARED_POINTER_REDIRECTION(var_num, arg_num, cast)                                                     \
+auto arg##arg_num##_pointer = (cast) ARG##arg_num(var_num);                                                            \
+{                                                                                                                      \
+    mmap_region_info* region = set_mmap_table->get_region_info(var_num, ARG##arg_num(var_num));                        \
+    if (region && region->connected)                                                                                   \
+        arg##arg_num##_pointer = (cast)                                                                                \
+              (region->connected->region_base_address + (ARG##arg_num(var_num) - region->region_base_address));        \
+}
+// syscall arg logging pointer redirection -----------------------------------------------------------------------------
+
+
 // =====================================================================================================================
 //      intent instruction class definition
 // =====================================================================================================================

@@ -4508,7 +4508,9 @@ POSTCALL(socketpair)
 LOG_ARGS(sendto)
 {
 	GETTEXTADDRDIRECT(variantnum, text_addr, 5, ARG6(variantnum));
-	auto buf_str = call_serialize_io_buffer(variantnum, (const unsigned char*) ARG2(variantnum), ARG3(variantnum));
+
+    LOGGING_SHARED_POINTER_REDIRECTION(variantnum, 2, unsigned char*)
+	auto buf_str = call_serialize_io_buffer(variantnum, arg2_pointer, ARG3(variantnum));
 
 	debugf("%s - SYS_SENDTO(%d, " PTRSTR " (%s), %zd, %u = %s, 0x" PTRSTR " (%s), %d)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
