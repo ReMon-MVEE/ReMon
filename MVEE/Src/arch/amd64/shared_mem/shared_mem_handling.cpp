@@ -545,7 +545,7 @@ int             intent_replay_buffer::advance                       (unsigned in
                 replay_buffer::~replay_buffer                       ()
 {
     for (unsigned int i = 0; i < this->buffer_size; i++)
-        if (this->buffer[i].buffer != this->buffer[i].static_buffer)
+        if (this->buffer[i].buffer && this->buffer[i].buffer != this->buffer[i].static_buffer)
             free(this->buffer[i].buffer);
     free(this->buffer);
     free(this->variant_states);
@@ -668,6 +668,7 @@ int             replay_buffer::advance                              (unsigned in
     {
         if (current_entry->buffer != current_entry->static_buffer)
             free(current_entry->buffer);
+        current_entry->buffer = nullptr;
 
         current_entry->variants_passed = 0;
         current_entry->entry_state     = REPLAY_ENTRY_EMPTY_STATE;
