@@ -1051,6 +1051,7 @@ bool mmap_table::map_range (int variantnum, unsigned long address, unsigned long
     {
         new_region->shadow = shadow;
         new_region->shadow->mmap();
+        new_region->original_base = (void*) address;
 
         if (insert_variant_shared_region(variantnum, new_region) < 0)
         {
