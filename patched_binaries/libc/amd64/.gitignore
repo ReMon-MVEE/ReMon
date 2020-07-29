@@ -1,3 +1,4 @@
+/libclang_rt*
 /librt.so.1
 /libutil.so.1
 /libpthread.so.0

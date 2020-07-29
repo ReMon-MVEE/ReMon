@@ -64,17 +64,6 @@ add_custom_command(
         DEPENDS ${CMAKE_SOURCE_DIR}/MVEE/Src/MVEE_syscalls_handlers.cpp ${UNISTD_HDR}
 )
 
-# compile the syncagent
-execute_process(
-        COMMAND ${CMAKE_SOURCE_DIR}/build_scripts/compile_syncagent.rb
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-        OUTPUT_VARIABLE COMPILE_SYNCAGENT_OUTPUT
-        RESULT_VARIABLE COMPILE_SYNCAGENT_RESULT
-)
-message("syncagent compilation result:\n"
-        "\toutput:\n" ${COMPILE_SYNCAGENT_OUTPUT}
-        "\n\tresult: " ${COMPILE_SYNCAGENT_RESULT})
-message("")
 if(DEPS_PRESENT_IN_SYSTEM)
     set(MUSL_GCC musl-gcc)
 else()
@@ -248,5 +237,6 @@ target_compile_definitions(mvee PRIVATE
         #MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL
 )
 # ======================================================================================================================
+add_subdirectory(libsync)
 add_subdirectory(MVEE_LD_Loader)
 add_subdirectory(Utilities)
