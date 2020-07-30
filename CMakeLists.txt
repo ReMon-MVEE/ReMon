@@ -225,16 +225,17 @@ else()
     )
 endif()
 # ----------------------------------------------------------------------------------------------------------------------
-# compile definitions, uncomment to set or comment to unset
-set(MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
-        MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
-)
+option(EmulateCPUID "Emulate CPUID instruction." ON)
+option(EmulateShm "Emulate shared memory." ON)
+option(LogNonInstrumentedIns "Log non-instrumented instructions using shared memory." ON)
+option(ShmInsLogging "Log instructions using shared memory." ON)
+option(ShmInsLoggingFull "Log instructions using shared memory with more verbosity." OFF)
 target_compile_definitions(mvee PRIVATE
-        MVEE_EMULATE_CPUID
-        MVEE_EMULATE_SHARED_MEMORY
-        MVEE_LOG_NON_INSTRUMENTED_INSTRUCTION
-        ${MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING}
-        #MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL
+    $<$<BOOL:${EmulateCPUID}>:MVEE_EMULATE_CPUID>
+    $<$<BOOL:${EmulateShm}>:MVEE_EMULATE_SHARED_MEMORY>
+    $<$<BOOL:${LogNonInstrumentedIns}>:MVEE_LOG_NON_INSTRUMENTED_INSTRUCTION>
+    $<$<BOOL:${ShmInsLogging}>:MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING>
+    $<$<BOOL:${ShmInsLoggingFull}>:MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL>
 )
 # ======================================================================================================================
 add_subdirectory(libsync)
