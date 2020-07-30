@@ -1845,8 +1845,14 @@ bool mvee::process_opts(int argc, char** argv, bool add_args)
 				(*mvee::config_monitor)["log_to_stdout"] = true;
 				break;
 			case 'N':
-				mvee::numvariants = strtoll(optarg, NULL, 10);
-				break;
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+                printf("shared memory logging option only available when running single variant, "
+                       "-N should be omitted.\n");
+                return false;
+#else
+                mvee::numvariants = strtoll(optarg, NULL, 10);
+                break;
+#endif
 			case 'n':
 				(*mvee::config_variant_global)["disable_syscall_checks"] = true;
 				break;
@@ -1907,6 +1913,11 @@ int main(int argc, char *argv[])
     }
     else
     {
+
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+        mvee::numvariants = 1;
+#endif
+
 		mvee::os_check_ptrace_scope();
 		mvee::os_check_kernel_cmdline();
 		mvee::init_syslocks();
