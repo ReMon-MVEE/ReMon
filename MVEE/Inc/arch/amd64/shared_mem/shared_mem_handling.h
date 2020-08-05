@@ -174,8 +174,10 @@ warnf("\n%s\n", output.str().c_str());
 
 // buffer states
 #define VARIANTS_WAITING_OFFSET                 0x00u
+#define LEADER_WAITING_OFFSET                   0x01u
 
 #define REPLAY_BUFFER_VARIANTS_WAITING          (0x01u << VARIANTS_WAITING_OFFSET)
+#define REPLAY_BUFFER_LEADER_WAITING            (0x01u << LEADER_WAITING_OFFSET)
 
 // entry states
 #define REPLAY_ENTRY_EMPTY_STATE                0x00u
@@ -252,38 +254,37 @@ warnf("\n%s\n", output.str().c_str());
 // ---------------------------------------------------------------------------------------------------------------------
 
 
-// some static function like macros ------------------------------------------------------------------------------------
-#define SHARED_MEMORY_ACCESS(variant_num, signal)                                                                      \
+// check for shared memory access --------------------------------------------------------------------------------------
+#define SHARED_MEMORY_ADDRESS_TAG               0xffff800000000000ull
+#define ADDRESS_TAGGED(address)                 (((unsigned long long) address & SHARED_MEMORY_ADDRESS_TAG) ==         \
+                                                 SHARED_MEMORY_ADDRESS_TAG)
+#define REMOVE_ADDRESS_TAG(address)             ((unsigned long long) address & ~SHARED_MEMORY_ADDRESS_TAG)
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+#define IS_SHARED_MEMORY_ACCESS(variant_num, signal)                                                                   \
         (siginfo.si_signo == SIGSEGV && siginfo.si_addr != 0)
+#else
+#define IS_SHARED_MEMORY_ACCESS(variant_num, signal)                                                                   \
+        (siginfo.si_signo == SIGSEGV && siginfo.si_addr != 0 && ADDRESS_TAGGED(siginfo.si_addr))
+#endif
 // ---------------------------------------------------------------------------------------------------------------------
 
 
 // ugly syscall shared pointer redirection -----------------------------------------------------------------------------
 #define REPLACE_SHARED_POINTER_ARG(var, arg)                                                                           \
 {                                                                                                                      \
-    mmap_region_info* region = set_mmap_table->get_region_info(var, ARG##arg(var));                                    \
+    mmap_region_info* region = set_mmap_table->get_region_info(var, ARG##arg(var) & ~SHARED_MEMORY_ADDRESS_TAG);       \
     if (region && region->shadow)                                                                                      \
     {                                                                                                                  \
-        REPLACE_ARG##arg(var) = (unsigned long long) ARG##arg(var);                                                    \
+        variants[var].have_overwritten_args = true;                                                                    \
+        overwritten_syscall_arg overwritten_arg;                                                                       \
+        overwritten_arg.syscall_arg_num = arg;                                                                         \
+        overwritten_arg.arg_old_value = ARG##arg(var);                                                                 \
+        overwritten_arg.restore_data = false;                                                                          \
+        variants[var].overwritten_args.push_back(overwritten_arg);                                                     \
         SETARG##arg(var, region->connected->region_base_address +                                                      \
-                (ARG##arg(var) - region->region_base_address));                                                        \
+                ((ARG##arg(var) & ~SHARED_MEMORY_ADDRESS_TAG) - region->region_base_address));                         \
     }                                                                                                                  \
-    else                                                                                                               \
-        REPLACE_ARG##arg(var) = 0;                                                                                     \
 }
-
-
-#define RESET_SHARED_POINTER_ARG(var, arg)                                                                             \
-if (REPLACE_ARG##arg(var))                                                                                             \
-    SETARG##arg(var, REPLACE_ARG##arg(var));                                                                           \
-
-
-#define REPLACE_ARG1(var)                   variants[var].replace_regs.rdi
-#define REPLACE_ARG2(var)                   variants[var].replace_regs.rsi
-#define REPLACE_ARG3(var)                   variants[var].replace_regs.rdx
-#define REPLACE_ARG4(var)                   variants[var].replace_regs.r10
-#define REPLACE_ARG5(var)                   variants[var].replace_regs.r8
-#define REPLACE_ARG6(var)                   variants[var].replace_regs.r9
 // ugly syscall shared pointer redirection -----------------------------------------------------------------------------
 
 
@@ -640,7 +641,9 @@ private:
     unsigned int    buffer_size;
     replay_state*   variant_states;
     unsigned int    variant_count;
+#ifndef MVEE_SHARED_MEMORY_REPLAY_LEADER
     unsigned int    head;
+#endif
     __uint8_t       state;
     monitor*        relevant_monitor;
 

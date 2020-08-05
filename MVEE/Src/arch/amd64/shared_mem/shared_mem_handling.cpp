@@ -263,7 +263,7 @@ void instruction_intent::debug_print_minimal                        ()
     if (size)
     {
         START_OUTPUT_DEBUG
-        output << "instruction pointer: " << std::hex << instruction_pointer << "\n";
+        output << "instruction pointer: " << std::hex << instruction_pointer << " - " << (int) size << "\n";
         output << "faulting address: " << std::hex << effective_address << "\n";
         ADD_OUTPUT_DEBUG("instruction:", instruction, size)
         PRINT_OUTPUT_DEBUG
@@ -523,7 +523,9 @@ int             intent_replay_buffer::advance                       (unsigned in
     this->buffer_size      = replay_buffer_size;
     this->variant_states   = (replay_state*) malloc(mvee::numvariants * sizeof(replay_state));
     this->variant_count    = mvee::numvariants;
+#ifndef MVEE_SHARED_MEMORY_REPLAY_LEADER
     this->head             = 0;
+#endif
     this->state            = 0;
     this->relevant_monitor = relevant_monitor;
 
@@ -552,6 +554,7 @@ int             intent_replay_buffer::advance                       (unsigned in
 }
 
 // access and updating -------------------------------------------------------------------------------------------------
+#ifndef MVEE_SHARED_MEMORY_REPLAY_LEADER
 int             replay_buffer::obtain_buffer                        (unsigned int variant_num, void* monitor_pointer,
                                                                      instruction_intent &instruction, void** requested,
                                                                      unsigned long long requested_size)
@@ -704,6 +707,174 @@ int             replay_buffer::advance                              (unsigned in
 
     return REPLAY_BUFFER_RETURN_OK;
 }
+#else
+int             replay_buffer::obtain_buffer                        (unsigned int variant_num, void* monitor_pointer,
+                                                                     instruction_intent &instruction, void** requested,
+                                                                     unsigned long long requested_size)
+{
+    if (variant_num >= this->variant_count)
+        return REPLAY_BUFFER_RETURN_ERROR;
+
+    // get current state and entry
+    replay_state* current_state = &this->variant_states[variant_num];
+    replay_entry* current_entry = &this->buffer[current_state->current_index];
+
+    if (variant_num == 0)
+    {
+        // entry currently empty
+        if (current_entry->entry_state == REPLAY_ENTRY_EMPTY_STATE)
+        {
+            // fill entry
+            for (int i = 0; i < instruction.size; i++)
+                current_entry->instruction[i] = instruction.instruction[i];
+            current_entry->instruction_size = instruction.size;
+
+            if (requested)
+            {
+                if (requested_size > REPLAY_ENTRY_STATIC_BUFFER_SIZE)
+                {
+                    current_entry->buffer = (__uint8_t*) malloc(requested_size);
+                    if (!current_entry->buffer)
+                    {
+                        warnf("could not allocate buffer of size %llu\n", requested_size);
+                        return REPLAY_BUFFER_RETURN_ERROR;
+                    }
+                }
+                else
+                    current_entry->buffer = current_entry->static_buffer;
+                *requested = current_entry->buffer;
+                current_entry->buffer_size = requested_size;
+            }
+            else
+            {
+                current_entry->buffer      = nullptr;
+                current_entry->buffer_size = 0;
+            }
+
+            current_entry->monitor_pointer = monitor_pointer;
+            current_entry->variants_passed = 0;
+            current_entry->entry_state     = REPLAY_ENTRY_FILLED_STATE;
+
+            return REPLAY_BUFFER_RETURN_FIRST;
+        }
+        // entry not empty
+        else
+        {
+            this->state |= REPLAY_BUFFER_LEADER_WAITING;
+            current_state->state = REPLAY_STATE_WAITING;
+            return REPLAY_BUFFER_RETURN_WAIT;
+        }
+    }
+    else
+    {
+        // entry currently empty
+        if (current_entry->entry_state == REPLAY_ENTRY_EMPTY_STATE)
+        {
+            this->state |= REPLAY_BUFFER_VARIANTS_WAITING;
+            current_state->state = REPLAY_STATE_WAITING;
+            return REPLAY_BUFFER_RETURN_WAIT;
+        }
+        else
+        {
+            // compare instruction
+            if (instruction.size != current_entry->instruction_size)
+                return REPLAY_BUFFER_RETURN_ERROR;
+            for (int i = 0; i < current_entry->instruction_size; i++)
+                if (current_entry->instruction[i] != instruction.instruction[i])
+                    return REPLAY_BUFFER_RETURN_ERROR;
+
+            // compare monitor pointer
+            if (current_entry->monitor_pointer != monitor_pointer)
+                return REPLAY_BUFFER_RETURN_ERROR;
+
+            // return buffer
+            if (requested)
+            {
+                if (current_entry->buffer_size != requested_size)
+                    return REPLAY_BUFFER_RETURN_ERROR;
+                *requested = current_entry->buffer;
+            }
+            // ok
+            return REPLAY_BUFFER_RETURN_OK;
+        }
+    }
+}
+
+
+int             replay_buffer::advance                              (unsigned int variant_num)
+{
+    if (variant_num >= this->variant_count)
+        return REPLAY_BUFFER_RETURN_ERROR;
+
+    // get current state and entry
+    replay_state* current_state = &this->variant_states[variant_num];
+    replay_entry* current_entry = &this->buffer[current_state->current_index];
+
+    // advance
+    current_state->current_index = (current_state->current_index + 1) % this->buffer_size;
+    if (variant_num == 0)
+    {
+        if (this->state & REPLAY_BUFFER_VARIANTS_WAITING)
+        {
+            this->state &= ~REPLAY_BUFFER_VARIANTS_WAITING;
+
+            for (unsigned int i = 1; i < this->variant_count; i++)
+            {
+                if (this->variant_states[i].state == REPLAY_STATE_WAITING)
+                {
+                    variantstate* variant = &this->relevant_monitor->variants[i];
+                    this->variant_states[i].state = REPLAY_STATE_RUNNING;
+
+                    if (instruction_intent_emulation::lookup_table[variant->instruction.opcode()].emulator(
+                            variant->instruction, *this->relevant_monitor, variant) != 0)
+                        return REPLAY_BUFFER_RETURN_ERROR;
+
+                    variant->regs.rip += variant->instruction.size;
+                    if (!interaction::write_all_regs(variant->variantpid, &variant->regs))
+                        return REPLAY_BUFFER_RETURN_ERROR;
+
+                    this->relevant_monitor->call_resume((int) i);
+                }
+            }
+        }
+
+        current_state->state = REPLAY_STATE_EXPECTING_EMPTY;
+    }
+
+    // entry should be emptied?
+    current_entry->variants_passed++;
+    if (current_entry->variants_passed >= this->variant_count)
+    {
+        if (current_entry->buffer != current_entry->static_buffer)
+            free(current_entry->buffer);
+        current_entry->buffer = nullptr;
+
+        current_entry->variants_passed = 0;
+        current_entry->entry_state     = REPLAY_ENTRY_EMPTY_STATE;
+
+        // check if variants were waiting for this
+        if (this->state & REPLAY_BUFFER_LEADER_WAITING)
+        {
+            this->state &= ~REPLAY_BUFFER_LEADER_WAITING;
+
+            variantstate* variant = &this->relevant_monitor->variants[0];
+            this->variant_states[0].state = REPLAY_STATE_RUNNING;
+
+            if (instruction_intent_emulation::lookup_table[variant->instruction.opcode()].emulator(
+                    variant->instruction, *this->relevant_monitor, variant) != 0)
+                return REPLAY_BUFFER_RETURN_ERROR;
+
+            variant->regs.rip += variant->instruction.size;
+            if (!interaction::write_all_regs(variant->variantpid, &variant->regs))
+                return REPLAY_BUFFER_RETURN_ERROR;
+
+            this->relevant_monitor->call_resume((int) 0);
+        }
+    }
+
+    return REPLAY_BUFFER_RETURN_OK;
+}
+#endif
 
 
 // =====================================================================================================================
@@ -735,8 +906,10 @@ int             replay_buffer::advance                              (unsigned in
     this->active_shadow_users--;
 
     if (this->shadow_base && this->active_shadow_users <= 0)
+    {
         if (munmap(this->shadow_base, this->size))
             return errno;
+    }
 
     return 0;
 }
@@ -745,8 +918,6 @@ int             mmap_table::shadow_map                              (variantstat
                                                                      std::shared_ptr<shared_monitor_map_info>* shadow,
                                                                      size_t size, int protection, int flags, int offset)
 {
-    // warnf("opening shadow mapping for %s | flags: %d\n", backing_file, backing_flags);
-
     // open file
     int fd = -1;
     if (info->file_type == FT_MEMFD)
@@ -796,13 +967,43 @@ int             mmap_table::shadow_map                              (variantstat
 #endif
     }
 
+    auto directory_size = (size_t) (size >> 3u);
+    directory_size += ((size & 0b111u) > 0);
+    void* temp_shadow_directory = mmap(nullptr, directory_size, PROT_READ | PROT_WRITE,
+            MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    if (temp_shadow_directory == MAP_FAILED)
+    {
+        warnf("\tsize:       %zu\n", directory_size);
+        warnf("\tprotection: %d\n", PROT_READ | PROT_WRITE);
+        warnf("\tflags:      %d\n", MAP_ANONYMOUS | MAP_PRIVATE);
+        warnf("\tfd:         %d\n", fd);
+        warnf("\toffset:     %d\n", offset);
+        warnf("could not map directory for shared file %s | error %d\n", info->paths[0].c_str(), errno);
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+        temp_shadow_directory = nullptr;
+#else
+        munmap(temp_shadow, size);
+        // we won't be using this anyway if we're logging
+        close(fd);
+        return -1;
+#endif
+    }
+
     close(fd);
 
     // bookkeeping
     *shadow = std::shared_ptr<shared_monitor_map_info>(
             (shared_monitor_map_info*) malloc(sizeof(shared_monitor_map_info)));
-    (*shadow)->shadow_base = temp_shadow;
-    (*shadow)->size = size;
+    (*shadow)->shadow_base      = temp_shadow;
+    (*shadow)->size             = size;
+
+#ifdef JNS_DEBUG
+    debugf("shadow mapping ====================================\n");
+    debugf("file:                  %s\n", info->paths[0].c_str());
+    debugf("shadow base:           %p\n", (*shadow)->shadow_base);
+    debugf("shadow size:           %zu\n", (*shadow)->size);
+    debugf("===================================================\n");
+#endif
 
     // return ok
     return 0;
@@ -920,7 +1121,6 @@ void               mmap_table::debug_shared                         ()
 
     warnf("%s\n", output.str().c_str());
 }
-
 
 
 // =====================================================================================================================

@@ -44,7 +44,8 @@ mmap_region_info::mmap_region_info
     unsigned int  prot_flags,
     fd_info*      backing_file,
     unsigned int  backing_file_offset,
-    unsigned int  map_flags
+    unsigned int  map_flags,
+    mmap_region_info* connected
 )
     : region_base_address(address),
     region_size(size),
@@ -52,7 +53,8 @@ mmap_region_info::mmap_region_info
     region_backing_file_offset(backing_file_offset),
     region_backing_file_unsynced(false),
     region_is_so(false),
-    shadow(nullptr)
+    shadow(nullptr),
+    connected(connected)
 {
     region_map_flags = map_flags & ~(MAP_FIXED);
 
@@ -1045,7 +1047,7 @@ bool mmap_table::map_range (int variantnum, unsigned long address, unsigned long
     // now we can just create a new region without having to deal with
     // overlap scenarios
     mmap_region_info* new_region = new mmap_region_info(variantnum, address, size, prot_flags, region_backing_file,
-            region_backing_file_offset, map_flags);
+            region_backing_file_offset, map_flags, connected);
 
     if (shadow)
     {
@@ -1060,7 +1062,6 @@ bool mmap_table::map_range (int variantnum, unsigned long address, unsigned long
                   (void*) (new_region->region_base_address + new_region->region_size));
         }
     }
-    new_region->connected = connected;
 //    new_region->print_region_info("inserting region: ", mvee::warnf);
     if (!full_map[variantnum].insert(new_region).second)
     {

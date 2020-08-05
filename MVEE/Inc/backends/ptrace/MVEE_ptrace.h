@@ -381,8 +381,8 @@ namespace interaction
 
         ssize_t nread = process_vm_readv(variantpid, local, 1, remote, 1, 0);
         if (nread != data_len)
-            warnf("interaction::read_memory failed. tried to read %ld bytes - actually read %zd bytes - errno: %d (%s)\n", 
-				  data_len, nread, errno, strerror(errno));
+            warnf("interaction::read_memory failed. tried to read %ld bytes - actually read %zd bytes - errno: %d (%s)\n",
+                    data_len, nread, errno, strerror(errno));
 
 #ifdef MVEE_GENERATE_EXTRA_STATS
         if (!mvee::in_logging_handler)
