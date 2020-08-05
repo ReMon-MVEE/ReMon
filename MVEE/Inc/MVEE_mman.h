@@ -185,7 +185,8 @@ public:
     // Constructor
     //
     mmap_region_info(int variantnum, unsigned long address, unsigned long size, unsigned int prot_flags,
-            fd_info* backing_file, unsigned int backing_file_offset, unsigned int map_flags);
+            fd_info* backing_file, unsigned int backing_file_offset, unsigned int map_flags,
+            mmap_region_info* connected = nullptr);
 
 private:
     std::shared_ptr<mmap_addr2line_proc>

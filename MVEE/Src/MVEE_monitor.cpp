@@ -2166,7 +2166,7 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
 #ifdef MVEE_EMULATE_SHARED_MEMORY
             // shared memory access ====================================================================================
             // check if this SIGSEGV was caused by a genuine shared memory access
-            if (SHARED_MEMORY_ACCESS(variantnum, siginfo))
+            if IS_SHARED_MEMORY_ACCESS(variantnum, siginfo)
             {
 #ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
                 // log instruction =====================================================================================
@@ -2175,7 +2175,7 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                 if (variant_map_info)
                 {
                     if (instruction_tracing::log_shared_instruction(*this, variant, siginfo.si_addr,
-                        variant_map_info) < 0)
+                            variant_map_info) < 0)
                     {
                         // set_mmap_table->print_mmap_table(warnf);
                         mmap_region_info* region = set_mmap_table->get_region_info(variantnum, variant->regs.rip,
@@ -2196,7 +2196,8 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
 #else
                 // update the intent for the faulting variant
                 instruction_intent* instruction = &variant->instruction;
-                instruction->update((void*) variant->regs.rip, siginfo.si_addr);
+                instruction->update((void*) variant->regs.rip,
+                        (void*) ((unsigned long long) siginfo.si_addr & ~SHARED_MEMORY_ADDRESS_TAG));
 
                 mvee::log_non_instrumented(variant, this, instruction);
 
@@ -2216,27 +2217,29 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                     case ILLEGAL_ACCESS_TERMINATION:
                     {
 #ifdef JNS_DEBUG
+                        warnf("illegal access\n");
                         variant->instruction.debug_print();
                         mmap_region_info* region = this->set_mmap_table->get_region_info(variantnum,
                                 variants[variantnum].regs.rip, 0);
                         if (!region)
-                            debugf("could not find location of instruction\n");
+                            debugf("variant %d | could not find location of instruction\n", variantnum);
                         else
                         {
-                            debugf("instruction in %s at offset %llx\n",
+                            debugf("variant %d | instruction in %s at offset %llx\n", variantnum,
                                    region->region_backing_file_path.c_str(),
                                    variants[variantnum].regs.rip - region->region_base_address);
                         }
                         mmap_region_info* accessed_region = this->set_mmap_table->get_region_info(variantnum,
-                                (unsigned long long) siginfo.si_addr, 0);
+                                ((unsigned long long) siginfo.si_addr & ~SHARED_MEMORY_ADDRESS_TAG), 0);
                         if (!accessed_region)
                             debugf("could not find location of access\n");
                         else
                         {
-                            debugf("access in %s at offset %llx\n",
-                                   accessed_region->region_backing_file_path.c_str(),
-                                   (unsigned long long) siginfo.si_addr - accessed_region->region_base_address);
+                            debugf("access in %s at offset %llx\n", accessed_region->region_backing_file_path.c_str(),
+                                    ((unsigned long long) siginfo.si_addr & ~SHARED_MEMORY_ADDRESS_TAG)
+                                        - accessed_region->region_base_address);
                         }
+                        set_mmap_table->print_mmap_table(debugf);
 #endif
                         shutdown(false);
                         return;
@@ -2247,7 +2250,10 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                         return;
                     }
                     case UNKNOWN_MEMORY_TERMINATION:
+                    {
+                        instruction->debug_print_minimal();
                         break;
+                    }
                     default:
                     {
                         warnf("unexpected emulation result\n");

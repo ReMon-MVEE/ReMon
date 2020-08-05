@@ -85,6 +85,28 @@ add_custom_target(
         COMMAND "${CMAKE_COMMAND}" .. -DCMAKE_BUILD_TYPE=Release
 )
 
+add_custom_target(
+        emulate-shm
+        COMMAND "${CMAKE_COMMAND}" ..
+            -DEmulateCPUID=ON
+            -DEmulateShm=ON
+            -DLogNonInstrumentedIns=ON
+            -DShmInsLogging=OFF
+            -DShmInsLoggingFull=OFF
+            -DShmReplayLeader=ON
+)
+
+add_custom_target(
+        trace-shm
+        COMMAND "${CMAKE_COMMAND}" ..
+            -DEmulateCPUID=ON
+            -DEmulateShm=ON
+            -DLogNonInstrumentedIns=ON
+            -DShmInsLogging=ON
+            -DShmInsLoggingFull=OFF
+            -DShmReplayLeader=ON
+)
+
 message("using:")
 message("\t- " ${CMAKE_CXX_COMPILER})
 message("\t- " ${CMAKE_LINKER})
@@ -230,12 +252,14 @@ option(EmulateShm "Emulate shared memory." ON)
 option(LogNonInstrumentedIns "Log non-instrumented instructions using shared memory." ON)
 option(ShmInsLogging "Log instructions using shared memory." ON)
 option(ShmInsLoggingFull "Log instructions using shared memory with more verbosity." OFF)
+option(ShmReplayLeader "Modifies replaying of shared memory instructions to follow leader-follower principle." OFF)
 target_compile_definitions(mvee PRIVATE
     $<$<BOOL:${EmulateCPUID}>:MVEE_EMULATE_CPUID>
     $<$<BOOL:${EmulateShm}>:MVEE_EMULATE_SHARED_MEMORY>
     $<$<BOOL:${LogNonInstrumentedIns}>:MVEE_LOG_NON_INSTRUMENTED_INSTRUCTION>
     $<$<BOOL:${ShmInsLogging}>:MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING>
     $<$<BOOL:${ShmInsLoggingFull}>:MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL>
+    $<$<BOOL:${ShmReplayLeader}>:MVEE_SHARED_MEMORY_REPLAY_LEADER>
 )
 # ======================================================================================================================
 add_subdirectory(libsync)
