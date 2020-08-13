@@ -1679,9 +1679,19 @@ public:
     // BYTE_LOADER_DEFINITION(0xa9)
     // BYTE_EMULATOR_DEFINITION(0xa9)
 
-    /* Not implemented - blocked */
-    // BYTE_LOADER_DEFINITION(0xaa)
-    // BYTE_EMULATOR_DEFINITION(0xaa)
+    /* Valid in first round
+     *
+     * ## First round ##
+     *
+     * stos m8, al
+     *
+     * ## Other rounds ##
+     *
+     * If encountered in other rounds, ILLEGAL_ACCESS should be set as operation and the decoding should be terminated
+     * returning ILLEGAL_ACCESS_TERMINATION.
+     */
+    BYTE_LOADER_DEFINITION(0xaa)
+    BYTE_EMULATOR_DEFINITION(0xaa)
 
     /* Valid in first round
      *
@@ -2363,7 +2373,7 @@ public:
             {&block_loader          , &block_emulator},                                              // 0xa7
             {&block_loader          , &block_emulator},                                              // 0xa8
             {&block_loader          , &block_emulator},                                              // 0xa9
-            {&block_loader          , &block_emulator},                                              // 0xaa
+            {&BYTE_LOADER_NAME(0xaa), &BYTE_EMULATOR_NAME(0xaa)},                               // 0xaa
             {&BYTE_LOADER_NAME(0xab), &BYTE_EMULATOR_NAME(0xab)},                               // 0xab
             {&block_loader          , &block_emulator},                                              // 0xac
             {&block_loader          , &block_emulator},                                              // 0xad

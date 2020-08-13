@@ -264,7 +264,8 @@ warnf("\n%s\n", output.str().c_str());
         (siginfo.si_signo == SIGSEGV && siginfo.si_addr != 0)
 #else
 #define IS_SHARED_MEMORY_ACCESS(variant_num, signal)                                                                   \
-        (siginfo.si_signo == SIGSEGV && siginfo.si_addr != 0 && ADDRESS_TAGGED(siginfo.si_addr))
+        (siginfo.si_signo == SIGSEGV && siginfo.si_addr != 0 && siginfo.si_addr != (void*) 0xffffffffffffffff          \
+         && ADDRESS_TAGGED(siginfo.si_addr))
 #endif
 // ---------------------------------------------------------------------------------------------------------------------
 
@@ -281,8 +282,7 @@ warnf("\n%s\n", output.str().c_str());
         overwritten_arg.arg_old_value = ARG##arg(var);                                                                 \
         overwritten_arg.restore_data = false;                                                                          \
         variants[var].overwritten_args.push_back(overwritten_arg);                                                     \
-        SETARG##arg(var, region->connected->region_base_address +                                                      \
-                ((ARG##arg(var) & ~SHARED_MEMORY_ADDRESS_TAG) - region->region_base_address));                         \
+        SETARG##arg(var, (ARG##arg(var) & ~SHARED_MEMORY_ADDRESS_TAG));                                                \
     }                                                                                                                  \
 }
 // ugly syscall shared pointer redirection -----------------------------------------------------------------------------
@@ -290,13 +290,7 @@ warnf("\n%s\n", output.str().c_str());
 
 // syscall arg logging pointer redirection -----------------------------------------------------------------------------
 #define LOGGING_SHARED_POINTER_REDIRECTION(var_num, arg_num, cast)                                                     \
-auto arg##arg_num##_pointer = (cast) ARG##arg_num(var_num);                                                            \
-{                                                                                                                      \
-    mmap_region_info* region = set_mmap_table->get_region_info(var_num, ARG##arg_num(var_num));                        \
-    if (region && region->connected)                                                                                   \
-        arg##arg_num##_pointer = (cast)                                                                                \
-              (region->connected->region_base_address + (ARG##arg_num(var_num) - region->region_base_address));        \
-}
+auto arg##arg_num##_pointer = (cast) REMOVE_ADDRESS_TAG(ARG##arg_num(var_num));                                        \
 // syscall arg logging pointer redirection -----------------------------------------------------------------------------
 
 

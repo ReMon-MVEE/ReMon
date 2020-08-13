@@ -341,6 +341,11 @@ BYTE_LOADER_IMPL(0x2b)
         SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_FIRST_LEVEL)
         LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
     }
+    if (round == INSTRUCTION_DECODING_SECOND_LEVEL)
+    {
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_SECOND_LEVEL)
+        LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
+    }
 
     // illegal otherwise
     return -1;
@@ -1353,8 +1358,21 @@ BYTE_LOADER_IMPL(0xa4)
 // BYTE_LOADER_IMPL(0xa9)
 
 
-/* Not implemented - blocked */
-// BYTE_LOADER_IMPL(0xaa)
+/* Valid in first round */
+BYTE_LOADER_IMPL(0xaa)
+{
+    if (round == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        SET_EFFECTIVE_OPCODE(instruction, round)
+
+        // update instruction size
+        instruction.size++;
+        return ACCESS_OK_TERMINATION;
+    }
+
+    // illegal otherwise
+    return ILLEGAL_ACCESS_TERMINATION;
+}
 
 
 /* Valid in first round */
