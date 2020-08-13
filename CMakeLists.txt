@@ -252,7 +252,7 @@ option(EmulateShm "Emulate shared memory." ON)
 option(LogNonInstrumentedIns "Log non-instrumented instructions using shared memory." ON)
 option(ShmInsLogging "Log instructions using shared memory." ON)
 option(ShmInsLoggingFull "Log instructions using shared memory with more verbosity." OFF)
-option(ShmReplayLeader "Modifies replaying of shared memory instructions to follow leader-follower principle." OFF)
+option(ShmReplayLeader "Modifies replaying of shared memory instructions to follow leader-follower principle." ON)
 target_compile_definitions(mvee PRIVATE
     $<$<BOOL:${EmulateCPUID}>:MVEE_EMULATE_CPUID>
     $<$<BOOL:${EmulateShm}>:MVEE_EMULATE_SHARED_MEMORY>

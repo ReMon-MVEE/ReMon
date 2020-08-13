@@ -131,7 +131,7 @@ public:
 
                 shared_monitor_map_info                 (void* shadow_base, size_t size);
                 ~shared_monitor_map_info                ();
-    int         mmap                                    ();
+    // int         mmap                                    ();
     int         unmap                                   ();
 };
 
@@ -170,8 +170,6 @@ public:
     std::shared_ptr<shared_monitor_map_info>
                   shadow;
     void*         original_base;
-    mmap_region_info*
-                  connected;
 
     //
     // Debugging/Backtracing support
@@ -185,8 +183,7 @@ public:
     // Constructor
     //
     mmap_region_info(int variantnum, unsigned long address, unsigned long size, unsigned int prot_flags,
-            fd_info* backing_file, unsigned int backing_file_offset, unsigned int map_flags,
-            mmap_region_info* connected = nullptr);
+            fd_info* backing_file, unsigned int backing_file_offset, unsigned int map_flags);
 
 private:
     std::shared_ptr<mmap_addr2line_proc>
@@ -310,8 +307,7 @@ public:
     bool        map_range                   (int variantnum, unsigned long address, unsigned long size,
                                              unsigned int map_flags, unsigned int prot_flags,
                                              fd_info* region_backing_file, unsigned int region_backing_file_offset,
-                                             std::shared_ptr<shared_monitor_map_info> shadow = nullptr,
-                                             mmap_region_info* connected = nullptr);
+                                             const std::shared_ptr<shared_monitor_map_info>& shadow = nullptr);
 	unsigned long find_image_base           (int variantnum, std::string image_name);
 
     //
@@ -366,11 +362,14 @@ public:
     int                shadow_map                   (variantstate* variant, fd_info* info,
                                                      std::shared_ptr<shared_monitor_map_info>* shadow,
                                                      size_t size, int protection, int flags, int offset);
-    int                insert_variant_shared_region (int variant, mmap_region_info* region);
-    mmap_region_info*  get_shared_info              (int variant, unsigned long long address);
-    int                munmap_variant_shadow_region (int variant, mmap_region_info* region_info);
-    int                split_variant_shadow_region  (int variant, mmap_region_info* region_info);
-    int                merge_variant_shadow_region  (int variant, mmap_region_info* region_info1,
+    int                shadow_shmat                 (variantstate* variant, int shmid,
+                                                     std::shared_ptr<shared_monitor_map_info>* shadow,
+                                                     unsigned long long size);
+    int                insert_variant_shared_region (mmap_region_info* region);
+    mmap_region_info*  get_shared_info              (unsigned long long address);
+    int                munmap_variant_shadow_region (mmap_region_info* region_info);
+    int                split_variant_shadow_region  (mmap_region_info* region_info);
+    int                merge_variant_shadow_region  (mmap_region_info* region_info1,
                                                      mmap_region_info* region_info2);
     void               debug_shared                 ();
 
@@ -391,7 +390,7 @@ private:
     std::map<std::string,
              std::map<std::string, unsigned long> >
                     cached_syms;                      // maps libname -> symbol name -> symbol offset within lib
-    std::vector<std::vector<mmap_region_info*>>
+    std::vector<mmap_region_info*>
                     variant_mappings;
 };
 

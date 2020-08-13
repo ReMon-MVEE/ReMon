@@ -44,8 +44,7 @@ mmap_region_info::mmap_region_info
     unsigned int  prot_flags,
     fd_info*      backing_file,
     unsigned int  backing_file_offset,
-    unsigned int  map_flags,
-    mmap_region_info* connected
+    unsigned int  map_flags
 )
     : region_base_address(address),
     region_size(size),
@@ -53,8 +52,7 @@ mmap_region_info::mmap_region_info
     region_backing_file_offset(backing_file_offset),
     region_backing_file_unsynced(false),
     region_is_so(false),
-    shadow(nullptr),
-    connected(connected)
+    shadow(nullptr)
 {
     region_map_flags = map_flags & ~(MAP_FIXED);
 
@@ -189,9 +187,6 @@ mmap_table::mmap_table()
 	std::uniform_int_distribution<> distr(1, 254);
 	mmap_base = distr(mt) * (HIGHEST_USERMODE_ADDRESS >> 8);
 //	warnf("mmap_base is 0x" PTRSTR "\n", mmap_base);
-
-    for (int i = 0; i < mvee::numvariants; i++)
-        variant_mappings.emplace_back();
 #ifdef MVEE_MMAN_DEBUG
     print_mmap_table(mvee::logf);
 #endif
@@ -216,9 +211,6 @@ mmap_table::mmap_table(const mmap_table& parent)
 
     full_map.resize(mvee::numvariants);
 
-    for (int i = 0; i < mvee::numvariants; i++)
-        variant_mappings.emplace_back();
-
     for (int i = 0; i < mvee::numvariants; ++i)
     {
 		// copy memory map
@@ -228,7 +220,7 @@ mmap_table::mmap_table(const mmap_table& parent)
             full_map[i].insert(new_region);
 
             if ((*it)->shadow != nullptr)
-                insert_variant_shared_region(i, new_region);
+                insert_variant_shared_region(new_region);
         }
     }
 }
@@ -407,9 +399,7 @@ mmap_region_info* mmap_table::merge_regions(int variantnum, mmap_region_info* re
 
             // update shadow reference count
             if (region1->shadow && region2->shadow)
-                merge_variant_shadow_region(variantnum, region1, region2);
-            if (region1->connected && region2->connected)
-                merge_regions(variantnum, region1->connected, region2->connected, dont_touch_maps);
+                merge_variant_shadow_region(region1, region2);
 
             if (!dont_touch_maps)
             {
@@ -462,7 +452,7 @@ mmap_region_info* mmap_table::split_region(int variantnum, mmap_region_info* exi
 
     // another region is referencing this shadow
     if (upper_region->shadow)
-        split_variant_shadow_region(variantnum, existing_region);
+        split_variant_shadow_region(existing_region);
 
 #ifdef MVEE_MMAN_DEBUG
     lower_region->print_region_info(">>> lower split: ");
@@ -967,16 +957,10 @@ static __thread unsigned long __munmap_size;
 
 bool mmap_table::mman_munmap_range_callback(mmap_table* table, mmap_region_info* region_info, void* callback_param)
 {
-    unsigned long long base_offset = 0;
-    if (region_info->connected)
-        base_offset = __munmap_base - region_info->region_base_address;
     //  warnf("munmap callback: region: 0x%08x-0x%08x\n", region_info->region_base_address, region_info->region_base_address + region_info->region_size);
     // watch out for partial mprotects!
     if (__munmap_base > region_info->region_base_address)
     {
-        if (region_info->connected)
-            table->split_region(__munmap_variantnum, region_info->connected,
-                    region_info->connected->region_base_address + base_offset);
         // split_region returns the lower part. the existing region info becomes the upper part...
         table->split_region(__munmap_variantnum, region_info, __munmap_base);
         //	warnf("splitting because munmap base > region base\n");
@@ -984,25 +968,10 @@ bool mmap_table::mman_munmap_range_callback(mmap_table* table, mmap_region_info*
     if (__munmap_base + __munmap_size < region_info->region_base_address + region_info->region_size)
     {
         //	warnf("splitting because munmap_limit < region limit\n");
-        if (region_info->connected)
-            table->split_region(__munmap_variantnum, region_info->connected,
-                    region_info->connected->region_base_address + base_offset + __munmap_size);
         region_info = table->split_region(__munmap_variantnum, region_info, __munmap_base + __munmap_size);
     }
 
-    // shared memory?
-    if (region_info->shadow)
-        table->munmap_variant_shadow_region(__munmap_variantnum, region_info);
-
     // delete the region from the table
-    if (region_info->connected)
-    {
-        std::set<mmap_region_info*, region_sort>::iterator it =
-                table->full_map[(unsigned long)callback_param].find(region_info->connected);
-        if (it != table->full_map[(unsigned long)callback_param].end())
-            table->full_map[(unsigned long)callback_param].erase(it);
-        delete region_info->connected;
-    }
     std::set<mmap_region_info*, region_sort>::iterator it =
         table->full_map[(unsigned long)callback_param].find(region_info);
     if (it != table->full_map[(unsigned long)callback_param].end())
@@ -1035,8 +1004,8 @@ bool mmap_table::munmap_range (int variantnum, unsigned long base, unsigned long
 -----------------------------------------------------------------------------*/
 bool mmap_table::map_range (int variantnum, unsigned long address, unsigned long size, unsigned int map_flags,
                             unsigned int prot_flags, fd_info* region_backing_file,
-                            unsigned int region_backing_file_offset, std::shared_ptr<shared_monitor_map_info> shadow,
-                            mmap_region_info* connected)
+                            unsigned int region_backing_file_offset,
+                            const std::shared_ptr<shared_monitor_map_info>& shadow)
 {
     address = ROUND_DOWN(address, 4096);
     size    = ROUND_UP(size, 4096);
@@ -1047,15 +1016,16 @@ bool mmap_table::map_range (int variantnum, unsigned long address, unsigned long
     // now we can just create a new region without having to deal with
     // overlap scenarios
     mmap_region_info* new_region = new mmap_region_info(variantnum, address, size, prot_flags, region_backing_file,
-            region_backing_file_offset, map_flags, connected);
+            region_backing_file_offset, map_flags);
 
-    if (shadow)
+    if (shadow && variantnum == 0)
     {
         new_region->shadow = shadow;
-        new_region->shadow->mmap();
+        // new_region->shadow->mmap();
+        new_region->shadow->active_shadow_users++;
         new_region->original_base = (void*) address;
 
-        if (insert_variant_shared_region(variantnum, new_region) < 0)
+        if (insert_variant_shared_region(new_region) < 0)
         {
             warnf("big oopsie! - [%p; %p)\n\n",
                   (void*) new_region->region_base_address,
@@ -1210,9 +1180,10 @@ void mmap_table::calculate_disjoint_bases (unsigned long size, std::vector<unsig
     if (!merged_regions.insert(pseudo).second)
         SAFEDELETE(pseudo);
 
-    // warnf("merged set dump\n");
-    //for (it = merged_regions.begin(); it != merged_regions.end(); ++it)
-    //  warnf("> found region - 0x%08x-0x%08x\n", (*it)->region_base_address, (*it)->region_size + (*it)->region_base_address);
+    warnf("merged set dump\n");
+    for (it = merged_regions.begin(); it != merged_regions.end(); ++it)
+        warnf("> found region - %p-%p\n", (void*) (*it)->region_base_address,
+                (void*) ((*it)->region_size + (*it)->region_base_address));
 
     // step 2: fill any holes that are not large enough to contain the new region
     unsigned long     prev_end = 0;
@@ -1318,6 +1289,7 @@ void mmap_table::calculate_disjoint_bases (unsigned long size, std::vector<unsig
             }
             else
             {
+                warnf("found %p for %d\n\n",  (void*) test_region.region_base_address, i);
                 break;
             }
         }

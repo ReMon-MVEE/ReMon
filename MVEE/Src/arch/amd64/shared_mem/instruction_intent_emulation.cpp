@@ -696,6 +696,27 @@ BYTE_EMULATOR_IMPL(0x2b)
         return 0;
     }
 
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
+    {
+        LOAD_SRC_AND_DST(DEFINE_FPREGS_STRUCT, xmm_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+
+        GET_BUFFER_CHECK_OR_FILL(destination, source, 16)
+
+        __asm
+        (
+                ".intel_syntax noprefix;"
+                "movdqu xmm0, XMMWORD PTR [rdx];"
+                "movntps XMMWORD PTR [rax], xmm0;"
+                ".att_syntax;"
+                :
+                : "a" (destination), "d" (source)
+                : "xmm0"
+        );
+
+        REPLAY_BUFFER_ADVANCE
+        return 0;
+    }
+
     // illegal otherwise
     return -1;
 }
@@ -2010,37 +2031,6 @@ BYTE_EMULATOR_IMPL(0x89)
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
             GET_BUFFER_CHECK_OR_FILL(destination, source, 8)
-            /*
-            void* buffer;
-            int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, destination, instruction,
-                    &buffer, sizeof (unsigned long long) + sizeof(int));
-            auto content         = (unsigned long long*) buffer;
-            auto leading_variant = (int*) ((unsigned long long*) buffer + 1);
-            if (result < 0)
-                return result;
-            if (result == REPLAY_BUFFER_RETURN_FIRST)
-            {
-                *content         = *(unsigned long long*) source;
-                *leading_variant = variant->variant_num;
-            }
-            else if (*(unsigned long long*) buffer == *(unsigned long long*) source)
-            {
-                REPLAY_BUFFER_ADVANCE
-                return 0;
-            }
-            else if (relevant_monitor.same_address(*leading_variant, *content, variant->variant_num,
-                    *(unsigned long long*) source))
-            {
-                warnf("same memory region detected\n\n");
-                REPLAY_BUFFER_ADVANCE
-                return 0;
-            }
-            else
-            {
-                warnf("sources don't match\n\n");
-                return -1;
-            }
-            */
 
             __asm
             (
@@ -2529,8 +2519,65 @@ BYTE_EMULATOR_IMPL(0xa4)
 // BYTE_EMULATOR_IMPL(0xa9)
 
 
-/* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0xaa)
+/* Valid in first round */
+BYTE_EMULATOR_IMPL(0xaa)
+{
+    // we're in need of rax as source
+    DEFINE_REGS_STRUCT
+
+    void* monitor_pointer;
+    if (instruction_intent::determine_monitor_pointer(relevant_monitor, variant, instruction.effective_address,
+            &monitor_pointer) != 0)
+        return -1;
+    void* source = shared_mem_register_access::ACCESS_GENERAL_NAME(rax)(regs_struct);
+
+    unsigned long long count = 1;
+    if (PREFIXES_GRP_ONE_PRESENT(instruction) && (PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE ||
+            PREFIXES_GRP_ONE(instruction) == REPNZ_PREFIX_CODE))
+        count = regs_struct->rcx;
+
+    GET_BUFFER_RAW(monitor_pointer, 1 + sizeof(unsigned long long))
+    if (result == REPLAY_BUFFER_RETURN_FIRST)
+    {
+        *(__uint8_t *) buffer = *(__uint8_t *) source;
+        *(unsigned long long*) ((__uint8_t *) buffer + 1) = count;
+    }
+    else if (*(__uint8_t*) buffer == *(__uint8_t*) source)
+    {
+        if (PREFIXES_GRP_ONE_PRESENT(instruction) && (PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE ||
+                PREFIXES_GRP_ONE(instruction) == REPNZ_PREFIX_CODE)
+                && *(unsigned long long*) ((__uint8_t *) buffer + 1) != count)
+            return -1;
+
+        if (regs_struct->eflags & (0b1u << 10u))
+            regs_struct->rdi -= count;
+        else
+            regs_struct->rdi += count;
+
+        REPLAY_BUFFER_ADVANCE
+        return 0;
+    }
+    else
+        return -1;
+
+    __asm
+    (
+            ".intel_syntax noprefix;"
+            "mov rdi, rdx;"
+            "rep stosb;"
+            ".att_syntax;"
+            :
+            : "a" (*(__uint8_t*) source), "d" (monitor_pointer), "c" (count)
+    );
+
+    if (regs_struct->eflags & (0b1u << 10u))
+        regs_struct->rdi -= count;
+    else
+        regs_struct->rdi += count;
+
+    REPLAY_BUFFER_ADVANCE
+    return 0;
+}
 
 
 /* Valid in first round */
@@ -2538,6 +2585,10 @@ BYTE_EMULATOR_IMPL(0xab)
 {
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
+        if (PREFIXES_GRP_ONE_PRESENT(instruction) && (PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE ||
+                PREFIXES_GRP_ONE(instruction) == REPNZ_PREFIX_CODE))
+            return -1;
+
         // we're in need of rax as source
         DEFINE_REGS_STRUCT
 

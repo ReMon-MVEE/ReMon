@@ -89,7 +89,6 @@ variantstate::variantstate()
     , orig_controllen (0)
     , config (NULL)
     , instruction (&this->variantpid, &this->variant_num)
-    , connected_mapping(nullptr)
 #ifdef __NR_socketcall
     , orig_arg1 (0)
 #endif
@@ -2232,12 +2231,14 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                         mmap_region_info* accessed_region = this->set_mmap_table->get_region_info(variantnum,
                                 ((unsigned long long) siginfo.si_addr & ~SHARED_MEMORY_ADDRESS_TAG), 0);
                         if (!accessed_region)
-                            debugf("could not find location of access\n");
+                            debugf("could not find location of access | %p\n",
+                                   (void*) ((unsigned long long) siginfo.si_addr & ~SHARED_MEMORY_ADDRESS_TAG));
                         else
                         {
-                            debugf("access in %s at offset %llx\n", accessed_region->region_backing_file_path.c_str(),
+                            debugf("access in %s at offset %llx | %p\n", accessed_region->region_backing_file_path.c_str(),
                                     ((unsigned long long) siginfo.si_addr & ~SHARED_MEMORY_ADDRESS_TAG)
-                                        - accessed_region->region_base_address);
+                                        - accessed_region->region_base_address,
+                                   (void*) ((unsigned long long) siginfo.si_addr & ~SHARED_MEMORY_ADDRESS_TAG));
                         }
                         set_mmap_table->print_mmap_table(debugf);
 #endif
@@ -2251,7 +2252,7 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                     }
                     case UNKNOWN_MEMORY_TERMINATION:
                     {
-                        instruction->debug_print_minimal();
+                        debugf("unknown memory\n");
                         break;
                     }
                     default:

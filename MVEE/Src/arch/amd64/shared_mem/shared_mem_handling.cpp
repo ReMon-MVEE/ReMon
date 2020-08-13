@@ -12,6 +12,7 @@
 #include <sys/mman.h>
 #include <arch/amd64/hde.h>
 #include <sys/stat.h>
+#include <sys/shm.h>
 #include "shared_mem_reg_access.h"
 #include "MVEE_interaction.h"
 
@@ -111,8 +112,8 @@ int             instruction_intent::determine_monitor_pointer       (monitor& re
                                                                      unsigned long long size)
 {
     // translate variant address to monitor address
-    mmap_region_info* variant_map_info = relevant_monitor.set_mmap_table->get_shared_info(variant->variant_num,
-            (unsigned long long) variant_address);
+    mmap_region_info* variant_map_info =
+            relevant_monitor.set_mmap_table->get_shared_info((unsigned long long) variant_address);
     if (!variant_map_info)
     {
         debugf("variant %d address %lx does not have an associated monitor mapping\n",
@@ -891,7 +892,7 @@ int             replay_buffer::advance                              (unsigned in
     if (this->shadow_base)
         munmap(this->shadow_base, this->size);
 }
-
+/*
     int         shared_monitor_map_info::mmap                       ()
 {
     if (!shadow_base)
@@ -900,7 +901,7 @@ int             replay_buffer::advance                              (unsigned in
     this->active_shadow_users++;
     return 0;
 }
-
+*/
     int         shared_monitor_map_info::unmap                      ()
 {
     this->active_shadow_users--;
@@ -967,28 +968,6 @@ int             mmap_table::shadow_map                              (variantstat
 #endif
     }
 
-    auto directory_size = (size_t) (size >> 3u);
-    directory_size += ((size & 0b111u) > 0);
-    void* temp_shadow_directory = mmap(nullptr, directory_size, PROT_READ | PROT_WRITE,
-            MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-    if (temp_shadow_directory == MAP_FAILED)
-    {
-        warnf("\tsize:       %zu\n", directory_size);
-        warnf("\tprotection: %d\n", PROT_READ | PROT_WRITE);
-        warnf("\tflags:      %d\n", MAP_ANONYMOUS | MAP_PRIVATE);
-        warnf("\tfd:         %d\n", fd);
-        warnf("\toffset:     %d\n", offset);
-        warnf("could not map directory for shared file %s | error %d\n", info->paths[0].c_str(), errno);
-#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
-        temp_shadow_directory = nullptr;
-#else
-        munmap(temp_shadow, size);
-        // we won't be using this anyway if we're logging
-        close(fd);
-        return -1;
-#endif
-    }
-
     close(fd);
 
     // bookkeeping
@@ -1009,31 +988,67 @@ int             mmap_table::shadow_map                              (variantstat
     return 0;
 }
 
+int             mmap_table::shadow_shmat                            (variantstate* variant, int shmid,
+                                                                     std::shared_ptr<shared_monitor_map_info>* shadow,
+                                                                     unsigned long long size)
+{
+    // map shadow
+    errno = 0;
+    void* temp_shadow = shmat(shmid, nullptr, 0);
+    if (temp_shadow == MAP_FAILED)
+    {
+        warnf("could not map shared memory segment %d | error %d\n", shmid, errno);
+#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+        temp_shadow = nullptr;
+#else
+        // we won't be using this anyway if we're logging
+        return -1;
+#endif
+    }
 
-int             mmap_table::insert_variant_shared_region            (int variant, mmap_region_info* region)
+    // bookkeeping
+    *shadow = std::shared_ptr<shared_monitor_map_info>(
+            (shared_monitor_map_info*) malloc(sizeof(shared_monitor_map_info)));
+    (*shadow)->shadow_base      = temp_shadow;
+    (*shadow)->size             = size;
+
+#ifdef JNS_DEBUG
+    debugf("shadow mapping ====================================\n");
+    debugf("shmid:                 %d\n", shmid);
+    debugf("shadow base:           %p\n", (*shadow)->shadow_base);
+    debugf("shadow size:           %zu\n", (*shadow)->size);
+    debugf("===================================================\n");
+#endif
+
+    // return ok
+    return 0;
+}
+
+
+int             mmap_table::insert_variant_shared_region            (mmap_region_info* region)
 {
     unsigned long long end = region->region_base_address + region->region_size;
 
-    if (variant_mappings[variant].empty() || end <= variant_mappings[variant].front()->region_base_address)
+    if (variant_mappings.empty() || end <= variant_mappings.front()->region_base_address)
     {
-        variant_mappings[variant].insert(variant_mappings[variant].begin(), region);
+        variant_mappings.insert(variant_mappings.begin(), region);
         return 0;
     }
 
-    for (auto iter = variant_mappings[variant].begin(); iter != (variant_mappings[variant].end() - 1); iter++)
+    for (auto iter = variant_mappings.begin(); iter != (variant_mappings.end() - 1); iter++)
     {
         if (((*iter)->region_base_address + (*iter)->region_size) <= region->region_base_address&&
                 (*(iter + 1))->region_base_address >= end)
         {
-            variant_mappings[variant].insert(iter + 1, region);
+            variant_mappings.insert(iter + 1, region);
             return 0;
         }
     }
 
-    if (region->region_base_address >= (variant_mappings[variant].back()->region_base_address) +
-                                               variant_mappings[variant].back()->region_size)
+    if (region->region_base_address >= (variant_mappings.back()->region_base_address) +
+                                               variant_mappings.back()->region_size)
     {
-        variant_mappings[variant].insert(variant_mappings[variant].end(), region);
+        variant_mappings.insert(variant_mappings.end(), region);
         return 0;
     }
 
@@ -1042,9 +1057,9 @@ int             mmap_table::insert_variant_shared_region            (int variant
 
 
 mmap_region_info*
-                mmap_table::get_shared_info                         (int variant, unsigned long long address)
+                mmap_table::get_shared_info                         (unsigned long long address)
 {
-    for (auto &iter: variant_mappings[variant])
+    for (auto &iter: variant_mappings)
     {
         if (address >= iter->region_base_address && address < (iter->region_base_address + iter->region_size))
             return iter;
@@ -1054,13 +1069,13 @@ mmap_region_info*
 }
 
 
-int             mmap_table::munmap_variant_shadow_region            (int variant, mmap_region_info* region_info)
+int             mmap_table::munmap_variant_shadow_region            (mmap_region_info* region_info)
 {
-    for (unsigned int i = 0; i < variant_mappings[variant].size(); i++)
+    for (unsigned int i = 0; i < variant_mappings.size(); i++)
     {
-        if (*(variant_mappings[variant].begin() + i) == region_info)
+        if (*(variant_mappings.begin() + i) == region_info)
         {
-            variant_mappings[variant].erase(variant_mappings[variant].begin() + i);
+            variant_mappings.erase(variant_mappings.begin() + i);
             break;
         }
     }
@@ -1070,12 +1085,13 @@ int             mmap_table::munmap_variant_shadow_region            (int variant
 
     return 0;
 }
-int             mmap_table::split_variant_shadow_region             (int variant, mmap_region_info* region_info)
+int             mmap_table::split_variant_shadow_region             (mmap_region_info* region_info)
 {
-    region_info->shadow->mmap();
+    region_info->shadow->active_shadow_users++;
+    // region_info->shadow->mmap();
     return 0;
 }
-int             mmap_table::merge_variant_shadow_region             (int variant, mmap_region_info* region_info1,
+int             mmap_table::merge_variant_shadow_region             (mmap_region_info* region_info1,
                                                                      mmap_region_info* region_info2)
 {
     if (region_info1->shadow != region_info2->shadow)
@@ -1085,12 +1101,12 @@ int             mmap_table::merge_variant_shadow_region             (int variant
     region_info1->shadow = nullptr;
 
     int to_erase = -1;
-    for (unsigned int i = 0; i < variant_mappings[variant].size(); i++)
+    for (unsigned int i = 0; i < variant_mappings.size(); i++)
     {
-        if (*(variant_mappings[variant].begin() + i) == region_info2)
+        if (*(variant_mappings.begin() + i) == region_info2)
         {
             to_erase = (int) i;
-            variant_mappings[variant].erase(variant_mappings[variant].begin() + i);
+            variant_mappings.erase(variant_mappings.begin() + i);
             break;
         }
     }
