@@ -256,16 +256,20 @@ warnf("\n%s\n", output.str().c_str());
 
 // check for shared memory access --------------------------------------------------------------------------------------
 #define SHARED_MEMORY_ADDRESS_TAG               0xffff800000000000ull
-#define ADDRESS_TAGGED(address)                 (((unsigned long long) address & SHARED_MEMORY_ADDRESS_TAG) ==         \
+#define IS_TAGGED_ADDRESS(address)              (((unsigned long long) address & SHARED_MEMORY_ADDRESS_TAG) ==         \
                                                  SHARED_MEMORY_ADDRESS_TAG)
-#define REMOVE_ADDRESS_TAG(address)             ((unsigned long long) address & ~SHARED_MEMORY_ADDRESS_TAG)
+
+void* decode_address_tag(void* address, const variantstate* variant);
+void* encode_address_tag(void* address, const variantstate* variant);
+unsigned long decode_address_tag(unsigned long address, const variantstate* variant);
+unsigned long encode_address_tag(unsigned long address, const variantstate* variant);
 #ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
 #define IS_SHARED_MEMORY_ACCESS(variant_num, signal)                                                                   \
         (siginfo.si_signo == SIGSEGV && siginfo.si_addr != 0)
 #else
 #define IS_SHARED_MEMORY_ACCESS(variant_num, signal)                                                                   \
         (siginfo.si_signo == SIGSEGV && siginfo.si_addr != 0 && siginfo.si_addr != (void*) 0xffffffffffffffff          \
-         && ADDRESS_TAGGED(siginfo.si_addr))
+         && IS_TAGGED_ADDRESS(siginfo.si_addr))
 #endif
 // ---------------------------------------------------------------------------------------------------------------------
 
@@ -273,7 +277,7 @@ warnf("\n%s\n", output.str().c_str());
 // ugly syscall shared pointer redirection -----------------------------------------------------------------------------
 #define REPLACE_SHARED_POINTER_ARG(var, arg)                                                                           \
 {                                                                                                                      \
-    mmap_region_info* region = set_mmap_table->get_region_info(var, ARG##arg(var) & ~SHARED_MEMORY_ADDRESS_TAG);       \
+    mmap_region_info* region = set_mmap_table->get_region_info(var, decode_address_tag(ARG##arg(var), &variants[var])); \
     if (region && region->shadow)                                                                                      \
     {                                                                                                                  \
         variants[var].have_overwritten_args = true;                                                                    \
@@ -282,7 +286,7 @@ warnf("\n%s\n", output.str().c_str());
         overwritten_arg.arg_old_value = ARG##arg(var);                                                                 \
         overwritten_arg.restore_data = false;                                                                          \
         variants[var].overwritten_args.push_back(overwritten_arg);                                                     \
-        SETARG##arg(var, (ARG##arg(var) & ~SHARED_MEMORY_ADDRESS_TAG));                                                \
+        SETARG##arg(var, decode_address_tag(ARG##arg(var), &variants[var]));                                            \
     }                                                                                                                  \
 }
 // ugly syscall shared pointer redirection -----------------------------------------------------------------------------
@@ -290,7 +294,7 @@ warnf("\n%s\n", output.str().c_str());
 
 // syscall arg logging pointer redirection -----------------------------------------------------------------------------
 #define LOGGING_SHARED_POINTER_REDIRECTION(var_num, arg_num, cast)                                                     \
-auto arg##arg_num##_pointer = (cast) REMOVE_ADDRESS_TAG(ARG##arg_num(var_num));                                        \
+auto arg##arg_num##_pointer = (cast) decode_address_tag(ARG##arg_num(var_num), &variants[var_num]);                                        \
 // syscall arg logging pointer redirection -----------------------------------------------------------------------------
 
 
