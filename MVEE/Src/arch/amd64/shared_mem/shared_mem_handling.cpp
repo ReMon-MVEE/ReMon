@@ -1834,7 +1834,7 @@ unsigned long decode_address_tag(unsigned long address, const variantstate* vari
 {
   unsigned long high = address & 0xffffffff00000000ull;
   unsigned long low  = address & 0x00000000ffffffffull;
-  return (high ^ SHARED_MEMORY_ADDRESS_TAG) + low;
+  return (high ^ variant->shm_tag) + low;
 }
 
 unsigned long encode_address_tag(unsigned long address, const variantstate* variant)

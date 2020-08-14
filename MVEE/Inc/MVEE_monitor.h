@@ -268,6 +268,7 @@ public:
 #ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
     void*         syscall_pointer;
 #endif
+    unsigned long shm_tag;                                          // Tag for shared memory pages
     // -----------------------------------------------------------------------------------------------------------------
 
     variantstate();

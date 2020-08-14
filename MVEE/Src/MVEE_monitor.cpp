@@ -233,6 +233,7 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
 #ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
         variants[i].syscall_pointer = parent_monitor->variants[i].syscall_pointer;
 #endif
+        variants[i].shm_tag = parent_monitor->variants[i].shm_tag;
     }
 
     // variant monitors are a different story. New variants (forks/vforks/clones) always
