@@ -2350,7 +2350,7 @@ BYTE_EMULATOR_IMPL(0xa4)
                  PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE) ? regs_struct->rcx : 1;
 
         // source is known to be shared memory
-        if ((void*) (regs_struct->rsi & ~SHARED_MEMORY_ADDRESS_TAG) == instruction.effective_address)
+        if ((void*)decode_address_tag(regs_struct->rsi, variant) == instruction.effective_address)
         {
             // source to monitor pointer
             if (instruction_intent::determine_monitor_pointer(relevant_monitor, variant,
@@ -2359,8 +2359,8 @@ BYTE_EMULATOR_IMPL(0xa4)
 
             // check if destination is shared memory, or regular variant memory
             int result = instruction_intent::determine_monitor_pointer(relevant_monitor, variant,
-                    (void*) ((regs_struct->rdi & SHARED_MEMORY_ADDRESS_TAG) == SHARED_MEMORY_ADDRESS_TAG ?
-                            regs_struct->rdi & ~SHARED_MEMORY_ADDRESS_TAG : regs_struct->rdi), &destination, size);
+                    (void*)(IS_TAGGED_ADDRESS(regs_struct->rdi) ?
+                            decode_address_tag(regs_struct->rdi, variant) : regs_struct->rdi), &destination, size);
             if (result == NO_REGION_INFO)
             {
                 destination = (void*) regs_struct->rdi;
@@ -2370,7 +2370,7 @@ BYTE_EMULATOR_IMPL(0xa4)
                 return -1;
         }
         // destination is known shared memory
-        else if ((void*) (regs_struct->rdi & ~SHARED_MEMORY_ADDRESS_TAG) == instruction.effective_address)
+        else if ((void*)decode_address_tag(regs_struct->rdi, variant) == instruction.effective_address)
         {
             // destination to monitor pointer
             if (instruction_intent::determine_monitor_pointer(relevant_monitor, variant,
@@ -2379,8 +2379,8 @@ BYTE_EMULATOR_IMPL(0xa4)
 
             // check if source is shared memory, or regular variant memory
             int result = instruction_intent::determine_monitor_pointer(relevant_monitor, variant,
-                    (void*) ((regs_struct->rsi & SHARED_MEMORY_ADDRESS_TAG) == SHARED_MEMORY_ADDRESS_TAG ?
-                            regs_struct->rsi & ~SHARED_MEMORY_ADDRESS_TAG : regs_struct->rsi), &source, size);
+                    (void*)(IS_TAGGED_ADDRESS(regs_struct->rsi) ?
+                            decode_address_tag(regs_struct->rsi, variant) : regs_struct->rsi), &source, size);
             if (result == NO_REGION_INFO)
             {
                 source = (void*) regs_struct->rsi;

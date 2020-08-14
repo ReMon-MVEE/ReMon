@@ -2195,8 +2195,7 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
 #else
                 // update the intent for the faulting variant
                 instruction_intent* instruction = &variant->instruction;
-                instruction->update((void*) variant->regs.rip,
-                        (void*) ((unsigned long long) siginfo.si_addr & ~SHARED_MEMORY_ADDRESS_TAG));
+                instruction->update((void*) variant->regs.rip, decode_address_tag(siginfo.si_addr, variant));
 
                 mvee::log_non_instrumented(variant, this, instruction);
 
@@ -2229,16 +2228,15 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                                    variants[variantnum].regs.rip - region->region_base_address);
                         }
                         mmap_region_info* accessed_region = this->set_mmap_table->get_region_info(variantnum,
-                                ((unsigned long long) siginfo.si_addr & ~SHARED_MEMORY_ADDRESS_TAG), 0);
+                                (unsigned long long) decode_address_tag(siginfo.si_addr, variant), 0);
                         if (!accessed_region)
-                            debugf("could not find location of access | %p\n",
-                                   (void*) ((unsigned long long) siginfo.si_addr & ~SHARED_MEMORY_ADDRESS_TAG));
+                            debugf("could not find location of access | %p\n", decode_address_tag(siginfo.si_addr, variant));
                         else
                         {
                             debugf("access in %s at offset %llx | %p\n", accessed_region->region_backing_file_path.c_str(),
-                                    ((unsigned long long) siginfo.si_addr & ~SHARED_MEMORY_ADDRESS_TAG)
+                                    (unsigned long long) decode_address_tag(siginfo.si_addr, variant)
                                         - accessed_region->region_base_address,
-                                   (void*) ((unsigned long long) siginfo.si_addr & ~SHARED_MEMORY_ADDRESS_TAG));
+                                   decode_address_tag(siginfo.si_addr, variant));
                         }
                         set_mmap_table->print_mmap_table(debugf);
 #endif

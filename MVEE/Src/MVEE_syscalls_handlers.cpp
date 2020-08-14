@@ -3795,15 +3795,15 @@ PRECALL(munmap)
     // for further information
     if IS_UNSYNCED_CALL
     {
-        if ((ARG1(variantnum) & SHARED_MEMORY_ADDRESS_TAG) == SHARED_MEMORY_ADDRESS_TAG)
-            call_overwrite_arg_value(variantnum, 1, ARG1(variantnum) & ~SHARED_MEMORY_ADDRESS_TAG, true);
+        if (IS_TAGGED_ADDRESS(ARG1(variantnum)))
+            call_overwrite_arg_value(variantnum, 1, decode_address_tag(ARG1(variantnum), &variants[variantnum]), true);
         return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
     }
 
-    if ((ARG1(0) & SHARED_MEMORY_ADDRESS_TAG) == SHARED_MEMORY_ADDRESS_TAG)
+    if (IS_TAGGED_ADDRESS(ARG1(0)))
     {
         for (int i = 0; i < mvee::numvariants; i++)
-            call_overwrite_arg_value(i, 1, ARG1(i) & ~SHARED_MEMORY_ADDRESS_TAG, true);
+            call_overwrite_arg_value(i, 1, decode_address_tag(ARG1(i), &variants[variantnum]), true);
     }
 
 	CHECKARG(2);
@@ -5466,8 +5466,7 @@ POSTCALL(shmat)
             }
 
             for (int i = 0; i < mvee::numvariants; ++i)
-                call_postcall_set_variant_result(i,
-                        ((unsigned long long) addresses[0]) | SHARED_MEMORY_ADDRESS_TAG);
+                call_postcall_set_variant_result(i, encode_address_tag(addresses[0], &variants[i]));
         }
 	}
 
@@ -7344,7 +7343,7 @@ POSTCALL(mmap)
             }
 
             for (int i = 0; i < mvee::numvariants; ++i)
-                call_postcall_set_variant_result(i, results[0] | SHARED_MEMORY_ADDRESS_TAG);
+                call_postcall_set_variant_result(i, encode_address_tag(results[0], &variants[i]));
         }
 #endif
 
