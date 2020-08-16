@@ -174,6 +174,7 @@ void monitor::init()
     atomic_buffer                  = NULL;
     ipmon_buffer                   = NULL;
 	ring_buffer                    = NULL;
+	shm_buffer                     = NULL;
     current_signal                 = 0;
     current_signal_sent            = 0;
     current_signal_info            = NULL;
@@ -912,6 +913,8 @@ nobacktrace:
         delete ipmon_buffer;
     if (ring_buffer)
         delete ring_buffer;
+    if (shm_buffer)
+        delete shm_buffer;
 
     pthread_mutex_lock(&monitor_lock);
     local_detachlist.clear();

@@ -5319,7 +5319,8 @@ PRECALL(shmat)
     if ((atomic_buffer &&
                 ((int) ARG1(0) == atomic_buffer->id || (int) ARG1(0) == atomic_buffer->eip_id)) ||
             (set_fd_table->file_map_exists() && (int)ARG1(0) == set_fd_table->file_map_id()) ||
-            (ipmon_buffer && (int)ARG1(0) == ipmon_buffer->id))
+            (ipmon_buffer && (int)ARG1(0) == ipmon_buffer->id) ||
+            (shm_buffer  && (int)ARG1(0) == shm_buffer->id))
         return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
     else
     {
@@ -5360,6 +5361,12 @@ CALL(shmat)
 		disjoint_bases = false;
 		shm_sz = ipmon_buffer->sz;
 	}
+  else if (shm_buffer  && (int)ARG1(0) == shm_buffer->id)
+  {
+		debugf("attach to shared memory buffer requested\n");
+		disjoint_bases = false;
+    shm_sz = shm_buffer->sz;
+  }
 	else
 	{
         bool found = false;
@@ -5427,6 +5434,11 @@ POSTCALL(shmat)
 //		hwbp_set_watch(0, addresses[0] + 64 * (1 + mvee::numvariants), MVEE_BP_WRITE_ONLY); // detects writes of first syscall no
 #endif
 	}
+  else if (shm_buffer  && (int)ARG1(0) == shm_buffer->id)
+  {
+		region_name = "[shm-buffer]";
+		region_size = shm_buffer->sz;
+  }
 	else if (set_fd_table->file_map_exists() 
 			 && (int)ARG1(0) == set_fd_table->file_map_id())
 	{
