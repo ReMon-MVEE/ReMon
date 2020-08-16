@@ -1129,6 +1129,7 @@ private:
 
     _shm_info*                        ipmon_buffer;
 	_shm_info*                        ring_buffer;
+    _shm_info*                        shm_buffer;          // shared memory buffer
 
     // Signal info
     unsigned short                    current_signal;         // signal no for the signal we're currently delivering

@@ -726,6 +726,16 @@ long monitor::call_call_dispatch ()
 
 					info = ring_buffer;
 				}
+                else if (buffer_type == MVEE_SHM_BUFFER)
+                {
+                  if (!shm_buffer)
+                  {
+                    shm_buffer = new _shm_info();
+                    alloc_size =  SHARED_QUEUE_SLOTS * actual_slot_size;
+                  }
+
+                  info = shm_buffer;
+                }
                 else if (buffer_type <= MVEE_MAX_SHM_TYPES)
                 {
                     it         = set_shm_table->table.find(buffer_type);
@@ -815,6 +825,10 @@ long monitor::call_call_dispatch ()
                         result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
                         break;
                     }
+                }
+                else if (ARG1(0) == MVEE_SHM_BUFFER)
+                {
+                    info = shm_buffer;
                 }
                 else if (ARG1(0) <= MVEE_MAX_SHM_TYPES)
                 {
