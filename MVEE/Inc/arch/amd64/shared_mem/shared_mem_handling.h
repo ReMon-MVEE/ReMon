@@ -294,7 +294,9 @@ unsigned long encode_address_tag(unsigned long address, const variantstate* vari
 
 // syscall arg logging pointer redirection -----------------------------------------------------------------------------
 #define LOGGING_SHARED_POINTER_REDIRECTION(var_num, arg_num, cast)                                                     \
-auto arg##arg_num##_pointer = (cast) decode_address_tag(ARG##arg_num(var_num), &variants[var_num]);                                        \
+auto arg##arg_num##_pointer = (cast) (IS_TAGGED_ADDRESS(ARG##arg_num(var_num)) ?                                       \
+    decode_address_tag(ARG##arg_num(var_num), &variants[var_num]) :                                                    \
+    ARG##arg_num(var_num));
 // syscall arg logging pointer redirection -----------------------------------------------------------------------------
 
 
