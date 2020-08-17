@@ -2218,8 +2218,8 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                     }
                     case ILLEGAL_ACCESS_TERMINATION:
                     {
-#ifdef JNS_DEBUG
                         warnf("illegal access\n");
+#ifdef JNS_DEBUG
                         variant->instruction.debug_print();
                         mmap_region_info* region = this->set_mmap_table->get_region_info(variantnum,
                                 variants[variantnum].regs.rip, 0);
