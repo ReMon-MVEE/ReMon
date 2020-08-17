@@ -580,12 +580,12 @@ bool monitor::call_compare_msgvectors(std::vector<struct msghdr*>& addresses, bo
             // UGH
             if (msg.msg_control)
             {
-                delete ((unsigned char*)msg.msg_control);
+                delete[] ((unsigned char*)msg.msg_control);
                 msg.msg_control = NULL;
             }
             if (msg.msg_name)
             {
-                delete ((unsigned char*)msg.msg_name);
+                delete[] ((unsigned char*)msg.msg_name);
                 msg.msg_name = NULL;
             }
         }
@@ -598,22 +598,22 @@ out:
     {
         if (msg.msg_control)
         {
-            delete ((unsigned char*)msg.msg_control);
+            delete[] ((unsigned char*)msg.msg_control);
             msg.msg_control = NULL;
         }
         if (msg.msg_name)
         {
-            delete ((unsigned char*)msg.msg_name);
+            delete[] ((unsigned char*)msg.msg_name);
             msg.msg_name = NULL;
         }
         if (master_msg.msg_control)
         {
-            delete ((unsigned char*)master_msg.msg_control);
+            delete[] ((unsigned char*)master_msg.msg_control);
             master_msg.msg_control = NULL;
         }
         if (master_msg.msg_name)
         {
-            delete ((unsigned char*)master_msg.msg_name);
+            delete[] ((unsigned char*)master_msg.msg_name);
             master_msg.msg_name = NULL;
         }
     }
@@ -762,7 +762,7 @@ std::set<int> monitor::call_get_fd_set_from_domain_msgvector(struct msghdr* addr
 
 	if (master_msg.msg_control)
 	{
-		delete ((unsigned char*) master_msg.msg_control);
+		delete[] ((unsigned char*) master_msg.msg_control);
 		master_msg.msg_control = nullptr;
 	}
 

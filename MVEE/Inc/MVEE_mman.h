@@ -133,6 +133,11 @@ public:
                 ~shared_monitor_map_info                ();
     // int         mmap                                    ();
     int         unmap                                   ();
+
+    //
+    // Constructor
+    //
+    shared_monitor_map_info() = default;
 };
 
 //

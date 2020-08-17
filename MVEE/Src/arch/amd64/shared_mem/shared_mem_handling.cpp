@@ -971,8 +971,7 @@ int             mmap_table::shadow_map                              (variantstat
     close(fd);
 
     // bookkeeping
-    *shadow = std::shared_ptr<shared_monitor_map_info>(
-            (shared_monitor_map_info*) malloc(sizeof(shared_monitor_map_info)));
+    *shadow = std::shared_ptr<shared_monitor_map_info>(new shared_monitor_map_info());
     (*shadow)->shadow_base      = temp_shadow;
     (*shadow)->size             = size;
 
