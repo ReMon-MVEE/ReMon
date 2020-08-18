@@ -2468,7 +2468,7 @@ BYTE_EMULATOR_IMPL(0xa4)
                     :
                     : [dst] "a" (dst_spoof ? spoof : destination), [src] "d" (src_spoof ? spoof : source),
                             [count] "c" (&regs_struct->rcx), [flags] "b" (&regs_struct->eflags)
-                    : "r8"
+                    : "r8", "rsi", "rdi"
             );
 
             if (dst_spoof && !interaction::write_memory(variant->variantpid, destination, (long) size, spoof))
