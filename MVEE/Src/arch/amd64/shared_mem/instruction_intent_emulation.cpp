@@ -2453,22 +2453,16 @@ BYTE_EMULATOR_IMPL(0xa4)
             (
                     ".intel_syntax noprefix;"
                     "pushf;"
-                    "push QWORD PTR [rbx];"
+                    "push rbx;"
                     "popf;"
-                    "mov r8, rcx;"
-                    "mov rcx, QWORD PTR [r8];"
-                    "mov rsi, rdx;"
-                    "mov rdi, rax;"
                     "rep movsb;"
-                    "mov QWORD PTR [r8], rcx;"
                     "pushf;"
-                    "pop QWORD PTR [rbx];"
+                    "pop rbx;"
                     "popf;"
                     ".att_syntax;"
-                    :
-                    : [dst] "a" (dst_spoof ? spoof : destination), [src] "d" (src_spoof ? spoof : source),
-                            [count] "c" (&regs_struct->rcx), [flags] "b" (&regs_struct->eflags)
-                    : "r8", "rsi", "rdi"
+                    : [count] "+c" (regs_struct->rcx), [flags] "+b" (regs_struct->eflags)
+                    : [dst] "D" (dst_spoof ? spoof : destination), [src] "S" (src_spoof ? spoof : source)
+                    : "r8"
             );
 
             if (dst_spoof && !interaction::write_memory(variant->variantpid, destination, (long) size, spoof))
