@@ -3803,7 +3803,7 @@ PRECALL(munmap)
     if (IS_TAGGED_ADDRESS(ARG1(0)))
     {
         for (int i = 0; i < mvee::numvariants; i++)
-            call_overwrite_arg_value(i, 1, decode_address_tag(ARG1(i), &variants[variantnum]), true);
+            call_overwrite_arg_value(i, 1, decode_address_tag(ARG1(i), &variants[i]), true);
     }
 
 	CHECKARG(2);
