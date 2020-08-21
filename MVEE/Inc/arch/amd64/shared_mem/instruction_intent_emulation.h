@@ -577,7 +577,17 @@ public:
     // BYTE_LOADER_DEFINITION(0x38)
     // BYTE_EMULATOR_DEFINITION(0x38)
 
-    /* Not implemented - blocked */
+    /* Valid in first round
+     *
+     * ## First round ##
+     *
+     * cmp Ev, Gv
+     *
+     * ## Other rounds ##
+     *
+     * If encountered in other rounds, ILLEGAL_ACCESS should be set as operation and the decoding should be terminated
+     * returning ILLEGAL_ACCESS_TERMINATION.
+     */
     BYTE_LOADER_DEFINITION(0x39)
     BYTE_EMULATOR_DEFINITION(0x39)
 
