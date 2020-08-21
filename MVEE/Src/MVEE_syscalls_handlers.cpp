@@ -7112,13 +7112,13 @@ CALL(mmap)
 				call_overwrite_arg_value(i, 1, address, true);
 
 				debugf("%s - replaced call by SYS_MMAP(0x" PTRSTR ", %lu, %s, %s, %d, %lu)\n",
-					   call_get_variant_pidstr(variantnum).c_str(), 
+					   call_get_variant_pidstr(i).c_str(),
 					   address, 
-					   (unsigned long)ARG2(variantnum),
-					   getTextualProtectionFlags(ARG3(variantnum)).c_str(),
-					   getTextualMapType(ARG4(variantnum)).c_str(), 
-					   (int)ARG5(variantnum), 
-					   (unsigned long)ARG6(variantnum));
+					   (unsigned long)ARG2(i),
+					   getTextualProtectionFlags(ARG3(i)).c_str(),
+					   getTextualMapType(ARG4(i)).c_str(),
+					   (int)ARG5(i),
+					   (unsigned long)ARG6(i));
 			}
 		}
         return MVEE_CALL_ALLOW;
