@@ -773,9 +773,88 @@ BYTE_EMULATOR_IMPL(0x2b)
 /* Not implemented - blocked */
 // BYTE_EMULATOR_IMPL(0x38)
 
+/* Valid in first round */
+BYTE_EMULATOR_IMPL(0x39)
+{
+    // cmp Ev, Gv
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
 
-/* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0x39)
+        // 64-bit
+        if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
+        {
+            GET_BUFFER_REPLACE(source, 8)
+
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "mov rdx, QWORD PTR [rdx];"
+                    "pushfq;"
+                    "push QWORD PTR [rcx];"
+                    "popfq;"
+                    "cmp QWORD PTR [rax], rdx;"
+                    "pushfq;"
+                    "pop QWORD PTR [rcx];"
+                    "popfq;"
+                    ".att_syntax;"
+                    :
+                    : "a" (destination), "d" (source), "c" (&regs_struct->eflags)
+            );
+        }
+        // 16-bit
+        else if (PREFIXES_GRP_THREE_PRESENT(instruction))
+        {
+            GET_BUFFER_REPLACE(source, 2)
+
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "mov dx, WORD PTR [rdx];"
+                    "pushfq;"
+                    "push QWORD PTR [rcx];"
+                    "popfq;"
+                    "cmp WORD PTR [rax], dx;"
+                    "pushfq;"
+                    "pop QWORD PTR [rcx];"
+                    "popfq;"
+                    ".att_syntax;"
+                    :
+                    : "a" (destination), "d" (source), "c" (&regs_struct->eflags)
+            );
+        }
+        // 32-bit
+        else
+        {
+            GET_BUFFER_REPLACE(source, 4)
+
+            __asm
+            (
+                    ".intel_syntax noprefix;"
+                    "mov r15, QWORD PTR [rax];"
+                    "pushfq;"
+                    "push QWORD PTR [rcx];"
+                    "popfq;"
+                    "cmp r15d, DWORD PTR [rdx];"
+                    "pushfq;"
+                    "pop QWORD PTR [rcx];"
+                    "popfq;"
+                    "mov QWORD PTR [rax], r15;"
+                    ".att_syntax;"
+                    :
+                    : "a" (destination), "d" (source), "c" (&regs_struct->eflags)
+                    : "r15"
+            );
+        }
+
+        // registers will be written back anyway
+        REPLAY_BUFFER_ADVANCE
+        return 0;
+    }
+
+    // illegal otherwise
+    return 1;
+}
 
 
 /* Not implemented - blocked */
