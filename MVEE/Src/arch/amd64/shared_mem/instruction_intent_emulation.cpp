@@ -2528,20 +2528,20 @@ BYTE_EMULATOR_IMPL(0xa4)
             (PREFIXES_GRP_ONE(instruction) == REPNZ_PREFIX_CODE ||
              PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE))
         {
+            void* asm_dst = dst_spoof ? spoof : destination;
+            void* asm_src = src_spoof ? spoof : source;
             __asm
             (
                     ".intel_syntax noprefix;"
-                    "pushf;"
-                    "push rbx;"
+                    "push %[flags];"
                     "popf;"
                     "rep movsb;"
                     "pushf;"
-                    "pop rbx;"
-                    "popf;"
+                    "pop %[flags];"
                     ".att_syntax;"
-                    : [count] "+c" (regs_struct->rcx), [flags] "+b" (regs_struct->eflags)
-                    : [dst] "D" (dst_spoof ? spoof : destination), [src] "S" (src_spoof ? spoof : source)
-                    : "r8"
+                    : [count] "+c" (regs_struct->rcx), [flags] "+g" (regs_struct->eflags), "+D" (asm_dst), "+S" (asm_src)
+                    :
+                    : "cc", "memory"
             );
 
             if (dst_spoof && !interaction::write_memory(variant->variantpid, destination, (long) size, spoof))
