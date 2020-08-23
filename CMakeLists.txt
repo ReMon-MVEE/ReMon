@@ -194,6 +194,7 @@ target_compile_options(mvee PRIVATE
         -Wpedantic
         -Wno-unused-parameter
         -Wno-unused-function
+        $<$<CXX_COMPILER_ID:Clang>:-no-integrated-as>
 )
 
 # output override
