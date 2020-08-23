@@ -3,6 +3,7 @@
 //
 
 
+#include <stdint.h>
 #include <sys/user.h>
 #include <MVEE.h>
 #include <MVEE_interaction.h>
@@ -18,7 +19,7 @@
 #define LOAD_SRC_AND_DST(DEFINE_REGS, lookup, DST_LOADER_MACRO, SRC_LOADER_MACRO)                                      \
     DEFINE_REGS                                                                                                        \
                                                                                                                        \
-    __uint8_t modrm = instruction[instruction.effective_opcode_index + 1];                                             \
+    uint8_t modrm = instruction[instruction.effective_opcode_index + 1];                                               \
                                                                                                                        \
     void* source;                                                                                                      \
     SRC_LOADER_MACRO(source, lookup);                                                                                  \
@@ -48,13 +49,13 @@ if (instruction.determine_monitor_pointer(relevant_monitor, variant, instruction
 
 
 #define LOAD_REG_CODE(pointer, lookup)                                                                                 \
-__uint8_t reg_rex_extra = PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_R(instruction) ?                     \
+uint8_t reg_rex_extra = PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_R(instruction) ?                       \
         0b1000u : 0;                                                                                                   \
 pointer = shared_mem_register_access::lookup[reg_rex_extra | GET_REG_CODE((unsigned) modrm)](regs_struct);
 
 
 #define LOAD_REG_CODE_BYTE(pointer, lookup)                                                                            \
-__uint8_t reg_code = GET_REG_CODE((unsigned) modrm);                                                                   \
+uint8_t reg_code = GET_REG_CODE((unsigned) modrm);                                                                     \
 if (PREFIXES_REX_PRESENT(instruction))                                                                                 \
 {                                                                                                                      \
     if (PREFIXES_REX_FIELD_R(instruction))                                                                             \
@@ -72,13 +73,13 @@ pointer = &instruction.instruction[instruction.immediate_operand_index];
 
 #define COMPARE_BUFFERS(first, second, size)                                                                           \
 for (int i = 0; i < size; i++)                                                                                         \
-    if (((__uint8_t*) first)[i] != ((__uint8_t*) second)[i])                                                           \
+    if (((uint8_t*) first)[i] != ((uint8_t*) second)[i])                                                               \
         return -1;
 
 
 #define COPY_BUFFER(first, second, size)                                                                               \
 for (int i = 0; i < size; i++)                                                                                         \
-    ((__uint8_t*) first)[i] = ((__uint8_t*) second)[i];                                                                \
+    ((uint8_t*) first)[i] = ((uint8_t*) second)[i];                                                                    \
 
 
 #define REPLAY_BUFFER_ADVANCE                                                                                          \
@@ -193,61 +194,58 @@ BYTE_EMULATOR_IMPL(0x01)
         // 64-bit
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            __asm
+            uint64_t* typed_destination = (uint64_t*)destination;
+            uint64_t* typed_source = (uint64_t*)source;
+            __asm__
             (
                     ".intel_syntax noprefix;"
-                    "pushf;"
-                    "push QWORD PTR [rcx];"
+                    "push %[flags];"
                     "popf;"
-                    "mov rdx, QWORD PTR [rdx];"
-                    "lock add QWORD PTR [rax], rdx;"
+                    "lock add QWORD PTR [%[dst]], %[src];"
                     "pushf;"
-                    "pop QWORD PTR [rcx];"
-                    "popf;"
+                    "pop %[flags];"
                     ".att_syntax;"
-                    :
-                    : [dst] "a" (destination), [src] "d" (source), "c" (&regs_struct->eflags)
-                    :
+                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                    : [dst] "r" (typed_destination), [src] "r" (*typed_source)
+                    : "cc"
             );
         }
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            __asm
+            uint16_t* typed_destination = (uint16_t*)destination;
+            uint16_t* typed_source = (uint16_t*)source;
+            __asm__
             (
                     ".intel_syntax noprefix;"
-                    "pushf;"
-                    "push QWORD PTR [rcx];"
+                    "push %[flags];"
                     "popf;"
-                    "mov dx, WORD PTR [rdx];"
-                    "lock add WORD PTR [rax], dx;"
+                    "lock add WORD PTR [%[dst]], %[src];"
                     "pushf;"
-                    "pop QWORD PTR [rcx];"
-                    "popf;"
+                    "pop %[flags];"
                     ".att_syntax;"
-                    :
-                    : [dst] "a" (destination), [src] "d" (source), "c" (&regs_struct->eflags)
-                    :
+                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                    : [dst] "r" (typed_destination), [src] "r" (*typed_source)
+                    : "cc"
             );
         }
         // 32-bit
         else
         {
-            __asm
+            uint32_t* typed_destination = (uint32_t*)destination;
+            uint32_t* typed_source = (uint32_t*)source;
+            __asm__
             (
                     ".intel_syntax noprefix;"
-                    "pushf;"
-                    "push QWORD PTR [rcx];"
+                    "push %[flags];"
                     "popf;"
-                    "mov edx, DWORD PTR [rdx];"
-                    "lock add DWORD PTR [rax], edx;"
+                    "lock add DWORD PTR [%[dst]], %[src];"
                     "pushf;"
-                    "pop QWORD PTR [rcx];"
-                    "popf;"
+                    "pop %[flags];"
                     ".att_syntax;"
-                    :
-                    : [dst] "a" (destination), [src] "d" (source), "c" (&regs_struct->eflags)
-                    :
+                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                    : [dst] "r" (typed_destination), [src] "r" (*typed_source)
+                    : "cc"
             );
         }
 
@@ -279,61 +277,60 @@ BYTE_EMULATOR_IMPL(0x03)
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
             GET_BUFFER_REPLACE(source, 8)
-            __asm
+            uint64_t* typed_destination = (uint64_t*)destination;
+            uint64_t* typed_source = (uint64_t*)source;
+            __asm__
             (
                     ".intel_syntax noprefix;"
-                    "pushf;"
-                    "push QWORD PTR [rcx];"
+                    "push %[flags];"
                     "popf;"
-                    "mov rdx, QWORD PTR [rdx];"
-                    "add QWORD PTR [rax], rdx;"
+                    "add QWORD PTR [%[dst]], %[src];"
                     "pushf;"
-                    "pop QWORD PTR [rcx];"
-                    "popf;"
+                    "pop %[flags];"
                     ".att_syntax;"
-                    :
-                    : "a" (destination), "d" (source), "c" (&regs_struct->eflags)
+                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                    : [dst] "r" (typed_destination), [src] "r" (*typed_source)
+                    : "cc"
             );
         }
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
             GET_BUFFER_REPLACE(source, 2)
-            __asm
+            uint16_t* typed_destination = (uint16_t*)destination;
+            uint16_t* typed_source = (uint16_t*)source;
+            __asm__
             (
                     ".intel_syntax noprefix;"
-                    "pushf;"
-                    "push QWORD PTR [rcx];"
+                    "push %[flags];"
                     "popf;"
-                    "mov dx, WORD PTR [rdx];"
-                    "add WORD PTR [rax], dx;"
+                    "add WORD PTR [%[dst]], %[src];"
                     "pushf;"
-                    "pop QWORD PTR [rcx];"
-                    "popf;"
+                    "pop %[flags];"
                     ".att_syntax;"
-                    :
-                    : "a" (destination), "d" (source), "c" (&regs_struct->eflags)
+                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                    : [dst] "r" (typed_destination), [src] "r" (*typed_source)
+                    : "cc"
             );
         }
         // 32-bit
         else
         {
             GET_BUFFER_REPLACE(source, 4)
-            __asm
+            uint32_t* typed_destination = (uint32_t*)destination;
+            uint32_t* typed_source = (uint32_t*)source;
+            __asm__
             (
                     ".intel_syntax noprefix;"
-                    "pushf;"
-                    "push QWORD PTR [rcx];"
+                    "push %[flags];"
                     "popf;"
-                    "mov r15, QWORD PTR [rax];"
-                    "add r15d, DWORD PTR [rdx];"
-                    "mov QWORD PTR [rax], r15;"
+                    "add DWORD PTR [%[dst]], %[src];"
                     "pushf;"
-                    "pop QWORD PTR [rcx];"
-                    "popf;"
+                    "pop %[flags];"
                     ".att_syntax;"
-                    :
-                    : "a" (destination), "d" (source), "c" (&regs_struct->eflags)
+                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                    : [dst] "r" (typed_destination), [src] "r" (*typed_source)
+                    : "cc"
             );
         }
 
@@ -408,7 +405,7 @@ BYTE_EMULATOR_IMPL(0x10)
         GET_BUFFER_REPLACE(source, 16)
 
         // perform operation
-        __asm
+        __asm__
         (
                 ".intel_syntax noprefix;"
                 "movups xmm0, XMMWORD PTR [rdx];"
@@ -447,7 +444,7 @@ BYTE_EMULATOR_IMPL(0x11)
         GET_BUFFER_CHECK_OR_FILL(destination, source, 16)
 
         // perform operation
-        __asm
+        __asm__
         (
                 ".intel_syntax noprefix;"
                 "movups xmm0, XMMWORD PTR [rdx];"
@@ -574,7 +571,7 @@ BYTE_EMULATOR_IMPL(0x29)
         // movapd xmm/m128, xmm
         if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            __asm
+            __asm__
             (
                     ".intel_syntax noprefix;"
                     "movups xmm0, XMMWORD PTR [rdx];"
@@ -588,7 +585,7 @@ BYTE_EMULATOR_IMPL(0x29)
         // movaps xmm/m128, xmm
         else
         {
-            __asm
+            __asm__
             (
                     ".intel_syntax noprefix;"
                     "movups xmm0, XMMWORD PTR [rdx];"
@@ -627,67 +624,63 @@ BYTE_EMULATOR_IMPL(0x2b)
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
             GET_BUFFER_REPLACE(source, 8)
+            uint64_t* typed_destination = (uint64_t*)destination;
+            uint64_t* typed_source = (uint64_t*)source;
 
-            __asm
+            __asm__
             (
                     ".intel_syntax noprefix;"
-                    "mov rdx, QWORD PTR [rdx];"
-                    "pushfq;"
-                    "push QWORD PTR [rcx];"
-                    "popfq;"
-                    "sub QWORD PTR [rax], rdx;"
-                    "pushfq;"
-                    "pop QWORD PTR [rcx];"
-                    "popfq;"
+                    "push %[flags];"
+                    "popf;"
+                    "sub QWORD PTR [%[dst]], %[src];"
+                    "pushf;"
+                    "pop %[flags];"
                     ".att_syntax;"
-                    :
-                    : "a" (destination), "d" (source), "c" (&regs_struct->eflags)
-                    :
+                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                    : [dst] "r" (typed_destination), [src] "r" (*typed_source)
+                    : "cc"
             );
         }
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
             GET_BUFFER_REPLACE(source, 2)
+            uint16_t* typed_destination = (uint16_t*)destination;
+            uint16_t* typed_source = (uint16_t*)source;
 
-            __asm
+            __asm__
             (
                     ".intel_syntax noprefix;"
-                    "mov dx, WORD PTR [rdx];"
-                    "pushfq;"
-                    "push QWORD PTR [rcx];"
-                    "popfq;"
-                    "sub WORD PTR [rax], dx;"
-                    "pushfq;"
-                    "pop QWORD PTR [rcx];"
-                    "popfq;"
+                    "push %[flags];"
+                    "popf;"
+                    "sub WORD PTR [%[dst]], %[src];"
+                    "pushf;"
+                    "pop %[flags];"
                     ".att_syntax;"
-                    :
-                    : "a" (destination), "d" (source), "c" (&regs_struct->eflags)
-                    :
+                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                    : [dst] "r" (typed_destination), [src] "r" (*typed_source)
+                    : "cc"
             );
         }
         // 32-bit
         else
         {
             GET_BUFFER_REPLACE(source, 4)
+            uint32_t* typed_destination = (uint32_t*)destination;
+            uint32_t* typed_source = (uint32_t*)source;
 
-            __asm
+            __asm__
             (
                     ".intel_syntax noprefix;"
-                    "mov r8, QWORD PTR [rax];"
-                    "pushfq;"
-                    "push QWORD PTR [rcx];"
-                    "popfq;"
-                    "sub r8d, DWORD PTR [rdx];"
-                    "pushfq;"
-                    "pop QWORD PTR [rcx];"
-                    "popfq;"
-                    "mov QWORD PTR [rax], r8;"
+                    "push %[flags];"
+                    "popf;"
+                    "sub DWORD PTR [%[dst]], %[src];"
+                    "pushf;"
+                    "pop %[flags];"
                     ".att_syntax;"
-                    :
-                    : "a" (destination), "d" (source), "c" (&regs_struct->eflags)
-                    : "r8"
+                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                    : [dst] "r" (typed_destination), [src] "r" (*typed_source)
+                    : "cc"
             );
         }
 
@@ -702,7 +695,7 @@ BYTE_EMULATOR_IMPL(0x2b)
 
         GET_BUFFER_CHECK_OR_FILL(destination, source, 16)
 
-        __asm
+        __asm__
         (
                 ".intel_syntax noprefix;"
                 "movdqu xmm0, XMMWORD PTR [rdx];"
@@ -785,65 +778,63 @@ BYTE_EMULATOR_IMPL(0x39)
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
             GET_BUFFER_REPLACE(source, 8)
+            uint64_t* typed_destination = (uint64_t*)destination;
+            uint64_t* typed_source = (uint64_t*)source;
 
-            __asm
+            __asm__
             (
                     ".intel_syntax noprefix;"
-                    "mov rdx, QWORD PTR [rdx];"
-                    "pushfq;"
-                    "push QWORD PTR [rcx];"
-                    "popfq;"
-                    "cmp QWORD PTR [rax], rdx;"
-                    "pushfq;"
-                    "pop QWORD PTR [rcx];"
-                    "popfq;"
+                    "push %[flags];"
+                    "popf;"
+                    "cmp QWORD PTR [%[dst]], %[src];"
+                    "pushf;"
+                    "pop %[flags];"
                     ".att_syntax;"
-                    :
-                    : "a" (destination), "d" (source), "c" (&regs_struct->eflags)
+                    : [flags] "+r" (regs_struct->eflags)
+                    : [dst] "r" (typed_destination), "m" (*typed_destination), [src] "r" (*typed_source)
+                    : "cc"
             );
         }
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
             GET_BUFFER_REPLACE(source, 2)
+            uint16_t* typed_destination = (uint16_t*)destination;
+            uint16_t* typed_source = (uint16_t*)source;
 
-            __asm
+            __asm__
             (
                     ".intel_syntax noprefix;"
-                    "mov dx, WORD PTR [rdx];"
-                    "pushfq;"
-                    "push QWORD PTR [rcx];"
-                    "popfq;"
-                    "cmp WORD PTR [rax], dx;"
-                    "pushfq;"
-                    "pop QWORD PTR [rcx];"
-                    "popfq;"
+                    "push %[flags];"
+                    "popf;"
+                    "cmp WORD PTR [%[dst]], %[src];"
+                    "pushf;"
+                    "pop %[flags];"
                     ".att_syntax;"
-                    :
-                    : "a" (destination), "d" (source), "c" (&regs_struct->eflags)
+                    : [flags] "+r" (regs_struct->eflags)
+                    : [dst] "r" (typed_destination), "m" (*typed_destination), [src] "r" (*typed_source)
+                    : "cc"
             );
         }
         // 32-bit
         else
         {
             GET_BUFFER_REPLACE(source, 4)
+            uint32_t* typed_destination = (uint32_t*)destination;
+            uint32_t* typed_source = (uint32_t*)source;
 
-            __asm
+            __asm__
             (
                     ".intel_syntax noprefix;"
-                    "mov r15, QWORD PTR [rax];"
-                    "pushfq;"
-                    "push QWORD PTR [rcx];"
-                    "popfq;"
-                    "cmp r15d, DWORD PTR [rdx];"
-                    "pushfq;"
-                    "pop QWORD PTR [rcx];"
-                    "popfq;"
-                    "mov QWORD PTR [rax], r15;"
+                    "push %[flags];"
+                    "popf;"
+                    "cmp DWORD PTR [%[dst]], %[src];"
+                    "pushf;"
+                    "pop %[flags];"
                     ".att_syntax;"
-                    :
-                    : "a" (destination), "d" (source), "c" (&regs_struct->eflags)
-                    : "r15"
+                    : [flags] "+r" (regs_struct->eflags)
+                    : [dst] "r" (typed_destination), "m" (*typed_destination), [src] "r" (*typed_source)
+                    : "cc"
             );
         }
 
@@ -873,65 +864,63 @@ BYTE_EMULATOR_IMPL(0x3b)
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
             GET_BUFFER_REPLACE(source, 8)
+            uint64_t* typed_destination = (uint64_t*)destination;
+            uint64_t* typed_source = (uint64_t*)source;
 
-            __asm
+            __asm__
             (
                     ".intel_syntax noprefix;"
-                    "mov rdx, QWORD PTR [rdx];"
-                    "pushfq;"
-                    "push QWORD PTR [rcx];"
-                    "popfq;"
-                    "cmp QWORD PTR [rax], rdx;"
-                    "pushfq;"
-                    "pop QWORD PTR [rcx];"
-                    "popfq;"
+                    "push %[flags];"
+                    "popf;"
+                    "cmp QWORD PTR [%[dst]], %[src];"
+                    "pushf;"
+                    "pop %[flags];"
                     ".att_syntax;"
-                    :
-                    : "a" (destination), "d" (source), "c" (&regs_struct->eflags)
+                    : [flags] "+r" (regs_struct->eflags)
+                    : [dst] "r" (typed_destination), "m" (*typed_destination), [src] "r" (*typed_source)
+                    : "cc"
             );
         }
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
             GET_BUFFER_REPLACE(source, 2)
+            uint16_t* typed_destination = (uint16_t*)destination;
+            uint16_t* typed_source = (uint16_t*)source;
 
-            __asm
+            __asm__
             (
                     ".intel_syntax noprefix;"
-                    "mov dx, WORD PTR [rdx];"
-                    "pushfq;"
-                    "push QWORD PTR [rcx];"
-                    "popfq;"
-                    "cmp WORD PTR [rax], dx;"
-                    "pushfq;"
-                    "pop QWORD PTR [rcx];"
-                    "popfq;"
+                    "push %[flags];"
+                    "popf;"
+                    "cmp WORD PTR [%[dst]], %[src];"
+                    "pushf;"
+                    "pop %[flags];"
                     ".att_syntax;"
-                    :
-                    : "a" (destination), "d" (source), "c" (&regs_struct->eflags)
+                    : [flags] "+r" (regs_struct->eflags)
+                    : [dst] "r" (typed_destination), "m" (*typed_destination), [src] "r" (*typed_source)
+                    : "cc"
             );
         }
         // 32-bit
         else
         {
             GET_BUFFER_REPLACE(source, 4)
+            uint32_t* typed_destination = (uint32_t*)destination;
+            uint32_t* typed_source = (uint32_t*)source;
 
-            __asm
+            __asm__
             (
                     ".intel_syntax noprefix;"
-                    "mov r15, QWORD PTR [rax];"
-                    "pushfq;"
-                    "push QWORD PTR [rcx];"
-                    "popfq;"
-                    "cmp r15d, DWORD PTR [rdx];"
-                    "pushfq;"
-                    "pop QWORD PTR [rcx];"
-                    "popfq;"
-                    "mov QWORD PTR [rax], r15;"
+                    "push %[flags];"
+                    "popf;"
+                    "cmp DWORD PTR [%[dst]], %[src];"
+                    "pushf;"
+                    "pop %[flags];"
                     ".att_syntax;"
-                    :
-                    : "a" (destination), "d" (source), "c" (&regs_struct->eflags)
-                    : "r15"
+                    : [flags] "+r" (regs_struct->eflags)
+                    : [dst] "r" (typed_destination), "m" (*typed_destination), [src] "r" (*typed_source)
+                    : "cc"
             );
         }
 
@@ -1111,17 +1100,10 @@ BYTE_EMULATOR_IMPL(0x63)
         // movsxd r64, r/m32
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            GET_BUFFER_REPLACE(source, 8)
-            __asm
-            (
-                    ".intel_syntax noprefix;"
-                    "movsxd rdx, DWORD PTR[rdx];"
-                    "mov QWORD PTR[rax], rdx;"
-                    ".att_syntax;"
-                    :
-                    : "a" (destination), "d" (source)
-                    :
-            );
+            GET_BUFFER_REPLACE(source, 4)
+            int64_t* typed_destination = (int64_t*)destination;
+            int32_t* typed_source = (int32_t*)source;
+            *typed_destination = *typed_source;
         }
         // movsxd r32, r/m32 | movsxd r16, r/m16
         else
@@ -1274,7 +1256,7 @@ BYTE_EMULATOR_IMPL(0x74)
         DEFINE_FPREGS_STRUCT
 
         // temporary modrm copy
-        __uint8_t modrm = instruction[instruction.effective_opcode_index + 1];
+        uint8_t modrm = instruction[instruction.effective_opcode_index + 1];
 
         // pcmpeqb xmm, xmm/m128
         if (PREFIXES_GRP_THREE_PRESENT(instruction))
@@ -1387,6 +1369,8 @@ BYTE_EMULATOR_IMPL(0x80)
         LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_RM_CODE, LOAD_IMM)
 
         GET_BUFFER_IMITATE_RESULT(destination, &(regs_struct->eflags), 8)
+        uint8_t* typed_destination = (uint8_t*)destination;
+        uint8_t* typed_source = (uint8_t*)source;
 
         // ModR/M reg field used as opcode extension
         switch (GET_REG_CODE(modrm))
@@ -1399,21 +1383,18 @@ BYTE_EMULATOR_IMPL(0x80)
             case 0b100u: // AND - and r/m8, imm8
             {
                 // perform operation, note that the flags register is also changed here
-                __asm
+                __asm__
                 (
                         ".intel_syntax noprefix;"
-                        "pushfq;"
-                        "push QWORD PTR [rcx];"
-                        "popfq;"
-                        "mov r15b, BYTE PTR [rdx];"
-                        "and BYTE PTR [rax], r15b;"
-                        "pushfq;"
-                        "pop QWORD PTR [rcx];"
-                        "popfq;"
+                        "push %[flags];"
+                        "popf;"
+                        "and BYTE PTR [%[dst]], %[src];"
+                        "pushf;"
+                        "pop %[flags];"
                         ".att_syntax;"
-                        :
-                        : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
-                        : "r15"
+                        : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                        : [dst] "r" (typed_destination), [src] "r" (*typed_source)
+                        : "cc"
                 );
 
                 break;
@@ -1424,21 +1405,18 @@ BYTE_EMULATOR_IMPL(0x80)
             case 0b111u: // CMP - CMP r/m8, imm8
             {
                 // perform operation, note that the flags register is also changed here
-                __asm
+                __asm__
                 (
                         ".intel_syntax noprefix;"
-                        "pushfq;"
-                        "push QWORD PTR [rcx];"
-                        "popfq;"
-                        "mov r15b, BYTE PTR [rdx];"
-                        "cmp BYTE PTR [rax], r15b;"
-                        "pushfq;"
-                        "pop QWORD PTR [rcx];"
-                        "popfq;"
+                        "push %[flags];"
+                        "popf;"
+                        "cmp BYTE PTR [%[dst]], %[src];"
+                        "pushf;"
+                        "pop %[flags];"
                         ".att_syntax;"
-                        :
-                        : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
-                        : "r15"
+                        : [flags] "+r" (regs_struct->eflags)
+                        : [dst] "r" (typed_destination), "m" (*typed_destination), [src] "r" (*typed_source)
+                        : "cc"
                 );
 
                 break;
@@ -1483,62 +1461,58 @@ BYTE_EMULATOR_IMPL(0x81)
                 // and r/m64, imm32
                 if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
                 {
-                    __asm
+                    uint64_t* typed_destination = (uint64_t*)destination;
+                    int32_t* typed_source = (int32_t*)source;
+                    __asm__
                     (
                             ".intel_syntax noprefix;"
-                            "pushfq;"
-                            "push QWORD PTR [rcx];"
-                            "popfq;"
-                            "xor r15, r15;"
-                            "mov r15d, DWORD PTR [rdx];"
-                            "and QWORD PTR [rax], r15;"
-                            "pushfq;"
-                            "pop QWORD PTR [rcx];"
-                            "popfq;"
+                            "push %[flags];"
+                            "popf;"
+                            "and QWORD PTR [%[dst]], %[src];"
+                            "pushf;"
+                            "pop %[flags];"
                             ".att_syntax;"
-                            :
-                            : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
-                            : "r15"
+                            : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                            : [dst] "r" (typed_destination), [src] "r" ((int64_t)*typed_source)
+                            : "cc"
                     );
                 }
                 // and r/m16, imm16
                 else if (PREFIXES_GRP_THREE_PRESENT(instruction))
                 {
-                    __asm
+                    uint16_t* typed_destination = (uint16_t*)destination;
+                    uint16_t* typed_source = (uint16_t*)source;
+                    __asm__
                     (
                             ".intel_syntax noprefix;"
-                            "pushfq;"
-                            "push QWORD PTR [rcx];"
-                            "popfq;"
-                            "mov dx, WORD PTR [rdx];"
-                            "and WORD PTR [rax], dx;"
-                            "pushfq;"
-                            "pop QWORD PTR [rcx];"
-                            "popfq;"
+                            "push %[flags];"
+                            "popf;"
+                            "and WORD PTR [%[dst]], %[src];"
+                            "pushf;"
+                            "pop %[flags];"
                             ".att_syntax;"
-                            :
-                            : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
-                            :
+                            : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                            : [dst] "r" (typed_destination), [src] "r" (*typed_source)
+                            : "cc"
                     );
                 }
                 // and r/m32, imm32
                 else
                 {
-                    __asm
+                    uint32_t* typed_destination = (uint32_t*)destination;
+                    uint32_t* typed_source = (uint32_t*)source;
+                    __asm__
                     (
                             ".intel_syntax noprefix;"
-                            "pushfq;"
-                            "push QWORD PTR [rcx];"
-                            "popfq;"
-                            "mov edx, DWORD PTR [rdx];"
-                            "and DWORD PTR [rax], edx;"
-                            "pushfq;"
-                            "pop QWORD PTR [rcx];"
-                            "popfq;"
+                            "push %[flags];"
+                            "popf;"
+                            "and DWORD PTR [%[dst]], %[src];"
+                            "pushf;"
+                            "pop %[flags];"
                             ".att_syntax;"
-                            :
-                            : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
-                            :
+                            : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                            : [dst] "r" (typed_destination), [src] "r" (*typed_source)
+                            : "cc"
                     );
                 }
 
@@ -1552,61 +1526,58 @@ BYTE_EMULATOR_IMPL(0x81)
                 // cmp r/m64, imm32
                 if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
                 {
-                    __asm
+                    uint64_t* typed_destination = (uint64_t*)destination;
+                    int32_t* typed_source = (int32_t*)source;
+                    __asm__
                     (
                             ".intel_syntax noprefix;"
-                            "pushfq;"
-                            "push QWORD PTR [rcx];"
-                            "popfq;"
-                            "movsxd rdx, DWORD PTR [rdx];"
-                            "cmp QWORD PTR [rax], rdx;"
-                            "pushfq;"
-                            "pop QWORD PTR [rcx];"
-                            "popfq;"
+                            "push %[flags];"
+                            "popf;"
+                            "cmp QWORD PTR [%[dst]], %[src];"
+                            "pushf;"
+                            "pop %[flags];"
                             ".att_syntax;"
-                            :
-                            : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
-                            :
+                            : [flags] "+r" (regs_struct->eflags)
+                            : [dst] "r" (typed_destination), "m" (*typed_destination), [src] "r" ((int64_t)*typed_source)
+                            : "cc"
                     );
                 }
                 // cmp r/m16, imm16
                 else if (PREFIXES_GRP_THREE_PRESENT(instruction))
                 {
-                    __asm
+                    uint16_t* typed_destination = (uint16_t*)destination;
+                    uint16_t* typed_source = (uint16_t*)source;
+                    __asm__
                     (
                             ".intel_syntax noprefix;"
-                            "pushfq;"
-                            "push QWORD PTR [rcx];"
-                            "popfq;"
-                            "mov dx, WORD PTR [rdx];"
-                            "cmp WORD PTR [rax], dx;"
-                            "pushfq;"
-                            "pop QWORD PTR [rcx];"
-                            "popfq;"
+                            "push %[flags];"
+                            "popf;"
+                            "cmp WORD PTR [%[dst]], %[src];"
+                            "pushf;"
+                            "pop %[flags];"
                             ".att_syntax;"
-                            :
-                            : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
-                            :
+                            : [flags] "+r" (regs_struct->eflags)
+                            : [dst] "r" (typed_destination), "m" (*typed_destination), [src] "r" (*typed_source)
+                            : "cc"
                     );
                 }
                 // cmp r/m32, imm32
                 else
                 {
-                    __asm
+                    uint32_t* typed_destination = (uint32_t*)destination;
+                    uint32_t* typed_source = (uint32_t*)source;
+                    __asm__
                     (
                             ".intel_syntax noprefix;"
-                            "pushfq;"
-                            "push QWORD PTR [rcx];"
-                            "popfq;"
-                            "mov edx, DWORD PTR [rdx];"
-                            "cmp DWORD PTR [rax], edx;"
-                            "pushfq;"
-                            "pop QWORD PTR [rcx];"
-                            "popfq;"
+                            "push %[flags];"
+                            "popf;"
+                            "cmp DWORD PTR [%[dst]], %[src];"
+                            "pushf;"
+                            "pop %[flags];"
                             ".att_syntax;"
-                            :
-                            : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
-                            :
+                            : [flags] "+r" (regs_struct->eflags)
+                            : [dst] "r" (typed_destination), "m" (*typed_destination), [src] "r" (*typed_source)
+                            : "cc"
                     );
                 }
 
@@ -1657,61 +1628,58 @@ BYTE_EMULATOR_IMPL(0x83)
                 // add r/m64, imm8
                 if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
                 {
-                    __asm
+                    uint64_t* typed_destination = (uint64_t*)destination;
+                    int8_t* typed_source = (int8_t*)source;
+                    __asm__
                     (
                             ".intel_syntax noprefix;"
-                            "pushfq;"
-                            "push QWORD PTR [rcx];"
-                            "popfq;"
-                            "movsx rdx, BYTE PTR [rdx];"
-                            "add QWORD PTR [rax], rdx;"
-                            "pushfq;"
-                            "pop QWORD PTR [rcx];"
-                            "popfq;"
+                            "push %[flags];"
+                            "popf;"
+                            "add QWORD PTR [%[dst]], %[src];"
+                            "pushf;"
+                            "pop %[flags];"
                             ".att_syntax;"
-                            :
-                            : [dst] "a"(destination), [src] "d"(source), [flags] "c"(&(regs_struct->eflags))
-                            :
+                            : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                            : [dst] "r" (typed_destination), [src] "r" ((int64_t)*typed_source)
+                            : "cc"
                     );
                 }
                 // add r/m16, imm8
                 else if (PREFIXES_GRP_THREE_PRESENT(instruction))
                 {
-                    __asm
+                    uint16_t* typed_destination = (uint16_t*)destination;
+                    int8_t* typed_source = (int8_t*)source;
+                    __asm__
                     (
                             ".intel_syntax noprefix;"
-                            "pushfq;"
-                            "push QWORD PTR [rcx];"
-                            "popfq;"
-                            "movsx dx, BYTE PTR [rdx];"
-                            "add WORD PTR [rax], dx;"
-                            "pushfq;"
-                            "pop QWORD PTR [rcx];"
-                            "popfq;"
+                            "push %[flags];"
+                            "popf;"
+                            "add WORD PTR [%[dst]], %[src];"
+                            "pushf;"
+                            "pop %[flags];"
                             ".att_syntax;"
-                            :
-                            : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
-                            :
+                            : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                            : [dst] "r" (typed_destination), [src] "r" ((int16_t)*typed_source)
+                            : "cc"
                     );
                 }
                 // add r/m32, imm8
                 else
                 {
-                    __asm
+                    uint32_t* typed_destination = (uint32_t*)destination;
+                    int8_t* typed_source = (int8_t*)source;
+                    __asm__
                     (
                             ".intel_syntax noprefix;"
-                            "pushfq;"
-                            "push QWORD PTR [rcx];"
-                            "popfq;"
-                            "movsx edx, BYTE PTR [rdx];"
-                            "add DWORD PTR [rax], edx;"
-                            "pushfq;"
-                            "pop QWORD PTR [rcx];"
-                            "popfq;"
+                            "push %[flags];"
+                            "popf;"
+                            "add DWORD PTR [%[dst]], %[src];"
+                            "pushf;"
+                            "pop %[flags];"
                             ".att_syntax;"
-                            :
-                            : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
-                            :
+                            : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                            : [dst] "r" (typed_destination), [src] "r" ((int32_t)*typed_source)
+                            : "cc"
                     );
                 }
 
@@ -1723,61 +1691,58 @@ BYTE_EMULATOR_IMPL(0x83)
                 // or r/m64, imm8
                 if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
                 {
-                    __asm
+                    uint64_t* typed_destination = (uint64_t*)destination;
+                    int8_t* typed_source = (int8_t*)source;
+                    __asm__
                     (
                             ".intel_syntax noprefix;"
-                            "pushfq;"
-                            "push QWORD PTR [rcx];"
-                            "popfq;"
-                            "movsx rdx, BYTE PTR [rdx];"
-                            "or QWORD PTR [rax], rdx;"
-                            "pushfq;"
-                            "pop QWORD PTR [rcx];"
-                            "popfq;"
+                            "push %[flags];"
+                            "popf;"
+                            "or QWORD PTR [%[dst]], %[src];"
+                            "pushf;"
+                            "pop %[flags];"
                             ".att_syntax;"
-                            :
-                            : [dst] "a"(destination), [src] "d"(source), [flags] "c"(&(regs_struct->eflags))
-                            :
+                            : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                            : [dst] "r" (typed_destination), [src] "r" ((int64_t)*typed_source)
+                            : "cc"
                     );
                 }
                     // or r/m16, imm8
                 else if (PREFIXES_GRP_THREE_PRESENT(instruction))
                 {
-                    __asm
+                    uint16_t* typed_destination = (uint16_t*)destination;
+                    int8_t* typed_source = (int8_t*)source;
+                    __asm__
                     (
-                    ".intel_syntax noprefix;"
-                    "pushfq;"
-                    "push QWORD PTR [rcx];"
-                    "popfq;"
-                    "movsx dx, BYTE PTR [rdx];"
-                    "or WORD PTR [rax], dx;"
-                    "pushfq;"
-                    "pop QWORD PTR [rcx];"
-                    "popfq;"
-                    ".att_syntax;"
-                    :
-                    : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
-                    :
+                            ".intel_syntax noprefix;"
+                            "push %[flags];"
+                            "popf;"
+                            "or WORD PTR [%[dst]], %[src];"
+                            "pushf;"
+                            "pop %[flags];"
+                            ".att_syntax;"
+                            : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                            : [dst] "r" (typed_destination), [src] "r" ((int16_t)*typed_source)
+                            : "cc"
                     );
                 }
-                    // add r/m32, imm8
+                    // or r/m32, imm8
                 else
                 {
-                    __asm
+                    uint32_t* typed_destination = (uint32_t*)destination;
+                    int8_t* typed_source = (int8_t*)source;
+                    __asm__
                     (
-                    ".intel_syntax noprefix;"
-                    "pushfq;"
-                    "push QWORD PTR [rcx];"
-                    "popfq;"
-                    "movsx edx, BYTE PTR [rdx];"
-                    "or DWORD PTR [rax], edx;"
-                    "pushfq;"
-                    "pop QWORD PTR [rcx];"
-                    "popfq;"
-                    ".att_syntax;"
-                    :
-                    : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
-                    :
+                            ".intel_syntax noprefix;"
+                            "push %[flags];"
+                            "popf;"
+                            "or DWORD PTR [%[dst]], %[src];"
+                            "pushf;"
+                            "pop %[flags];"
+                            ".att_syntax;"
+                            : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                            : [dst] "r" (typed_destination), [src] "r" ((int32_t)*typed_source)
+                            : "cc"
                     );
                 }
 
@@ -1789,64 +1754,61 @@ BYTE_EMULATOR_IMPL(0x83)
             case 0b101u: // SUB - not yet implemented
             {
                 // perform operation, note that the flags register is also changed here
-                // or r/m64, imm8
+                // sub r/m64, imm8
                 if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
                 {
-                    __asm
+                    uint64_t* typed_destination = (uint64_t*)destination;
+                    int8_t* typed_source = (int8_t*)source;
+                    __asm__
                     (
-                    ".intel_syntax noprefix;"
-                    "pushfq;"
-                    "push QWORD PTR [rcx];"
-                    "popfq;"
-                    "movsx rdx, BYTE PTR [rdx];"
-                    "sub QWORD PTR [rax], rdx;"
-                    "pushfq;"
-                    "pop QWORD PTR [rcx];"
-                    "popfq;"
-                    ".att_syntax;"
-                    :
-                    : [dst] "a"(destination), [src] "d"(source), [flags] "c"(&(regs_struct->eflags))
-                    :
+                            ".intel_syntax noprefix;"
+                            "push %[flags];"
+                            "popf;"
+                            "sub QWORD PTR [%[dst]], %[src];"
+                            "pushf;"
+                            "pop %[flags];"
+                            ".att_syntax;"
+                            : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                            : [dst] "r" (typed_destination), [src] "r" ((int64_t)*typed_source)
+                            : "cc"
                     );
                 }
-                    // or r/m16, imm8
+                    // sub r/m16, imm8
                 else if (PREFIXES_GRP_THREE_PRESENT(instruction))
                 {
-                    __asm
+                    uint16_t* typed_destination = (uint16_t*)destination;
+                    int8_t* typed_source = (int8_t*)source;
+                    __asm__
                     (
-                    ".intel_syntax noprefix;"
-                    "pushfq;"
-                    "push QWORD PTR [rcx];"
-                    "popfq;"
-                    "movsx dx, BYTE PTR [rdx];"
-                    "sub WORD PTR [rax], dx;"
-                    "pushfq;"
-                    "pop QWORD PTR [rcx];"
-                    "popfq;"
-                    ".att_syntax;"
-                    :
-                    : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
-                    :
+                            ".intel_syntax noprefix;"
+                            "push %[flags];"
+                            "popf;"
+                            "sub WORD PTR [%[dst]], %[src];"
+                            "pushf;"
+                            "pop %[flags];"
+                            ".att_syntax;"
+                            : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                            : [dst] "r" (typed_destination), [src] "r" ((int16_t)*typed_source)
+                            : "cc"
                     );
                 }
-                    // add r/m32, imm8
+                    // sub r/m32, imm8
                 else
                 {
-                    __asm
+                    uint32_t* typed_destination = (uint32_t*)destination;
+                    int8_t* typed_source = (int8_t*)source;
+                    __asm__
                     (
-                    ".intel_syntax noprefix;"
-                    "pushfq;"
-                    "push QWORD PTR [rcx];"
-                    "popfq;"
-                    "movsx edx, BYTE PTR [rdx];"
-                    "sub DWORD PTR [rax], edx;"
-                    "pushfq;"
-                    "pop QWORD PTR [rcx];"
-                    "popfq;"
-                    ".att_syntax;"
-                    :
-                    : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
-                    :
+                            ".intel_syntax noprefix;"
+                            "push %[flags];"
+                            "popf;"
+                            "sub DWORD PTR [%[dst]], %[src];"
+                            "pushf;"
+                            "pop %[flags];"
+                            ".att_syntax;"
+                            : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                            : [dst] "r" (typed_destination), [src] "r" ((int32_t)*typed_source)
+                            : "cc"
                     );
                 }
 
@@ -1860,61 +1822,58 @@ BYTE_EMULATOR_IMPL(0x83)
                 // cmp r/m64, imm8
                 if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
                 {
-                    __asm
+                    uint64_t* typed_destination = (uint64_t*)destination;
+                    int8_t* typed_source = (int8_t*)source;
+                    __asm__
                     (
                             ".intel_syntax noprefix;"
-                            "pushfq;"
-                            "push QWORD PTR [rcx];"
-                            "popfq;"
-                            "movsx rdx, BYTE PTR [rdx];"
-                            "cmp QWORD PTR [rax], rdx;"
-                            "pushfq;"
-                            "pop QWORD PTR [rcx];"
-                            "popfq;"
+                            "push %[flags];"
+                            "popf;"
+                            "cmp QWORD PTR [%[dst]], %[src];"
+                            "pushf;"
+                            "pop %[flags];"
                             ".att_syntax;"
-                            :
-                            : [dst] "a"(destination), [src] "d"(source), [flags] "c"(&(regs_struct->eflags))
-                            :
+                            : [flags] "+r" (regs_struct->eflags)
+                            : [dst] "r" (typed_destination), "m" (*typed_destination), [src] "r" ((int64_t)*typed_source)
+                            : "cc"
                     );
                 }
                 // cmp r/m16, imm8
                 else if (PREFIXES_GRP_THREE_PRESENT(instruction))
                 {
-                    __asm
+                    uint16_t* typed_destination = (uint16_t*)destination;
+                    int8_t* typed_source = (int8_t*)source;
+                    __asm__
                     (
                             ".intel_syntax noprefix;"
-                            "pushfq;"
-                            "push QWORD PTR [rcx];"
-                            "popfq;"
-                            "movsx dx, BYTE PTR [rdx];"
-                            "cmp WORD PTR [rax], dx;"
-                            "pushfq;"
-                            "pop QWORD PTR [rcx];"
-                            "popfq;"
+                            "push %[flags];"
+                            "popf;"
+                            "cmp WORD PTR [%[dst]], %[src];"
+                            "pushf;"
+                            "pop %[flags];"
                             ".att_syntax;"
-                            :
-                            : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
-                            :
+                            : [flags] "+r" (regs_struct->eflags)
+                            : [dst] "r" (typed_destination), "m" (*typed_destination), [src] "r" ((int16_t)*typed_source)
+                            : "cc"
                     );
                 }
                 // cmp r/m32, imm8
                 else
                 {
-                    __asm
+                    uint32_t* typed_destination = (uint32_t*)destination;
+                    int8_t* typed_source = (int8_t*)source;
+                    __asm__
                     (
                             ".intel_syntax noprefix;"
-                            "pushfq;"
-                            "push QWORD PTR [rcx];"
-                            "popfq;"
-                            "movsx edx, BYTE PTR [rdx];"
-                            "cmp DWORD PTR [rax], edx;"
-                            "pushfq;"
-                            "pop QWORD PTR [rcx];"
-                            "popfq;"
+                            "push %[flags];"
+                            "popf;"
+                            "cmp DWORD PTR [%[dst]], %[src];"
+                            "pushf;"
+                            "pop %[flags];"
                             ".att_syntax;"
-                            :
-                            : [dst] "a" (destination), [src] "d" (source), [flags] "c" (&(regs_struct->eflags))
-                            :
+                            : [flags] "+r" (regs_struct->eflags)
+                            : [dst] "r" (typed_destination), "m" (*typed_destination), [src] "r" ((int32_t)*typed_source)
+                            : "cc"
                     );
                 }
 
@@ -1958,98 +1917,74 @@ BYTE_EMULATOR_IMPL(0x87)
         // 64-bit
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            GET_BUFFER_RAW(destination, 2 * sizeof(__uint64_t))
-            auto orig_src = (__uint64_t*) buffer;
-            auto repl_src = ((__uint64_t*) buffer) + 1;
+            GET_BUFFER_RAW(destination, 2 * sizeof(uint64_t))
+            auto orig_src = (uint64_t*) buffer;
+            auto repl_src = ((uint64_t*) buffer) + 1;
+            uint64_t* typed_destination = (uint64_t*)destination;
+            uint64_t* typed_source = (uint64_t*)source;
 
             if (result != REPLAY_BUFFER_RETURN_FIRST)
             {
-                if (*orig_src != *(__uint64_t*) source)
+                if (*orig_src != *typed_source)
                     return -1;
 
-                *(__uint64_t*) source = *repl_src;
+                *typed_source = *repl_src;
 
                 REPLAY_BUFFER_ADVANCE
                 return 0;
             }
 
-            *orig_src = *(__uint64_t*) source;
-            __asm
-            (
-                    ".intel_syntax noprefix;"
-                    "mov r15, QWORD PTR [rdx];"
-                    "lock xchg QWORD PTR [rax], r15;"
-                    "mov QWORD PTR [rdx], r15;"
-                    ".att_syntax;"
-                    :
-                    : "a" (destination), "d" (source)
-                    : "r15"
-            );
-            *repl_src = *(__uint64_t*) source;
+            *orig_src = *typed_source;
+            __atomic_exchange(typed_destination, typed_source, typed_source, __ATOMIC_ACQ_REL);
+            *repl_src = *typed_source;
         }
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            GET_BUFFER_RAW(destination, 2 * sizeof(__uint16_t))
-            auto orig_src = (__uint16_t*) buffer;
-            auto repl_src = ((__uint16_t*) buffer) + 1;
+            GET_BUFFER_RAW(destination, 2 * sizeof(uint16_t))
+            auto orig_src = (uint16_t*) buffer;
+            auto repl_src = ((uint16_t*) buffer) + 1;
+            uint16_t* typed_destination = (uint16_t*)destination;
+            uint16_t* typed_source = (uint16_t*)source;
 
             if (result != REPLAY_BUFFER_RETURN_FIRST)
             {
-                if (*orig_src != *(__uint16_t*) source)
+                if (*orig_src != *typed_source)
                     return -1;
 
-                *(__uint16_t*) source = *repl_src;
+                *typed_source = *repl_src;
 
                 REPLAY_BUFFER_ADVANCE
                 return 0;
             }
 
-            *orig_src = *(__uint16_t*) source;
-            __asm
-            (
-                    ".intel_syntax noprefix;"
-                    "mov r15w, WORD PTR [rdx];"
-                    "lock xchg WORD PTR [rax], r15w;"
-                    "mov WORD PTR [rdx], r15w;"
-                    ".att_syntax;"
-                    :
-                    : "a" (destination), "d" (source)
-                    : "r15"
-            );
-            *repl_src = *(__uint16_t*) source;
+            *orig_src = *typed_source;
+            __atomic_exchange(typed_destination, typed_source, typed_source, __ATOMIC_ACQ_REL);
+            *repl_src = *typed_source;
         }
         // 32-bit
         else
         {
-            GET_BUFFER_RAW(destination, 2 * sizeof(__uint32_t))
-            auto orig_src = (__uint32_t*) buffer;
-            auto repl_src = ((__uint32_t*) buffer) + 1;
+            GET_BUFFER_RAW(destination, 2 * sizeof(uint32_t))
+            auto orig_src = (uint32_t*) buffer;
+            auto repl_src = ((uint32_t*) buffer) + 1;
+            uint32_t* typed_destination = (uint32_t*)destination;
+            uint32_t* typed_source = (uint32_t*)source;
 
             if (result != REPLAY_BUFFER_RETURN_FIRST)
             {
-                if (*orig_src != *(__uint32_t*) source)
+                if (*orig_src != *typed_source)
                     return -1;
 
-                *(__uint32_t*) source = *repl_src;
+                *typed_source = *repl_src;
 
                 REPLAY_BUFFER_ADVANCE
                 return 0;
             }
 
-            *orig_src = *(__uint32_t*) source;
-            __asm
-            (
-                    ".intel_syntax noprefix;"
-                    "mov r15d, DWORD PTR [rdx];"
-                    "lock xchg DWORD PTR [rax], r15d;"
-                    "mov DWORD PTR [rdx], r15d;"
-                    ".att_syntax;"
-                    :
-                    : "a" (destination), "d" (source)
-                    : "r15"
-            );
-            *repl_src = *(__uint32_t*) source;
+            *orig_src = *typed_source;
+            __atomic_exchange(typed_destination, typed_source, typed_source, __ATOMIC_ACQ_REL);
+            *repl_src = *typed_source;
         }
 
         // no need to write back registers here
@@ -2075,18 +2010,11 @@ BYTE_EMULATOR_IMPL(0x88)
             source = (void*) ((unsigned long long) source + 1);
 
         GET_BUFFER_CHECK_OR_FILL(destination, source, 1)
+        uint8_t* typed_destination = (uint8_t*)destination;
+        uint8_t* typed_source = (uint8_t*)source;
 
         // execute operation
-        __asm
-        (
-                ".intel_syntax noprefix;"
-                "mov dl, BYTE PTR [rdx];"
-                "mov BYTE PTR [rax], dl;"
-                ".att_syntax;"
-                :
-                : [dst] "a" (destination), [src] "d" (source)
-                :
-        );
+        *typed_destination = *typed_source;
 
         // we don't have to write anything back here, destination shouldn't be able to be a register
         REPLAY_BUFFER_ADVANCE
@@ -2110,49 +2038,31 @@ BYTE_EMULATOR_IMPL(0x89)
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
             GET_BUFFER_CHECK_OR_FILL(destination, source, 8)
+            uint64_t* typed_destination = (uint64_t*)destination;
+            uint64_t* typed_source = (uint64_t*)source;
 
-            __asm
-            (
-                    ".intel_syntax noprefix;"
-                    "mov rdx, QWORD PTR [rdx];"
-                    "mov QWORD PTR [rax], rdx;"
-                    ".att_syntax;"
-                    :
-                    : [dst] "a" (destination), [src] "d" (source)
-                    :
-            );
+            // execute operation
+            *typed_destination = *typed_source;
         }
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
             GET_BUFFER_CHECK_OR_FILL(destination, source, 2)
+            uint16_t* typed_destination = (uint16_t*)destination;
+            uint16_t* typed_source = (uint16_t*)source;
 
-            __asm
-            (
-                    ".intel_syntax noprefix;"
-                    "mov dx, WORD PTR [rdx];"
-                    "mov WORD PTR [rax], dx;"
-                    ".att_syntax;"
-                    :
-                    : [dst] "a" (destination), [src] "d" (source)
-                    :
-            );
+            // execute operation
+            *typed_destination = *typed_source;
         }
         // default 32-bit
         else
         {
             GET_BUFFER_CHECK_OR_FILL(destination, source, 4)
+            uint32_t* typed_destination = (uint32_t*)destination;
+            uint32_t* typed_source = (uint32_t*)source;
 
-            __asm
-            (
-                    ".intel_syntax noprefix;"
-                    "mov edx, DWORD PTR [rdx];"
-                    "mov DWORD PTR [rax], edx;"
-                    ".att_syntax;"
-                    :
-                    : [dst] "a" (destination), [src] "d" (source)
-                    :
-            );
+            // execute operation
+            *typed_destination = *typed_source;
         }
 
         // no need to write back any registers
@@ -2178,17 +2088,11 @@ BYTE_EMULATOR_IMPL(0x8a)
             destination = (void*) ((unsigned long long) destination + 1);
 
         GET_BUFFER_REPLACE(source, 1)
+        uint8_t* typed_destination = (uint8_t*)destination;
+        uint8_t* typed_source = (uint8_t*)source;
 
-        __asm
-        (
-                ".intel_syntax noprefix;"
-                "mov dl, BYTE PTR [rdx];"
-                "mov BYTE PTR [rax], dl;"
-                ".att_syntax;"
-                :
-                : [dst] "a" (destination), [src] "d" (buffer)
-                :
-        );
+        // execute operation
+        *typed_destination = *typed_source;
 
         // registers will be written back with rip
         REPLAY_BUFFER_ADVANCE
@@ -2212,49 +2116,31 @@ BYTE_EMULATOR_IMPL(0x8b)
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
             GET_BUFFER_REPLACE(source, 8)
+            uint64_t* typed_destination = (uint64_t*)destination;
+            uint64_t* typed_source = (uint64_t*)source;
 
-            __asm
-            (
-                    ".intel_syntax noprefix;"
-                    "mov rdx, QWORD PTR [rdx];"
-                    "mov QWORD PTR [rax], rdx;"
-                    ".att_syntax;"
-                    :
-                    : [dst] "a" (destination), [src] "d" (source)
-                    :
-            );
+            // execute operation
+            *typed_destination = *typed_source;
         }
         // 16-bit version
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
             GET_BUFFER_REPLACE(source, 2)
+            uint16_t* typed_destination = (uint16_t*)destination;
+            uint16_t* typed_source = (uint16_t*)source;
 
-            __asm
-            (
-                    ".intel_syntax noprefix;"
-                    "mov dx, WORD PTR [rdx];"
-                    "mov WORD PTR [rax], dx;"
-                    ".att_syntax;"
-                    :
-                    : [dst] "a" (destination), [src] "d" (source)
-                    :
-            );
+            // execute operation
+            *typed_destination = *typed_source;
         }
         // 32-bit version
         else
         {
             GET_BUFFER_REPLACE(source, 4)
+            uint64_t* typed_destination = (uint64_t*)destination;
+            uint32_t* typed_source = (uint32_t*)source;
 
-            __asm
-            (
-                    ".intel_syntax noprefix;"
-                    "mov edx, DWORD PTR [rdx];"
-                    "mov QWORD PTR [rax], rdx;"
-                    ".att_syntax;"
-                    :
-                    : [dst] "a" (destination), [src] "d" (source)
-                    :
-            );
+            // execute operation
+            *typed_destination = *typed_source;
         }
 
         // registers will be written back with rip
@@ -2374,16 +2260,16 @@ BYTE_EMULATOR_IMPL(0xa2)
         // this should be valid here
         user_regs_struct* regs = &variant->regs;
 
-        __uint32_t eax_input = regs->rax & REG_SIZE_32;
-        __uint32_t ecx_input = regs->rcx & REG_SIZE_32;
+        uint32_t eax_input = regs->rax & REG_SIZE_32;
+        uint32_t ecx_input = regs->rcx & REG_SIZE_32;
 
         // execute instruction
-        __asm
+        __asm__
         (
                 ".intel_syntax noprefix;"
                 "cpuid;"
                 ".att_syntax;"
-                : "+a" (regs->rax), "+d" (regs->rdx), "+c" (regs->rcx), "+b" (regs->rbx)
+                : "+a" (regs->rax), "=d" (regs->rdx), "+c" (regs->rcx), "=b" (regs->rbx)
                 :
                 :
         );
@@ -2530,7 +2416,7 @@ BYTE_EMULATOR_IMPL(0xa4)
         {
             void* asm_dst = dst_spoof ? spoof : destination;
             void* asm_src = src_spoof ? spoof : source;
-            __asm
+            __asm__
             (
                     ".intel_syntax noprefix;"
                     "push %[flags];"
@@ -2612,14 +2498,14 @@ BYTE_EMULATOR_IMPL(0xaa)
     GET_BUFFER_RAW(monitor_pointer, 1 + sizeof(unsigned long long))
     if (result == REPLAY_BUFFER_RETURN_FIRST)
     {
-        *(__uint8_t *) buffer = *(__uint8_t *) source;
-        *(unsigned long long*) ((__uint8_t *) buffer + 1) = count;
+        *(uint8_t *) buffer = *(uint8_t *) source;
+        *(unsigned long long*) ((uint8_t *) buffer + 1) = count;
     }
-    else if (*(__uint8_t*) buffer == *(__uint8_t*) source)
+    else if (*(uint8_t*) buffer == *(uint8_t*) source)
     {
         if (PREFIXES_GRP_ONE_PRESENT(instruction) && (PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE ||
                 PREFIXES_GRP_ONE(instruction) == REPNZ_PREFIX_CODE)
-                && *(unsigned long long*) ((__uint8_t *) buffer + 1) != count)
+                && *(unsigned long long*) ((uint8_t *) buffer + 1) != count)
             return -1;
 
         if (regs_struct->eflags & (0b1u << 10u))
@@ -2633,14 +2519,15 @@ BYTE_EMULATOR_IMPL(0xaa)
     else
         return -1;
 
-    __asm
+    void* destination = monitor_pointer;
+    __asm__
     (
             ".intel_syntax noprefix;"
-            "mov rdi, rdx;"
             "rep stosb;"
             ".att_syntax;"
-            :
-            : "a" (*(__uint8_t*) source), "d" (monitor_pointer), "c" (count)
+            : "+D" (destination)
+            : "a" (*(uint8_t*) source), "c" (count)
+            : "memory"
     );
 
     if (regs_struct->eflags & (0b1u << 10u))
@@ -2676,8 +2563,8 @@ BYTE_EMULATOR_IMPL(0xab)
         {
             GET_BUFFER_RAW(monitor_pointer, 8)
             if (result == REPLAY_BUFFER_RETURN_FIRST)
-                *(__uint64_t*) buffer = *(__uint64_t*) source;
-            else if (*(__uint64_t*) buffer == *(__uint64_t*) source)
+                *(uint64_t*) buffer = *(uint64_t*) source;
+            else if (*(uint64_t*) buffer == *(uint64_t*) source)
             {
                 if (regs_struct->eflags & (0b1u << 10u))
                     regs_struct->rdi -= 8;
@@ -2690,14 +2577,15 @@ BYTE_EMULATOR_IMPL(0xab)
             else
                 return -1;
 
-            __asm
+            void* destination = monitor_pointer;
+            __asm__
             (
                     ".intel_syntax noprefix;"
-                    "mov rdi, rdx;"
                     "stosq;"
                     ".att_syntax;"
-                    :
-                    : "a" (*(__uint64_t*) source), "d" (monitor_pointer)
+                    : "+D" (destination)
+                    : "a" (*(uint64_t*) source)
+                    : "memory"
             );
 
             if (regs_struct->eflags & (0b1u << 10u))
@@ -2710,8 +2598,8 @@ BYTE_EMULATOR_IMPL(0xab)
         {
             GET_BUFFER_RAW(monitor_pointer, 2)
             if (result == REPLAY_BUFFER_RETURN_FIRST)
-                *(__uint16_t*) buffer = *(__uint16_t*) source;
-            else if (*(__uint16_t*) buffer == *(__uint16_t*) source)
+                *(uint16_t*) buffer = *(uint16_t*) source;
+            else if (*(uint16_t*) buffer == *(uint16_t*) source)
             {
                 if (regs_struct->eflags & (0b1u << 10u))
                     regs_struct->rdi -= 2;
@@ -2724,14 +2612,15 @@ BYTE_EMULATOR_IMPL(0xab)
             else
                 return -1;
 
-            __asm
+            void* destination = monitor_pointer;
+            __asm__
             (
                     ".intel_syntax noprefix;"
-                    "mov rdi, rdx;"
                     "stosw;"
                     ".att_syntax;"
-                    :
-                    : "a" (*(__uint16_t*) source), "d" (monitor_pointer)
+                    : "+D" (destination)
+                    : "a" (*(uint16_t*) source)
+                    : "memory"
             );
 
             if (regs_struct->eflags & (0b1u << 10u))
@@ -2744,8 +2633,8 @@ BYTE_EMULATOR_IMPL(0xab)
         {
             GET_BUFFER_RAW(monitor_pointer, 2)
             if (result == REPLAY_BUFFER_RETURN_FIRST)
-                *(__uint32_t*) buffer = *(__uint32_t*) source;
-            else if (*(__uint32_t*) buffer == *(__uint32_t*) source)
+                *(uint32_t*) buffer = *(uint32_t*) source;
+            else if (*(uint32_t*) buffer == *(uint32_t*) source)
             {
                 if (regs_struct->eflags & (0b1u << 10u))
                     regs_struct->rdi -= 2;
@@ -2758,14 +2647,15 @@ BYTE_EMULATOR_IMPL(0xab)
             else
                 return -1;
 
-            __asm
+            void* destination = monitor_pointer;
+            __asm__
             (
                     ".intel_syntax noprefix;"
-                    "mov rdi, rdx;"
                     "stosd;"
                     ".att_syntax;"
-                    :
-                    : "a" (*(__uint32_t*) source), "d" (monitor_pointer)
+                    : "+D" (destination)
+                    : "a" (*(uint32_t*) source)
+                    : "memory"
             );
 
             if (regs_struct->eflags & (0b1u << 10u))
@@ -2842,71 +2732,62 @@ BYTE_EMULATOR_IMPL(0xb1)
         // 64-bit
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
+            uint64_t* typed_destination = (uint64_t*)destination;
+            uint64_t* typed_source = (uint64_t*)source;
+
             // todo - always executed with LOCK for now, might not be the best
-            __asm
+            __asm__
             (
                     ".intel_syntax noprefix;"
-                    "mov rcx, QWORD PTR [rcx];"
-                    "mov rax, QWORD PTR [rsi];"
-                    "pushfq;"
-                    "push QWORD PTR [rbx];"
-                    "popfq;"
-                    "lock cmpxchg QWORD PTR [rdx], rcx;"
-                    "pushfq;"
-                    "pop QWORD PTR [rbx];"
-                    "popfq;"
-                    "mov QWORD PTR [rsi], rax;"
+                    "push %[flags];"
+                    "popf;"
+                    "lock cmpxchg QWORD PTR [%[dst]], %[src];"
+                    "pushf;"
+                    "pop %[flags];"
                     ".att_syntax;"
-                    :
-                    : [dst] "d" (destination), [src] "c" (source),
-                        [flags] "b" (&regs_struct->eflags), "S" (&regs_struct->rax)
-                    :
+                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination), "+a" (regs_struct->rax)
+                    : [dst] "r" (typed_destination), [src] "r" (*typed_source)
+                    : "cc"
             );
         }
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            __asm
+            uint16_t* typed_destination = (uint16_t*)destination;
+            uint16_t* typed_source = (uint16_t*)source;
+
+            __asm__
             (
                     ".intel_syntax noprefix;"
-                    "mov cx, WORD PTR [rcx];"
-                    "mov ax, WORD PTR [rsi];"
-                    "pushfq;"
-                    "push QWORD PTR [rbx];"
-                    "popfq;"
-                    "lock cmpxchg WORD PTR [rdx], cx;"
-                    "pushfq;"
-                    "pop QWORD PTR [rbx];"
-                    "popfq;"
-                    "mov WORD PTR [rsi], ax;"
+                    "push %[flags];"
+                    "popf;"
+                    "lock cmpxchg WORD PTR [%[dst]], %[src];"
+                    "pushf;"
+                    "pop %[flags];"
                     ".att_syntax;"
-                    :
-                    : [dst] "d" (destination), [src] "c" (source),
-                            [flags] "b" (&regs_struct->eflags), "S" (&regs_struct->rax)
-                    :
+                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination), "+a" (regs_struct->rax)
+                    : [dst] "r" (typed_destination), [src] "r" (*typed_source)
+                    : "cc"
             );
         }
         // 32-bit
         else
         {
-            __asm
+            uint32_t* typed_destination = (uint32_t*)destination;
+            uint32_t* typed_source = (uint32_t*)source;
+
+            __asm__
             (
                     ".intel_syntax noprefix;"
-                    "mov ecx, DWORD PTR [rcx];"
-                    "mov eax, DWORD PTR [rsi];"
-                    "pushfq;"
-                    "push QWORD PTR [rbx];"
-                    "popfq;"
-                    "lock cmpxchg DWORD PTR [rdx], ecx;"
-                    "pushfq;"
-                    "pop QWORD PTR [rbx];"
-                    "popfq;"
-                    "mov DWORD PTR [rsi], eax;"
+                    "push %[flags];"
+                    "popf;"
+                    "lock cmpxchg DWORD PTR [%[dst]], %[src];"
+                    "pushf;"
+                    "pop %[flags];"
                     ".att_syntax;"
-                    :
-                    : [dst] "d" (destination), [src] "c" (source),
-                        [flags] "b" (&regs_struct->eflags), "S" (&regs_struct->rax)
-                    :
+                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination), "+a" (regs_struct->rax)
+                    : [dst] "r" (typed_destination), [src] "r" (*typed_source)
+                    : "cc"
             );
         }
 
@@ -2948,51 +2829,25 @@ BYTE_EMULATOR_IMPL(0xb6)
         LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_REG_CODE, LOAD_RM_CODE)
 
         GET_BUFFER_REPLACE(source, 1)
+        uint8_t* typed_source = (uint8_t*)source;
 
         // 64-bit size
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            // perform operation
-            __asm__
-            (
-                    ".intel_syntax noprefix;"
-                    "movzx r15, BYTE PTR [rdx];"
-                    "mov QWORD PTR [rax], r15;"
-                    ".att_syntax;"
-                    :
-                    : [dst] "a" (destination), [src] "d" (source)
-                    : "r15"
-            );
+            uint64_t* typed_destination = (uint64_t*)destination;
+            *typed_destination = *typed_source;
         }
         // 16-bit size
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            // perform operation
-            __asm__
-            (
-                    ".intel_syntax noprefix;"
-                    "movzx r15, BYTE PTR [rdx];"
-                    "mov WORD PTR [rax], r15w;"
-                    ".att_syntax;"
-                    :
-                    : [dst] "a" (destination), [src] "d" (source)
-                    : "r15"
-            );
+            uint16_t* typed_destination = (uint16_t*)destination;
+            *typed_destination = *typed_source;
         }
         // 32-bit size
         else
         {
-            // perform operation
-            __asm__
-            (
-                    ".intel_syntax noprefix;"
-                    "movzx r15d, BYTE PTR [rdx];"
-                    "mov QWORD PTR [rax], r15;"
-                    ".att_syntax;"
-                    :
-                    : [dst] "a" (destination), [src] "d" (source)
-                    : "r15"
-            );
+            uint64_t* typed_destination = (uint64_t*)destination;
+            *typed_destination = *typed_source;
         }
 
         // registers will be written back with rip
@@ -3014,51 +2869,19 @@ BYTE_EMULATOR_IMPL(0xb7)
         LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_REG_CODE, LOAD_RM_CODE)
 
         GET_BUFFER_REPLACE(source, 2)
+        uint16_t* typed_source = (uint16_t*)source;
 
         // 64-bit size
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            // perform operation
-            __asm__
-            (
-                    ".intel_syntax noprefix;"
-                    "movzx r15, WORD PTR [rdx];"
-                    "mov QWORD PTR [rax], r15;"
-                    ".att_syntax;"
-                    :
-                    : [dst] "a" (destination), [src] "d" (source)
-                    : "r15"
-            );
-        }
-        // 16-bit size
-        else if (PREFIXES_GRP_THREE_PRESENT(instruction))
-        {
-            // perform operation
-            __asm__
-            (
-                    ".intel_syntax noprefix;"
-                    "movzx r15d, WORD PTR [rdx];"
-                    "mov WORD PTR [rax], r15w;"
-                    ".att_syntax;"
-                    :
-                    : [dst] "a" (destination), [src] "d" (source)
-                    : "r15"
-            );
+            uint64_t* typed_destination = (uint64_t*)destination;
+            *typed_destination = *typed_source;
         }
         // 32-bit size
         else
         {
-            // perform operation
-            __asm__
-            (
-                    ".intel_syntax noprefix;"
-                    "movzx r15d, WORD PTR [rdx];"
-                    "mov QWORD PTR [rax], r15;"
-                    ".att_syntax;"
-                    :
-                    : [dst] "a" (destination), [src] "d" (source)
-                    : "r15"
-            );
+            uint64_t* typed_destination = (uint64_t*)destination;
+            *typed_destination = *typed_source;
         }
 
         // registers will be written back with rip
@@ -3104,49 +2927,26 @@ BYTE_EMULATOR_IMPL(0xbe)
         LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_REG_CODE, LOAD_RM_CODE)
 
         // always byte
-        GET_BUFFER_REPLACE(source, 2)
+        GET_BUFFER_REPLACE(source, 1)
+        int8_t* typed_source = (int8_t*)source;
 
         // 64-bit
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            __asm
-            (
-                    ".intel_syntax noprefix;"
-                    "movsx r15, BYTE PTR [rdx];"
-                    "mov QWORD PTR [rax], r15;"
-                    ".att_syntax;"
-                    :
-                    : "a" (destination), "d" (source)
-                    : "r15"
-            );
+            int64_t* typed_destination = (int64_t*)destination;
+            *typed_destination = *typed_source;
         }
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            __asm
-            (
-                    ".intel_syntax noprefix;"
-                    "movsx r15w, BYTE PTR [rdx];"
-                    "mov WORD PTR [rax], r15w;"
-                    ".att_syntax;"
-                    :
-                    : "a" (destination), "d" (source)
-                    : "r15"
-            );
+            int16_t* typed_destination = (int16_t*)destination;
+            *typed_destination = *typed_source;
         }
         // 32-bit
         else
         {
-            __asm
-            (
-                    ".intel_syntax noprefix;"
-                    "movsx r15d, BYTE PTR [rdx];"
-                    "mov QWORD PTR [rax], r15;"
-                    ".att_syntax;"
-                    :
-                    : "a" (destination), "d" (source)
-                    : "r15"
-            );
+            uint64_t* typed_destination = (uint64_t*)destination;
+            *typed_destination = (int32_t)*typed_source;
         }
 
         // registers written back by default
@@ -3178,104 +2978,116 @@ BYTE_EMULATOR_IMPL(0xc1)
         // 64-bit size
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            GET_BUFFER_RAW(destination, (sizeof(__uint64_t) * 2))
-            auto source_original  = (__uint64_t*) buffer;
-            auto source_overwrite = ((__uint64_t*) buffer) + 1;
+            GET_BUFFER_RAW(destination, (sizeof(uint64_t) * 2))
+            auto source_original  = (uint64_t*) buffer;
+            auto source_overwrite = ((uint64_t*) buffer) + 1;
+            uint64_t* typed_destination = (uint64_t*)destination;
+            uint64_t* typed_source = (uint64_t*)source;
 
             if (result != REPLAY_BUFFER_RETURN_FIRST)
             {
-                if (*((__uint64_t*) source) != *source_original)
+                if (*typed_source != *source_original)
                     return -1;
-                *((__uint64_t*) source) = *source_overwrite;
+                *typed_source = *source_overwrite;
 
                 REPLAY_BUFFER_ADVANCE
                 return 0;
             }
 
-            *source_original = *((__uint64_t*) source);
+            *source_original = *typed_source;
 
             // perform operation
             __asm__
             (
                     ".intel_syntax noprefix;"
-                    "mov r15, QWORD PTR [rdx];"
-                    "xadd QWORD PTR [rax], r15;"
-                    "mov QWORD PTR [rdx], r15;"
+                    "push %[flags];"
+                    "popf;"
+                    "xadd QWORD PTR [%[dst]], %[src];"
+                    "pushf;"
+                    "pop %[flags];"
                     ".att_syntax;"
-                    :
-                    : [dst] "a" (destination), [src] "d" (source)
-                    : "r15"
+                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination), [src] "+r" (*typed_source)
+                    : [dst] "r" (typed_destination)
+                    : "cc"
             );
 
-            *source_overwrite = *((__uint64_t*) source);
+            *source_overwrite = *typed_source;
         }
         // 16-bit size
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            GET_BUFFER_RAW(destination, (sizeof(__uint16_t) * 2))
-            auto source_original  = (__uint16_t*) buffer;
-            auto source_overwrite = ((__uint16_t*) buffer) + 1;
+            GET_BUFFER_RAW(destination, (sizeof(uint16_t) * 2))
+            auto source_original  = (uint16_t*) buffer;
+            auto source_overwrite = ((uint16_t*) buffer) + 1;
+            uint16_t* typed_destination = (uint16_t*)destination;
+            uint16_t* typed_source = (uint16_t*)source;
 
             if (result != REPLAY_BUFFER_RETURN_FIRST)
             {
-                if (*((__uint16_t*) source) != *source_original)
+                if (*typed_source != *source_original)
                     return -1;
-                *((__uint16_t*) source) = *source_overwrite;
+                *typed_source = *source_overwrite;
 
                 REPLAY_BUFFER_ADVANCE
                 return 0;
             }
 
-            *source_original = *((__uint16_t*) source);
+            *source_original = *typed_source;
 
             // perform operation
             __asm__
             (
                     ".intel_syntax noprefix;"
-                    "mov r15w, WORD PTR [rdx];"
-                    "xadd WORD PTR [rax], r15w;"
-                    "mov WORD PTR [rdx], r15w;"
+                    "push %[flags];"
+                    "popf;"
+                    "xadd WORD PTR [%[dst]], %[src];"
+                    "pushf;"
+                    "pop %[flags];"
                     ".att_syntax;"
-                    :
-                    : [dst] "a" (destination), [src] "d" (source)
-                    : "r15"
+                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination), [src] "+r" (*typed_source)
+                    : [dst] "r" (typed_destination)
+                    : "cc"
             );
 
-            *source_overwrite = *((__uint16_t*) source);
+            *source_overwrite = *typed_source;
         }
         // 32-bit size
         else
         {
-            GET_BUFFER_RAW(destination, (sizeof(__uint32_t) * 2))
-            auto source_original  = (__uint32_t*) buffer;
-            auto source_overwrite = ((__uint32_t*) buffer) + 1;
+            GET_BUFFER_RAW(destination, (sizeof(uint32_t) * 2))
+            auto source_original  = (uint32_t*) buffer;
+            auto source_overwrite = ((uint32_t*) buffer) + 1;
+            uint32_t* typed_destination = (uint32_t*)destination;
+            uint32_t* typed_source = (uint32_t*)source;
 
             if (result != REPLAY_BUFFER_RETURN_FIRST)
             {
-                if (*((__uint32_t*) source) != *source_original)
+                if (*typed_source != *source_original)
                     return -1;
-                *((__uint32_t*) source) = *source_overwrite;
+                *typed_source = *source_overwrite;
 
                 REPLAY_BUFFER_ADVANCE
                 return 0;
             }
 
-            *source_original = *((__uint32_t*) source);
+            *source_original = *typed_source;
 
             // perform operation
             __asm__
             (
                     ".intel_syntax noprefix;"
-                    "mov r15d, DWORD PTR [rdx];"
-                    "xadd DWORD PTR [rax], r15d;"
-                    "mov DWORD PTR [rdx], r15d;"
+                    "push %[flags];"
+                    "popf;"
+                    "xadd DWORD PTR [%[dst]], %[src];"
+                    "pushf;"
+                    "pop %[flags];"
                     ".att_syntax;"
-                    :
-                    : [dst] "a" (destination), [src] "d" (source)
-                    : "r15"
+                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination), [src] "+r" (*typed_source)
+                    : [dst] "r" (typed_destination)
+                    : "cc"
             );
 
-            *source_overwrite = *((__uint32_t*) source);
+            *source_overwrite = *typed_source;
         }
 
         // registers will be written back in a bit
@@ -3311,7 +3123,7 @@ BYTE_EMULATOR_IMPL(0xc6)
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
         // local temporary modrm byte copy
-        __uint8_t modrm = instruction.instruction[instruction.effective_opcode_index + 1];
+        uint8_t modrm = instruction.instruction[instruction.effective_opcode_index + 1];
 
         // define source
         void* source;
@@ -3331,16 +3143,9 @@ BYTE_EMULATOR_IMPL(0xc6)
         }
 
         // perform operation
-        __asm
-        (
-                ".intel_syntax noprefix;"
-                "mov dl, BYTE PTR [rdx];"
-                "mov BYTE PTR [rax], dl;"
-                ".att_syntax;"
-                :
-                : [dst] "a" (destination), [src] "d" (source)
-                :
-        );
+        uint8_t* typed_destination = (uint8_t*)destination;
+        uint8_t* typed_source = (uint8_t*)source;
+        *typed_destination = *typed_source;
 
         // no writeback needed
         REPLAY_BUFFER_ADVANCE
@@ -3358,7 +3163,7 @@ BYTE_EMULATOR_IMPL(0xc7)
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
         // small test
-        __uint8_t modrm = instruction[instruction.effective_opcode_index + 1];
+        uint8_t modrm = instruction[instruction.effective_opcode_index + 1];
         if (GET_REG_CODE((unsigned) modrm) != 0b000u)
             return -1;
 
@@ -3373,44 +3178,23 @@ BYTE_EMULATOR_IMPL(0xc7)
         // 64-bit
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            __asm
-            (
-                    ".intel_syntax noprefix;"
-                    "movsxd r15, DWORD PTR [rdx];"
-                    "mov QWORD PTR [rax], r15;"
-                    ".att_syntax;"
-                    :
-                    : "a" (destination), "d" (source)
-                    : "r15"
-            );
+            int64_t* typed_destination = (int64_t*)destination;
+            int32_t* typed_source = (int32_t*)source;
+            *typed_destination = *typed_source;
         }
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            __asm
-            (
-                    ".intel_syntax noprefix;"
-                    "mov r15w, WORD PTR [rdx];"
-                    "mov WORD PTR [rax], r15w;"
-                    ".att_syntax;"
-                    :
-                    : "a" (destination), "d" (source)
-                    : "r15"
-            );
+            uint16_t* typed_destination = (uint16_t*)destination;
+            uint16_t* typed_source = (uint16_t*)source;
+            *typed_destination = *typed_source;
         }
         // 32-bit
         else
         {
-            __asm
-            (
-                    ".intel_syntax noprefix;"
-                    "mov r15d, DWORD PTR [rdx];"
-                    "mov DWORD PTR [rax], r15d;"
-                    ".att_syntax;"
-                    :
-                    : "a" (destination), "d" (source)
-                    : "r15"
-            );
+            uint32_t* typed_destination = (uint32_t*)destination;
+            uint32_t* typed_source = (uint32_t*)source;
+            *typed_destination = *typed_source;
         }
 
         // no register writeback needed
@@ -3505,7 +3289,7 @@ BYTE_EMULATOR_IMPL(0xda)
         DEFINE_FPREGS_STRUCT
 
         // save local copy for modrm
-        __uint8_t modrm = instruction.instruction[instruction.effective_opcode_index + 1];
+        uint8_t modrm = instruction.instruction[instruction.effective_opcode_index + 1];
 
 
         // pminub xmm, xmm/m128
@@ -3522,7 +3306,7 @@ BYTE_EMULATOR_IMPL(0xda)
             GET_BUFFER_REPLACE(source, 16)
 
             // execute operation
-            __asm
+            __asm__
             (
                     ".intel_syntax noprefix;"
                     "movdqu xmm0, XMMWORD PTR [rax];"
@@ -3549,7 +3333,7 @@ BYTE_EMULATOR_IMPL(0xda)
             GET_BUFFER_REPLACE(source, 8)
 
             // execute operation
-            __asm
+            __asm__
             (
                     ".intel_syntax noprefix;"
                     "movq mm0, QWORD PTR [rax];"
