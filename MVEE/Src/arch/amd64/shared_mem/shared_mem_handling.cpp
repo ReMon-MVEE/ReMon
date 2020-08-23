@@ -714,7 +714,10 @@ int             replay_buffer::obtain_buffer                        (unsigned in
                                                                      unsigned long long requested_size)
 {
     if (variant_num >= this->variant_count)
+    {
+        warnf("variant_num out of bounds %d\n", variant_num);
         return REPLAY_BUFFER_RETURN_ERROR;
+    }
 
     // get current state and entry
     replay_state* current_state = &this->variant_states[variant_num];
@@ -777,22 +780,34 @@ int             replay_buffer::obtain_buffer                        (unsigned in
         }
         else
         {
-            // compare instruction
-            if (instruction.size != current_entry->instruction_size)
-                return REPLAY_BUFFER_RETURN_ERROR;
-            for (int i = 0; i < current_entry->instruction_size; i++)
-                if (current_entry->instruction[i] != instruction.instruction[i])
-                    return REPLAY_BUFFER_RETURN_ERROR;
-
             // compare monitor pointer
             if (current_entry->monitor_pointer != monitor_pointer)
+            {
+                warnf("monitor_pointer differs\n");
                 return REPLAY_BUFFER_RETURN_ERROR;
+            }
+
+            // compare instruction
+            if (instruction.size != current_entry->instruction_size)
+            {
+                warnf("instruction size differs\n");
+                return REPLAY_BUFFER_RETURN_ERROR;
+            }
+            for (int i = 0; i < current_entry->instruction_size; i++)
+                if (current_entry->instruction[i] != instruction.instruction[i])
+                {
+                    warnf("instruction intent differs\n");
+                    return REPLAY_BUFFER_RETURN_ERROR;
+                }
 
             // return buffer
             if (requested)
             {
                 if (current_entry->buffer_size != requested_size)
+                {
+                    warnf("buffer size not as requested\n");
                     return REPLAY_BUFFER_RETURN_ERROR;
+                }
                 *requested = current_entry->buffer;
             }
             // ok
@@ -828,11 +843,17 @@ int             replay_buffer::advance                              (unsigned in
 
                     if (instruction_intent_emulation::lookup_table[variant->instruction.opcode()].emulator(
                             variant->instruction, *this->relevant_monitor, variant) != 0)
+                    {
+                        warnf("follower emulation failed\n");
                         return REPLAY_BUFFER_RETURN_ERROR;
+                    }
 
                     variant->regs.rip += variant->instruction.size;
                     if (!interaction::write_all_regs(variant->variantpid, &variant->regs))
+                    {
+                        warnf("writing follower regs failed\n");
                         return REPLAY_BUFFER_RETURN_ERROR;
+                    }
 
                     this->relevant_monitor->call_resume((int) i);
                 }
@@ -863,11 +884,17 @@ int             replay_buffer::advance                              (unsigned in
 
             if (instruction_intent_emulation::lookup_table[variant->instruction.opcode()].emulator(
                     variant->instruction, *this->relevant_monitor, variant) != 0)
+            {
+                warnf("waiting follower emulation failed\n");
                 return REPLAY_BUFFER_RETURN_ERROR;
+            }
 
             variant->regs.rip += variant->instruction.size;
             if (!interaction::write_all_regs(variant->variantpid, &variant->regs))
+            {
+                warnf("writing follower regs failed\n");
                 return REPLAY_BUFFER_RETURN_ERROR;
+            }
 
             this->relevant_monitor->call_resume((int) 0);
         }
