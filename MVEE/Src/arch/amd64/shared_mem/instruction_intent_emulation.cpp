@@ -777,7 +777,7 @@ BYTE_EMULATOR_IMPL(0x39)
         // 64-bit
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            GET_BUFFER_REPLACE(source, 8)
+            GET_BUFFER_REPLACE(destination, 8)
             uint64_t* typed_destination = (uint64_t*)destination;
             uint64_t* typed_source = (uint64_t*)source;
 
@@ -798,7 +798,7 @@ BYTE_EMULATOR_IMPL(0x39)
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            GET_BUFFER_REPLACE(source, 2)
+            GET_BUFFER_REPLACE(destination, 2)
             uint16_t* typed_destination = (uint16_t*)destination;
             uint16_t* typed_source = (uint16_t*)source;
 
@@ -819,7 +819,7 @@ BYTE_EMULATOR_IMPL(0x39)
         // 32-bit
         else
         {
-            GET_BUFFER_REPLACE(source, 4)
+            GET_BUFFER_REPLACE(destination, 4)
             uint32_t* typed_destination = (uint32_t*)destination;
             uint32_t* typed_source = (uint32_t*)source;
 
@@ -2637,9 +2637,9 @@ BYTE_EMULATOR_IMPL(0xab)
             else if (*(uint32_t*) buffer == *(uint32_t*) source)
             {
                 if (regs_struct->eflags & (0b1u << 10u))
-                    regs_struct->rdi -= 2;
+                    regs_struct->rdi -= 4;
                 else
-                    regs_struct->rdi += 2;
+                    regs_struct->rdi += 4;
 
                 REPLAY_BUFFER_ADVANCE
                 return 0;
@@ -2659,9 +2659,9 @@ BYTE_EMULATOR_IMPL(0xab)
             );
 
             if (regs_struct->eflags & (0b1u << 10u))
-                regs_struct->rdi -= 2;
+                regs_struct->rdi -= 4;
             else
-                regs_struct->rdi += 2;
+                regs_struct->rdi += 4;
         }
 
         REPLAY_BUFFER_ADVANCE
