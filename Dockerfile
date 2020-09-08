@@ -46,7 +46,7 @@ RUN sed -i 's/^#\sdeb-src/deb-src/' /etc/apt/sources.list
 # Install extra applications to run in MVEE, or tools to build those applications
 RUN \
     apt-get update && \
-    apt-get install -y vim less strace sudo
+    apt-get install -y vim less strace sudo dpkg-dev cmake-curses-gui gawk
 
 # Make sure normal users have plenty of rights to /opt
 RUN chmod 777 /opt
