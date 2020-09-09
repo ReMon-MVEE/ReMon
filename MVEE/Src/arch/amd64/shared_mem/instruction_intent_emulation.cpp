@@ -2638,16 +2638,16 @@ BYTE_EMULATOR_IMPL(0xab)
         // we're in need of rax as source
         DEFINE_REGS_STRUCT
 
-        void* monitor_pointer;
+        void* destination;
         if (instruction_intent::determine_monitor_pointer(relevant_monitor, variant, instruction.effective_address,
-                                                          &monitor_pointer) != 0)
+                &destination) != 0)
             return -1;
         void* source = shared_mem_register_access::ACCESS_GENERAL_NAME(rax)(regs_struct);
 
         // stos m64
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            GET_BUFFER_RAW(monitor_pointer, 8)
+            GET_BUFFER_RAW(destination, 8)
             if (result == REPLAY_BUFFER_RETURN_FIRST)
                 *(uint64_t*) buffer = *(uint64_t*) source;
             else if (*(uint64_t*) buffer == *(uint64_t*) source)
@@ -2663,7 +2663,6 @@ BYTE_EMULATOR_IMPL(0xab)
             else
                 return -1;
 
-            void* destination = monitor_pointer;
             __asm__
             (
                     ".intel_syntax noprefix;"
@@ -2682,7 +2681,7 @@ BYTE_EMULATOR_IMPL(0xab)
         // stos m16
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            GET_BUFFER_RAW(monitor_pointer, 2)
+            GET_BUFFER_RAW(destination, 2)
             if (result == REPLAY_BUFFER_RETURN_FIRST)
                 *(uint16_t*) buffer = *(uint16_t*) source;
             else if (*(uint16_t*) buffer == *(uint16_t*) source)
@@ -2698,7 +2697,6 @@ BYTE_EMULATOR_IMPL(0xab)
             else
                 return -1;
 
-            void* destination = monitor_pointer;
             __asm__
             (
                     ".intel_syntax noprefix;"
@@ -2717,7 +2715,7 @@ BYTE_EMULATOR_IMPL(0xab)
         // stos m32
         else
         {
-            GET_BUFFER_RAW(monitor_pointer, 2)
+            GET_BUFFER_RAW(destination, 2)
             if (result == REPLAY_BUFFER_RETURN_FIRST)
                 *(uint32_t*) buffer = *(uint32_t*) source;
             else if (*(uint32_t*) buffer == *(uint32_t*) source)
@@ -2733,7 +2731,6 @@ BYTE_EMULATOR_IMPL(0xab)
             else
                 return -1;
 
-            void* destination = monitor_pointer;
             __asm__
             (
                     ".intel_syntax noprefix;"
