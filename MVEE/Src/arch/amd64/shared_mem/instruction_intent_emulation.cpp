@@ -1130,11 +1130,11 @@ BYTE_EMULATOR_IMPL(0x63)
 // BYTE_EMULATOR_IMPL(0x65)
 
 
-/* Not implemented - blocked in first round */
+/* Prefix, blocked */
 // BYTE_EMULATOR_IMPL(0x66)
 
 
-/* Not implemented - blocked in first round */
+/* Prefix, blocked */
 // BYTE_EMULATOR_IMPL(0x67)
 
 
@@ -3495,8 +3495,58 @@ BYTE_EMULATOR_IMPL(0xda)
 // BYTE_EMULATOR_IMPL(0xe6)
 
 
-/* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0xe7)
+/* Valid in second round */
+BYTE_EMULATOR_IMPL(0xe7)
+{
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
+    {
+        // movntdq m128, xmm
+        if (PREFIXES_GRP_THREE_PRESENT(instruction))
+        {
+            LOAD_SRC_AND_DST(DEFINE_FPREGS_STRUCT, xmm_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+            GET_BUFFER_CHECK_OR_FILL(destination, source, 16)
+
+            __asm__
+            (
+                    ".intel_syntax noprefix;"
+                    "movdqu xmm0, XMMWORD PTR [rdx];"
+                    "movntdq XMMWORD PTR [rax], xmm0;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "a" (destination), [src] "d" (source)
+                    : "xmm0", "memory"
+            );
+        }
+        // illegal access
+        else if (PREFIXES_GRP_ONE_PRESENT(instruction) && (PREFIXES_GRP_TWO(instruction) == REPZ_PREFIX_CODE ||
+                PREFIXES_GRP_TWO(instruction) == REPNZ_PREFIX_CODE))
+            return -1;
+        // movntq m64, mm
+        else
+        {
+            LOAD_SRC_AND_DST(DEFINE_FPREGS_STRUCT, mm_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+            GET_BUFFER_CHECK_OR_FILL(destination, source, 8)
+
+            __asm__
+            (
+                    ".intel_syntax noprefix;"
+                    "movq  mm0, QWORD PTR [rdx];"
+                    "movntq QWORD PTR [rax], mm0;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "a" (destination), [src] "d" (source)
+                    : "mm0", "memory"
+            );
+        }
+
+        // no registers need to be written back
+        REPLAY_BUFFER_ADVANCE
+        return 0;
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */

@@ -2094,9 +2094,20 @@ public:
     // BYTE_LOADER_DEFINITION(0xe6)
     // BYTE_EMULATOR_DEFINITION(0xe6)
 
-    /* Not implemented - blocked */
-    // BYTE_LOADER_DEFINITION(0xe7)
-    // BYTE_EMULATOR_DEFINITION(0xe7)
+    /* Valid in second round
+     *
+     * ## Second round ##
+     *
+     * 0x66 prefix: movntdq m128, xmm
+     * no prefix:   movntq m64, mm
+     *
+     * ## Other rounds ##
+     *
+     * If encountered in other rounds, ILLEGAL_ACCESS should be set as operation and the decoding should be terminated
+     * returning ILLEGAL_ACCESS_TERMINATION.
+     */
+    BYTE_LOADER_DEFINITION(0xe7)
+    BYTE_EMULATOR_DEFINITION(0xe7)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xe8)
@@ -2444,7 +2455,7 @@ public:
             {&block_loader          , &block_emulator},                                              // 0xe4
             {&block_loader          , &block_emulator},                                              // 0xe5
             {&block_loader          , &block_emulator},                                              // 0xe6
-            {&block_loader          , &block_emulator},                                              // 0xe7
+            {&BYTE_LOADER_NAME(0xe7), &BYTE_EMULATOR_NAME(0xe7)},                               // 0xe7
             {&block_loader          , &block_emulator},                                              // 0xe8
             {&block_loader          , &block_emulator},                                              // 0xe9
             {&block_loader          , &block_emulator},                                              // 0xea
