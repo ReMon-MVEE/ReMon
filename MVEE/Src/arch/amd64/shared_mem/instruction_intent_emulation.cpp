@@ -1376,11 +1376,11 @@ BYTE_EMULATOR_IMPL(0x7f)
     {
         if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
         {
-            LOAD_SRC_AND_DST(DEFINE_FPREGS_STRUCT, xmm_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
 
             // movdqu xmm/m128, xmm if f3 prefix is present
             if (PREFIXES_GRP_ONE_PRESENT(instruction) && PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE)
             {
+                LOAD_SRC_AND_DST(DEFINE_FPREGS_STRUCT, xmm_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
                 GET_BUFFER_CHECK_OR_FILL(destination, source, 16)
 
                 // perform operation
@@ -1398,6 +1398,7 @@ BYTE_EMULATOR_IMPL(0x7f)
             // movdqa xmm/m128, xmm if f3 prefix is not present
             else if (PREFIXES_GRP_THREE_PRESENT(instruction))
             {
+                LOAD_SRC_AND_DST(DEFINE_FPREGS_STRUCT, xmm_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
                 GET_BUFFER_CHECK_OR_FILL(destination, source, 16)
 
                 // perform operation
@@ -1415,6 +1416,7 @@ BYTE_EMULATOR_IMPL(0x7f)
             // mova m64, mm
             else
             {
+                LOAD_SRC_AND_DST(DEFINE_FPREGS_STRUCT, mm_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
                 GET_BUFFER_CHECK_OR_FILL(destination, source, 8)
 
                 __asm__
@@ -1430,12 +1432,9 @@ BYTE_EMULATOR_IMPL(0x7f)
             }
 
 
-            // write back regs, always needed here
-            if (interaction::write_all_fpregs(*instruction.variant_pid, regs_struct))
-            {
-                REPLAY_BUFFER_ADVANCE
-                return 0;
-            }
+            // no write back needed here
+            REPLAY_BUFFER_ADVANCE
+            return 0;
         }
 
         // invalid otherwise
