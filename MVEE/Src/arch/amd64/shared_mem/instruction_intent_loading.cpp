@@ -1879,8 +1879,19 @@ BYTE_LOADER_IMPL(0xda)
 // BYTE_LOADER_IMPL(0xe6)
 
 
-/* Not implemented - blocked */
-// BYTE_LOADER_IMPL(0xe7)
+/* Valid in second round */
+BYTE_LOADER_IMPL(0xe7)
+{
+    // movntdq/movntq
+    if (round == INSTRUCTION_DECODING_SECOND_LEVEL)
+    {
+        SET_EFFECTIVE_OPCODE(instruction, round)
+        LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
+    }
+
+    // illegal otherwise
+    return ILLEGAL_ACCESS_TERMINATION;
+}
 
 
 /* Not implemented - blocked */
