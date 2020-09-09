@@ -1190,8 +1190,7 @@ BYTE_EMULATOR_IMPL(0x6f)
                     : "xmm0"
             );
         }
-        // movdqa xmm, xmm/m128 if f3 prefix is present
-        // implemented as movdqu because it's not behaving
+        // movdqa xmm, xmm/m128 if f3 prefix is not present
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
             GET_BUFFER_REPLACE(source, 16)
@@ -1201,15 +1200,29 @@ BYTE_EMULATOR_IMPL(0x6f)
             (
                     ".intel_syntax noprefix;"
                     "movdqu xmm0, XMMWORD PTR [rdx];"
-                    "movdqu XMMWORD PTR [rax], xmm0;"
+                    "movdqa XMMWORD PTR [rax], xmm0;"
                     ".att_syntax;"
                     :
                     : [dst] "a" (destination), [src] "d" (source)
                     : "xmm0"
             );
         }
+        // mova mm, m64
         else
-            return -1;
+        {
+            GET_BUFFER_REPLACE(source, 8);
+
+            __asm__
+            (
+                    ".intel_syntax noprefix;"
+                    "movq mm0, QWORD PTR [rdx];"
+                    "movq QWORD PTR [rax], mm0;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "a" (destination), [src] "d" (source)
+                    : "mm0"
+            );
+        }
 
 
         // write back regs, always needed here
@@ -1357,7 +1370,81 @@ BYTE_EMULATOR_IMPL(0x74)
 
 
 /* Valid in second round */
-// BYTE_EMULATOR_IMPL(0x7f)
+BYTE_EMULATOR_IMPL(0x7f)
+{
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
+    {
+        if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
+        {
+            LOAD_SRC_AND_DST(DEFINE_FPREGS_STRUCT, xmm_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+
+            // movdqu xmm/m128, xmm if f3 prefix is present
+            if (PREFIXES_GRP_ONE_PRESENT(instruction) && PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE)
+            {
+                GET_BUFFER_CHECK_OR_FILL(destination, source, 16)
+
+                // perform operation
+                __asm__
+                (
+                        ".intel_syntax noprefix;"
+                        "movdqu xmm0, XMMWORD PTR [rdx];"
+                        "movdqu XMMWORD PTR [rax], xmm0;"
+                        ".att_syntax;"
+                        :
+                        : [dst] "a" (destination), [src] "d" (source)
+                        : "xmm0"
+                );
+            }
+            // movdqa xmm/m128, xmm if f3 prefix is not present
+            else if (PREFIXES_GRP_THREE_PRESENT(instruction))
+            {
+                GET_BUFFER_CHECK_OR_FILL(destination, source, 16)
+
+                // perform operation
+                __asm__
+                (
+                        ".intel_syntax noprefix;"
+                        "movdqu xmm0, XMMWORD PTR [rdx];"
+                        "movdqa XMMWORD PTR [rax], xmm0;"
+                        ".att_syntax;"
+                        :
+                        : [dst] "a" (destination), [src] "d" (source)
+                        : "xmm0"
+                );
+            }
+            // mova m64, mm
+            else
+            {
+                GET_BUFFER_CHECK_OR_FILL(destination, source, 8)
+
+                __asm__
+                (
+                        ".intel_syntax noprefix;"
+                        "movq mm0, QWORD PTR [rdx];"
+                        "movq QWORD PTR [rax], mm0;"
+                        ".att_syntax;"
+                        :
+                        : [dst] "a" (destination), [src] "d" (source)
+                        : "mm0"
+                );
+            }
+
+
+            // write back regs, always needed here
+            if (interaction::write_all_fpregs(*instruction.variant_pid, regs_struct))
+            {
+                REPLAY_BUFFER_ADVANCE
+                return 0;
+            }
+        }
+
+        // invalid otherwise
+        return -1;
+    }
+
+    // illegal access otherwise
+    return -1;
+}
 
 
 /* Valid in first round */
