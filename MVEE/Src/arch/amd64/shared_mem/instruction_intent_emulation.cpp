@@ -1835,8 +1835,11 @@ BYTE_EMULATOR_IMPL(0x83)
                 break;
             }
             case 0b010u: // ADC - not yet implemented
+                return -1;
             case 0b011u: // SBB - not yet implemented
+                return -1;
             case 0b100u: // AND - not yet implemented
+                return -1;
             case 0b101u: // SUB - not yet implemented
             {
                 // perform operation, note that the flags register is also changed here
@@ -3142,6 +3145,8 @@ BYTE_EMULATOR_IMPL(0xc1)
             auto source_overwrite = ((uint32_t*) buffer) + 1;
             uint32_t* typed_destination = (uint32_t*)destination;
             uint32_t* typed_source = (uint32_t*)source;
+
+            *(typed_source + 1) = 0;
 
             if (result != REPLAY_BUFFER_RETURN_FIRST)
             {

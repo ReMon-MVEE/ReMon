@@ -1382,6 +1382,7 @@ void            instruction_tests::test_0x0f_0xc1                   ()
     unsigned long long source;
     unsigned long long orig_src = 0x1122112211221122;
     unsigned long long original = 0x2211221122112211;
+    unsigned long long original_32b = 0x22112211;
     unsigned long long test     = orig_src + original;
 
     // 16-bit ----------------------------------------------------------------------------------------------------------
@@ -1407,9 +1408,9 @@ void            instruction_tests::test_0x0f_0xc1                   ()
     source = orig_src;
     __asm (
             ".intel_syntax noprefix;"
-            "mov r8d, DWORD PTR [rdx];"
+            "mov r8, QWORD PTR [rdx];"
             "xadd DWORD PTR [rax], r8d;"
-            "mov DWORD PTR [rdx], r8d;"
+            "mov QWORD PTR [rdx], r8;"
             ".att_syntax;"
             :
             : "a" (buffers::shared_sink), "d" (&source)
@@ -1417,7 +1418,7 @@ void            instruction_tests::test_0x0f_0xc1                   ()
     );
     TEST_RESULT("xadd WORD PTR [reg], regw",
                 testing_aid::compare_buffers(buffers::shared_sink, (__uint8_t*) &test, DWORD_SIZE) == 0 &&
-                testing_aid::compare_buffers((__uint8_t*) &source, (__uint8_t*) &original, DWORD_SIZE) == 0)
+                testing_aid::compare_buffers((__uint8_t*) &source, (__uint8_t*) &original_32b, QWORD_SIZE) == 0)
     // 32-bit ----------------------------------------------------------------------------------------------------------
 
     // 64-bit ----------------------------------------------------------------------------------------------------------
