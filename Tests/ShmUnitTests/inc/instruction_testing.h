@@ -98,6 +98,11 @@ __asm(                                                                          
 #define DECABYTE_SIZE           10u
 #define DQWORD_SIZE             16u
 
+#define BYTE_MASK                             0xfful
+#define WORD_MASK                           0xfffful
+#define DWORD_MASK                      0xfffffffful
+#define QWORD_MASK              0xfffffffffffffffful
+
 
 // =====================================================================================================================
 //      logging
