@@ -98,6 +98,8 @@ int             main                                                (int argc, c
     // tests -----------------------------------------------------------------------------------------------------------
 #ifdef TEST_MOVSB
     instruction_tests::test_0x01();
+    instruction_tests::test_0x03();
+    instruction_tests::test_0x2b();
     instruction_tests::test_0x39();
     instruction_tests::test_0x3b();
     instruction_tests::test_0x83();
@@ -111,6 +113,8 @@ int             main                                                (int argc, c
     instruction_tests::test_0x0f_0x6f();
     instruction_tests::test_0x0f_0x7f();
     instruction_tests::test_0x0f_0xb1();
+    instruction_tests::test_0x0f_0xb6();
+    instruction_tests::test_0x0f_0xb7();
     instruction_tests::test_0x0f_0xbe();
     instruction_tests::test_0x0f_0xc1();
     instruction_tests::test_0x0f_0xe7();

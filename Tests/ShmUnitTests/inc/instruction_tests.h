@@ -23,6 +23,10 @@ namespace instruction_tests
 {
     void        test_0x01                           ();
 
+    void        test_0x03                           ();
+
+    void        test_0x2b                           ();
+
     void        test_0x39                           ();
 
     void        test_0x3b                           ();
@@ -48,6 +52,10 @@ namespace instruction_tests
     void        test_0x0f_0x7f                      ();
 
     void        test_0x0f_0xb1                      ();
+
+    void        test_0x0f_0xb6                      ();
+
+    void        test_0x0f_0xb7                      ();
 
     void        test_0x0f_0xbe                      ();
 
