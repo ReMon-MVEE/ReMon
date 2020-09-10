@@ -319,6 +319,7 @@ BYTE_EMULATOR_IMPL(0x03)
             GET_BUFFER_REPLACE(source, 4)
             uint32_t* typed_destination = (uint32_t*)destination;
             uint32_t* typed_source = (uint32_t*)source;
+            *(typed_destination + 1) = 0;
             __asm__
             (
                     ".intel_syntax noprefix;"
@@ -668,6 +669,7 @@ BYTE_EMULATOR_IMPL(0x2b)
             GET_BUFFER_REPLACE(source, 4)
             uint32_t* typed_destination = (uint32_t*)destination;
             uint32_t* typed_source = (uint32_t*)source;
+            *(typed_destination + 1) = 0;
 
             __asm__
             (
@@ -1996,7 +1998,7 @@ BYTE_EMULATOR_IMPL(0x83)
 // BYTE_EMULATOR_IMPL(0x86)
 
 
-/* Not implemented - blocked */
+/* Valid in first round */
 BYTE_EMULATOR_IMPL(0x87)
 {
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
@@ -2963,6 +2965,12 @@ BYTE_EMULATOR_IMPL(0xb7)
             uint64_t* typed_destination = (uint64_t*)destination;
             *typed_destination = *typed_source;
         }
+        // 16-bit
+        else if (PREFIXES_GRP_THREE_PRESENT(instruction))
+        {
+            uint16_t* typed_destination = (uint16_t*)destination;
+            *typed_destination = *typed_source;
+        }
         // 32-bit size
         else
         {
@@ -3031,8 +3039,9 @@ BYTE_EMULATOR_IMPL(0xbe)
         // 32-bit
         else
         {
-            uint64_t* typed_destination = (uint64_t*)destination;
+            uint32_t* typed_destination = (uint32_t*)destination;
             *typed_destination = (int32_t)*typed_source;
+            *(typed_destination + 1) = 0x00;
         }
 
         // registers written back by default
