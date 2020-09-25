@@ -201,6 +201,18 @@ warnf("\n%s\n", output.str().c_str());
 // ---------------------------------------------------------------------------------------------------------------------
 
 
+// states for shared memory setup --------------------------------------------------------------------------------------
+#define SHM_SETUP_EXPECTING_ERROR               -1
+#define SHM_SETUP_IDLE                          0
+#define SHM_SETUP_EXPECTING_SHADOW              1
+#define SHM_SETUP_EXPECTING_BITMAP              2
+#define SHM_CLEANUP_EXPECTING_ERROR             -2
+#define SHM_CLEANUP_IDLE                        0
+#define SHM_CLEANUP_EXPECTING_SHADOW            3
+#define SHM_CLEANUP_EXPECTING_BITMAP            4
+// states for shared memory setup --------------------------------------------------------------------------------------
+
+
 // =====================================================================================================================
 //      macros
 // =====================================================================================================================
@@ -277,7 +289,7 @@ unsigned long encode_address_tag(unsigned long address, const variantstate* vari
 // ugly syscall shared pointer redirection -----------------------------------------------------------------------------
 #define REPLACE_SHARED_POINTER_ARG(var, arg)                                                                           \
 {                                                                                                                      \
-    mmap_region_info* region = set_mmap_table->get_region_info(var, decode_address_tag(ARG##arg(var), &variants[var])); \
+    mmap_region_info* region = set_mmap_table->get_region_info(var, decode_address_tag(ARG##arg(var), &variants[var]));\
     if (region && region->shadow)                                                                                      \
     {                                                                                                                  \
         variants[var].have_overwritten_args = true;                                                                    \

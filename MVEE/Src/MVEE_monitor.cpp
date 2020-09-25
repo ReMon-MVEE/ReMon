@@ -205,6 +205,8 @@ void monitor::init()
 
 monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap_table, bool shares_sighand_table, bool shares_tgid)
         : buffer(this)
+        , shm_setup_state(SHM_SETUP_IDLE)
+        , current_shadow(nullptr)
 {
     init();
 
@@ -1725,6 +1727,7 @@ void monitor::handle_syscall_entrance_event(int index)
 		else
 			call_resume(index);
         variants[index].call_dispatched = true;
+
         return;
     }
 
@@ -2219,7 +2222,7 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                     case ILLEGAL_ACCESS_TERMINATION:
                     {
                         warnf("illegal access\n");
-#ifdef JNS_DEBUG
+
                         variant->instruction.debug_print();
                         mmap_region_info* region = this->set_mmap_table->get_region_info(variantnum,
                                 variants[variantnum].regs.rip, 0);
@@ -2243,7 +2246,7 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                                    decode_address_tag(siginfo.si_addr, variant));
                         }
                         set_mmap_table->print_mmap_table(debugf);
-#endif
+
                         shutdown(false);
                         return;
                     }

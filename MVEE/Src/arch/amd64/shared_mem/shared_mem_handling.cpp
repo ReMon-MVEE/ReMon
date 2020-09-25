@@ -112,44 +112,35 @@ int             instruction_intent::determine_monitor_pointer       (monitor& re
                                                                      unsigned long long size)
 {
     // translate variant address to monitor address
-    mmap_region_info* variant_map_info =
+    shared_monitor_map_info* monitor_map =
             relevant_monitor.set_mmap_table->get_shared_info((unsigned long long) variant_address);
-    if (!variant_map_info)
+    if (!monitor_map)
     {
         debugf("variant %d address %lx does not have an associated monitor mapping\n",
               variant->variant_num, (unsigned long) variant_address);
         return NO_REGION_INFO;
     }
 
-    std::shared_ptr<shared_monitor_map_info> monitor_map_info = variant_map_info->shadow;
-    if (!monitor_map_info || !monitor_map_info->shadow_base)
-    {
-        warnf("variant %d address %lx maps to monitor mapping that points to null or none at all...\n",
-              variant->variant_num, (unsigned long)variant_address);
-        return NO_REGION_INFO;
-    }
-
     if ((unsigned long long) variant_address >=
-            (variant_map_info->region_base_address + variant_map_info->region_size) ||
-            (unsigned long long) variant_address < variant_map_info->region_base_address)
+            (monitor_map->variant_base + monitor_map->size) ||
+            (unsigned long long) variant_address < monitor_map->variant_base)
     {
         warnf("No offset can be calculated.\n");
         warnf("Variant effective address 0x%p does not fall between mapping in variant: [0x%p, 0x%p).\n",
-              variant_address, (void*) variant_map_info->region_base_address,
-              (void*) (variant_map_info->region_base_address + variant_map_info->region_size));
+              variant_address, (void*) monitor_map->variant_base,
+              (void*) (monitor_map->variant_base + monitor_map->size));
         return -1;
     }
 
-    if (size > 0 && ((unsigned long long) variant_address + size) >
-            variant_map_info->region_base_address + variant_map_info->region_size)
+    if (size > 0 && ((unsigned long long) variant_address + size) > monitor_map->variant_base + monitor_map->size)
     {
         warnf("Instruction, %p + %llx, will go out of range of shared mapping.\n",
               variant_address, size);
         return -1;
     }
 
-    unsigned long long offset = (unsigned long long) variant_address - variant_map_info->region_base_address;
-    *monitor_pointer = (void*) ((unsigned long long) monitor_map_info->shadow_base + offset);
+    unsigned long long offset = (unsigned long long) variant_address - monitor_map->variant_base;
+    *monitor_pointer = (void*) ((unsigned long long) monitor_map->monitor_base + offset);
 
     // return ok
     return 0;
@@ -220,7 +211,6 @@ uint8_t         instruction_intent::operator[]                      (size_t inde
 
 void            instruction_intent::debug_print                     ()
 {
-#ifdef JNS_DEBUG
 #define BYTE_TO_HIGHER_HEX(byte)            (((byte & 0xf0u) >> 0x04u) + ((byte & 0xf0u) < 0xa0u ? '0' : 'a' - 0x0au))
 #define BYTE_TO_LOWER_HEX(byte)             ((byte & 0x0fu) + ((byte & 0x0fu) < 0x0au ? '0' : 'a' - 0x0au))
     // string stream to help format output
@@ -255,7 +245,6 @@ void            instruction_intent::debug_print                     ()
 
     // print output
     debugf("%s", output.str().c_str());
-#endif
 }
 
 void instruction_intent::debug_print_minimal                        ()
@@ -908,42 +897,122 @@ int             replay_buffer::advance                              (unsigned in
 // =====================================================================================================================
 //      shadow maintenance
 // =====================================================================================================================
-                shared_monitor_map_info::shared_monitor_map_info    (void* shadow_base, size_t size)
-        : active_shadow_users(0)
+                shared_monitor_map_info::shared_monitor_map_info(shared_monitor_map_info* monitor_map_from)
+        : variant_base(monitor_map_from->variant_base)
+        , monitor_base(monitor_map_from->monitor_base)
+        , is_shmat(monitor_map_from->is_shmat)
+        , size(monitor_map_from->size)
+        , variant_shadows(mvee::numvariants)
+        , leader_bitmap(monitor_map_from->leader_bitmap)
 {
-    this->shadow_base = shadow_base;
-    this->size = size;
+    for (int i = 0; i < mvee::numvariants; i++)
+        variant_shadows[i] = monitor_map_from->variant_shadows[i];
 }
-                shared_monitor_map_info::~shared_monitor_map_info   ()
+                shared_monitor_map_info::shared_monitor_map_info(unsigned long long variant_base, void* monitor_base,
+                                                                 unsigned long long size, bool is_shmat)
+        : variant_base(variant_base)
+        , monitor_base(monitor_base)
+        , is_shmat(is_shmat)
+        , size(size)
+        , variant_shadows(mvee::numvariants)
+        , leader_bitmap({ -1, nullptr, 0x00 })
 {
-    if (this->shadow_base)
-        munmap(this->shadow_base, this->size);
+    for (int i = 0; i < mvee::numvariants; i++)
+        variant_shadows[i] = { -1, nullptr, 0x00 };
 }
-/*
-    int         shared_monitor_map_info::mmap                       ()
-{
-    if (!shadow_base)
-        return -1;
 
-    this->active_shadow_users++;
-    return 0;
-}
-*/
-    int         shared_monitor_map_info::unmap                      ()
-{
-    this->active_shadow_users--;
 
-    if (this->shadow_base && this->active_shadow_users <= 0)
+                shared_monitor_map_info::~shared_monitor_map_info()
+{
+}
+
+
+int                shared_monitor_map_info::setup_shm               ()
+{
+    for (int variant_num = 0; variant_num < mvee::numvariants; variant_num++)
     {
-        if (munmap(this->shadow_base, this->size))
-            return errno;
+        int shmid = shmget(IPC_PRIVATE, this->size, IPC_CREAT | S_IRUSR | S_IWUSR);
+        if (shmid == -1)
+        {
+            warnf("problem setting up variant local shadow for variant %d - errno: %d\n", variant_num, errno);
+            return -1;
+        }
+        void* shm_addr = shmat(shmid, nullptr, 0);
+        if (shm_addr == (void*) -1)
+        {
+            warnf("problem attaching to variant local shadow (shmid: %d) for variant %d - errno: %d\n", shmid,
+                  variant_num, errno);
+            return -1;
+        }
+
+        this->variant_shadows[variant_num] =
+                {
+                        shmid,
+                        shm_addr,
+                        0x00
+                };
     }
 
+    int shmid = shmget(IPC_PRIVATE, ROUND_UP(this->size, 8) / 8, IPC_CREAT | S_IRUSR | S_IWUSR);
+    if (shmid == -1)
+    {
+        warnf("problem setting up bitmap - errno: %d\n", errno);
+        return -1;
+    }
+    void* shm_addr = shmat(shmid, nullptr, 0);
+    if (shm_addr == (void*) -1)
+    {
+        warnf("problem attaching to bitmap (shmid: %d) - errno: %d\n", shmid, errno);
+        return -1;
+    }
+
+    this->leader_bitmap =
+            {
+                    shmid,
+                    shm_addr,
+                    0x00
+            };
+
     return 0;
 }
 
+
+void               shared_monitor_map_info::cleanup_shm             ()
+{
+    if (this->monitor_base)
+    {
+        if (!this->is_shmat)
+            munmap(this->monitor_base, this->size);
+        else
+            shmdt(this->monitor_base);
+        this->variant_base = 0;
+        this->monitor_base = nullptr;
+    }
+    for (int i = 0; i < mvee::numvariants; i++)
+    {
+        if (this->variant_shadows[i].monitor_base)
+        {
+            shmdt(this->variant_shadows[i].monitor_base);
+            this->variant_shadows[i].variant_base = 0;
+            this->variant_shadows[i].monitor_base = nullptr;
+        }
+    }
+    if (this->leader_bitmap.monitor_base)
+    {
+        shmdt(this->leader_bitmap.monitor_base);
+        this->leader_bitmap.variant_base = 0;
+        this->leader_bitmap.monitor_base = nullptr;
+    }
+
+    this->is_shmat = false;
+    this->size = 0;
+}
+
+
+
 int             mmap_table::shadow_map                              (variantstate* variant, fd_info* info,
-                                                                     std::shared_ptr<shared_monitor_map_info>* shadow,
+                                                                     unsigned long long variant_base,
+                                                                     shared_monitor_map_info** shadow,
                                                                      size_t size, int protection, int flags, int offset)
 {
     // open file
@@ -998,14 +1067,14 @@ int             mmap_table::shadow_map                              (variantstat
     close(fd);
 
     // bookkeeping
-    *shadow = std::shared_ptr<shared_monitor_map_info>(new shared_monitor_map_info());
-    (*shadow)->shadow_base      = temp_shadow;
-    (*shadow)->size             = size;
+    *shadow = init_shared_info(variant_base, temp_shadow, (unsigned long long) size);
+    if (!(*shadow))
+        return -1;
 
 #ifdef JNS_DEBUG
     debugf("shadow mapping ====================================\n");
     debugf("file:                  %s\n", info->paths[0].c_str());
-    debugf("shadow base:           %p\n", (*shadow)->shadow_base);
+    debugf("shadow base:           %p\n", (*shadow)->monitor_base);
     debugf("shadow size:           %zu\n", (*shadow)->size);
     debugf("===================================================\n");
 #endif
@@ -1015,7 +1084,8 @@ int             mmap_table::shadow_map                              (variantstat
 }
 
 int             mmap_table::shadow_shmat                            (variantstate* variant, int shmid,
-                                                                     std::shared_ptr<shared_monitor_map_info>* shadow,
+                                                                     unsigned long long variant_base,
+                                                                     shared_monitor_map_info** shadow,
                                                                      unsigned long long size)
 {
     // map shadow
@@ -1033,114 +1103,109 @@ int             mmap_table::shadow_shmat                            (variantstat
     }
 
     // bookkeeping
-    *shadow = std::shared_ptr<shared_monitor_map_info>(
-            (shared_monitor_map_info*) malloc(sizeof(shared_monitor_map_info)));
-    (*shadow)->shadow_base      = temp_shadow;
-    (*shadow)->size             = size;
+    *shadow = init_shared_info(variant_base, temp_shadow, size, true);
+    if (!(*shadow))
+        return -1;
 
 #ifdef JNS_DEBUG
     debugf("shadow mapping ====================================\n");
     debugf("shmid:                 %d\n", shmid);
-    debugf("shadow base:           %p\n", (*shadow)->shadow_base);
+    debugf("shadow base:           %p\n", (*shadow)->monitor_base);
     debugf("shadow size:           %zu\n", (*shadow)->size);
     debugf("===================================================\n");
 #endif
-
     // return ok
     return 0;
 }
 
 
-int             mmap_table::insert_variant_shared_region            (mmap_region_info* region)
+shared_monitor_map_info*
+                mmap_table::init_shared_info                        (unsigned long long variant_base,
+                                                                     void* monitor_base, unsigned long long size,
+                                                                     bool shmat)
 {
-    unsigned long long end = region->region_base_address + region->region_size;
+    unsigned long long end = variant_base + size;
+    auto monitor_map = new shared_monitor_map_info(variant_base, monitor_base, size, shmat);
 
-    if (variant_mappings.empty() || end <= variant_mappings.front()->region_base_address)
+
+    if (variant_mappings.empty() || end <= (unsigned long long) variant_mappings.front()->variant_base)
     {
-        variant_mappings.insert(variant_mappings.begin(), region);
-        return 0;
+        variant_mappings.insert(variant_mappings.begin(), monitor_map);
+        return monitor_map;
     }
 
-    for (auto iter = variant_mappings.begin(); iter != (variant_mappings.end() - 1); iter++)
-    {
-        if (((*iter)->region_base_address + (*iter)->region_size) <= region->region_base_address&&
-                (*(iter + 1))->region_base_address >= end)
+    for (auto iter = variant_mappings.begin(); iter != (variant_mappings.end() - 1); iter++) {
+        if (((*iter)->variant_base + (*iter)->size) <= monitor_map->variant_base && (*(iter + 1))->variant_base >= end)
         {
-            variant_mappings.insert(iter + 1, region);
-            return 0;
+            variant_mappings.insert(iter + 1, monitor_map);
+            return monitor_map;
         }
     }
 
-    if (region->region_base_address >= (variant_mappings.back()->region_base_address) +
-                                               variant_mappings.back()->region_size)
+    if (monitor_map->variant_base >= variant_mappings.back()->variant_base + variant_mappings.back()->size)
     {
-        variant_mappings.insert(variant_mappings.end(), region);
-        return 0;
-    }
-
-    return -1;
-}
-
-
-mmap_region_info*
-                mmap_table::get_shared_info                         (unsigned long long address)
-{
-    for (auto &iter: variant_mappings)
-    {
-        if (address >= iter->region_base_address && address < (iter->region_base_address + iter->region_size))
-            return iter;
+        variant_mappings.insert(variant_mappings.end(), monitor_map);
+        return monitor_map;
     }
 
     return nullptr;
 }
 
 
-int             mmap_table::munmap_variant_shadow_region            (mmap_region_info* region_info)
+shared_monitor_map_info*
+                mmap_table::get_shared_info                         (unsigned long long address)
 {
-    for (unsigned int i = 0; i < variant_mappings.size(); i++)
+    for (auto &iter: variant_mappings)
+        if (address >= iter->variant_base && address < (iter->variant_base + iter->size))
+            return iter;
+
+    return nullptr;
+}
+
+
+int             mmap_table::munmap_variant_shadow_region            (shared_monitor_map_info* monitor_map)
+{
+    for (auto iter = variant_mappings.begin(); iter != variant_mappings.end(); iter++)
     {
-        if (*(variant_mappings.begin() + i) == region_info)
+        if ((*iter)->variant_base == monitor_map->variant_base)
         {
-            variant_mappings.erase(variant_mappings.begin() + i);
+            variant_mappings.erase(iter);
             break;
         }
     }
 
-    region_info->shadow->unmap();
-    region_info->shadow = nullptr;
-
+    monitor_map->cleanup_shm();
     return 0;
 }
-int             mmap_table::split_variant_shadow_region             (mmap_region_info* region_info)
+
+
+int             mmap_table::split_variant_shadow_region             (shared_monitor_map_info* monitor_map,
+                                                                     unsigned long long split_address)
 {
-    region_info->shadow->active_shadow_users++;
-    // region_info->shadow->mmap();
-    return 0;
+    // using exit to terminate here as we currently don't implement it.
+    exit(-1);
+    /*
+    if (split_address <= monitor_map->variant_base || split_address >= monitor_map->variant_base + monitor_map->size ||
+            (split_address & PAGE_MASK))
+        return -1;
+
+    warnf("We don't do that here. - splitting shared region\n\n");
+    return -1;
+     */
 }
-int             mmap_table::merge_variant_shadow_region             (mmap_region_info* region_info1,
-                                                                     mmap_region_info* region_info2)
+int             mmap_table::merge_variant_shadow_region             (shared_monitor_map_info* monitor_map1,
+                                                                     shared_monitor_map_info* monitor_map2)
 {
-    if (region_info1->shadow != region_info2->shadow)
+    // using exit to terminate here as we currently don't implement it.
+    exit(-1);
+    /*
+    if (monitor_map1->variant_base + monitor_map1->size != monitor_map2->variant_base &&
+            monitor_map1->variant_base != monitor_map2->variant_base + monitor_map2->size)
         return -1;
 
-    region_info1->shadow->unmap();
-    region_info1->shadow = nullptr;
-
-    int to_erase = -1;
-    for (unsigned int i = 0; i < variant_mappings.size(); i++)
-    {
-        if (*(variant_mappings.begin() + i) == region_info2)
-        {
-            to_erase = (int) i;
-            variant_mappings.erase(variant_mappings.begin() + i);
-            break;
-        }
-    }
-
-    if (to_erase == -1)
-        return -1;
-
-    return 0;
+    warnf("We don't do that here. - merging shared regions\n\n");
+    return -1;
+     */
 }
 
 
@@ -1148,17 +1213,11 @@ void               mmap_table::debug_shared                         ()
 {
     std::stringstream output;
     output << "mappings:\n";
-    for (int i = 0; i < mvee::numvariants; i++)
-    {
-        output << "\tvariant " << i << ":\n";
-        for (auto iter: this->full_map[i])
-            if (iter && iter->shadow)
-                output << "\t  > variant: [ " << std::hex << iter->region_base_address << "; "
-                        << std::hex << iter->region_base_address + iter->region_size << " ) => "
-                        << " monitor: [ " << std::hex << iter->shadow->shadow_base << "; "
-                        << std::hex << (unsigned long long) iter->shadow->shadow_base + iter->shadow->size << " ) "
-                        << "\n\t\t-  " << iter->region_backing_file_path.c_str() << "\n";
-    }
+    for (const auto& iter: this->variant_mappings)
+        output << "\t  > variant: [ " << std::hex << iter->variant_base << "; "
+                << std::hex << (unsigned long long) iter->variant_base + iter->size << " ) => "
+                << " monitor: [ " << std::hex << iter->monitor_base << "; "
+                << std::hex << (unsigned long long) iter->monitor_base + iter->size << " )\n";
     output << "\n";
 
     warnf("%s\n", output.str().c_str());
