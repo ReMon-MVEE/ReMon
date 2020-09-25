@@ -38,13 +38,14 @@
 -----------------------------------------------------------------------------*/
 mmap_region_info::mmap_region_info
 (
-    int           variantnum,
-    unsigned long address,
-    unsigned long size,
-    unsigned int  prot_flags,
-    fd_info*      backing_file,
-    unsigned int  backing_file_offset,
-    unsigned int  map_flags
+    int                      variantnum,
+    unsigned long            address,
+    unsigned long            size,
+    unsigned int             prot_flags,
+    fd_info*                 backing_file,
+    unsigned int             backing_file_offset,
+    unsigned int             map_flags,
+    shared_monitor_map_info* monitor_map
 )
     : region_base_address(address),
     region_size(size),
@@ -52,7 +53,7 @@ mmap_region_info::mmap_region_info
     region_backing_file_offset(backing_file_offset),
     region_backing_file_unsynced(false),
     region_is_so(false),
-    shadow(nullptr)
+    shadow(monitor_map)
 {
     region_map_flags = map_flags & ~(MAP_FIXED);
 
@@ -137,8 +138,8 @@ void mmap_region_info::print_region_info(const char* log_prefix, void (*logfunc)
 
     std::stringstream stream;
     if (shadow)
-        stream << " - [ " << std::hex << shadow->shadow_base << " ; " << std::hex <<
-                ((unsigned long long) shadow->shadow_base + shadow->size) << " )";
+        stream << " - [ " << std::hex << shadow->monitor_base << " ; " << std::hex <<
+                ((unsigned long long) shadow->monitor_base + shadow->size) << " )";
     else
         stream.str("");
     logfunc("%s - " PTRSTR "-" PTRSTR " - %s - %s - %s - %d bytes%s\n",
@@ -219,8 +220,8 @@ mmap_table::mmap_table(const mmap_table& parent)
             auto new_region = new mmap_region_info(**it);
             full_map[i].insert(new_region);
 
-            if ((*it)->shadow != nullptr)
-                insert_variant_shared_region(new_region);
+            if (i == 0 && (*it)->shadow != nullptr)
+                variant_mappings.push_back(new shared_monitor_map_info((*it)->shadow));
         }
     }
 }
@@ -399,7 +400,7 @@ mmap_region_info* mmap_table::merge_regions(int variantnum, mmap_region_info* re
 
             // update shadow reference count
             if (region1->shadow && region2->shadow)
-                merge_variant_shadow_region(region1, region2);
+                merge_variant_shadow_region(region1->shadow, region2->shadow);
 
             if (!dont_touch_maps)
             {
@@ -452,7 +453,7 @@ mmap_region_info* mmap_table::split_region(int variantnum, mmap_region_info* exi
 
     // another region is referencing this shadow
     if (upper_region->shadow)
-        split_variant_shadow_region(existing_region);
+        split_variant_shadow_region(upper_region->shadow, split_address);
 
 #ifdef MVEE_MMAN_DEBUG
     lower_region->print_region_info(">>> lower split: ");
@@ -963,13 +964,20 @@ bool mmap_table::mman_munmap_range_callback(mmap_table* table, mmap_region_info*
     {
         // split_region returns the lower part. the existing region info becomes the upper part...
         table->split_region(__munmap_variantnum, region_info, __munmap_base);
+        if (region_info->shadow)
+            table->split_variant_shadow_region(region_info->shadow, __munmap_base);
         //	warnf("splitting because munmap base > region base\n");
     }
     if (__munmap_base + __munmap_size < region_info->region_base_address + region_info->region_size)
     {
         //	warnf("splitting because munmap_limit < region limit\n");
         region_info = table->split_region(__munmap_variantnum, region_info, __munmap_base + __munmap_size);
+        if (region_info->shadow)
+            table->split_variant_shadow_region(region_info->shadow, __munmap_base + __munmap_size);
     }
+
+    if (__munmap_variantnum == 0 && region_info->shadow)
+        table->munmap_variant_shadow_region(region_info->shadow);
 
     // delete the region from the table
     std::set<mmap_region_info*, region_sort>::iterator it =
@@ -1005,7 +1013,7 @@ bool mmap_table::munmap_range (int variantnum, unsigned long base, unsigned long
 bool mmap_table::map_range (int variantnum, unsigned long address, unsigned long size, unsigned int map_flags,
                             unsigned int prot_flags, fd_info* region_backing_file,
                             unsigned int region_backing_file_offset,
-                            const std::shared_ptr<shared_monitor_map_info>& shadow)
+                            shared_monitor_map_info* shadow)
 {
     address = ROUND_DOWN(address, 4096);
     size    = ROUND_UP(size, 4096);
@@ -1016,22 +1024,7 @@ bool mmap_table::map_range (int variantnum, unsigned long address, unsigned long
     // now we can just create a new region without having to deal with
     // overlap scenarios
     mmap_region_info* new_region = new mmap_region_info(variantnum, address, size, prot_flags, region_backing_file,
-            region_backing_file_offset, map_flags);
-
-    if (shadow && variantnum == 0)
-    {
-        new_region->shadow = shadow;
-        // new_region->shadow->mmap();
-        new_region->shadow->active_shadow_users++;
-        new_region->original_base = (void*) address;
-
-        if (insert_variant_shared_region(new_region) < 0)
-        {
-            warnf("big oopsie! - [%p; %p)\n\n",
-                  (void*) new_region->region_base_address,
-                  (void*) (new_region->region_base_address + new_region->region_size));
-        }
-    }
+            region_backing_file_offset, map_flags, shadow);
 //    new_region->print_region_info("inserting region: ", mvee::warnf);
     if (!full_map[variantnum].insert(new_region).second)
     {

@@ -3843,7 +3843,11 @@ POSTCALL(munmap)
 				}
 			}
 
-			set_mmap_table->munmap_range(variantnum, ARG1(variantnum), ARG2(variantnum));
+			if (IS_TAGGED_ADDRESS(ARG1(variantnum)))
+                set_mmap_table->munmap_range(variantnum, decode_address_tag(ARG1(variantnum), &variants[variantnum]),
+                        ARG2(variantnum));
+            else
+			    set_mmap_table->munmap_range(variantnum, ARG1(variantnum), ARG2(variantnum));
 			set_mmap_table->verify_mman_table(variantnum, variants[variantnum].variantpid);
 		}
 		else
@@ -3866,8 +3870,13 @@ POSTCALL(munmap)
 				}
 			}
 
-			for (int i = 0; i < mvee::numvariants; ++i)
-				set_mmap_table->munmap_range(i, ARG1(i), ARG2(i));
+
+            if (IS_TAGGED_ADDRESS(ARG1(0)))
+                for (int i = 0; i < mvee::numvariants; ++i)
+                    set_mmap_table->munmap_range(i, decode_address_tag(ARG1(i), &variants[i]), ARG2(i));
+            else
+                for (int i = 0; i < mvee::numvariants; ++i)
+                    set_mmap_table->munmap_range(i, ARG1(i), ARG2(i));
 
 			while (writeback_infos.size() > 0)
 			{
@@ -5323,6 +5332,8 @@ PRECALL(shmat)
             (ipmon_buffer && (int)ARG1(0) == ipmon_buffer->id) ||
             (shm_buffer  && (int)ARG1(0) == shm_buffer->id))
         return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+    else if (shm_setup_state == SHM_SETUP_EXPECTING_SHADOW)
+        return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
     else
     {
         for (auto it = set_shm_table->table.begin(); it != set_shm_table->table.end(); ++it)
@@ -5337,39 +5348,57 @@ PRECALL(shmat)
 
 CALL(shmat)
 {
-	bool disjoint_bases = true;
-	long shm_sz = PAGE_SIZE;
+    bool disjoint_bases = true;
+    long shm_sz = PAGE_SIZE;
 
     if (atomic_buffer &&
             ((int)ARG1(0) == atomic_buffer->id || (int)ARG1(0) == atomic_buffer->eip_id))
-	{
+    {
         disjoint_bases = false;
-		if ((int)ARG1(0) == atomic_buffer->id)
-			shm_sz = atomic_buffer->sz;
-		else
-			shm_sz = atomic_buffer->eip_sz;
-		debugf("attach to atomic buffer requested - size = %ld\n", shm_sz);
-	}
-	else if (set_fd_table->file_map_exists() && (int)ARG1(0) == set_fd_table->file_map_id())
-	{
-		disjoint_bases = false;
-		shm_sz = PAGE_SIZE;
-	}
-	else if (ipmon_buffer && (int)ARG1(0) == ipmon_buffer->id)
-	{
-		debugf("attach to IP-MON buffer requested\n");
-		//disjoint_bases = true;
-		disjoint_bases = false;
-		shm_sz = ipmon_buffer->sz;
-	}
-  else if (shm_buffer  && (int)ARG1(0) == shm_buffer->id)
-  {
-		debugf("attach to shared memory buffer requested\n");
-		disjoint_bases = false;
+        if ((int)ARG1(0) == atomic_buffer->id)
+            shm_sz = atomic_buffer->sz;
+        else
+            shm_sz = atomic_buffer->eip_sz;
+        debugf("attach to atomic buffer requested - size = %ld\n", shm_sz);
+    }
+    else if (set_fd_table->file_map_exists() && (int)ARG1(0) == set_fd_table->file_map_id())
+    {
+        disjoint_bases = false;
+        shm_sz = PAGE_SIZE;
+    }
+    else if (ipmon_buffer && (int)ARG1(0) == ipmon_buffer->id)
+    {
+        debugf("attach to IP-MON buffer requested\n");
+        //disjoint_bases = true;
+        disjoint_bases = false;
+        shm_sz = ipmon_buffer->sz;
+    }
+    else if (shm_buffer  && (int)ARG1(0) == shm_buffer->id)
+    {
+        debugf("attach to shared memory buffer requested\n");
+        disjoint_bases = false;
     shm_sz = shm_buffer->sz;
-  }
-	else
-	{
+    }
+    else if (shm_setup_state == SHM_SETUP_EXPECTING_SHADOW)
+    {
+        disjoint_bases = false;
+        for (int i = 0; i < mvee::numvariants; i++)
+        {
+            call_overwrite_arg_value(i, 1, current_shadow->variant_shadows[i].shmid, true);
+            call_overwrite_arg_value(i, 3, IPC_CREAT | SHM_RND | S_IRUSR | S_IWUSR,
+                    true);
+        }
+        shm_sz = current_shadow->size;
+    }
+    else if (shm_setup_state == SHM_SETUP_EXPECTING_BITMAP)
+    {
+        disjoint_bases = false;
+        call_overwrite_arg_value(0, 1, current_shadow->leader_bitmap.shmid, true);
+        call_overwrite_arg_value(0, 3, IPC_CREAT | S_IRUSR | S_IWUSR, true);
+        shm_sz = ROUND_UP(current_shadow->size, 8) / 8;
+    }
+    else
+    {
         bool found = false;
 
         for (auto it = set_shm_table->table.begin(); it != set_shm_table->table.end(); ++it)
@@ -5384,9 +5413,16 @@ CALL(shmat)
             }
         }
 
+        // shared memory
         if (!found)
+        {
+            call_check_regs(0);
+            auto caller_info = set_mmap_table->get_caller_info(0, variants[0].variantpid, variants[0].regs.rip);
+            if (caller_info.find("mvee_shm_shmat") == std::string::npos)
+                return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOMEM);
             disjoint_bases = false;
-	}
+        }
+    }
 
     if (disjoint_bases)
     {
@@ -5411,12 +5447,13 @@ POSTCALL(shmat)
 	std::vector<unsigned long> addresses = call_postcall_get_result_vector();
 	std::string region_name = "[anonymous-sys V shm]";
 	unsigned long region_size = 0;
-    std::shared_ptr<shared_monitor_map_info> shadow = nullptr;
+    shared_monitor_map_info* shadow = nullptr;
     fd_info info;
 
 	if (!call_succeeded)
 	{
 		warnf("shmat failed!!!\n");
+		log_variant_backtrace(0);
 		return 0;
 	}
 
@@ -5435,11 +5472,11 @@ POSTCALL(shmat)
 //		hwbp_set_watch(0, addresses[0] + 64 * (1 + mvee::numvariants), MVEE_BP_WRITE_ONLY); // detects writes of first syscall no
 #endif
 	}
-  else if (shm_buffer  && (int)ARG1(0) == shm_buffer->id)
-  {
-		region_name = "[shm-buffer]";
-		region_size = shm_buffer->sz;
-  }
+    else if (shm_buffer  && (int)ARG1(0) == shm_buffer->id)
+    {
+        region_name = "[shm-buffer]";
+        region_size = shm_buffer->sz;
+    }
 	else if (set_fd_table->file_map_exists() 
 			 && (int)ARG1(0) == set_fd_table->file_map_id())
 	{
@@ -5447,6 +5484,18 @@ POSTCALL(shmat)
 		region_name = "[ipmon-file-map]";
 		region_size = info->sz;
 	}
+    else if (shm_setup_state == SHM_SETUP_EXPECTING_SHADOW)
+    {
+        for (int i = 0; i < mvee::numvariants; i++)
+            current_shadow->variant_shadows[i].variant_base = addresses[i];
+        shm_setup_state = SHM_SETUP_EXPECTING_BITMAP;
+    }
+    else if (shm_setup_state == SHM_SETUP_EXPECTING_BITMAP)
+    {
+        current_shadow->leader_bitmap.variant_base = addresses[0];
+        shm_setup_state = SHM_SETUP_IDLE;
+        current_shadow = nullptr;
+    }
 	else
 	{
 	    bool shared_memory = true;
@@ -5472,14 +5521,20 @@ POSTCALL(shmat)
             }
             region_size = shm_info.shm_segsz;
 
-            if (set_mmap_table->shadow_shmat(&variants[0], ARG1(0), &shadow, shm_info.shm_segsz) != 0)
+            if (set_mmap_table->shadow_shmat(&variants[0], ARG1(0), addresses[0],
+                    &shadow, shm_info.shm_segsz) != 0)
             {
                 shutdown(false);
                 return MVEE_POSTCALL_DONTRESUME;
             }
+            if (shadow)
+                shadow->setup_shm();
 
             for (int i = 0; i < mvee::numvariants; ++i)
                 call_postcall_set_variant_result(i, encode_address_tag(addresses[0], &variants[i]));
+
+            current_shadow = shadow;
+            shm_setup_state = SHM_SETUP_EXPECTING_SHADOW;
         }
 	}
 
@@ -7200,6 +7255,12 @@ CALL(mmap)
                         }
                     }
                 }
+            } else if (ARG3(0) & (PROT_READ | PROT_WRITE))
+            {
+                call_check_regs(0);
+                auto caller_info = set_mmap_table->get_caller_info(0, variants[0].variantpid, variants[0].regs.rip);
+                if (caller_info.find("mvee_shm_mmap") == std::string::npos)
+                    return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOMEM);
             }
 #ifndef MVEE_ALLOW_SHM
             if ((ARG3(0) & PROT_WRITE) || (ARG3(0) & PROT_EXEC))
@@ -7343,11 +7404,11 @@ POSTCALL(mmap)
 			}
 		}
 
-        std::shared_ptr<shared_monitor_map_info> shadow = nullptr;
+        shared_monitor_map_info* shadow = nullptr;
 #ifdef MVEE_EMULATE_SHARED_MEMORY
         if (info && (info->access_flags & O_RDWR) && (ARG4(0) & MAP_SHARED) && (ARG3(0) & ~PROT_EXEC))
         {
-            if (set_mmap_table->shadow_map(&variants[0], info, &shadow, ARG2(0), ARG3(0),
+            if (set_mmap_table->shadow_map(&variants[0], info, results[0], &shadow, ARG2(0), ARG3(0),
                     ARG4(0), ARG6(0)) < 0)
             {
                 warnf("could not create shadow mapping...\n");
@@ -7357,6 +7418,9 @@ POSTCALL(mmap)
 
             for (int i = 0; i < mvee::numvariants; ++i)
                 call_postcall_set_variant_result(i, encode_address_tag(results[0], &variants[i]));
+
+            shm_setup_state = SHM_SETUP_EXPECTING_SHADOW;
+            current_shadow = shadow;
         }
 #endif
 
@@ -7369,6 +7433,8 @@ POSTCALL(mmap)
 #endif
             set_mmap_table->map_range(i, results[i], ARG2(0), ARG4(0), ARG3(0), info,
                     actual_offset, shadow);
+            if (shadow)
+                shadow->setup_shm();
 		}
 
 		//
