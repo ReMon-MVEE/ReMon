@@ -64,10 +64,6 @@ set(SETUP
         SETUP_BIGCHUNGUS
 )
 
-set(TESTS_TO_RUN
-        TEST_MOVSB
-)
-
 set(CONFIG
         #TEST_FUNCTIONALITY
         LOG
@@ -94,7 +90,6 @@ target_include_directories(instruction_tests PRIVATE
 )
 
 target_compile_definitions(instruction_tests PRIVATE
-        ${TESTS_TO_RUN}
         ${SETUP}
         ${CONFIG}
 )

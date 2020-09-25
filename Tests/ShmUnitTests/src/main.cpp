@@ -96,7 +96,6 @@ int             main                                                (int argc, c
 #endif
 
     // tests -----------------------------------------------------------------------------------------------------------
-#ifdef TEST_MOVSB
     instruction_tests::test_0x01();
     instruction_tests::test_0x03();
     instruction_tests::test_0x2b();
@@ -119,7 +118,6 @@ int             main                                                (int argc, c
     instruction_tests::test_0x0f_0xc1();
     instruction_tests::test_0x0f_0xe7();
     // instruction_tests::test_extras();
-#endif
     // tests -----------------------------------------------------------------------------------------------------------
 
 
