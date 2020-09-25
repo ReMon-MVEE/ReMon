@@ -28,12 +28,12 @@ void            instruction_tests::test_0x01                        ()
     __asm
     (
             ".intel_syntax noprefix;"
-            "add QWORD PTR [%[dst]], %[src];"
+            "add QWORD PTR [rdx], rax;"
             "pushf;"
-            "pop %[flags];"
+            "pop rbx;"
             ".att_syntax;"
-            : [flags] "+r" (flags)
-            : [dst] "r" (buffers::shared_sink), [src] "r" (original)
+            : [flags] "+b" (flags)
+            : [dst] "d" (buffers::shared_sink), [src] "a" (original)
             : "memory"
     );
     TEST_RESULT("add m64, r64 | 0x1111111111111111 * 2",
@@ -45,12 +45,12 @@ void            instruction_tests::test_0x01                        ()
     __asm
     (
             ".intel_syntax noprefix;"
-            "add QWORD PTR [%[dst]], %[src];"
+            "add QWORD PTR [rdx], rax;"
             "pushf;"
-            "pop %[flags];"
+            "pop rcx;"
             ".att_syntax;"
-            : [flags] "+r" (flags)
-            : [dst] "r" (buffers::shared_sink), [src] "r" ((unsigned long long) 1)
+            : [flags] "+c" (flags)
+            : [dst] "d" (buffers::shared_sink), [src] "a" ((unsigned long long) 1)
             : "memory"
     );
     TEST_RESULT("add m64, r64 | overflow",
@@ -64,12 +64,12 @@ void            instruction_tests::test_0x01                        ()
     __asm
     (
             ".intel_syntax noprefix;"
-            "add DWORD PTR [%[dst]], %[src];"
+            "add DWORD PTR [rdx], eax;"
             "pushf;"
-            "pop %[flags];"
+            "pop rcx;"
             ".att_syntax;"
-            : [flags] "+r" (flags)
-            : [dst] "r" (buffers::shared_sink), [src] "r" ((__uint32_t) original)
+            : [flags] "+c" (flags)
+            : [dst] "d" (buffers::shared_sink), [src] "a" ((__uint32_t) original)
             : "memory"
     );
     TEST_RESULT("add m32, r32 | 0x11111111 * 2",
@@ -83,12 +83,12 @@ void            instruction_tests::test_0x01                        ()
     __asm
     (
             ".intel_syntax noprefix;"
-            "add DWORD PTR [%[dst]], %[src];"
+            "add DWORD PTR [rdx], eax;"
             "pushf;"
-            "pop %[flags];"
+            "pop rcx;"
             ".att_syntax;"
-            : [flags] "+r" (flags)
-            : [dst] "r" (buffers::shared_sink), [src] "r" ((__uint32_t) 1)
+            : [flags] "+c" (flags)
+            : [dst] "d" (buffers::shared_sink), [src] "a" ((__uint32_t) 1)
             : "memory"
     );
     TEST_RESULT("add m32, r32 | overflow",
@@ -104,12 +104,12 @@ void            instruction_tests::test_0x01                        ()
     __asm
     (
             ".intel_syntax noprefix;"
-            "add WORD PTR [%[dst]], %[src];"
+            "add WORD PTR [rdx], ax;"
             "pushf;"
-            "pop %[flags];"
+            "pop rcx;"
             ".att_syntax;"
-            : [flags] "+r" (flags)
-            : [dst] "r" (buffers::shared_sink), [src] "r" ((__uint16_t) original)
+            : [flags] "+c" (flags)
+            : [dst] "d" (buffers::shared_sink), [src] "a" ((__uint16_t) original)
             : "memory"
     );
     TEST_RESULT("add m16, r16 | 0x1111 * 2",
@@ -123,12 +123,12 @@ void            instruction_tests::test_0x01                        ()
     __asm
     (
             ".intel_syntax noprefix;"
-            "add WORD PTR [%[dst]], %[src];"
+            "add WORD PTR [rdx], ax;"
             "pushf;"
-            "pop %[flags];"
+            "pop rcx;"
             ".att_syntax;"
-            : [flags] "+r" (flags)
-            : [dst] "r" (buffers::shared_sink), [src] "r" ((__uint16_t) 1)
+            : [flags] "+c" (flags)
+            : [dst] "d" (buffers::shared_sink), [src] "a" ((__uint16_t) 1)
             : "memory"
     );
     TEST_RESULT("add m16, r16 | overflow",
@@ -147,23 +147,22 @@ void            instruction_tests::test_0x03                        ()
 {
     START_TEST("Runnings tests for add (0x03)... \n")
 
-    unsigned long long source = 0x1111111111111111;
-    unsigned long long sum    = 2 * (__uint32_t) source;
+    unsigned long long dst = 0x1111111111111111;
+    unsigned long long sum = 2 * (__uint32_t) dst;
 
     // 32-bit ----------------------------------------------------------------------------------------------------------
-    *(__uint64_t*) buffers::shared_sink = source;
+    *(__uint64_t*) buffers::shared_sink = dst;
     __asm
     (
             ".intel_syntax noprefix;"
-            "mov r8, %[src];"
-            "add r8d, DWORD PTR [%[dst]];"
-            "mov %[src], r8;"
+            "mov r8, rdx;"
+            "add r8d, DWORD PTR [rax];"
+            "mov rdx, r8;"
             ".att_syntax;"
-            : [src] "+r" (source)
-            : [dst] "r" (buffers::shared_sink)
+            : [src] "+d" (dst)
+            : [dst] "a" (buffers::shared_sink)
     );
-    TEST_RESULT("add r32, m32 | 0x111111 * 2",
-                source == sum)
+    TEST_RESULT("add r32, m32 | 0x111111 * 2", dst == sum)
     // 32-bit ----------------------------------------------------------------------------------------------------------
     
     *(__uint64_t*) buffers::shared_sink = 0x00;
@@ -175,22 +174,22 @@ void            instruction_tests::test_0x2b                        ()
 {
     START_TEST("Running tests for sub (0x2b)... \n")
 
-    unsigned long long source = 0x1111111100000000;
-    unsigned long long result = ((__uint32_t) source) - 1;
+    unsigned long long dst = 0x1111111100000000;
+    unsigned long long sub = ((__uint32_t) dst) - 1;
 
     // 32-bit ----------------------------------------------------------------------------------------------------------
     *(__uint32_t*) buffers::shared_sink = 0x01;
     __asm
     (
             ".intel_syntax noprefix;"
-            "mov r8, %[dst];"
-            "sub r8d, DWORD PTR [%[src]];"
-            "mov %[dst], r8;"
+            "mov r8, rdx;"
+            "sub r8d, DWORD PTR [rax];"
+            "mov rdx, r8;"
             ".att_syntax;"
-            : [dst] "+r" (source)
-            : [src] "r" (buffers::shared_sink)
+            : [dst] "+d" (dst)
+            : [src] "a" (buffers::shared_sink)
     );
-    TEST_RESULT("sub r32, m32 | 0 - 1", result == source)
+    TEST_RESULT("sub r32, m32 | 0 - 1", dst == sub)
     // 32-bit ----------------------------------------------------------------------------------------------------------
 
     *(__uint64_t*) buffers::shared_sink = 0x00;
@@ -255,7 +254,7 @@ void            instruction_tests::test_0x3b                        ()
 {
     START_TEST("Running tests for cmp (0x3b)... \n")
 
-    unsigned long long source  = 0x0101010101010101;
+    unsigned long long dst     = 0x0101010101010101;
     unsigned long long equal   = 0x0101010101010101;
     unsigned long long unequal = 0x1010101010101010;
     unsigned long long flags;
@@ -265,14 +264,14 @@ void            instruction_tests::test_0x3b                        ()
     __asm
     (
             ".intel_syntax noprefix;"
-            "mov r8, %[dst];"
-            "cmp r8d, DWORD PTR [%[src]];"
+            "mov r8, rdx;"
+            "cmp r8d, DWORD PTR [rax];"
             "pushf;"
-            "pop %[flags];"
-            "mov %[dst], r8;"
+            "pop rcx;"
+            "mov rdx, r8;"
             ".att_syntax;"
-            : [dst] "+r" (source), [flags] "+r" (flags)
-            : [src] "r" (buffers::shared_sink)
+            : [dst] "+d" (dst), [flags] "+c" (flags)
+            : [src] "a" (buffers::shared_sink)
     );
     TEST_RESULT("cmp | equal", flags & ZF_MASK)
 
@@ -280,14 +279,14 @@ void            instruction_tests::test_0x3b                        ()
     __asm
     (
             ".intel_syntax noprefix;"
-            "mov r8, %[dst];"
-            "cmp r8d, DWORD PTR [%[src]];"
+            "mov r8, rdx;"
+            "cmp r8d, DWORD PTR [rax];"
             "pushf;"
-            "pop %[flags];"
-            "mov %[dst], r8;"
+            "pop rcx;"
+            "mov rdx, r8;"
             ".att_syntax;"
-            : [dst] "+r" (source), [flags] "+r" (flags)
-            : [src] "r" (buffers::shared_sink)
+            : [dst] "+d" (dst), [flags] "+c" (flags)
+            : [src] "a" (buffers::shared_sink)
     );
     TEST_RESULT("cmp | equal", !(flags & ZF_MASK))
     // 32-bit ----------------------------------------------------------------------------------------------------------
@@ -438,10 +437,10 @@ void            instruction_tests::test_0x89                        ()
     asm
     (
             ".intel_syntax noprefix;"
-            "mov WORD PTR [%[dst]], %[src];"
+            "mov WORD PTR [rdx], ax;"
             ".att_syntax;"
             :
-            : [dst] "r" (buffers::shared_sink), [src] "r" ((__uint16_t) original)
+            : [dst] "d" (buffers::shared_sink), [src] "a" ((__uint16_t) original)
             : "memory"
     );
     TEST_RESULT("mov m16, r16", (__uint16_t) original == *(__uint16_t*) buffers::shared_sink &&
@@ -454,10 +453,10 @@ void            instruction_tests::test_0x89                        ()
     asm
     (
             ".intel_syntax noprefix;"
-            "mov DWORD PTR [%[dst]], %[src];"
+            "mov DWORD PTR [rdx], eax;"
             ".att_syntax;"
             :
-            : [dst] "r" (buffers::shared_sink), [src] "r" ((__uint32_t) original)
+            : [dst] "d" (buffers::shared_sink), [src] "a" ((__uint32_t) original)
             : "memory"
     );
     TEST_RESULT("mov m32, r32", (__uint32_t) original == *(__uint32_t*) buffers::shared_sink &&
@@ -470,10 +469,10 @@ void            instruction_tests::test_0x89                        ()
     asm
     (
             ".intel_syntax noprefix;"
-            "mov QWORD PTR [%[dst]], %[src];"
+            "mov QWORD PTR [rdx], rax;"
             ".att_syntax;"
             :
-            : [dst] "r" (buffers::shared_sink), [src] "r" ((__uint64_t) original)
+            : [dst] "d" (buffers::shared_sink), [src] "a" ((__uint64_t) original)
             : "memory"
     );
     TEST_RESULT("mov m64, r64", (__uint64_t) original == *(__uint64_t*) buffers::shared_sink)
@@ -1006,11 +1005,11 @@ void            instruction_tests::test_0x0f_0x11                   ()
     asm
     (
             ".intel_syntax noprefix;"
-            "movups xmm0, XMMWORD PTR [%[src]];"
-            "movups XMMWORD PTR [%[dst]], xmm0;"
+            "movups xmm0, XMMWORD PTR [rax];"
+            "movups XMMWORD PTR [rdx], xmm0;"
             ".att_syntax;"
             :
-            : [dst] "r" (buffers::shared_sink), [src] "r" (original)
+            : [dst] "d" (buffers::shared_sink), [src] "a" (original)
     );
     TEST_RESULT("movups m128, xmm", testing_aid::compare_buffers(buffers::shared_sink,
             (__uint8_t*) original, DQWORD_SIZE) == 0)
@@ -1277,11 +1276,11 @@ void            instruction_tests::test_0x0f_0x6f                   ()
     __asm__
     (
             ".intel_syntax noprefix;"
-            "movq mm0, QWORD PTR [%[src]];"
-            "movq QWORD PTR [%[dst]], mm0;"
+            "movq mm0, QWORD PTR [rax];"
+            "movq QWORD PTR [rdx], mm0;"
             ".att_syntax;"
             :
-            : "m" (buffers::shared_sink), "m" (destination), [dst] "r" (destination), [src] "r" (buffers::shared_sink)
+            : "m" (buffers::shared_sink), "m" (destination), [dst] "d" (destination), [src] "a" (buffers::shared_sink)
             : "mm0"
     );
     // movq ------------------------------------------------------------------------------------------------------------
@@ -1301,11 +1300,11 @@ void            instruction_tests::test_0x0f_0x7f                   ()
     __asm
     (
             ".intel_syntax noprefix;"
-            "movq mm0, QWORD PTR [%[src]];"
-            "movq QWORD PTR [%[dst]], mm0;"
+            "movq mm0, QWORD PTR [rax];"
+            "movq QWORD PTR [rdx], mm0;"
             ".att_syntax;"
             :
-            : [dst] "r" (buffers::shared_sink), [src] "r" (original)
+            : [dst] "d" (buffers::shared_sink), [src] "a" (original)
             : "memory", "mm0"
     );
     TEST_RESULT("movq m64, mm",
@@ -1317,11 +1316,11 @@ void            instruction_tests::test_0x0f_0x7f                   ()
     __asm
     (
             ".intel_syntax noprefix;"
-            "movdqa xmm0, XMMWORD PTR [%[src]];"
-            "movdqa XMMWORD PTR [%[dst]], xmm0;"
+            "movdqa xmm0, XMMWORD PTR [rax];"
+            "movdqa XMMWORD PTR [rdx], xmm0;"
             ".att_syntax;"
             :
-            : [dst] "r" (buffers::shared_sink), [src] "r" (original)
+            : [dst] "d" (buffers::shared_sink), [src] "a" (original)
             : "memory", "xmm0"
     );
     TEST_RESULT("movdqa m128, xmm",
@@ -1333,11 +1332,11 @@ void            instruction_tests::test_0x0f_0x7f                   ()
     __asm
     (
             ".intel_syntax noprefix;"
-            "movdqu xmm0, XMMWORD PTR [%[src]];"
-            "movdqu XMMWORD PTR [%[dst]], xmm0;"
+            "movdqu xmm0, XMMWORD PTR [rax];"
+            "movdqu XMMWORD PTR [rdx], xmm0;"
             ".att_syntax;"
             :
-            : [dst] "r" (buffers::shared_sink), [src] "r" (original)
+            : [dst] "d" (buffers::shared_sink), [src] "a" (original)
             : "memory", "xmm0"
     );
     TEST_RESULT("movdqu m128, xmm",
@@ -1363,12 +1362,12 @@ void            instruction_tests::test_0x0f_0xb6                   ()
     __asm
     (
             ".intel_syntax noprefix;"
-            "mov r8, %[dst];"
-            "movzx r8d, BYTE PTR [%[src]];"
-            "mov %[dst], r8;"
+            "mov r8, rdx;"
+            "movzx r8d, BYTE PTR [rax];"
+            "mov rdx, r8;"
             ".att_syntax;"
-            : [dst] "+r" (destination)
-            : [src] "r" (buffers::shared_sink)
+            : [dst] "+d" (destination)
+            : [src] "a" (buffers::shared_sink)
             : "r8"
     );
     TEST_RESULT("movzx r32, m8", destination == source)
@@ -1380,14 +1379,15 @@ void            instruction_tests::test_0x0f_0xb6                   ()
     __asm
     (
             ".intel_syntax noprefix;"
-            "mov r8, %[dst];"
-            "movzx r8w, BYTE PTR [%[src]];"
-            "mov %[dst], r8;"
+            "mov r8, rdx;"
+            "movzx r8w, BYTE PTR [rax];"
+            "mov rdx, r8;"
             ".att_syntax;"
-            : [dst] "+r" (destination)
-            : [src] "r" (buffers::shared_sink)
+            : [dst] "+d" (destination)
+            : [src] "a" (buffers::shared_sink)
             : "r8"
     );
+    logf_buff((__uint8_t*) &destination, QWORD_SIZE);
     TEST_RESULT("movzx r16, m8", (__uint16_t) destination == source &&
             ((destination & ~WORD_MASK) == (original & ~WORD_MASK)))
     // 16-bit ----------------------------------------------------------------------------------------------------------
@@ -1414,12 +1414,12 @@ void            instruction_tests::test_0x0f_0xb7                   ()
     __asm
     (
             ".intel_syntax noprefix;"
-            "mov r8, %[dst];"
-            "movzx r8d, WORD PTR [%[src]];"
-            "mov %[dst], r8;"
+            "mov r8, rdx;"
+            "movzx r8d, WORD PTR [rax];"
+            "mov rdx, r8;"
             ".att_syntax;"
-            : [dst] "+r" (destination)
-            : [src] "r" (buffers::shared_sink)
+            : [dst] "+d" (destination)
+            : [src] "a" (buffers::shared_sink)
             : "r8"
     );
     TEST_RESULT("movzx r32, m16", destination == source)
@@ -1447,12 +1447,12 @@ void            instruction_tests::test_0x0f_0xbe                   ()
     __asm
     (
             ".intel_syntax noprefix;"
-            "mov r8, %[dst];"
-            "movsx r8d, BYTE PTR [%[src]];"
-            "mov %[dst], r8;"
+            "mov r8, rdx;"
+            "movsx r8d, BYTE PTR [rax];"
+            "mov rdx, r8;"
             ".att_syntax;"
-            : [dst] "+r" (destination)
-            : [src] "r" (buffers::shared_sink)
+            : [dst] "+d" (destination)
+            : [src] "a" (buffers::shared_sink)
             : "r8"
     );
     TEST_RESULT("movsx r32, m16", (__uint32_t) destination == (__uint32_t) -1 &&
@@ -1547,11 +1547,11 @@ void            instruction_tests::test_0x0f_0xe7                   ()
     __asm
     (
             ".intel_syntax noprefix;"
-            "movdqu xmm0, XMMWORD PTR [%[src]];"
-            "movntdq XMMWORD PTR [%[dst]], xmm0;"
+            "movdqu xmm0, XMMWORD PTR [rax];"
+            "movntdq XMMWORD PTR [rdx], xmm0;"
             ".att_syntax;"
             :
-            : [dst] "r" (buffers::shared_sink), [src] "r" (original)
+            : [dst] "d" (buffers::shared_sink), [src] "a" (original)
             : "xmm0", "memory"
     );
     TEST_RESULT("movntdq m128, xmm",
@@ -1564,11 +1564,11 @@ void            instruction_tests::test_0x0f_0xe7                   ()
     __asm
     (
             ".intel_syntax noprefix;"
-            "movq mm0, QWORD PTR [%[src]];"
-            "movntq QWORD PTR [%[dst]], mm0;"
+            "movq mm0, QWORD PTR [rax];"
+            "movntq QWORD PTR [rdx], mm0;"
             ".att_syntax;"
             :
-            : [dst] "r" (buffers::shared_sink), [src] "r" (original)
+            : [dst] "d" (buffers::shared_sink), [src] "a" (original)
             : "mm0", "memory"
     );
     TEST_RESULT("movntq m64, mm",
