@@ -315,11 +315,13 @@ void            instruction_tests::test_0x83                        ()
             :
             : "a" (buffers::shared_sink), "d" (&eflags)
     );
+    TEST_RESULT("cmp | not equal", !(eflags & ZF_MASK));
+
 
     *(unsigned long long*) buffers::shared_sink = original;
     __asm(
             ".intel_syntax noprefix;"
-            "cmp QWORD PTR [rax], 0xf1;"
+            "cmp QWORD PTR [rax], 0x11;"
             "pushf;"
             "pop r8;"
             "mov QWORD PTR [rdx], r8;"
@@ -328,10 +330,22 @@ void            instruction_tests::test_0x83                        ()
             : "a" (buffers::shared_sink), "d" (&eflags)
     );
 
+    TEST_RESULT("cmp | equal", !(eflags & ZF_MASK));
+
+    FINISH_TEST("Grp 1 tests successful!", "Grp 1 tests failed!")
+}
+
+void            instruction_tests::test_0x81                        ()
+{
+    START_TEST("Running tests for 0x81\n")
+
+    unsigned long long eflags;
+    unsigned long long original = 0xfffffffff0000000;
+
     *(unsigned long long*) buffers::shared_sink = original;
     __asm(
             ".intel_syntax noprefix;"
-            "cmp DWORD PTR [rax], 0x00000000000000e1;"
+            "cmp DWORD PTR [rax], 0xf0000000;"
             "pushf;"
             "pop r8;"
             "mov QWORD PTR [rdx], r8;"
@@ -339,10 +353,27 @@ void            instruction_tests::test_0x83                        ()
             :
             : "a" (buffers::shared_sink), "d" (&eflags)
     );
+    TEST_RESULT("cmp | 32 bit", (eflags & ZF_MASK));
+
     // 111 - cmp -------------------------------------------------------------------------------------------------------
 
+    *(unsigned long long*) buffers::shared_sink = 0xffffffffffffffff;
+    __asm(
+            ".intel_syntax noprefix;"
+            "and DWORD PTR [rax], 0x11111111;"
+            "pushf;"
+            "pop r8;"
+            "mov QWORD PTR [rdx], r8;"
+            ".att_syntax;"
+            :
+            : "a" (buffers::shared_sink), "d" (&eflags)
+    );
+
+    TEST_RESULT("and | 32 bit", !(eflags & ZF_MASK));
+    TEST_RESULT("and | 32 bit", *(__uint64_t*)buffers::shared_sink == 0xffffffff11111111);
+
     *(__uint64_t*) buffers::shared_sink = 0x00;
-    FINISH_TEST("Grp 1 tests successful!", "Grp 1 tests failed!")
+    FINISH_TEST("cmp (0x81) tests successful!", "0x81 tests failed!")
 }
 
 
@@ -984,10 +1015,12 @@ void            instruction_tests::test_0xc7                        ()
             :
             : "a" (buffers::shared_sink)
     );
+
     TEST_RESULT("mov m64, imm32 | sign extend",
-                *(__uint32_t*) buffers::shared_sink == (__uint32_t) 0xf0000000 &&
+                *(__uint32_t*) buffers::shared_sink == (__uint32_t) 0xf0000000);
+    TEST_RESULT("mov m64, imm32 | sign extend 2",
                 testing_aid::compare_buffers(buffers::shared_sink + DWORD_SIZE, ((__uint8_t*) &sign) + DWORD_SIZE,
-                        QWORD_SIZE - DWORD_SIZE) == 0)
+                        QWORD_SIZE - DWORD_SIZE) == 0);
     // 64-bit ----------------------------------------------------------------------------------------------------------
 
 
@@ -1294,6 +1327,7 @@ void            instruction_tests::test_0x0f_0x7f                   ()
     START_TEST("Running tests for 0x0f 0x7f...\n")
 
     unsigned long long original[] = { 0x1122334455667788, 0x8877665544332211 };
+    unsigned long long mm64_result[] = { 0x1122334455667788, 0x0 };
     testing_aid::clear_buffer(buffers::shared_sink, DQWORD_SIZE);
 
     // movq ------------------------------------------------------------------------------------------------------------
@@ -1308,7 +1342,7 @@ void            instruction_tests::test_0x0f_0x7f                   ()
             : "memory", "mm0"
     );
     TEST_RESULT("movq m64, mm",
-            testing_aid::compare_buffers((__uint8_t*) original, buffers::shared_sink, QWORD_SIZE) == 0);
+            testing_aid::compare_buffers((__uint8_t*) mm64_result, buffers::shared_sink, DQWORD_SIZE) == 0);
     *(__uint64_t*) buffers::shared_sink = 0x00;
     // movq ------------------------------------------------------------------------------------------------------------
 

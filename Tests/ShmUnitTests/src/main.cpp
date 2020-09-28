@@ -101,6 +101,7 @@ int             main                                                (int argc, c
     instruction_tests::test_0x2b();
     instruction_tests::test_0x39();
     instruction_tests::test_0x3b();
+    instruction_tests::test_0x81();
     instruction_tests::test_0x83();
     instruction_tests::test_0x87();
     instruction_tests::test_0x89();
