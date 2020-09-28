@@ -206,10 +206,6 @@ warnf("\n%s\n", output.str().c_str());
 #define SHM_SETUP_IDLE                          0
 #define SHM_SETUP_EXPECTING_SHADOW              1
 #define SHM_SETUP_EXPECTING_BITMAP              2
-#define SHM_CLEANUP_EXPECTING_ERROR             -2
-#define SHM_CLEANUP_IDLE                        0
-#define SHM_CLEANUP_EXPECTING_SHADOW            3
-#define SHM_CLEANUP_EXPECTING_BITMAP            4
 // states for shared memory setup --------------------------------------------------------------------------------------
 
 

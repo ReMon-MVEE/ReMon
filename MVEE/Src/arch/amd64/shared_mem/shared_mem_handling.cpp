@@ -6,6 +6,7 @@
 #include "shared_mem_handling.h"
 
 #include <ios>
+#include <memory>
 #include <MVEE.h>
 #include <MVEE_mman.h>
 #include <MVEE_monitor.h>
