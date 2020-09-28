@@ -977,7 +977,10 @@ bool mmap_table::mman_munmap_range_callback(mmap_table* table, mmap_region_info*
     }
 
     if (__munmap_variantnum == 0 && region_info->shadow)
+    {
         table->munmap_variant_shadow_region(region_info->shadow);
+        region_info->shadow = nullptr;
+    }
 
     // delete the region from the table
     std::set<mmap_region_info*, region_sort>::iterator it =
