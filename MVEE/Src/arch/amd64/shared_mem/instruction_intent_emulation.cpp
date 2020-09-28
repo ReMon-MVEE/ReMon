@@ -1415,7 +1415,7 @@ BYTE_EMULATOR_IMPL(0x7f)
                         : "xmm0"
                 );
             }
-            // mova m64, mm
+            // movq m64, mm
             else
             {
                 LOAD_SRC_AND_DST(DEFINE_FPREGS_STRUCT, mm_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
@@ -1456,7 +1456,26 @@ BYTE_EMULATOR_IMPL(0x80)
     {
         LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_RM_CODE, LOAD_IMM)
 
-        GET_BUFFER_IMITATE_RESULT(destination, &(regs_struct->eflags), 8)
+        // replay and spoofing
+        GET_BUFFER_RAW(destination, (sizeof(unsigned long long) + sizeof(unsigned long long)));
+
+        auto eflags_result = (unsigned long long*) buffer;
+        auto mem_buffer = (unsigned long long*) ((uint8_t*)buffer + sizeof(unsigned long long));
+
+        // imitate
+        if (result != REPLAY_BUFFER_RETURN_FIRST)
+        {
+            regs_struct->eflags = *eflags_result;
+            if (!interaction::write_memory(variant->variantpid, destination, (long long) 1, mem_buffer))
+            {
+                warnf("write failed\n");
+                return -1;
+            }
+
+            REPLAY_BUFFER_ADVANCE
+            return 0;
+        }
+
         uint8_t* typed_destination = (uint8_t*)destination;
         uint8_t* typed_source = (uint8_t*)source;
 
@@ -1514,7 +1533,8 @@ BYTE_EMULATOR_IMPL(0x80)
                 return -1;
         }
 
-        COPY_BUFFER(buffer, &(regs_struct->eflags), 8)
+        *eflags_result = regs_struct->eflags;
+        *mem_buffer = *(unsigned long long*)destination;
 
         // registers will be written back with rip
         REPLAY_BUFFER_ADVANCE
@@ -1532,9 +1552,28 @@ BYTE_EMULATOR_IMPL(0x81)
     // immediate grp 1 Ev, Iz
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_RM_CODE, LOAD_IMM)
 
-        GET_BUFFER_IMITATE_RESULT(destination, &(regs_struct->eflags), 8)
+        // replay and spoofing
+        GET_BUFFER_RAW(destination, (sizeof(unsigned long long) + sizeof(unsigned long long)));
+
+        auto eflags_result = (unsigned long long*) buffer;
+        auto mem_buffer = (unsigned long long*) ((uint8_t*)buffer + sizeof(unsigned long long));
+
+        // imitate
+        if (result != REPLAY_BUFFER_RETURN_FIRST)
+        {
+            regs_struct->eflags = *eflags_result;
+
+            if (!interaction::write_memory(variant->variantpid, destination, (long long) 8, mem_buffer))
+            {
+                warnf("write failed\n");
+                return -1;
+            }
+
+            REPLAY_BUFFER_ADVANCE
+            return 0;
+        }
 
         switch (GET_REG_CODE(modrm))
         {
@@ -1676,7 +1715,8 @@ BYTE_EMULATOR_IMPL(0x81)
                 return -1;
         }
 
-        COPY_BUFFER(buffer, &(regs_struct->eflags), 8)
+        *eflags_result = regs_struct->eflags;
+        *mem_buffer = *(unsigned long long*)destination;
 
         // general purpose registers will be written back by default
         REPLAY_BUFFER_ADVANCE
@@ -2474,8 +2514,8 @@ BYTE_EMULATOR_IMPL(0xa4)
                 return -1;
             }
 
-            *rcx_result    = regs_struct->rcx;
-            *efalgs_result = regs_struct->eflags;
+            regs_struct->rcx    = *rcx_result;
+            regs_struct->eflags = *efalgs_result;
 
             REPLAY_BUFFER_ADVANCE
             return 0;

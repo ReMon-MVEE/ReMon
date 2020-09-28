@@ -31,6 +31,8 @@ namespace instruction_tests
 
     void        test_0x3b                           ();
 
+    void        test_0x81                           ();
+
     void        test_0x83                           ();
 
     void        test_0x87                           ();
