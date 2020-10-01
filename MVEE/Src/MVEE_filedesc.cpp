@@ -474,7 +474,7 @@ void fd_table::create_master_fd_info_from_proc (int fd, pid_t master_pid)
 	char perms [15];
 	std::string path;
 	char file  [1024];
-	int prot;
+	// int prot;
 	long flags;
 	bool found_in_fd = false;
 	bool found_in_fdinfo = false;
@@ -493,6 +493,7 @@ void fd_table::create_master_fd_info_from_proc (int fd, pid_t master_pid)
 			continue;
 		}
 
+        /*
 		if (perms[1] == 'r')
 		{
 			if (perms[2] == 'w')
@@ -508,6 +509,7 @@ void fd_table::create_master_fd_info_from_proc (int fd, pid_t master_pid)
 		{
 			prot = 0;
 		}
+        */
 
 		path = std::string(file);
 		found_in_fd = true;
@@ -532,7 +534,7 @@ void fd_table::create_master_fd_info_from_proc (int fd, pid_t master_pid)
 		found_in_fdinfo = true;
 		unsigned long tmp;
 		
-		if (sscanf(line.c_str(), "pos: %ld", &tmp) == 1)
+		if (sscanf(line.c_str(), "pos: %lud", &tmp) == 1)
 		{
 			// I guess we don't care about this for now...
 		}
