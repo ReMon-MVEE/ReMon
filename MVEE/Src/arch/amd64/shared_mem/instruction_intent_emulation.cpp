@@ -16,18 +16,6 @@
 // =====================================================================================================================
 //      macros
 // =====================================================================================================================
-#define LOAD_SRC_AND_DST(DEFINE_REGS, lookup, DST_LOADER_MACRO, SRC_LOADER_MACRO)                                      \
-    DEFINE_REGS                                                                                                        \
-                                                                                                                       \
-    uint8_t modrm = instruction[instruction.effective_opcode_index + 1];                                               \
-                                                                                                                       \
-    void* source;                                                                                                      \
-    SRC_LOADER_MACRO(source, lookup);                                                                                  \
-                                                                                                                       \
-    void* destination;                                                                                                 \
-    DST_LOADER_MACRO(destination, lookup)
-
-
 #define DEFINE_REGS_STRUCT                                                                                             \
     user_regs_struct* regs_struct = &variant->regs;                                                                    \
     relevant_monitor.call_check_regs(variant->variant_num);
@@ -38,23 +26,45 @@
     relevant_monitor.call_check_fpregs(variant->variant_num);
 
 
-#define LOAD_RM_CODE(pointer, lookup)                                                                                  \
+#define DEFINE_MODRM                                                                                                   \
+uint8_t modrm = instruction[instruction.effective_opcode_index + 1];
+
+
+#define LOAD_RM_CODE(__src_or_dst, __size)                                                                             \
 /* register if mod bits equal 0b11 */                                                                                  \
 if (GET_MOD_CODE((unsigned) modrm) == 0b11u)                                                                           \
     /* For shared memory emulation, this shouldn't happen */                                                           \
     return -1;                                                                                                         \
 /* memory reference otherwise, so determine the monitor relevant pointer */                                            \
-if (instruction.determine_monitor_pointer(relevant_monitor, variant, instruction.effective_address, &pointer) < 0)     \
-    return UNKNOWN_MEMORY_TERMINATION;
+OBTAIN_SHARED_MAPPING_INFO(__size)                                                                                     \
+void* __src_or_dst = (void*) ((unsigned long long) mapping_info->monitor_base + offset);                               \
 
 
-#define LOAD_REG_CODE(pointer, lookup)                                                                                 \
+#define OBTAIN_SHARED_MAPPING_INFO(__size)                                                                             \
+shared_monitor_map_info* mapping_info;                                                                                 \
+unsigned long long offset;                                                                                             \
+if (!(mapping_info = relevant_monitor.set_mmap_table->get_shared_info(                                                 \
+        (unsigned long long) instruction.effective_address)))                                                          \
+    return UNKNOWN_MEMORY_TERMINATION;                                                                                 \
+if ((offset = shared_memory_determine_offset(mapping_info, (unsigned long long) instruction.effective_address,         \
+        __size)) == (unsigned long long) -1)                                                                           \
+    return -1;
+
+
+#define OBTAIN_SHARED_MAPPING_INFO_NO_DEF(__variant_address, __mapping_info, __offset, __size)                         \
+if (!(__mapping_info = relevant_monitor.set_mmap_table->get_shared_info(__variant_address)))                           \
+    return UNKNOWN_MEMORY_TERMINATION;                                                                                 \
+if ((__offset = shared_memory_determine_offset(__mapping_info, __variant_address, __size)) == (unsigned long long) -1) \
+    return -1;
+
+
+#define LOAD_REG_CODE(__src_or_dst, lookup)                                                                            \
 uint8_t reg_rex_extra = PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_R(instruction) ?                       \
         0b1000u : 0;                                                                                                   \
-pointer = shared_mem_register_access::lookup[reg_rex_extra | GET_REG_CODE((unsigned) modrm)](regs_struct);
+void* __src_or_dst = shared_mem_register_access::lookup[reg_rex_extra | GET_REG_CODE((unsigned) modrm)](regs_struct);
 
 
-#define LOAD_REG_CODE_BYTE(pointer, lookup)                                                                            \
+#define LOAD_REG_CODE_BYTE(__src_or_dst, lookup)                                                                       \
 uint8_t reg_code = GET_REG_CODE((unsigned) modrm);                                                                     \
 if (PREFIXES_REX_PRESENT(instruction))                                                                                 \
 {                                                                                                                      \
@@ -63,12 +73,17 @@ if (PREFIXES_REX_PRESENT(instruction))                                          
 }                                                                                                                      \
 else                                                                                                                   \
     reg_code &= ~0b100u;                                                                                               \
-pointer = shared_mem_register_access::lookup[reg_code](regs_struct);
+void* __src_or_dst = shared_mem_register_access::lookup[reg_code](regs_struct);
 
-#define LOAD_IMM(pointer, ignore)                                                                                      \
+#define LOAD_IMM(__src_or_dst)                                                                                         \
 if (!instruction.immediate_operand_index)                                                                              \
     return -1;                                                                                                         \
-pointer = &instruction.instruction[instruction.immediate_operand_index];
+void* __src_or_dst = &instruction.instruction[instruction.immediate_operand_index];
+
+
+#define GET_INSTRUCTION_ACCESS_SIZE                                                                                    \
+((PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction)) ?                                            \
+        8 : (PREFIXES_GRP_THREE_PRESENT(instruction) ? 2 : 4))
 
 
 #define COMPARE_BUFFERS(first, second, size)                                                                           \
@@ -170,7 +185,10 @@ BYTE_EMULATOR_IMPL(0x01)
     // add r/m(16, 32, 64), r(16, 32, 64)
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        LOAD_RM_CODE(destination, GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_REG_CODE(source, general_purpose_lookup)
 
         unsigned long long mask = (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction)) ?
                 0xffffffffffffffff : (PREFIXES_GRP_THREE_PRESENT(instruction) ? 0xffff : 0xffffffff);
@@ -271,7 +289,10 @@ BYTE_EMULATOR_IMPL(0x03)
     if (EXTRA_INFO_ROUND_CODE(instruction) & INSTRUCTION_DECODING_FIRST_LEVEL)
     {
         // add Gv, Ev
-        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_REG_CODE, LOAD_RM_CODE)
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        LOAD_REG_CODE(destination, general_purpose_lookup)
+        LOAD_RM_CODE(source, GET_INSTRUCTION_ACCESS_SIZE)
 
         // 64-bit
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
@@ -401,7 +422,10 @@ BYTE_EMULATOR_IMPL(0x10)
             return -1;
 
         // movups xmm, xmm/m128
-        LOAD_SRC_AND_DST(DEFINE_FPREGS_STRUCT, xmm_lookup, LOAD_REG_CODE, LOAD_RM_CODE)
+        DEFINE_FPREGS_STRUCT
+        DEFINE_MODRM
+        LOAD_REG_CODE(destination, xmm_lookup)
+        LOAD_RM_CODE(source, 16)
 
         GET_BUFFER_REPLACE(source, 16)
 
@@ -440,7 +464,10 @@ BYTE_EMULATOR_IMPL(0x11)
             return -1;
 
         // movups xmm/m128, xmm
-        LOAD_SRC_AND_DST(DEFINE_FPREGS_STRUCT, xmm_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+        DEFINE_FPREGS_STRUCT
+        DEFINE_MODRM
+        LOAD_RM_CODE(destination, 16)
+        LOAD_REG_CODE(source, xmm_lookup)
 
         GET_BUFFER_CHECK_OR_FILL(destination, source, 16)
 
@@ -565,7 +592,10 @@ BYTE_EMULATOR_IMPL(0x29)
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
         // size and register type is the same, regardless of prefix
-        LOAD_SRC_AND_DST(DEFINE_FPREGS_STRUCT, xmm_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+        DEFINE_FPREGS_STRUCT
+        DEFINE_MODRM
+        LOAD_RM_CODE(destination, 16)
+        LOAD_REG_CODE(source, xmm_lookup)
 
         GET_BUFFER_CHECK_OR_FILL(destination, source, 16)
 
@@ -618,7 +648,10 @@ BYTE_EMULATOR_IMPL(0x2b)
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
         // sub Gv, Ev
-        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_REG_CODE, LOAD_RM_CODE)
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        LOAD_REG_CODE(destination, general_purpose_lookup)
+        LOAD_RM_CODE(source, GET_INSTRUCTION_ACCESS_SIZE)
 
 
         // 64-bit
@@ -693,7 +726,10 @@ BYTE_EMULATOR_IMPL(0x2b)
 
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
-        LOAD_SRC_AND_DST(DEFINE_FPREGS_STRUCT, xmm_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+        DEFINE_FPREGS_STRUCT
+        DEFINE_MODRM
+        LOAD_RM_CODE(destination, 16)
+        LOAD_REG_CODE(source, xmm_lookup)
 
         GET_BUFFER_CHECK_OR_FILL(destination, source, 16)
 
@@ -774,7 +810,10 @@ BYTE_EMULATOR_IMPL(0x39)
     // cmp Ev, Gv
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        LOAD_RM_CODE(destination, GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_REG_CODE(source, general_purpose_lookup)
 
         // 64-bit
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
@@ -860,7 +899,10 @@ BYTE_EMULATOR_IMPL(0x3b)
     // cmp Gv, Ev
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_REG_CODE, LOAD_RM_CODE)
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        LOAD_REG_CODE(destination, general_purpose_lookup)
+        LOAD_RM_CODE(source, GET_INSTRUCTION_ACCESS_SIZE)
 
         // 64-bit
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
@@ -1097,7 +1139,10 @@ BYTE_EMULATOR_IMPL(0x63)
 {
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_REG_CODE, LOAD_RM_CODE)
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        LOAD_REG_CODE(destination, general_purpose_lookup)
+        LOAD_RM_CODE(source, GET_INSTRUCTION_ACCESS_SIZE)
 
         // movsxd r64, r/m32
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
@@ -1173,11 +1218,14 @@ BYTE_EMULATOR_IMPL(0x6f)
 {
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
-        LOAD_SRC_AND_DST(DEFINE_FPREGS_STRUCT, xmm_lookup, LOAD_REG_CODE, LOAD_RM_CODE)
+        DEFINE_FPREGS_STRUCT
+        DEFINE_MODRM
+        LOAD_REG_CODE(destination, xmm_lookup)
 
         // movdqu xmm, xmm/m128 if f3 prefix is present
         if (PREFIXES_GRP_ONE_PRESENT(instruction) && PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE)
         {
+            LOAD_RM_CODE(source, 16)
             GET_BUFFER_REPLACE(source, 16)
 
             // perform operation
@@ -1195,6 +1243,7 @@ BYTE_EMULATOR_IMPL(0x6f)
         // movdqa xmm, xmm/m128 if f3 prefix is not present
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
+            LOAD_RM_CODE(source, 16)
             GET_BUFFER_REPLACE(source, 16)
 
             // perform operation
@@ -1212,6 +1261,7 @@ BYTE_EMULATOR_IMPL(0x6f)
         // mova mm, m64
         else
         {
+            LOAD_RM_CODE(source, 8)
             GET_BUFFER_REPLACE(source, 8);
 
             __asm__
@@ -1262,22 +1312,15 @@ BYTE_EMULATOR_IMPL(0x74)
     // valid in first round
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
-
-        // pointers to the source and destination location
-        void* source;
-        void* destination;
-
         // define regs struct
         DEFINE_FPREGS_STRUCT
-
-        // temporary modrm copy
-        uint8_t modrm = instruction[instruction.effective_opcode_index + 1];
+        DEFINE_MODRM
 
         // pcmpeqb xmm, xmm/m128
         if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
             // source rm
-            LOAD_RM_CODE(source, ignored_anyway)
+            LOAD_RM_CODE(source, 16)
             // destination reg
             LOAD_REG_CODE(destination, xmm_lookup)
 
@@ -1300,7 +1343,7 @@ BYTE_EMULATOR_IMPL(0x74)
         else
         {
             // source rm
-            LOAD_RM_CODE(source, ignored_anyway)
+            LOAD_RM_CODE(source, 8)
             // destination reg
             LOAD_REG_CODE(destination, mm_lookup)
 
@@ -1382,7 +1425,10 @@ BYTE_EMULATOR_IMPL(0x7f)
             // movdqu xmm/m128, xmm if f3 prefix is present
             if (PREFIXES_GRP_ONE_PRESENT(instruction) && PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE)
             {
-                LOAD_SRC_AND_DST(DEFINE_FPREGS_STRUCT, xmm_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+                DEFINE_FPREGS_STRUCT
+                DEFINE_MODRM
+                LOAD_RM_CODE(destination, 16)
+                LOAD_REG_CODE(source, xmm_lookup)
                 GET_BUFFER_CHECK_OR_FILL(destination, source, 16)
 
                 // perform operation
@@ -1400,7 +1446,10 @@ BYTE_EMULATOR_IMPL(0x7f)
             // movdqa xmm/m128, xmm if f3 prefix is not present
             else if (PREFIXES_GRP_THREE_PRESENT(instruction))
             {
-                LOAD_SRC_AND_DST(DEFINE_FPREGS_STRUCT, xmm_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+                DEFINE_FPREGS_STRUCT
+                DEFINE_MODRM
+                LOAD_RM_CODE(destination, 16)
+                LOAD_REG_CODE(source, xmm_lookup)
                 GET_BUFFER_CHECK_OR_FILL(destination, source, 16)
 
                 // perform operation
@@ -1418,7 +1467,10 @@ BYTE_EMULATOR_IMPL(0x7f)
             // movq m64, mm
             else
             {
-                LOAD_SRC_AND_DST(DEFINE_FPREGS_STRUCT, mm_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+                DEFINE_FPREGS_STRUCT
+                DEFINE_MODRM
+                LOAD_RM_CODE(destination, 8)
+                LOAD_REG_CODE(source, mm_lookup)
                 GET_BUFFER_CHECK_OR_FILL(destination, source, 8)
 
                 __asm__
@@ -1454,7 +1506,10 @@ BYTE_EMULATOR_IMPL(0x80)
     // Immediate Grp 1 Eb, Ib
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_RM_CODE, LOAD_IMM)
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        LOAD_RM_CODE(destination, 1)
+        LOAD_IMM(source)
 
         // replay and spoofing
         GET_BUFFER_RAW(destination, (sizeof(unsigned long long) + sizeof(unsigned long long)));
@@ -1552,7 +1607,10 @@ BYTE_EMULATOR_IMPL(0x81)
     // immediate grp 1 Ev, Iz
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_RM_CODE, LOAD_IMM)
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        LOAD_RM_CODE(destination, GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_IMM(source)
 
         // replay and spoofing
         GET_BUFFER_RAW(destination, (sizeof(unsigned long long) + sizeof(unsigned long long)));
@@ -1738,7 +1796,10 @@ BYTE_EMULATOR_IMPL(0x83)
     // grp 1 r/m(16,32,64), imm8
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_RM_CODE, LOAD_IMM)
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        LOAD_RM_CODE(destination, GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_IMM(source)
 
         GET_BUFFER_RAW(destination, sizeof(unsigned long long))
         if (result != REPLAY_BUFFER_RETURN_FIRST)
@@ -2043,7 +2104,10 @@ BYTE_EMULATOR_IMPL(0x87)
 {
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        LOAD_RM_CODE(destination, GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_REG_CODE(source, general_purpose_lookup)
 
         // 64-bit
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
@@ -2134,7 +2198,10 @@ BYTE_EMULATOR_IMPL(0x88)
     // mov r/m8, r8
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_RM_CODE, LOAD_REG_CODE_BYTE)
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        LOAD_RM_CODE(destination, 1)
+        LOAD_REG_CODE_BYTE(source, general_purpose_lookup)
 
         // special case that uses higher order lower byte, for example ah
         if (!PREFIXES_REX_PRESENT(instruction) && GET_REG_CODE((unsigned) modrm) & 0b100u)
@@ -2163,7 +2230,10 @@ BYTE_EMULATOR_IMPL(0x89)
     // move Ev, Gv
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        LOAD_RM_CODE(destination, GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_REG_CODE(source, general_purpose_lookup)
 
         // 64-bit implementation
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
@@ -2212,7 +2282,10 @@ BYTE_EMULATOR_IMPL(0x8a)
     // move r8, r/m8
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_REG_CODE_BYTE, LOAD_RM_CODE)
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        LOAD_REG_CODE_BYTE(destination, general_purpose_lookup)
+        LOAD_RM_CODE(source, 1)
 
         // use higher order byte of lowest word exception
         if (!PREFIXES_REX_PRESENT(instruction) && GET_REG_CODE((unsigned) modrm) & 0b100u)
@@ -2241,7 +2314,10 @@ BYTE_EMULATOR_IMPL(0x8b)
     // move Gv, Ev
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_REG_CODE, LOAD_RM_CODE)
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        LOAD_REG_CODE(destination, general_purpose_lookup)
+        LOAD_RM_CODE(source, GET_INSTRUCTION_ACCESS_SIZE)
 
         // 64-bit version
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
@@ -2437,53 +2513,44 @@ BYTE_EMULATOR_IMPL(0xa4)
         // gonna be using general purpose registers
         DEFINE_REGS_STRUCT
 
-        void* source;
-        void* destination;
+        unsigned long long src = regs_struct->rsi;
+        unsigned long long dst = regs_struct->rdi;
+        unsigned long long src_offset;
+        unsigned long long dst_offset;
+        shared_monitor_map_info* src_info;
+        shared_monitor_map_info* dst_info;
         bool src_spoof = false;
         bool dst_spoof = false;
         unsigned long long size = PREFIXES_GRP_ONE_PRESENT(instruction) &&
                 (PREFIXES_GRP_ONE(instruction) == REPNZ_PREFIX_CODE ||
                  PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE) ? regs_struct->rcx : 1;
 
-        // source is known to be shared memory
-        if ((void*)decode_address_tag(regs_struct->rsi, variant) == instruction.effective_address)
+        // source is shared memory
+        if (IS_TAGGED_ADDRESS(src))
         {
             // source to monitor pointer
-            if (instruction_intent::determine_monitor_pointer(relevant_monitor, variant,
-                    instruction.effective_address, &source, size) < 0)
-                return -1;
+            src = decode_address_tag(src, variant);
+            OBTAIN_SHARED_MAPPING_INFO_NO_DEF(src, src_info, src_offset, size)
+            src = (unsigned long long) src_info->monitor_base + src_offset;
 
             // check if destination is shared memory, or regular variant memory
-            int result = instruction_intent::determine_monitor_pointer(relevant_monitor, variant,
-                    (void*)(IS_TAGGED_ADDRESS(regs_struct->rdi) ?
-                            decode_address_tag(regs_struct->rdi, variant) : regs_struct->rdi), &destination, size);
-            if (result == NO_REGION_INFO)
+            if (IS_TAGGED_ADDRESS(dst))
             {
-                destination = (void*) regs_struct->rdi;
+                dst = decode_address_tag(dst, variant);
+                OBTAIN_SHARED_MAPPING_INFO_NO_DEF(dst, dst_info, dst_offset, size)
+                dst = (unsigned long long) dst_info->monitor_base + dst_offset;
+            }
+            else
                 dst_spoof = true;
-            }
-            else if (result < 0)
-                return -1;
         }
-        // destination is known shared memory
-        else if ((void*)decode_address_tag(regs_struct->rdi, variant) == instruction.effective_address)
+        // destination is shared memory
+        else if (IS_TAGGED_ADDRESS(regs_struct->rdi))
         {
-            // destination to monitor pointer
-            if (instruction_intent::determine_monitor_pointer(relevant_monitor, variant,
-                    instruction.effective_address, &destination, size) < 0)
-                return -1;
+            dst = decode_address_tag(dst, variant);
+            OBTAIN_SHARED_MAPPING_INFO_NO_DEF(dst, dst_info, dst_offset, size)
+            dst = (unsigned long long) dst_info->monitor_base + dst_offset;
 
-            // check if source is shared memory, or regular variant memory
-            int result = instruction_intent::determine_monitor_pointer(relevant_monitor, variant,
-                    (void*)(IS_TAGGED_ADDRESS(regs_struct->rsi) ?
-                            decode_address_tag(regs_struct->rsi, variant) : regs_struct->rsi), &source, size);
-            if (result == NO_REGION_INFO)
-            {
-                source = (void*) regs_struct->rsi;
-                src_spoof = true;
-            }
-            else if (result < 0)
-                return -1;
+            src_spoof = true;
         }
         // we would expect one of the two to be known shared memory
         else
@@ -2491,7 +2558,7 @@ BYTE_EMULATOR_IMPL(0xa4)
 
 
         // replay and spoofing
-        GET_BUFFER_RAW((src_spoof ? destination : source),
+        GET_BUFFER_RAW((void*) (src_spoof ? dst : src),
                        ((!src_spoof && !dst_spoof) ? sizeof(void*) : (dst_spoof ? size : 0)) +
                        (sizeof(unsigned long long) * 2))
         auto rcx_result = (unsigned long long*) buffer;
@@ -2502,12 +2569,12 @@ BYTE_EMULATOR_IMPL(0xa4)
         // imitate
         if (result != REPLAY_BUFFER_RETURN_FIRST)
         {
-            if (!dst_spoof && !src_spoof && destination != *actual_buffer)
+            if (!dst_spoof && !src_spoof && (void*) dst != *actual_buffer)
             {
                 warnf("second address mismatch\n");
                 return -1;
             }
-            else if (dst_spoof && !interaction::write_memory(variant->variantpid, destination, (long long) size,
+            else if (dst_spoof && !interaction::write_memory(variant->variantpid, (void*) dst, (long long) size,
                     actual_buffer))
             {
                 warnf("could not write data to variant\n");
@@ -2532,7 +2599,7 @@ BYTE_EMULATOR_IMPL(0xa4)
                 return -1;
             }
 
-            if (!interaction::read_memory(variant->variantpid, source, (signed long long) size, spoof))
+            if (!interaction::read_memory(variant->variantpid, (void*) src, (long long) size, spoof))
             {
                 warnf("could not read source to spoof\n");
                 return -1;
@@ -2545,8 +2612,8 @@ BYTE_EMULATOR_IMPL(0xa4)
             (PREFIXES_GRP_ONE(instruction) == REPNZ_PREFIX_CODE ||
              PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE))
         {
-            void* asm_dst = dst_spoof ? spoof : destination;
-            void* asm_src = src_spoof ? spoof : source;
+            void* asm_dst = dst_spoof ? spoof : (void*) dst;
+            void* asm_src = src_spoof ? spoof : (void*) src;
             __asm__
             (
                     ".intel_syntax noprefix;"
@@ -2561,7 +2628,7 @@ BYTE_EMULATOR_IMPL(0xa4)
                     : "cc", "memory"
             );
 
-            if (dst_spoof && !interaction::write_memory(variant->variantpid, destination, (long) size, spoof))
+            if (dst_spoof && !interaction::write_memory(variant->variantpid, (void*) dst, (long) size, spoof))
             {
                 warnf("movsb could not write back destination\n");
                 return -1;
@@ -2572,7 +2639,7 @@ BYTE_EMULATOR_IMPL(0xa4)
             *rcx_result    = regs_struct->rcx;
             *efalgs_result = regs_struct->eflags;
             if (!src_spoof && !dst_spoof)
-                *actual_buffer = destination;
+                *actual_buffer = (void*) dst;
 
             REPLAY_BUFFER_ADVANCE
             return 0;
@@ -2615,18 +2682,16 @@ BYTE_EMULATOR_IMPL(0xaa)
     // we're in need of rax as source
     DEFINE_REGS_STRUCT
 
-    void* monitor_pointer;
-    if (instruction_intent::determine_monitor_pointer(relevant_monitor, variant, instruction.effective_address,
-            &monitor_pointer) != 0)
-        return -1;
-    void* source = shared_mem_register_access::ACCESS_GENERAL_NAME(rax)(regs_struct);
-
     unsigned long long count = 1;
     if (PREFIXES_GRP_ONE_PRESENT(instruction) && (PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE ||
-            PREFIXES_GRP_ONE(instruction) == REPNZ_PREFIX_CODE))
+                                                  PREFIXES_GRP_ONE(instruction) == REPNZ_PREFIX_CODE))
         count = regs_struct->rcx;
 
-    GET_BUFFER_RAW(monitor_pointer, 1 + sizeof(unsigned long long))
+    OBTAIN_SHARED_MAPPING_INFO(count)
+    void* destination = (void*) ((unsigned long long) mapping_info->monitor_base + offset);
+    void* source = shared_mem_register_access::ACCESS_GENERAL_NAME(rax)(regs_struct);
+
+    GET_BUFFER_RAW(destination, 1 + sizeof(unsigned long long))
     if (result == REPLAY_BUFFER_RETURN_FIRST)
     {
         *(uint8_t *) buffer = *(uint8_t *) source;
@@ -2650,7 +2715,6 @@ BYTE_EMULATOR_IMPL(0xaa)
     else
         return -1;
 
-    void* destination = monitor_pointer;
     __asm__
     (
             ".intel_syntax noprefix;"
@@ -2683,10 +2747,8 @@ BYTE_EMULATOR_IMPL(0xab)
         // we're in need of rax as source
         DEFINE_REGS_STRUCT
 
-        void* destination;
-        if (instruction_intent::determine_monitor_pointer(relevant_monitor, variant, instruction.effective_address,
-                &destination) != 0)
-            return -1;
+        OBTAIN_SHARED_MAPPING_INFO(GET_INSTRUCTION_ACCESS_SIZE)
+        void* destination = (void*) ((unsigned long long) mapping_info->monitor_base + offset);
         void* source = shared_mem_register_access::ACCESS_GENERAL_NAME(rax)(regs_struct);
 
         // stos m64
@@ -2828,7 +2890,10 @@ BYTE_EMULATOR_IMPL(0xb1)
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
         // affects flags as well
-        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        LOAD_RM_CODE(destination, GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_REG_CODE(source, general_purpose_lookup)
 
         // we're saving the source to compare later, the result to imitate it later, and the eflags to imitate as well
         GET_BUFFER_RAW(destination, (sizeof(unsigned long long) * 4))
@@ -2954,7 +3019,10 @@ BYTE_EMULATOR_IMPL(0xb6)
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
         // movzx Gv, Eb
-        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_REG_CODE, LOAD_RM_CODE)
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        LOAD_REG_CODE(destination, general_purpose_lookup)
+        LOAD_RM_CODE(source, GET_INSTRUCTION_ACCESS_SIZE)
 
         GET_BUFFER_REPLACE(source, 1)
         uint8_t* typed_source = (uint8_t*)source;
@@ -2994,7 +3062,10 @@ BYTE_EMULATOR_IMPL(0xb7)
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
         // movzx Gv, Ew
-        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_REG_CODE, LOAD_RM_CODE)
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        LOAD_REG_CODE(destination, general_purpose_lookup)
+        LOAD_RM_CODE(source, GET_INSTRUCTION_ACCESS_SIZE)
 
         GET_BUFFER_REPLACE(source, 2)
         uint16_t* typed_source = (uint16_t*)source;
@@ -3058,7 +3129,10 @@ BYTE_EMULATOR_IMPL(0xbe)
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
         // movsx Gv, Eb
-        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_REG_CODE, LOAD_RM_CODE)
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        LOAD_REG_CODE(destination, general_purpose_lookup)
+        LOAD_RM_CODE(source, GET_INSTRUCTION_ACCESS_SIZE)
 
         // always byte
         GET_BUFFER_REPLACE(source, 1)
@@ -3108,7 +3182,10 @@ BYTE_EMULATOR_IMPL(0xc1)
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
         // xadd Ev, Gv
-        LOAD_SRC_AND_DST(DEFINE_REGS_STRUCT, general_purpose_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        LOAD_RM_CODE(destination, GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_REG_CODE(source, general_purpose_lookup)
 
         // 64-bit size
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
@@ -3259,16 +3336,9 @@ BYTE_EMULATOR_IMPL(0xc6)
     // mov r/m8, imm8
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        // local temporary modrm byte copy
-        uint8_t modrm = instruction.instruction[instruction.effective_opcode_index + 1];
-
-        // define source
-        void* source;
-        LOAD_IMM(source, ignored_anyway)
-
-        // define destination
-        void* destination;
-        LOAD_RM_CODE(destination, ignored_anyway)
+        DEFINE_MODRM
+        LOAD_IMM(source)
+        LOAD_RM_CODE(destination, 1)
 
         GET_BUFFER_RAW(destination, 1)
 
@@ -3299,16 +3369,12 @@ BYTE_EMULATOR_IMPL(0xc7)
 {
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
+        DEFINE_MODRM
+        LOAD_RM_CODE(destination, GET_INSTRUCTION_ACCESS_SIZE)
         // small test
-        uint8_t modrm = instruction[instruction.effective_opcode_index + 1];
         if (GET_REG_CODE((unsigned) modrm) != 0b000u)
             return -1;
-
-        void* destination;
-        LOAD_RM_CODE(destination, ignore)
-
-        void* source;
-        LOAD_IMM(source, ignore)
+        LOAD_IMM(source)
 
         GET_NULL_BUFFER(destination)
 
@@ -3424,21 +3490,13 @@ BYTE_EMULATOR_IMPL(0xda)
     {
         // we're gonna be using fpregs
         DEFINE_FPREGS_STRUCT
-
-        // save local copy for modrm
-        uint8_t modrm = instruction.instruction[instruction.effective_opcode_index + 1];
-
+        DEFINE_MODRM
 
         // pminub xmm, xmm/m128
         if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            // load source from rm
-            void* source;
-            LOAD_RM_CODE(source, xmm_lookup)
-
-            // load destination from reg
-            void* destination;
-            LOAD_RM_CODE(destination, xmm_lookup)
+            LOAD_RM_CODE(source, 16)
+            LOAD_REG_CODE(destination, xmm_lookup)
 
             GET_BUFFER_REPLACE(source, 16)
 
@@ -3459,13 +3517,8 @@ BYTE_EMULATOR_IMPL(0xda)
         // pminub mm, mm/m64
         else
         {
-            // load source from rm
-            void* source;
-            LOAD_RM_CODE(source, mm_lookup)
-
-            // load destination from reg
-            void* destination;
-            LOAD_RM_CODE(destination, mm_lookup)
+            LOAD_RM_CODE(source, 8)
+            LOAD_REG_CODE(destination, mm_lookup)
 
             GET_BUFFER_REPLACE(source, 8)
 
@@ -3550,10 +3603,14 @@ BYTE_EMULATOR_IMPL(0xe7)
 {
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
+        DEFINE_MODRM
+
         // movntdq m128, xmm
         if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            LOAD_SRC_AND_DST(DEFINE_FPREGS_STRUCT, xmm_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+            DEFINE_FPREGS_STRUCT
+            LOAD_RM_CODE(destination, 16)
+            LOAD_REG_CODE(source, xmm_lookup)
             GET_BUFFER_CHECK_OR_FILL(destination, source, 16)
 
             __asm__
@@ -3574,7 +3631,9 @@ BYTE_EMULATOR_IMPL(0xe7)
         // movntq m64, mm
         else
         {
-            LOAD_SRC_AND_DST(DEFINE_FPREGS_STRUCT, mm_lookup, LOAD_RM_CODE, LOAD_REG_CODE)
+            DEFINE_FPREGS_STRUCT
+            LOAD_RM_CODE(destination, 8)
+            LOAD_REG_CODE(source, mm_lookup)
             GET_BUFFER_CHECK_OR_FILL(destination, source, 8)
 
             __asm__

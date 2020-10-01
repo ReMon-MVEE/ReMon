@@ -108,9 +108,11 @@ __uint8_t       instruction_intent::opcode                          ()
     return instruction[effective_opcode_index];
 }
 
-int             instruction_intent::determine_monitor_pointer       (monitor& relevant_monitor, variantstate* variant,
-                                                                     void* variant_address, void** monitor_pointer,
-                                                                     unsigned long long size)
+/*
+shared_monitor_map_info*
+                instruction_intent::determine_monitor_pointer       (monitor& relevant_monitor, variantstate* variant,
+                                                                     void* variant_address, unsigned long long &offset,
+                                                                     unsigned long long access_size)
 {
     // translate variant address to monitor address
     shared_monitor_map_info* monitor_map =
@@ -133,18 +135,36 @@ int             instruction_intent::determine_monitor_pointer       (monitor& re
         return -1;
     }
 
-    if (size > 0 && ((unsigned long long) variant_address + size) > monitor_map->variant_base + monitor_map->size)
+    if (access_size > 0 &&
+            ((unsigned long long) variant_address + access_size) > monitor_map->variant_base + monitor_map->size)
     {
         warnf("Instruction, %p + %llx, will go out of range of shared mapping.\n",
-              variant_address, size);
+              variant_address, access_size);
         return -1;
     }
 
-    unsigned long long offset = (unsigned long long) variant_address - monitor_map->variant_base;
-    *monitor_pointer = (void*) ((unsigned long long) monitor_map->monitor_base + offset);
+    offset = (unsigned long long) variant_address - monitor_map->variant_base;
 
     // return ok
     return 0;
+}
+*/
+
+unsigned long long
+                shared_memory_determine_offset                      (shared_monitor_map_info* monitor_map,
+                                                                     unsigned long long variant_address,
+                                                                     unsigned long long access_size)
+{
+
+    if (variant_address < monitor_map->variant_base &&
+        ((unsigned long long) variant_address + access_size) > monitor_map->variant_base + monitor_map->size)
+    {
+        warnf("Instruction, %p + %llx, will go out of range of shared mapping.\n", (void*) variant_address,
+                access_size);
+        return -1;
+    }
+
+    return (unsigned long long) variant_address - monitor_map->variant_base;
 }
 
 // operator overloading ================================================================================================
@@ -1210,7 +1230,7 @@ int             mmap_table::merge_variant_shadow_region             (shared_moni
 }
 
 
-void               mmap_table::debug_shared                         ()
+void            mmap_table::debug_shared                            ()
 {
     std::stringstream output;
     output << "mappings:\n";
@@ -1222,6 +1242,69 @@ void               mmap_table::debug_shared                         ()
     output << "\n";
 
     warnf("%s\n", output.str().c_str());
+}
+
+
+// =====================================================================================================================
+//      manipulation for bitmap and shadow
+// =====================================================================================================================
+void            shared_memory_bitmap::bitmap_set                    (unsigned long long set_count,
+                                                                     __uint8_t* bitmap_base,
+                                                                     unsigned long long offset)
+{
+    if ((offset & 0b111u) + set_count <= 8)
+        ((__uint8_t*) bitmap_base)[offset >> 3u] |=
+                (__uint8_t) ((0xffu >> (8 - set_count)) << (offset & 0b111u));
+    else
+    {
+        /* locally used variables */
+        unsigned long long iterative_offset = offset;
+        auto iterative_count = (long long) (set_count + (offset & 0b111u));
+
+        /* first one might be middle of a bitmap byte */
+        ((__uint8_t*) bitmap_base)[offset >> 3u] |= (__uint8_t) (0xffu << (offset & 0b111u));
+
+        /* there might be some bits left */
+        while ((iterative_count-=8) > 0)
+        {
+            iterative_offset+=8;
+            /* write to bitmap */
+            ((__uint8_t*) bitmap_base)[iterative_offset >> 3u] |= (__uint8_t) (0xffu >>
+                    (iterative_count > 8u ? 0 : (unsigned) (8 - iterative_count)));
+        }
+    }
+}
+
+
+bool            shared_memory_bitmap::bitmap_read                   (unsigned long long read_count,
+                                                                     const __uint8_t* bitmap_base,
+                                                                     unsigned long long offset)
+{
+    if ((offset & 0b111u) + read_count <= 8)
+        return ((unsigned) (((__uint8_t*) bitmap_base)[offset >> 3u] >> (offset & 0b111u)) &
+            (0xffu >> (unsigned) (8 - read_count))) == 0;
+    /* locally used variables */
+    unsigned long long iterative_offset = offset;
+    auto iterative_count = (long long) read_count;
+
+    /* first one might be middle of a bitmap byte */
+    if ((((__uint8_t*) bitmap_base)[offset >> 3u] << (offset & 0b111u)) != 0)
+        return true;
+    iterative_count -= (offset & 0b111u);
+
+    /* there might be some bits left */
+    while (iterative_count > 0)
+    {
+        iterative_offset+=8;
+        /* write to bitmap */
+        if ((((__uint8_t*) bitmap_base)[iterative_offset >> 3u] >>
+                (iterative_count > 8u ? 0 : (unsigned) (8 - iterative_count))) != 0)
+            return true;
+        /* next bits to write */
+        iterative_count -= 8;
+    }
+
+    return false;
 }
 
 

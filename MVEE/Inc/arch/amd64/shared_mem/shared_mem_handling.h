@@ -16,6 +16,8 @@
 #include "shared_mem_operations.h"
 #include "instruction_intent_emulation.h"
 
+#include "MVEE_mman.h"
+
 
 // =====================================================================================================================
 //      forward definitions
@@ -319,7 +321,6 @@ class instruction_intent
     friend class monitor;
     friend class replay_buffer;
 private:
-    /**/
     uint8_t                             instruction[MAX_INSTRUCTION_SIZE] = { 0 };
 
     /* +---+---+-------+---+---+---+-----+---------+-----+-----+---+---+-------+-----+---+---+---------+---+
@@ -478,11 +479,6 @@ public:
 
     /* Obtain relevant opcode byte for this instruction. */
     __uint8_t       opcode                              ();
-
-    /* Obtain relevant opcode byte for this instruction. */
-    static int      determine_monitor_pointer           (monitor& relevant_monitor, variantstate* variant,
-                                                         void* variant_address, void** monitor_pointer,
-                                                         unsigned long long size=0);
     // -----------------------------------------------------------------------------------------------------------------
 
 
@@ -672,6 +668,33 @@ public:
     int             advance                             (unsigned int variant_num);
     // access and updating ---------------------------------------------------------------------------------------------
 };
+
+
+// =====================================================================================================================
+//      manipulation for bitmap and shadow
+// =====================================================================================================================
+#define NORMAL_TO_SHARED(__operation, __size)                                                                          \
+if (!variant.variant_num)                                                                                              \
+{                                                                                                                      \
+    typed_destination = shared_base + offset;                                                                          \
+    __operation;                                                                                                       \
+    shared_memory_bitmap(__size, bitmap_base, offset);                                                                 \
+}                                                                                                                      \
+typed_destination = shared_base + offset;                                                                              \
+__operation;
+
+
+unsigned long long
+                shared_memory_determine_offset                      (shared_monitor_map_info* monitor_map,
+                                                                     unsigned long long variant_address,
+                                                                     unsigned long long access_size=0);
+
+
+namespace shared_memory_bitmap
+{
+    void bitmap_set(unsigned long long set_count, __uint8_t* bitmap_base, unsigned long long offset);
+    bool bitmap_read(unsigned long long read_count, const __uint8_t* bitmap_base, unsigned long long offset);
+}
 
 
 // =====================================================================================================================
