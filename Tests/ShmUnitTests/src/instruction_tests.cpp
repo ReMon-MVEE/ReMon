@@ -807,9 +807,6 @@ void            instruction_tests::test_0xab                        ()
             : "a" (src)
             : "memory"
     );
-    logf("(__uint16_t) src == *(__uint16_t*) buffers::shared_sink: %s | %llx == %llx (%llx)\n",
-            (__uint16_t) src == *(__uint16_t*) buffers::shared_sink ? "good" : "fail",
-            (__uint16_t) src, *(__uint16_t*) buffers::shared_sink, *((__uint16_t*) passed_dst + 1));
     TEST_RESULT("stosw | df set",
             (__uint16_t) src == *(__uint16_t*) buffers::shared_sink &&
             (__uint32_t) src != *(__uint32_t*) buffers::shared_sink &&
