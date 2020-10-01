@@ -841,7 +841,8 @@ was_interrupted:
 void monitor::log_dump_queues(shm_table* shm_table)
 {
     unsigned int master_pos = 0, lowest;
-    long*        buffer, *eip_buffer;
+    // long*        buffer;
+    long*        eip_buffer;
 
 //	MutexLock lock(&mvee::global_lock);
 
@@ -930,8 +931,8 @@ void monitor::log_dump_queues(shm_table* shm_table)
 #ifndef MVEE_ALWAYS_DUMP_QUEUES
         if (!info->dumpcount) // i.e. if (first_dump)
         {
-#endif			
-        buffer     = (long*)info->ptr;
+#endif
+        // buffer     = (long*)info->ptr;
 		eip_buffer = (long*)info->eip_ptr;
         lowest     = 0xFFFFFFFF;
         info->dumpcount++;
