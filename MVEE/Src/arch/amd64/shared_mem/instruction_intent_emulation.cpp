@@ -165,6 +165,20 @@ if (result != REPLAY_BUFFER_RETURN_FIRST)                                       
 monitor_pointer = buffer;
 
 
+#define GET_BUFFER_IMITATE_FLAGS(__monitor_pointer)                                                                    \
+void* buffer;                                                                                                          \
+int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, __monitor_pointer, instruction, &buffer, 8);  \
+if (result < 0)                                                                                                        \
+    return result;                                                                                                     \
+if (result != REPLAY_BUFFER_RETURN_FIRST)                                                                              \
+{                                                                                                                      \
+    regs_struct->eflags = *(unsigned long long*) buffer;                                                               \
+    REPLAY_BUFFER_ADVANCE                                                                                              \
+    return 0;                                                                                                          \
+}
+
+
+
 // =====================================================================================================================
 //      byte emulators
 // =====================================================================================================================
@@ -1420,80 +1434,73 @@ BYTE_EMULATOR_IMPL(0x7f)
 {
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
-        if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
+        // movdqu xmm/m128, xmm if f3 prefix is present
+        if (PREFIXES_GRP_ONE_PRESENT(instruction) && PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE)
         {
+            DEFINE_FPREGS_STRUCT
+            DEFINE_MODRM
+            LOAD_RM_CODE(destination, 16)
+            LOAD_REG_CODE(source, xmm_lookup)
+            GET_BUFFER_CHECK_OR_FILL(destination, source, 16)
 
-            // movdqu xmm/m128, xmm if f3 prefix is present
-            if (PREFIXES_GRP_ONE_PRESENT(instruction) && PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE)
-            {
-                DEFINE_FPREGS_STRUCT
-                DEFINE_MODRM
-                LOAD_RM_CODE(destination, 16)
-                LOAD_REG_CODE(source, xmm_lookup)
-                GET_BUFFER_CHECK_OR_FILL(destination, source, 16)
+            // perform operation
+            __asm__
+            (
+                    ".intel_syntax noprefix;"
+                    "movdqu xmm0, XMMWORD PTR [rdx];"
+                    "movdqu XMMWORD PTR [rax], xmm0;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "a" (destination), [src] "d" (source)
+                    : "xmm0"
+            );
+        }
+        // movdqa xmm/m128, xmm if f3 prefix is not present
+        else if (PREFIXES_GRP_THREE_PRESENT(instruction))
+        {
+            DEFINE_FPREGS_STRUCT
+            DEFINE_MODRM
+            LOAD_RM_CODE(destination, 16)
+            LOAD_REG_CODE(source, xmm_lookup)
+            GET_BUFFER_CHECK_OR_FILL(destination, source, 16)
 
-                // perform operation
-                __asm__
-                (
-                        ".intel_syntax noprefix;"
-                        "movdqu xmm0, XMMWORD PTR [rdx];"
-                        "movdqu XMMWORD PTR [rax], xmm0;"
-                        ".att_syntax;"
-                        :
-                        : [dst] "a" (destination), [src] "d" (source)
-                        : "xmm0"
-                );
-            }
-            // movdqa xmm/m128, xmm if f3 prefix is not present
-            else if (PREFIXES_GRP_THREE_PRESENT(instruction))
-            {
-                DEFINE_FPREGS_STRUCT
-                DEFINE_MODRM
-                LOAD_RM_CODE(destination, 16)
-                LOAD_REG_CODE(source, xmm_lookup)
-                GET_BUFFER_CHECK_OR_FILL(destination, source, 16)
+            // perform operation
+            __asm__
+            (
+                    ".intel_syntax noprefix;"
+                    "movdqu xmm0, XMMWORD PTR [rdx];"
+                    "movdqa XMMWORD PTR [rax], xmm0;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "a" (destination), [src] "d" (source)
+                    : "xmm0"
+            );
+        }
+        // movq m64, mm
+        else
+        {
+            DEFINE_FPREGS_STRUCT
+            DEFINE_MODRM
+            LOAD_RM_CODE(destination, 8)
+            LOAD_REG_CODE(source, mm_lookup)
+            GET_BUFFER_CHECK_OR_FILL(destination, source, 8)
 
-                // perform operation
-                __asm__
-                (
-                        ".intel_syntax noprefix;"
-                        "movdqu xmm0, XMMWORD PTR [rdx];"
-                        "movdqa XMMWORD PTR [rax], xmm0;"
-                        ".att_syntax;"
-                        :
-                        : [dst] "a" (destination), [src] "d" (source)
-                        : "xmm0"
-                );
-            }
-            // movq m64, mm
-            else
-            {
-                DEFINE_FPREGS_STRUCT
-                DEFINE_MODRM
-                LOAD_RM_CODE(destination, 8)
-                LOAD_REG_CODE(source, mm_lookup)
-                GET_BUFFER_CHECK_OR_FILL(destination, source, 8)
-
-                __asm__
-                (
-                        ".intel_syntax noprefix;"
-                        "movq mm0, QWORD PTR [rdx];"
-                        "movq QWORD PTR [rax], mm0;"
-                        ".att_syntax;"
-                        :
-                        : [dst] "a" (destination), [src] "d" (source)
-                        : "mm0"
-                );
-            }
-
-
-            // no write back needed here
-            REPLAY_BUFFER_ADVANCE
-            return 0;
+            __asm__
+            (
+                    ".intel_syntax noprefix;"
+                    "movq mm0, QWORD PTR [rdx];"
+                    "movq QWORD PTR [rax], mm0;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "a" (destination), [src] "d" (source)
+                    : "mm0"
+            );
         }
 
-        // invalid otherwise
-        return -1;
+
+        // no write back needed here
+        REPLAY_BUFFER_ADVANCE
+        return 0;
     }
 
     // illegal access otherwise
@@ -1512,25 +1519,8 @@ BYTE_EMULATOR_IMPL(0x80)
         LOAD_RM_CODE(destination, 1)
         LOAD_IMM(source)
 
-        // replay and spoofing
-        GET_BUFFER_RAW(destination, (sizeof(unsigned long long) + sizeof(unsigned long long)));
-
-        auto eflags_result = (unsigned long long*) buffer;
-        auto mem_buffer = (unsigned long long*) ((uint8_t*)buffer + sizeof(unsigned long long));
-
-        // imitate
-        if (result != REPLAY_BUFFER_RETURN_FIRST)
-        {
-            regs_struct->eflags = *eflags_result;
-            if (!interaction::write_memory(variant->variantpid, destination, (long long) 1, mem_buffer))
-            {
-                warnf("write failed\n");
-                return -1;
-            }
-
-            REPLAY_BUFFER_ADVANCE
-            return 0;
-        }
+        // replay no spoofing needed
+        GET_BUFFER_IMITATE_FLAGS(destination)
 
         uint8_t* typed_destination = (uint8_t*)destination;
         uint8_t* typed_source = (uint8_t*)source;
@@ -1589,8 +1579,7 @@ BYTE_EMULATOR_IMPL(0x80)
                 return -1;
         }
 
-        *eflags_result = regs_struct->eflags;
-        *mem_buffer = *(unsigned long long*)destination;
+        *(unsigned long long*) buffer = regs_struct->eflags;
 
         // registers will be written back with rip
         REPLAY_BUFFER_ADVANCE
@@ -1613,26 +1602,8 @@ BYTE_EMULATOR_IMPL(0x81)
         LOAD_RM_CODE(destination, GET_INSTRUCTION_ACCESS_SIZE)
         LOAD_IMM(source)
 
-        // replay and spoofing
-        GET_BUFFER_RAW(destination, (sizeof(unsigned long long) + sizeof(unsigned long long)));
-
-        auto eflags_result = (unsigned long long*) buffer;
-        auto mem_buffer = (unsigned long long*) ((uint8_t*)buffer + sizeof(unsigned long long));
-
-        // imitate
-        if (result != REPLAY_BUFFER_RETURN_FIRST)
-        {
-            regs_struct->eflags = *eflags_result;
-
-            if (!interaction::write_memory(variant->variantpid, destination, (long long) 8, mem_buffer))
-            {
-                warnf("write failed\n");
-                return -1;
-            }
-
-            REPLAY_BUFFER_ADVANCE
-            return 0;
-        }
+        // replay no spoofing needed
+        GET_BUFFER_IMITATE_FLAGS(destination)
 
         switch (GET_REG_CODE(modrm))
         {
@@ -1774,8 +1745,7 @@ BYTE_EMULATOR_IMPL(0x81)
                 return -1;
         }
 
-        *eflags_result = regs_struct->eflags;
-        *mem_buffer = *(unsigned long long*)destination;
+        *(unsigned long long*) buffer = regs_struct->eflags;
 
         // general purpose registers will be written back by default
         REPLAY_BUFFER_ADVANCE
@@ -1802,13 +1772,7 @@ BYTE_EMULATOR_IMPL(0x83)
         LOAD_RM_CODE(destination, GET_INSTRUCTION_ACCESS_SIZE)
         LOAD_IMM(source)
 
-        GET_BUFFER_RAW(destination, sizeof(unsigned long long))
-        if (result != REPLAY_BUFFER_RETURN_FIRST)
-        {
-            regs_struct->eflags = *(unsigned long long*) buffer;
-            REPLAY_BUFFER_ADVANCE
-            return 0;
-        }
+        GET_BUFFER_IMITATE_FLAGS(destination)
 
         switch (GET_REG_CODE((unsigned ) instruction[instruction.effective_opcode_index + 1]))
         {
@@ -2545,7 +2509,7 @@ BYTE_EMULATOR_IMPL(0xa4)
                 dst_spoof = true;
         }
         // destination is shared memory
-        else if (IS_TAGGED_ADDRESS(regs_struct->rdi))
+        else if (IS_TAGGED_ADDRESS(dst))
         {
             dst = decode_address_tag(dst, variant);
             OBTAIN_SHARED_MAPPING_INFO_NO_DEF(dst, dst_info, dst_offset, size)
@@ -2563,9 +2527,8 @@ BYTE_EMULATOR_IMPL(0xa4)
                        ((!src_spoof && !dst_spoof) ? sizeof(void*) : (dst_spoof ? size : 0)) +
                        (sizeof(unsigned long long) * 2))
         auto rcx_result = (unsigned long long*) buffer;
-        auto efalgs_result = (unsigned long long*) ((unsigned long long) buffer + sizeof(unsigned long long));
-        void** actual_buffer = src_spoof ? nullptr :
-                (void**) ((unsigned long long) buffer + (sizeof(unsigned long long) * 2));
+        auto efalgs_result = (unsigned long long*) buffer + 1;
+        void** actual_buffer = src_spoof ? nullptr : (void**) ((unsigned long long*) buffer + 2);
 
         // imitate
         if (result != REPLAY_BUFFER_RETURN_FIRST)
@@ -2624,8 +2587,9 @@ BYTE_EMULATOR_IMPL(0xa4)
                     "pushf;"
                     "pop %[flags];"
                     ".att_syntax;"
-                    : [count] "+c" (regs_struct->rcx), [flags] "+g" (regs_struct->eflags), "+D" (asm_dst), "+S" (asm_src)
-                    :
+                    : [count] "+c" (regs_struct->rcx), [flags] "+g" (regs_struct->eflags), "+D" (asm_dst),
+                            "+S" (asm_src)
+                    : "m" (asm_src), "m" (asm_dst)
                     : "cc", "memory"
             );
 
@@ -2823,7 +2787,7 @@ BYTE_EMULATOR_IMPL(0xab)
         // stos m32
         else
         {
-            GET_BUFFER_RAW(destination, 2)
+            GET_BUFFER_RAW(destination, 4)
             if (result == REPLAY_BUFFER_RETURN_FIRST)
                 *(uint32_t*) buffer = *(uint32_t*) source;
             else if (*(uint32_t*) buffer == *(uint32_t*) source)
