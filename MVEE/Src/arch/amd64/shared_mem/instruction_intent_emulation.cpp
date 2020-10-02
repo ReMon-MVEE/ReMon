@@ -2722,7 +2722,7 @@ BYTE_EMULATOR_IMPL(0xaa)
             "rep stosb;"
             ".att_syntax;"
             : "+D" (destination)
-            : "a" (*(uint8_t*) source), "c" (count)
+            : "a" (*(uint8_t*) source), "c" (count), "m" (destination)
             : "memory"
     );
 
@@ -2777,7 +2777,7 @@ BYTE_EMULATOR_IMPL(0xab)
                     "stosq;"
                     ".att_syntax;"
                     : "+D" (destination)
-                    : "a" (*(uint64_t*) source)
+                    : "a" (*(uint64_t*) source), "m" (destination)
                     : "memory"
             );
 
@@ -2811,7 +2811,7 @@ BYTE_EMULATOR_IMPL(0xab)
                     "stosw;"
                     ".att_syntax;"
                     : "+D" (destination)
-                    : "a" (*(uint16_t*) source)
+                    : "a" (*(uint16_t*) source), "m" (destination)
                     : "memory"
             );
 
@@ -2845,7 +2845,7 @@ BYTE_EMULATOR_IMPL(0xab)
                     "stosd;"
                     ".att_syntax;"
                     : "+D" (destination)
-                    : "a" (*(uint32_t*) source)
+                    : "a" (*(uint32_t*) source), "m" (destination)
                     : "memory"
             );
 
