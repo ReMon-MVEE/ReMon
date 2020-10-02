@@ -1220,11 +1220,11 @@ BYTE_EMULATOR_IMPL(0x6f)
     {
         DEFINE_FPREGS_STRUCT
         DEFINE_MODRM
-        LOAD_REG_CODE(destination, xmm_lookup)
 
         // movdqu xmm, xmm/m128 if f3 prefix is present
         if (PREFIXES_GRP_ONE_PRESENT(instruction) && PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE)
         {
+            LOAD_REG_CODE(destination, xmm_lookup)
             LOAD_RM_CODE(source, 16)
             GET_BUFFER_REPLACE(source, 16)
 
@@ -1243,6 +1243,7 @@ BYTE_EMULATOR_IMPL(0x6f)
         // movdqa xmm, xmm/m128 if f3 prefix is not present
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
+            LOAD_REG_CODE(destination, xmm_lookup)
             LOAD_RM_CODE(source, 16)
             GET_BUFFER_REPLACE(source, 16)
 
@@ -1261,6 +1262,7 @@ BYTE_EMULATOR_IMPL(0x6f)
         // mova mm, m64
         else
         {
+            LOAD_REG_CODE(destination, mm_lookup)
             LOAD_RM_CODE(source, 8)
             GET_BUFFER_REPLACE(source, 8);
 
@@ -1275,7 +1277,6 @@ BYTE_EMULATOR_IMPL(0x6f)
                     : "mm0"
             );
         }
-
 
         // write back regs, always needed here
         if (interaction::write_all_fpregs(*instruction.variant_pid, regs_struct))

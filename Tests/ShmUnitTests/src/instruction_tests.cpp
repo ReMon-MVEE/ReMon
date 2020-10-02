@@ -1302,6 +1302,8 @@ void            instruction_tests::test_0x0f_0x6f                   ()
 
     // movq ------------------------------------------------------------------------------------------------------------
     unsigned long long destination[] = { 0xffffffffffffffff, 0xffffffffffffffff };
+    unsigned long long mm64_result[] = { 0x1122334455667788, 0xffffffffffffffff };
+
     *(unsigned long long*) buffers::shared_sink = 0x1122334455667788;
     __asm__
     (
@@ -1314,6 +1316,9 @@ void            instruction_tests::test_0x0f_0x6f                   ()
             : "mm0"
     );
     // movq ------------------------------------------------------------------------------------------------------------
+
+    TEST_RESULT("movq m64, mm",
+                testing_aid::compare_buffers((__uint8_t*) mm64_result, (__uint8_t*) destination, DQWORD_SIZE) == 0);
 
     FINISH_TEST("0x0f 0x6f tests successful!", "0x0f 0x6f tests failed!")
 }
