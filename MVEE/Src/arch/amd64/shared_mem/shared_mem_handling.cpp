@@ -151,7 +151,7 @@ shared_monitor_map_info*
 */
 
 unsigned long long
-                shared_memory_determine_offset                      (shared_monitor_map_info* monitor_map,
+                shm_handling::shared_memory_determine_offset        (shared_monitor_map_info* monitor_map,
                                                                      unsigned long long variant_address,
                                                                      unsigned long long access_size)
 {
@@ -165,6 +165,74 @@ unsigned long long
     }
 
     return (unsigned long long) variant_address - monitor_map->variant_base;
+}
+
+int             shm_handling::determine_source_from_shared_normal   (variantstate* variant,
+                                                                     monitor &relevant_monitor,
+                                                                     instruction_intent &instruction,
+                                                                     void** source,
+                                                                     shared_monitor_map_info* mapping_info,
+                                                                     unsigned long long offset,
+                                                                     unsigned long long size)
+{
+    /* leader variant case */
+    if (!variant->variant_num)
+    {
+        void* monitor_pointer = (void*) (mapping_info->monitor_base + offset);
+        void* variant_shadow  = (void*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);
+        /* area of memory is known to be written to be variants */
+        if (shared_memory_bitmap::bitmap_read(size, mapping_info->leader_bitmap.monitor_base, offset))
+        {
+            /* If area does not contain same content anymore, we detect it as bi-directional shared memory. */
+            /* In this case we take the data from the shared memory segment. */
+            if (memcmp(monitor_pointer, variant_shadow, size) != 0)
+            {
+                int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer,
+                        instruction, source, size);
+                if (result < 0)
+                    return result;
+                memcpy(*source, monitor_pointer, size);
+
+                /* clear bitmap for related entries */
+                shared_memory_bitmap::bitmap_clear(size, mapping_info->leader_bitmap.monitor_base, offset);
+            }
+            /* Otherwise we'll just use the local copy instead */
+            else
+            {
+                *source = variant_shadow;
+
+                /* Essentially puts an empty entry in the replay buffer */
+                int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer,
+                        instruction, nullptr, 0);
+                if (result < 0)
+                    return result;
+            }
+        }
+        else
+        {
+            int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num,
+                    (void*) (mapping_info->monitor_base + offset),
+                    instruction, source, size);
+            if (result < 0)
+                return result;
+            memcpy(*source, monitor_pointer, size);
+        }
+    }
+    /* followers */
+    else
+    {
+        int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num,
+                (void*) (mapping_info->monitor_base + offset),
+                instruction, source, 0);
+        if (result < 0)
+            return result;
+
+        /* If buffer has not been filled, use local copy */
+        if (!*source)
+            *source = (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);
+    }
+
+    return 0;
 }
 
 // operator overloading ================================================================================================
@@ -813,11 +881,13 @@ int             replay_buffer::obtain_buffer                        (unsigned in
             // return buffer
             if (requested)
             {
+                /* todo - removing this check technically allows for out of bounds accesses, but is needed for now
                 if (current_entry->buffer_size != requested_size)
                 {
                     warnf("buffer size not as requested\n");
                     return REPLAY_BUFFER_RETURN_ERROR;
                 }
+                */
                 *requested = current_entry->buffer;
             }
             // ok
@@ -877,7 +947,7 @@ int             replay_buffer::advance                              (unsigned in
     current_entry->variants_passed++;
     if (current_entry->variants_passed >= this->variant_count)
     {
-        if (current_entry->buffer != current_entry->static_buffer)
+        if (current_entry->buffer && current_entry->buffer != current_entry->static_buffer)
             free(current_entry->buffer);
         current_entry->buffer = nullptr;
 
@@ -895,14 +965,14 @@ int             replay_buffer::advance                              (unsigned in
             if (instruction_intent_emulation::lookup_table[variant->instruction.opcode()].emulator(
                     variant->instruction, *this->relevant_monitor, variant) != 0)
             {
-                warnf("waiting follower emulation failed\n");
+                warnf("leader emulation failed\n");
                 return REPLAY_BUFFER_RETURN_ERROR;
             }
 
             variant->regs.rip += variant->instruction.size;
             if (!interaction::write_all_regs(variant->variantpid, &variant->regs))
             {
-                warnf("writing follower regs failed\n");
+                warnf("writing leader regs failed\n");
                 return REPLAY_BUFFER_RETURN_ERROR;
             }
 
@@ -929,8 +999,9 @@ int             replay_buffer::advance                              (unsigned in
     for (int i = 0; i < mvee::numvariants; i++)
         variant_shadows[i] = monitor_map_from->variant_shadows[i];
 }
-                shared_monitor_map_info::shared_monitor_map_info(unsigned long long variant_base, void* monitor_base,
-                                                                 unsigned long long size, bool is_shmat)
+                shared_monitor_map_info::shared_monitor_map_info    (unsigned long long variant_base,
+                                                                     __uint8_t* monitor_base, unsigned long long size,
+                                                                     bool is_shmat)
         : variant_base(variant_base)
         , monitor_base(monitor_base)
         , is_shmat(is_shmat)
@@ -958,7 +1029,7 @@ int                shared_monitor_map_info::setup_shm               ()
             warnf("problem setting up variant local shadow for variant %d - errno: %d\n", variant_num, errno);
             return -1;
         }
-        void* shm_addr = shmat(shmid, nullptr, 0);
+        auto* shm_addr = (__uint8_t*) shmat(shmid, nullptr, 0);
         if (shm_addr == (void*) -1)
         {
             warnf("problem attaching to variant local shadow (shmid: %d) for variant %d - errno: %d\n", shmid,
@@ -980,7 +1051,7 @@ int                shared_monitor_map_info::setup_shm               ()
         warnf("problem setting up bitmap - errno: %d\n", errno);
         return -1;
     }
-    void* shm_addr = shmat(shmid, nullptr, 0);
+    auto* shm_addr = (__uint8_t*) shmat(shmid, nullptr, 0);
     if (shm_addr == (void*) -1)
     {
         warnf("problem attaching to bitmap (shmid: %d) - errno: %d\n", shmid, errno);
@@ -1146,7 +1217,7 @@ shared_monitor_map_info*
                                                                      bool shmat)
 {
     unsigned long long end = variant_base + size;
-    auto monitor_map = new shared_monitor_map_info(variant_base, monitor_base, size, shmat);
+    auto monitor_map = new shared_monitor_map_info(variant_base, (__uint8_t*) monitor_base, size, shmat);
 
 
     if (variant_mappings.empty() || end <= (unsigned long long) variant_mappings.front()->variant_base)
@@ -1276,13 +1347,41 @@ void            shared_memory_bitmap::bitmap_set                    (unsigned lo
 }
 
 
+void            shared_memory_bitmap::bitmap_clear                  (unsigned long long set_count,
+                                                                     __uint8_t* bitmap_base,
+                                                                     unsigned long long offset)
+{
+    if ((offset & 0b111u) + set_count <= 8)
+        ((__uint8_t*) bitmap_base)[offset >> 3u] &=
+                (__uint8_t) ~((0xffu >> (8 - set_count)) << (offset & 0b111u));
+    else
+    {
+        /* locally used variables */
+        unsigned long long iterative_offset = offset;
+        auto iterative_count = (long long) (set_count + (offset & 0b111u));
+
+        /* first one might be middle of a bitmap byte */
+        ((__uint8_t*) bitmap_base)[offset >> 3u] &= (__uint8_t) ~(0xffu << (offset & 0b111u));
+
+        /* there might be some bits left */
+        while ((iterative_count-=8) > 0)
+        {
+            iterative_offset+=8;
+            /* write to bitmap */
+            ((__uint8_t*) bitmap_base)[iterative_offset >> 3u] &= (__uint8_t) ~(0xffu >>
+                    (iterative_count > 8u ? 0 : (unsigned) (8 - iterative_count)));
+        }
+    }
+}
+
+
 bool            shared_memory_bitmap::bitmap_read                   (unsigned long long read_count,
                                                                      const __uint8_t* bitmap_base,
                                                                      unsigned long long offset)
 {
     if ((offset & 0b111u) + read_count <= 8)
         return ((unsigned) (((__uint8_t*) bitmap_base)[offset >> 3u] >> (offset & 0b111u)) &
-            (0xffu >> (unsigned) (8 - read_count))) == 0;
+            (0xffu >> (unsigned) (8 - read_count)));
     /* locally used variables */
     unsigned long long iterative_offset = offset;
     auto iterative_count = (long long) read_count;

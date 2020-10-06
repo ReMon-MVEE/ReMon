@@ -40,21 +40,31 @@ OBTAIN_SHARED_MAPPING_INFO(__size)                                              
 void* __src_or_dst = (void*) ((unsigned long long) mapping_info->monitor_base + offset);                               \
 
 
+#define LOAD_RM_CODE_NO_DEFINE(__size)                                                                                 \
+/* register if mod bits equal 0b11 */                                                                                  \
+if (GET_MOD_CODE((unsigned) modrm) == 0b11u)                                                                           \
+    /* For shared memory emulation, this shouldn't happen */                                                           \
+    return -1;                                                                                                         \
+/* memory reference otherwise, so determine the monitor relevant pointer */                                            \
+OBTAIN_SHARED_MAPPING_INFO(__size)                                                                                     \
+
+
 #define OBTAIN_SHARED_MAPPING_INFO(__size)                                                                             \
 shared_monitor_map_info* mapping_info;                                                                                 \
 unsigned long long offset;                                                                                             \
 if (!(mapping_info = relevant_monitor.set_mmap_table->get_shared_info(                                                 \
         (unsigned long long) instruction.effective_address)))                                                          \
     return UNKNOWN_MEMORY_TERMINATION;                                                                                 \
-if ((offset = shared_memory_determine_offset(mapping_info, (unsigned long long) instruction.effective_address,         \
-        __size)) == (unsigned long long) -1)                                                                           \
+if ((offset = shm_handling::shared_memory_determine_offset(mapping_info,                                               \
+        (unsigned long long) instruction.effective_address, __size)) == (unsigned long long) -1)                       \
     return -1;
 
 
 #define OBTAIN_SHARED_MAPPING_INFO_NO_DEF(__variant_address, __mapping_info, __offset, __size)                         \
 if (!(__mapping_info = relevant_monitor.set_mmap_table->get_shared_info(__variant_address)))                           \
     return UNKNOWN_MEMORY_TERMINATION;                                                                                 \
-if ((__offset = shared_memory_determine_offset(__mapping_info, __variant_address, __size)) == (unsigned long long) -1) \
+if ((__offset = shm_handling::shared_memory_determine_offset(__mapping_info, __variant_address, __size))               \
+        == (unsigned long long) -1)                                                                                    \
     return -1;
 
 
@@ -86,25 +96,14 @@ void* __src_or_dst = &instruction.instruction[instruction.immediate_operand_inde
         8 : (PREFIXES_GRP_THREE_PRESENT(instruction) ? 2 : 4))
 
 
-#define COMPARE_BUFFERS(first, second, size)                                                                           \
-for (int i = 0; i < size; i++)                                                                                         \
-    if (((uint8_t*) first)[i] != ((uint8_t*) second)[i])                                                               \
-        return -1;
-
-
-#define COPY_BUFFER(first, second, size)                                                                               \
-for (int i = 0; i < size; i++)                                                                                         \
-    ((uint8_t*) first)[i] = ((uint8_t*) second)[i];                                                                    \
-
-
 #define REPLAY_BUFFER_ADVANCE                                                                                          \
-if (relevant_monitor.buffer.advance(variant->variant_num) != 0)                                                 \
+if (relevant_monitor.buffer.advance(variant->variant_num) != 0)                                                        \
     return -1;
 
 
 #define GET_BUFFER_RAW(monitor_pointer, size)                                                                          \
 void* buffer;                                                                                                          \
-int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,          \
+int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,                 \
         &buffer, size);                                                                                                \
 if (result < 0)                                                                                                        \
     return result;
@@ -129,11 +128,12 @@ if (result < 0)                                                                 
     return result;                                                                                                     \
 if (result == REPLAY_BUFFER_RETURN_FIRST)                                                                              \
 {                                                                                                                      \
-    COPY_BUFFER(buffer, to_check, size)                                                                                \
+    memcpy(buffer, to_check, size);                                                                                    \
 }                                                                                                                      \
 else                                                                                                                   \
 {                                                                                                                      \
-    COMPARE_BUFFERS(buffer, to_check, size)                                                                            \
+    if (memcmp(buffer, to_check, size))                                                                                \
+        return -1;                                                                                                     \
     REPLAY_BUFFER_ADVANCE                                                                                              \
     return 0;                                                                                                          \
 }
@@ -146,7 +146,7 @@ if (result < 0)                                                                 
     return result;                                                                                                     \
 if (result == REPLAY_BUFFER_RETURN_FIRST)                                                                              \
 {                                                                                                                      \
-    COPY_BUFFER(buffer, monitor_pointer, size)                                                                         \
+    memcpy(buffer, monitor_pointer, size);                                                                             \
 }                                                                                                                      \
 monitor_pointer = buffer;
 
@@ -2197,38 +2197,35 @@ BYTE_EMULATOR_IMPL(0x89)
     {
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
-        LOAD_RM_CODE(destination, GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE)
         LOAD_REG_CODE(source, general_purpose_lookup)
 
         // 64-bit implementation
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            GET_BUFFER_CHECK_OR_FILL(destination, source, 8)
-            uint64_t* typed_destination = (uint64_t*)destination;
-            uint64_t* typed_source = (uint64_t*)source;
-
-            // execute operation
-            *typed_destination = *typed_source;
+            auto* typed_source = (uint64_t*)source;
+            NORMAL_TO_SHARED(
+                    uint64_t,
+                    *typed_destination = *typed_source
+            )
         }
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            GET_BUFFER_CHECK_OR_FILL(destination, source, 2)
-            uint16_t* typed_destination = (uint16_t*)destination;
-            uint16_t* typed_source = (uint16_t*)source;
-
-            // execute operation
-            *typed_destination = *typed_source;
+            auto* typed_source = (uint16_t*)source;
+            NORMAL_TO_SHARED(
+                    uint16_t,
+                    *typed_destination = *typed_source
+            )
         }
         // default 32-bit
         else
         {
-            GET_BUFFER_CHECK_OR_FILL(destination, source, 4)
-            uint32_t* typed_destination = (uint32_t*)destination;
-            uint32_t* typed_source = (uint32_t*)source;
-
-            // execute operation
-            *typed_destination = *typed_source;
+            auto* typed_source = (uint32_t*)source;
+            NORMAL_TO_SHARED(
+                    uint32_t,
+                    *typed_destination = *typed_source
+            )
         }
 
         // no need to write back any registers
@@ -2282,36 +2279,27 @@ BYTE_EMULATOR_IMPL(0x8b)
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
         LOAD_REG_CODE(destination, general_purpose_lookup)
-        LOAD_RM_CODE(source, GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE)
 
         // 64-bit version
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            GET_BUFFER_REPLACE(source, 8)
-            uint64_t* typed_destination = (uint64_t*)destination;
-            uint64_t* typed_source = (uint64_t*)source;
-
-            // execute operation
+            auto* typed_destination = (uint64_t*)destination;
+            NORMAL_FROM_SHARED(__uint64_t)
             *typed_destination = *typed_source;
         }
         // 16-bit version
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            GET_BUFFER_REPLACE(source, 2)
-            uint16_t* typed_destination = (uint16_t*)destination;
-            uint16_t* typed_source = (uint16_t*)source;
-
-            // execute operation
+            auto* typed_destination = (uint16_t*)destination;
+            NORMAL_FROM_SHARED(__uint16_t)
             *typed_destination = *typed_source;
         }
         // 32-bit version
         else
         {
-            GET_BUFFER_REPLACE(source, 4)
-            uint64_t* typed_destination = (uint64_t*)destination;
-            uint32_t* typed_source = (uint32_t*)source;
-
-            // execute operation
+            auto* typed_destination = (uint64_t*)destination;
+            NORMAL_FROM_SHARED(__uint32_t)
             *typed_destination = *typed_source;
         }
 

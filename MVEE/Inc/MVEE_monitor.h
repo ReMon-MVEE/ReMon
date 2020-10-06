@@ -282,6 +282,7 @@ public:
 //
 class monitor
 {
+    friend class shm_handling;
 	friend class mvee;
     friend class instruction_intent_emulation;
     friend class instruction_intent;
