@@ -128,13 +128,13 @@ public:
     struct variant_mapping_info_t
     {
         int                shmid;
-        void*              monitor_base;
+        __uint8_t*         monitor_base;
         unsigned long long variant_base;
     };
 
     unsigned long long
                 variant_base;
-    void*       monitor_base;
+    __uint8_t*  monitor_base;
     bool        is_shmat;
     size_t      size;
     std::vector<variant_mapping_info_t>
@@ -143,7 +143,7 @@ public:
                 leader_bitmap;
 
                 shared_monitor_map_info     (shared_monitor_map_info* monitor_map_from);
-                shared_monitor_map_info     (unsigned long long variant_base, void* monitor_base,
+                shared_monitor_map_info     (unsigned long long variant_base, __uint8_t* monitor_base,
                                              unsigned long long size, bool is_shmat);
                 ~shared_monitor_map_info    ();
 

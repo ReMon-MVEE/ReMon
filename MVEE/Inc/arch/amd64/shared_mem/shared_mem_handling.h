@@ -530,39 +530,8 @@ public:
 
 
 // =====================================================================================================================
-//      translation record
-// =====================================================================================================================
-struct translation_record
-{
-    // addresses in variant address space
-    void*           variant_base;
-    void*           variant_end;
-
-    // index to actual memory area as mapped in monitor
-    unsigned long   memory_id;
-};
-
-
-// =====================================================================================================================
 //      intent replaying data
 // =====================================================================================================================
-/*
-struct intent_replay
-{
-    __uint8_t       instruction[MAX_INSTRUCTION_SIZE];
-    __uint8_t       instruction_size;
-    __uint8_t       extra;
-    unsigned long long
-                    data_size;
-    __uint8_t*      data;
-    __uint8_t       data_buffer[REPLAY_DATA_BUFFER_SIZE];
-    unsigned long long
-                    result_size;
-    __uint8_t*      result;
-    __uint8_t       result_buffer[REPLAY_DATA_BUFFER_SIZE];
-    void*           monitor_address;
-};
-*/
 
 struct replay_entry
 {
@@ -590,54 +559,6 @@ struct replay_state
 // =====================================================================================================================
 // intent replaying buffer
 // =====================================================================================================================
-/*
-#ifndef INTENT_REPLAY_BUFFER_SIZE
-#define INTENT_REPLAY_BUFFER_SIZE               10
-#endif
-class intent_replay_buffer
-{
-private:
-    intent_replay   buffer[INTENT_REPLAY_BUFFER_SIZE] = {};
-    unsigned int    variant_count;
-    int*            variant_indexes;
-    monitor*        relevant_monitor;
-
-public:
-                    intent_replay_buffer                            (monitor* relevant_monitor, int variant_count);
-                    ~intent_replay_buffer                           ();
-
-    int             continue_access                                 (unsigned int variant_num);
-    int             maybe_resume_leader                             ();
-    int             access_data                                     (unsigned int variant_num,
-                                                                     instruction_intent* instruction, __uint8_t** data,
-                                                                     unsigned long long data_size,
-                                                                     void* monitor_pointer,
-                                                                     __uint8_t** result = nullptr,
-                                                                     unsigned long long result_size = 0,
-                                                                     unsigned int extra_options=0);
-    int             advance                                         (unsigned int variant_num);
-    void            print_count                                     ();
-
-     *
-     * +-------------+---+---+
-     * | X X X X X X | _ | _ |
-     * +-------------+---+---+
-     *  \             \   \
-     *   \             \   +-> leader waiting
-     *    \             +-> variant waiting
-     *     +-> unused
-     *
-     * | 0x00 | leader waiting  | set if the leader is currently waiting to resume intent handling. This value should
-     * |      |                 | checked after a variant has used the current slot in the buffer, after which a test
-     * |      |                 | has to be done to see if all variants are caught up. Only then can the leader resume.
-     * |      |                 |
-     * | 0x01 | variant waiting | set if a variant is currently waiting to resume intent handling
-     * | 0x02 | second mem op   | result pointer references a second pointer to a memory mapping
-     *
-    __uint8_t       extra;
-};
-*/
-
 class replay_buffer
 {
 private:
@@ -651,9 +572,6 @@ private:
     __uint8_t       state;
     monitor*        relevant_monitor;
 
-    // helper methods --------------------------------------------------------------------------------------------------
-    // int          continue_variant                    (unsigned int variant_num);
-    // helper methods --------------------------------------------------------------------------------------------------
 public:
     // construction ----------------------------------------------------------------------------------------------------
                     replay_buffer                       (monitor* relevant_monitor,
@@ -673,27 +591,52 @@ public:
 // =====================================================================================================================
 //      manipulation for bitmap and shadow
 // =====================================================================================================================
-#define NORMAL_TO_SHARED(__operation, __size)                                                                          \
-if (!variant.variant_num)                                                                                              \
+#define NORMAL_TO_SHARED(__cast, __operation)                                                                          \
+__cast* typed_destination;                                                                                             \
+int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, mapping_info->monitor_base + offset,          \
+        instruction, nullptr, 0);                                                                                      \
+if (result < 0)                                                                                                        \
+    return result;                                                                                                     \
+                                                                                                                       \
+if (!variant->variant_num)                                                                                             \
 {                                                                                                                      \
-    typed_destination = shared_base + offset;                                                                          \
+    typed_destination = (__cast*) (mapping_info->monitor_base + offset);                                               \
     __operation;                                                                                                       \
-    shared_memory_bitmap(__size, bitmap_base, offset);                                                                 \
+    shared_memory_bitmap::bitmap_set(sizeof(__cast), mapping_info->leader_bitmap.monitor_base, offset);                \
 }                                                                                                                      \
-typed_destination = shared_base + offset;                                                                              \
+typed_destination = (__cast*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);             \
 __operation;
 
 
-unsigned long long
-                shared_memory_determine_offset                      (shared_monitor_map_info* monitor_map,
-                                                                     unsigned long long variant_address,
-                                                                     unsigned long long access_size=0);
+#define NORMAL_FROM_SHARED(__cast)                                                                                     \
+__cast* typed_source;                                                                                                  \
+int result = shm_handling::determine_source_from_shared_normal(variant, relevant_monitor, instruction,                 \
+        (void**)&typed_source, mapping_info, offset, sizeof(__cast));                                                  \
+if (result < 0)                                                                                                        \
+    return result;                                                                                                     \
 
+
+class shm_handling
+{
+public:
+    static unsigned long long
+                shared_memory_determine_offset          (shared_monitor_map_info* monitor_map,
+                                                         unsigned long long variant_address,
+                                                         unsigned long long access_size=0);
+    static int  determine_source_from_shared_normal     (variantstate* variant, monitor &relevant_monitor,
+                                                         instruction_intent &instruction, void** source,
+                                                         shared_monitor_map_info* mapping_info,
+                                                         unsigned long long offset, unsigned long long size);
+};
 
 namespace shared_memory_bitmap
 {
-    void bitmap_set(unsigned long long set_count, __uint8_t* bitmap_base, unsigned long long offset);
-    bool bitmap_read(unsigned long long read_count, const __uint8_t* bitmap_base, unsigned long long offset);
+    void        bitmap_set                              (unsigned long long set_count, __uint8_t* bitmap_base,
+                                                         unsigned long long offset);
+    void        bitmap_clear                            (unsigned long long set_count, __uint8_t* bitmap_base,
+                                                         unsigned long long offset);
+    bool        bitmap_read                             (unsigned long long read_count, const __uint8_t* bitmap_base,
+                                                         unsigned long long offset);
 }
 
 
@@ -788,6 +731,5 @@ public:
     bool release(bool restore_registers=true);
 };
 #endif
-
 
 #endif //REMON_SHARED_MEM_HANDLING_H
