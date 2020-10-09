@@ -138,7 +138,7 @@ void mmap_region_info::print_region_info(const char* log_prefix, void (*logfunc)
 
     std::stringstream stream;
     if (shadow)
-        stream << " - [ " << std::hex << shadow->monitor_base << " ; " << std::hex <<
+        stream << " - [ " << std::hex << (unsigned long long) shadow->monitor_base << " ; " << std::hex <<
                 ((unsigned long long) shadow->monitor_base + shadow->size) << " )";
     else
         stream.str("");
