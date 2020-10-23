@@ -451,6 +451,42 @@ void            instruction_tests::test_0x87                        ()
                         ((__uint8_t*) &orig_src) + DWORD_SIZE, QWORD_SIZE - DWORD_SIZE) == 0);
     // 32-bit ----------------------------------------------------------------------------------------------------------
 
+
+    // pointer to shared
+    // 64-bit ----------------------------------------------------------------------------------------------------------
+    sink_src = (uint64_t)buffers::shared_sink;
+    *(__uint64_t*) buffers::shared_sink = orig_shm;
+    __asm
+    (
+            ".intel_syntax noprefix;"
+            "mov r15, QWORD PTR [rdx];"
+            "lock xchg QWORD PTR [rax], r15;"
+            "mov QWORD PTR [rdx], r15;"
+            ".att_syntax;"
+            :
+            : "a" (buffers::shared_sink), "d" (&sink_src)
+            : "r15"
+    );
+    TEST_RESULT("xchg m64, r64 - pointer written to shared",
+                (__uint64_t) sink_src == (__uint64_t) orig_shm &&
+                *(__uint64_t*) buffers::shared_sink == (uint64_t)buffers::shared_sink);
+    sink_src = orig_src;
+    __asm
+    (
+            ".intel_syntax noprefix;"
+            "mov r15, QWORD PTR [rdx];"
+            "lock xchg QWORD PTR [rax], r15;"
+            "mov QWORD PTR [rdx], r15;"
+            ".att_syntax;"
+            :
+            : "a" (buffers::shared_sink), "d" (&sink_src)
+            : "r15"
+    );
+    TEST_RESULT("xchg m64, r64 - pointer read from shared",
+                (__uint64_t) sink_src == (uint64_t)buffers::shared_sink &&
+                *(__uint64_t*) buffers::shared_sink == orig_src);
+    // 64-bit ----------------------------------------------------------------------------------------------------------
+
     *(__uint64_t*) buffers::shared_sink = 0x00;
     FINISH_TEST("xchg tests successful!", "xchg tests failed!");
 }
