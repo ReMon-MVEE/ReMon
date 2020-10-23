@@ -613,7 +613,7 @@ __cast* typed_source;                                                           
 int result = shm_handling::determine_source_from_shared_normal(variant, relevant_monitor, instruction,                 \
         (void**)&typed_source, mapping_info, offset, sizeof(__cast));                                                  \
 if (result < 0)                                                                                                        \
-    return result;                                                                                                     \
+    return result;
 
 
 class shm_handling

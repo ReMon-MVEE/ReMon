@@ -945,7 +945,7 @@ nobacktrace:
 	// shut us down if we still have running variants
     if (!have_running_variants)
 	{
-        pthread_exit(NULL);
+        pthread_exit(nullptr);
 	}
     else
 	{
@@ -2245,7 +2245,8 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                                         - accessed_region->region_base_address,
                                    decode_address_tag(siginfo.si_addr, variant));
                         }
-                        set_mmap_table->print_mmap_table(debugf);
+                        // set_mmap_table->print_mmap_table(debugf);
+                        log_backtraces();
 
                         shutdown(false);
                         return;

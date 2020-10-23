@@ -377,10 +377,12 @@ public:
     // Shared memory
     //
     int                shadow_map                   (variantstate* variant, fd_info* info,
-                                                     unsigned long long variant_base, shared_monitor_map_info** shadow,
+                                                     unsigned long long variant_base,
+                                                     shared_monitor_map_info** shadow,
                                                      size_t size, int protection, int flags, int offset);
     int                shadow_shmat                 (variantstate* variant, int shmid,
-                                                     unsigned long long variant_base, shared_monitor_map_info** shadow,
+                                                     unsigned long long variant_base,
+                                                     shared_monitor_map_info** shadow,
                                                      unsigned long long size);
     shared_monitor_map_info*
                        init_shared_info             (unsigned long long variant_base, void* monitor_base,
