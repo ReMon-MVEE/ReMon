@@ -31,12 +31,7 @@ uint8_t modrm = instruction[instruction.effective_opcode_index + 1];
 
 
 #define LOAD_RM_CODE(__src_or_dst, __size)                                                                             \
-/* register if mod bits equal 0b11 */                                                                                  \
-if (GET_MOD_CODE((unsigned) modrm) == 0b11u)                                                                           \
-    /* For shared memory emulation, this shouldn't happen */                                                           \
-    return -1;                                                                                                         \
-/* memory reference otherwise, so determine the monitor relevant pointer */                                            \
-OBTAIN_SHARED_MAPPING_INFO(__size)                                                                                     \
+LOAD_RM_CODE_NO_DEFINE(__size)                                                                                         \
 void* __src_or_dst = (void*) ((unsigned long long) mapping_info->monitor_base + offset);                               \
 
 
@@ -2065,6 +2060,48 @@ BYTE_EMULATOR_IMPL(0x83)
 
 
 /* Valid in first round */
+#define EXCHANGE_TO_SHARED(__cast, __operation)                                                                        \
+auto* typed_source = (__cast*)source;                                                                                  \
+auto* typed_destination = (__cast*)destination;                                                                        \
+                                                                                                                       \
+if (!variant->variant_num)                                                                                             \
+{                                                                                                                      \
+    unsigned long long requested_size = 0;                                                                             \
+    if(!shared_memory_bitmap::bitmap_read(sizeof(__cast), mapping_info->leader_bitmap.monitor_base, offset))           \
+    {                                                                                                                  \
+        requested_size = sizeof(__cast);                                                                               \
+        shared_memory_bitmap::bitmap_set(sizeof(__cast), mapping_info->leader_bitmap.monitor_base, offset);            \
+    }                                                                                                                  \
+    else if (*typed_destination != *(__cast*)(mapping_info->variant_shadows[0].monitor_base + offset))                 \
+        requested_size = sizeof(__cast);                                                                               \
+    void* buffer = nullptr;                                                                                            \
+    int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, destination, instruction, &buffer,        \
+            requested_size);                                                                                           \
+    if (result < 0)                                                                                                    \
+        return result;                                                                                                 \
+    __cast orig_source = *typed_source;                                                                                \
+    __operation;                                                                                                       \
+    *(__cast*)(mapping_info->variant_shadows[0].monitor_base + offset) = orig_source;                                  \
+    if (buffer)                                                                                                        \
+        *(__cast*)buffer = *typed_source;                                                                              \
+                                                                                                                       \
+    shared_memory_bitmap::bitmap_set(sizeof(__cast), mapping_info->leader_bitmap.monitor_base, offset);                \
+}                                                                                                                      \
+else                                                                                                                   \
+{                                                                                                                      \
+    void* buffer = nullptr;                                                                                            \
+    int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, destination, instruction, &buffer, 0);    \
+    if (result < 0)                                                                                                    \
+        return result;                                                                                                 \
+                                                                                                                       \
+    typed_destination = (__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);          \
+    if (buffer)                                                                                                        \
+        *typed_destination = *(__cast*)buffer;                                                                         \
+                                                                                                                       \
+    __operation;                                                                                                       \
+}
+
+
 BYTE_EMULATOR_IMPL(0x87)
 {
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
@@ -2077,74 +2114,23 @@ BYTE_EMULATOR_IMPL(0x87)
         // 64-bit
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            GET_BUFFER_RAW(destination, 2 * sizeof(uint64_t))
-            auto orig_src = (uint64_t*) buffer;
-            auto repl_src = ((uint64_t*) buffer) + 1;
-            uint64_t* typed_destination = (uint64_t*)destination;
-            uint64_t* typed_source = (uint64_t*)source;
-
-            if (result != REPLAY_BUFFER_RETURN_FIRST)
-            {
-                if (*orig_src != *typed_source)
-                    return -1;
-
-                *typed_source = *repl_src;
-
-                REPLAY_BUFFER_ADVANCE
-                return 0;
-            }
-
-            *orig_src = *typed_source;
-            __atomic_exchange(typed_destination, typed_source, typed_source, __ATOMIC_ACQ_REL);
-            *repl_src = *typed_source;
+            EXCHANGE_TO_SHARED(uint64_t ,
+                               __atomic_exchange(typed_destination, typed_source, typed_source, __ATOMIC_ACQ_REL)
+            )
         }
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            GET_BUFFER_RAW(destination, 2 * sizeof(uint16_t))
-            auto orig_src = (uint16_t*) buffer;
-            auto repl_src = ((uint16_t*) buffer) + 1;
-            uint16_t* typed_destination = (uint16_t*)destination;
-            uint16_t* typed_source = (uint16_t*)source;
-
-            if (result != REPLAY_BUFFER_RETURN_FIRST)
-            {
-                if (*orig_src != *typed_source)
-                    return -1;
-
-                *typed_source = *repl_src;
-
-                REPLAY_BUFFER_ADVANCE
-                return 0;
-            }
-
-            *orig_src = *typed_source;
-            __atomic_exchange(typed_destination, typed_source, typed_source, __ATOMIC_ACQ_REL);
-            *repl_src = *typed_source;
+            EXCHANGE_TO_SHARED(uint16_t ,
+                    __atomic_exchange(typed_destination, typed_source, typed_source, __ATOMIC_ACQ_REL)
+            )
         }
         // 32-bit
         else
         {
-            GET_BUFFER_RAW(destination, 2 * sizeof(uint32_t))
-            auto orig_src = (uint32_t*) buffer;
-            auto repl_src = ((uint32_t*) buffer) + 1;
-            uint32_t* typed_destination = (uint32_t*)destination;
-            uint32_t* typed_source = (uint32_t*)source;
-
-            if (result != REPLAY_BUFFER_RETURN_FIRST)
-            {
-                if (*orig_src != *typed_source)
-                    return -1;
-
-                *typed_source = *repl_src;
-
-                REPLAY_BUFFER_ADVANCE
-                return 0;
-            }
-
-            *orig_src = *typed_source;
-            __atomic_exchange(typed_destination, typed_source, typed_source, __ATOMIC_ACQ_REL);
-            *repl_src = *typed_source;
+            EXCHANGE_TO_SHARED(uint32_t,
+                    __atomic_exchange(typed_destination, typed_source, typed_source, __ATOMIC_ACQ_REL)
+            )
         }
 
         // no need to write back registers here
