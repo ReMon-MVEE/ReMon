@@ -108,48 +108,6 @@ __uint8_t       instruction_intent::opcode                          ()
     return instruction[effective_opcode_index];
 }
 
-/*
-shared_monitor_map_info*
-                instruction_intent::determine_monitor_pointer       (monitor& relevant_monitor, variantstate* variant,
-                                                                     void* variant_address, unsigned long long &offset,
-                                                                     unsigned long long access_size)
-{
-    // translate variant address to monitor address
-    shared_monitor_map_info* monitor_map =
-            relevant_monitor.set_mmap_table->get_shared_info((unsigned long long) variant_address);
-    if (!monitor_map)
-    {
-        debugf("variant %d address %lx does not have an associated monitor mapping\n",
-              variant->variant_num, (unsigned long) variant_address);
-        return NO_REGION_INFO;
-    }
-
-    if ((unsigned long long) variant_address >=
-            (monitor_map->variant_base + monitor_map->size) ||
-            (unsigned long long) variant_address < monitor_map->variant_base)
-    {
-        warnf("No offset can be calculated.\n");
-        warnf("Variant effective address 0x%p does not fall between mapping in variant: [0x%p, 0x%p).\n",
-              variant_address, (void*) monitor_map->variant_base,
-              (void*) (monitor_map->variant_base + monitor_map->size));
-        return -1;
-    }
-
-    if (access_size > 0 &&
-            ((unsigned long long) variant_address + access_size) > monitor_map->variant_base + monitor_map->size)
-    {
-        warnf("Instruction, %p + %llx, will go out of range of shared mapping.\n",
-              variant_address, access_size);
-        return -1;
-    }
-
-    offset = (unsigned long long) variant_address - monitor_map->variant_base;
-
-    // return ok
-    return 0;
-}
-*/
-
 unsigned long long
                 shm_handling::shared_memory_determine_offset        (shared_monitor_map_info* monitor_map,
                                                                      unsigned long long variant_address,
@@ -180,7 +138,7 @@ int             shm_handling::determine_source_from_shared_normal   (variantstat
     {
         void* monitor_pointer = (void*) (mapping_info->monitor_base + offset);
         void* variant_shadow  = (void*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);
-        /* area of memory is known to be written to be variants */
+        /* area of memory is known to be written to by variants */
         if (shared_memory_bitmap::bitmap_read(size, mapping_info->leader_bitmap.monitor_base, offset))
         {
             /* If area does not contain same content anymore, we detect it as bi-directional shared memory. */
@@ -811,7 +769,7 @@ int             replay_buffer::obtain_buffer                        (unsigned in
                 current_entry->instruction[i] = instruction.instruction[i];
             current_entry->instruction_size = instruction.size;
 
-            if (requested)
+            if (requested && requested_size > 0)
             {
                 if (requested_size > REPLAY_ENTRY_STATIC_BUFFER_SIZE)
                 {
@@ -1016,6 +974,7 @@ int             replay_buffer::advance                              (unsigned in
 
                 shared_monitor_map_info::~shared_monitor_map_info()
 {
+    cleanup_shm();
 }
 
 
@@ -1166,7 +1125,7 @@ int             mmap_table::shadow_map                              (variantstat
 #ifdef JNS_DEBUG
     debugf("shadow mapping ====================================\n");
     debugf("file:                  %s\n", info->paths[0].c_str());
-    debugf("shadow base:           %p\n", (*shadow)->monitor_base);
+    debugf("shadow base:           %p\n", (void*) (*shadow)->monitor_base);
     debugf("shadow size:           %zu\n", (*shadow)->size);
     debugf("===================================================\n");
 #endif
@@ -1202,7 +1161,7 @@ int             mmap_table::shadow_shmat                            (variantstat
 #ifdef JNS_DEBUG
     debugf("shadow mapping ====================================\n");
     debugf("shmid:                 %d\n", shmid);
-    debugf("shadow base:           %p\n", (*shadow)->monitor_base);
+    debugf("shadow base:           %p\n", (void*) (*shadow)->monitor_base);
     debugf("shadow size:           %zu\n", (*shadow)->size);
     debugf("===================================================\n");
 #endif
@@ -1261,12 +1220,11 @@ int             mmap_table::munmap_variant_shadow_region            (shared_moni
     {
         if ((*iter)->variant_base == monitor_map->variant_base)
         {
+            delete (*iter);
             variant_mappings.erase(iter);
             break;
         }
     }
-
-    monitor_map->cleanup_shm();
     return 0;
 }
 

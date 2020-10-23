@@ -228,6 +228,9 @@ mmap_table::mmap_table(const mmap_table& parent)
 
 mmap_table::~mmap_table()
 {
+    for (auto iter: variant_mappings)
+        delete iter;
+    variant_mappings.clear();
     truncate_table();
 }
 
