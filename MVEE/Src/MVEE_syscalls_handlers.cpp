@@ -5526,6 +5526,8 @@ POSTCALL(shmat)
         current_shadow->leader_bitmap.variant_base = addresses[0];
         shm_setup_state = SHM_SETUP_IDLE;
         current_shadow = nullptr;
+        for (int i = 1; i < mvee::numvariants; i++)
+            call_postcall_set_variant_result(i, -1);
     }
 	else
 	{
