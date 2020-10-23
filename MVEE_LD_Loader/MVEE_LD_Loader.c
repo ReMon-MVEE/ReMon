@@ -503,7 +503,8 @@ int main (int argc, char** argv, char** envp)
 {
 #ifdef MVEE_EMULATE_CPUID
     // disable CPUID execution for this process
-    syscall(__NR_arch_prctl, ARCH_SET_CPUID, 0);
+    if (syscall(__NR_arch_prctl, ARCH_SET_CPUID, 0) == -1)
+        printf("CPUID faulting failed to disable\n");
 #endif
 
     int           interp_fd = 0;
