@@ -2055,8 +2055,8 @@ bool acquire_shm_protected_memory_for_access::release(bool restore_registers)
 
     return true;
 }
-
 #endif
+
 
 void* decode_address_tag(void* address, const variantstate* variant)
 {
@@ -2078,3 +2078,99 @@ unsigned long encode_address_tag(unsigned long address, const variantstate* vari
 {
   return decode_address_tag(address, variant);
 }
+
+
+#ifdef MVEE_SHM_INSTRUCTION_ACCESS_DEBUGGING
+void            monitor::add_instruction                            (int variant_num, instruction_intent* intent)
+{
+    if (this->instruction_list[variant_num].size() >= 250)
+        this->instruction_list[variant_num].erase(this->instruction_list[variant_num].begin());
+    monitor::instruction_info_t info = {
+            { 0 },
+            intent->size,
+            (unsigned long) intent->instruction_pointer,
+            (unsigned long) intent->effective_address,
+            (unsigned long) -1,
+            false,
+            (unsigned long) -1,
+            false,
+            (unsigned long) -1,
+            (unsigned long) -1
+    };
+    memcpy(info.instruction, intent->instruction, intent->size);
+    instruction_list[variant_num].emplace_back(info);
+}
+
+
+void            monitor::print_instruction_list                     ()
+{
+    std::stringstream ss;
+    for (unsigned long variant = 0; variant < instruction_list.size(); variant++)
+    {
+        debugf("===================================================================================================\n");
+        debugf("variant %ld\n", variant);
+        debugf("\n");
+        for (unsigned long instruction = 0; instruction < instruction_list[variant].size(); instruction++)
+        {
+            debugf("instruction %ld\n", instruction);
+            ss.str("");
+            for (unsigned long i = 0; i < instruction_list[variant][instruction].size; i++)
+                ss << ((unsigned long long) instruction_list[variant][instruction].instruction[i] > 0xf ? "" : "0")
+                        << std::hex << (unsigned long long) instruction_list[variant][instruction].instruction[i]
+                        << ((i + 1 == instruction_list[variant][instruction].size) ? "" : " - ");
+            debugf(" > instruction:         %s\n", ss.str().c_str());
+            debugf(" > instruction pointer: %p\n", (void*) instruction_list[variant][instruction].instruction_pointer);
+            debugf(" > faulting address:    %p\n", (void*) instruction_list[variant][instruction].faulting_address);
+            debugf(" > source pointer:      %p\n", (void*) instruction_list[variant][instruction].src_ptr);
+            debugf(" > destination pointer: %p\n", (void*) instruction_list[variant][instruction].dst_ptr);
+            debugf(" > source:              %lx\n", instruction_list[variant][instruction].src);
+            debugf(" > destination:         %lx\n", instruction_list[variant][instruction].dst);
+        }
+        debugf("===================================================================================================\n");
+    }
+    debugf("===================================================================================================\n");
+    debugf("\n");
+}
+
+
+void            monitor::set_instruction_src_ptr                    (int variant_num, unsigned long src_ptr,
+                                                                     unsigned long src)
+{
+    if (instruction_list[variant_num].empty())
+        return;
+    instruction_list[variant_num].back().src_ptr = src_ptr;
+    instruction_list[variant_num].back().src_reg = false;
+    instruction_list[variant_num].back().src = src;
+}
+
+
+void            monitor::set_instruction_dst_ptr                    (int variant_num, unsigned long dst_ptr,
+                                                                     unsigned long dst)
+{
+    if (instruction_list[variant_num].empty())
+        return;
+    instruction_list[variant_num].back().dst_ptr = dst_ptr;
+    instruction_list[variant_num].back().dst_reg = false;
+    instruction_list[variant_num].back().dst = dst;
+}
+
+
+void            monitor::set_instruction_src_reg                    (int variant_num, unsigned long src)
+{
+    if (instruction_list[variant_num].empty())
+        return;
+    instruction_list[variant_num].back().src_ptr = (unsigned long) -1;
+    instruction_list[variant_num].back().src_reg = true;
+    instruction_list[variant_num].back().src = src;
+}
+
+
+void            monitor::set_instruction_dst_reg                    (int variant_num, unsigned long dst)
+{
+    if (instruction_list[variant_num].empty())
+        return;
+    instruction_list[variant_num].back().dst_ptr = (unsigned long) -1;
+    instruction_list[variant_num].back().dst_reg = true;
+    instruction_list[variant_num].back().dst = dst;
+}
+#endif

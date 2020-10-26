@@ -298,18 +298,18 @@ public:
     // Public interface for the MVEE logger
     // *************************************************************************
 
-	// 
+	//
     // Returns true if the logf function should log to this monitor's monitor
     // log
-	// 
+	//
     bool is_logging_enabled                  ();
 
-	// 
+	//
 	// Returns true if this monitor's variants are shutting down
 	//
     bool is_group_shutting_down              ();
 
-	// 
+	//
 	// Implemented in MVEE_logging.cpp. Logs basic information about this
 	// monitor and the variants it's monitoring.
 	//
@@ -333,21 +333,21 @@ public:
 
 	//
 	// Get the process ids of the variant threads monitored by this monitor
-	// 
+	//
     std::vector<pid_t>
           getpids                             ();
 
-	// 
+	//
 	// Calls pthread_join on the specified monitor's pthread_t object
 	//
     void  join_thread                         ();
 
-	// 
+	//
 	// Get the Task Group ID of the master variant monitored by this monitor
 	//
     pid_t get_mastertgid                      ();
 
-	// 
+	//
 	// Sets the should_check_multithread_state flag for this monitor, indicating
 	// that it should check if it's still monitoring a multi-threaded process
 	// upon the next opportunity. We use this mechanism to dynamically
@@ -357,12 +357,12 @@ public:
 
 	// *************************************************************************
 	// Scheduling support
-	// ************************************************************************* 
+	// *************************************************************************
 
 	//
 	// Returns the logical CPU core id of the core to which the master variant
 	// thread was assigned (if any)
-	// 
+	//
 	int   get_master_core                     ();
 
 	// *************************************************************************
@@ -379,7 +379,7 @@ public:
     // System Call Handlers
 	// *************************************************************************
 
-	// 
+	//
 	// Dummy functions called when we don't have a handler for a specific
 	// syscall
 	//
@@ -388,7 +388,7 @@ public:
 	void log_donthave                        (int variantnum);
 	void log_dontneed                        (int variantnum);
 
-	// 
+	//
 	// Syscall handler logging helper
 	//
 	std::string      call_get_variant_pidstr (int variantnum);
@@ -403,7 +403,7 @@ public:
     // Constructors/Destructors
 	// *************************************************************************
 
-	// 
+	//
 	// Constructor used for the primary monitor thread (i.e. the one that attaches
 	// to the initial variant processes)
 	//
@@ -416,6 +416,27 @@ public:
     monitor(monitor* parent_monitor, bool shares_fd_table=false, bool shares_mmap_table=false, bool shares_sighand_table=false, bool shares_tgid=false);
     ~monitor();
 
+    // *************************************************************************
+    // shared memory debugging stuff
+    // *************************************************************************
+
+
+#ifdef MVEE_SHM_INSTRUCTION_ACCESS_DEBUGGING
+#define SET_INSTRUCTION_SRC_PTR(__src_ptr, __src, __cast)                                                              \
+relevant_monitor.set_instruction_src_ptr(variant->variant_num, (unsigned long) __src_ptr, *(__cast*) __src);
+#define SET_INSTRUCTION_DST_PTR(__dst_ptr, __dst, __cast)                                                              \
+relevant_monitor.set_instruction_dst_ptr(variant->variant_num, (unsigned long) __dst_ptr, *(__cast*) __dst);
+#define SET_INSTRUCTION_SRC_REG(__src, __cast)                                                                         \
+relevant_monitor.set_instruction_src_reg(variant->variant_num, *(__cast*) __src);
+#define SET_INSTRUCTION_DST_REG(__dst, __cast)                                                                         \
+relevant_monitor.set_instruction_dst_reg(variant->variant_num, *(__cast*) __dst);
+    void             add_instruction                     (int variant_num, instruction_intent* intent);
+    void             print_instruction_list              ();
+    void             set_instruction_src_ptr             (int variant_num, unsigned long src_ptr, unsigned long src);
+    void             set_instruction_dst_ptr             (int variant_num, unsigned long dst_str, unsigned long dst);
+    void             set_instruction_src_reg             (int variant_num, unsigned long src);
+    void             set_instruction_dst_reg             (int variant_num, unsigned long dst);
+#endif
 private:
 
 	// *************************************************************************
@@ -1163,6 +1184,23 @@ private:
 
     int                               shm_setup_state;
     shared_monitor_map_info*          current_shadow;
+
+#ifdef MVEE_SHM_INSTRUCTION_ACCESS_DEBUGGING
+    struct instruction_info_t
+    {
+        uint8_t instruction [15];
+        unsigned long size;
+        unsigned long instruction_pointer;
+        unsigned long faulting_address;
+        unsigned long src_ptr;
+        bool src_reg;
+        unsigned long dst_ptr;
+        bool dst_reg;
+        unsigned long src;
+        unsigned long dst;
+    };
+    std::vector<std::vector<instruction_info_t>> instruction_list;
+#endif
     // shared memory ===================================================================================================
 };
 
