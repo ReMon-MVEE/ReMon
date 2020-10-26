@@ -201,6 +201,12 @@ void monitor::init()
 
     pthread_mutex_init(&monitor_lock, NULL);
     pthread_cond_init(&monitor_cond, NULL);
+
+#ifdef MVEE_SHM_INSTRUCTION_ACCESS_DEBUGGING
+    instruction_list = std::vector<std::vector<monitor::instruction_info_t>>();
+    for (int i = 0; i < mvee::numvariants; i++)
+        instruction_list.emplace_back(std::vector<monitor::instruction_info_t>());
+#endif
 }
 
 monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap_table, bool shares_sighand_table, bool shares_tgid)
