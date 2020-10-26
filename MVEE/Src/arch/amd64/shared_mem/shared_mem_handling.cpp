@@ -133,14 +133,14 @@ int             shm_handling::determine_source_from_shared_normal   (variantstat
                                                                      unsigned long long offset,
                                                                      unsigned long long size)
 {
+    void* monitor_pointer = (void*) (mapping_info->monitor_base + offset);
     /* leader variant case */
     if (!variant->variant_num)
     {
-        void* monitor_pointer = (void*) (mapping_info->monitor_base + offset);
-        void* variant_shadow  = (void*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);
         /* area of memory is known to be written to by variants */
         if (shared_memory_bitmap::bitmap_read(size, mapping_info->leader_bitmap.monitor_base, offset))
         {
+            void* variant_shadow  = (void*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);
             /* If area does not contain same content anymore, we detect it as bi-directional shared memory. */
             /* In this case we take the data from the shared memory segment. */
             if (memcmp(monitor_pointer, variant_shadow, size) != 0)
@@ -168,9 +168,8 @@ int             shm_handling::determine_source_from_shared_normal   (variantstat
         }
         else
         {
-            int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num,
-                    (void*) (mapping_info->monitor_base + offset),
-                    instruction, source, size);
+            int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,
+                    source, size);
             if (result < 0)
                 return result;
             memcpy(*source, monitor_pointer, size);
@@ -179,9 +178,8 @@ int             shm_handling::determine_source_from_shared_normal   (variantstat
     /* followers */
     else
     {
-        int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num,
-                (void*) (mapping_info->monitor_base + offset),
-                instruction, source, 0);
+        int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,
+                source, 0);
         if (result < 0)
             return result;
 
@@ -566,18 +564,22 @@ int             intent_replay_buffer::advance                       (unsigned in
     this->state            = 0;
     this->relevant_monitor = relevant_monitor;
 
+    passed_mask = 0;
+    for (int i = 0; i < mvee::numvariants - 1; i++)
+        passed_mask |= (1u<<(unsigned)i);
+
     // set default values
     for (unsigned int i = 0; i < this->buffer_size; i++)
     {
-        this->buffer[i].entry_state     = REPLAY_ENTRY_EMPTY_STATE;
+        this->buffer[i].passed          = this->passed_mask;
         this->buffer[i].buffer          = this->buffer[i].static_buffer;
-        this->buffer[i].variants_passed = this->variant_count;
     }
     for (unsigned int i = 0; i < this->variant_count; i++)
     {
         this->variant_states[i].state         = REPLAY_STATE_RUNNING;
         this->variant_states[i].current_index = 0;
     }
+
 }
 
 
@@ -759,10 +761,10 @@ int             replay_buffer::obtain_buffer                        (unsigned in
     replay_state* current_state = &this->variant_states[variant_num];
     replay_entry* current_entry = &this->buffer[current_state->current_index];
 
-    if (variant_num == 0)
+    if (!variant_num)
     {
         // entry currently empty
-        if (current_entry->entry_state == REPLAY_ENTRY_EMPTY_STATE)
+        if (current_entry->passed == this->passed_mask)
         {
             // fill entry
             for (int i = 0; i < instruction.size; i++)
@@ -792,8 +794,6 @@ int             replay_buffer::obtain_buffer                        (unsigned in
             }
 
             current_entry->monitor_pointer = monitor_pointer;
-            current_entry->variants_passed = 0;
-            current_entry->entry_state     = REPLAY_ENTRY_FILLED_STATE;
 
             return REPLAY_BUFFER_RETURN_FIRST;
         }
@@ -808,18 +808,13 @@ int             replay_buffer::obtain_buffer                        (unsigned in
     else
     {
         // entry currently empty
-        if (current_entry->entry_state == REPLAY_ENTRY_EMPTY_STATE)
-        {
-            this->state |= REPLAY_BUFFER_VARIANTS_WAITING;
-            current_state->state = REPLAY_STATE_WAITING;
-            return REPLAY_BUFFER_RETURN_WAIT;
-        }
-        else
+        if (!(current_entry->passed & (1u << (variant_num - 1))))
         {
             // compare monitor pointer
             if (current_entry->monitor_pointer != monitor_pointer)
             {
-                warnf("monitor_pointer differs\n");
+                warnf("monitor_pointer differs | leader %p - variant %d %p\n", current_entry->monitor_pointer,
+                      variant_num, monitor_pointer);
                 return REPLAY_BUFFER_RETURN_ERROR;
             }
 
@@ -851,6 +846,12 @@ int             replay_buffer::obtain_buffer                        (unsigned in
             // ok
             return REPLAY_BUFFER_RETURN_OK;
         }
+        else
+        {
+            this->state |= REPLAY_BUFFER_VARIANTS_WAITING;
+            current_state->state = REPLAY_STATE_WAITING;
+            return REPLAY_BUFFER_RETURN_WAIT;
+        }
     }
 }
 
@@ -866,8 +867,9 @@ int             replay_buffer::advance                              (unsigned in
 
     // advance
     current_state->current_index = (current_state->current_index + 1) % this->buffer_size;
-    if (variant_num == 0)
+    if (!variant_num)
     {
+        current_entry->passed = 0;
         if (this->state & REPLAY_BUFFER_VARIANTS_WAITING)
         {
             this->state &= ~REPLAY_BUFFER_VARIANTS_WAITING;
@@ -897,20 +899,17 @@ int             replay_buffer::advance                              (unsigned in
                 }
             }
         }
-
-        current_state->state = REPLAY_STATE_EXPECTING_EMPTY;
     }
+    else
+        current_entry->passed |= (1u << (variant_num - 1));
+
 
     // entry should be emptied?
-    current_entry->variants_passed++;
-    if (current_entry->variants_passed >= this->variant_count)
+    if (current_entry->passed == this->passed_mask)
     {
         if (current_entry->buffer && current_entry->buffer != current_entry->static_buffer)
             free(current_entry->buffer);
         current_entry->buffer = nullptr;
-
-        current_entry->variants_passed = 0;
-        current_entry->entry_state     = REPLAY_ENTRY_EMPTY_STATE;
 
         // check if variants were waiting for this
         if (this->state & REPLAY_BUFFER_LEADER_WAITING)
@@ -941,6 +940,18 @@ int             replay_buffer::advance                              (unsigned in
     return REPLAY_BUFFER_RETURN_OK;
 }
 #endif
+
+
+void            replay_buffer::debug_print                          ()
+{
+    debugf("===================================================================================================\n");
+    for (int variant = 0; variant < mvee::numvariants; variant++)
+    {
+        debugf("variant %d index: %d\n", variant, variant_states[variant].current_index);
+        debugf("\n");
+    }
+    debugf("===================================================================================================\n");
+}
 
 
 // =====================================================================================================================

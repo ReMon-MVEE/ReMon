@@ -544,8 +544,7 @@ struct replay_entry
                     buffer_size;
 
     void*           monitor_pointer;
-    unsigned int    variants_passed;
-    __uint8_t       entry_state;
+    __uint64_t      passed;
 };
 
 
@@ -572,6 +571,7 @@ private:
     __uint8_t       state;
     monitor*        relevant_monitor;
 
+    __uint64_t      passed_mask;
 public:
     // construction ----------------------------------------------------------------------------------------------------
                     replay_buffer                       (monitor* relevant_monitor,
@@ -585,6 +585,10 @@ public:
                                                          unsigned long long requested_size);
     int             advance                             (unsigned int variant_num);
     // access and updating ---------------------------------------------------------------------------------------------
+
+    // debug print -----------------------------------------------------------------------------------------------------
+    void            debug_print                         ();
+    // debug print -----------------------------------------------------------------------------------------------------
 };
 
 
