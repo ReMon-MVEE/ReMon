@@ -1793,7 +1793,7 @@ BYTE_EMULATOR_IMPL(0x83)
                             : "cc"
                     );
                 }
-                // add r/m16, imm8
+                // add r/m16, imm8monitor_pointer
                 else if (PREFIXES_GRP_THREE_PRESENT(instruction))
                 {
                     uint16_t* typed_destination = (uint16_t*)destination;
@@ -2114,14 +2114,14 @@ BYTE_EMULATOR_IMPL(0x87)
         // 64-bit
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            EXCHANGE_TO_SHARED(uint64_t ,
-                               __atomic_exchange(typed_destination, typed_source, typed_source, __ATOMIC_ACQ_REL)
+            EXCHANGE_TO_SHARED(uint64_t,
+                    __atomic_exchange(typed_destination, typed_source, typed_source, __ATOMIC_ACQ_REL)
             )
         }
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            EXCHANGE_TO_SHARED(uint16_t ,
+            EXCHANGE_TO_SHARED(uint16_t,
                     __atomic_exchange(typed_destination, typed_source, typed_source, __ATOMIC_ACQ_REL)
             )
         }
@@ -2271,21 +2271,21 @@ BYTE_EMULATOR_IMPL(0x8b)
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
             auto* typed_destination = (uint64_t*)destination;
-            NORMAL_FROM_SHARED(__uint64_t)
+            NORMAL_FROM_SHARED(uint64_t)
             *typed_destination = *typed_source;
         }
         // 16-bit version
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
             auto* typed_destination = (uint16_t*)destination;
-            NORMAL_FROM_SHARED(__uint16_t)
+            NORMAL_FROM_SHARED(uint16_t)
             *typed_destination = *typed_source;
         }
         // 32-bit version
         else
         {
             auto* typed_destination = (uint64_t*)destination;
-            NORMAL_FROM_SHARED(__uint32_t)
+            NORMAL_FROM_SHARED(uint32_t)
             *typed_destination = *typed_source;
         }
 
@@ -2961,10 +2961,9 @@ BYTE_EMULATOR_IMPL(0xb6)
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
         LOAD_REG_CODE(destination, general_purpose_lookup)
-        LOAD_RM_CODE(source, GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE)
 
-        GET_BUFFER_REPLACE(source, 1)
-        uint8_t* typed_source = (uint8_t*)source;
+        NORMAL_FROM_SHARED(uint8_t)
 
         // 64-bit size
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
