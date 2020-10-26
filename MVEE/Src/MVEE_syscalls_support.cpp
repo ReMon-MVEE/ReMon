@@ -221,8 +221,14 @@ bool monitor::call_compare_variant_buffers(std::vector<const unsigned char*>& bu
             /* little address sensitive hack for mplayer */
             std::string first_buf((char*) buf1, size);
             std::string second_buf((char*) buf2, size);
-            match = !first_buf.find("[mov,mp4,m4a,3gp,3g2,mj2 @ ") &&
-                    !second_buf.find("[mov,mp4,m4a,3gp,3g2,mj2 @ ");
+            match = (!first_buf.find("[mov,mp4,m4a,3gp,3g2,mj2 @ ") &&
+                    !second_buf.find("[mov,mp4,m4a,3gp,3g2,mj2 @ ")) ||
+                    (!first_buf.find("[h264 @ ") &&
+                    !second_buf.find("[h264 @ ")) ||
+                    (!first_buf.find("[matroska,webm @ ") &&
+                    !second_buf.find("[matroska,webm @ ")) ||
+                    (!first_buf.find("[opus @ ") &&
+                    !second_buf.find("[opus @ "));
             /* little address sensitive hack for mplayer */
             /*
             match = false;
