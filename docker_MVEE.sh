@@ -54,10 +54,12 @@ run_docker() {
     fi
 
     # The following command consists of:
-    # 1st line: the x11docker invocation and its options (allow for sudo/su, with default password 'x11docker')
+    # 1st line: The x11docker invocation and its options (allow for sudo/su, with default password 'x11docker'). Generally, these options aim
+    #           to integrate with the host as much as possible, while still allowing us to run and build the MVEE in a dockerized environment.
+    #           This reduces container isolation, but as isolation is not the reason we're using x11docker that's not an issue.
     # 2nd line: the docker options (allow ptracing and mount volumes)
     # 3rd line: the actual docker image and the command to run in it
-    x11docker --gpu --pulseaudio --interactive --home --sudouser --clipboard -- \
+    x11docker --hostdisplay --hostipc --gpu --pulseaudio --interactive --home --sudouser --clipboard -- \
         --cap-add SYS_PTRACE -ti $VOLUMES -- \
         $IMAGE bash
 }
