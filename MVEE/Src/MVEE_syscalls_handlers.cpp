@@ -5418,13 +5418,6 @@ CALL(shmat)
         }
         shm_sz = current_shadow->size;
     }
-    else if (shm_setup_state == SHM_SETUP_EXPECTING_BITMAP)
-    {
-        disjoint_bases = false;
-        call_overwrite_arg_value(0, 1, current_shadow->leader_bitmap.shmid, true);
-        call_overwrite_arg_value(0, 3, IPC_CREAT | S_IRUSR | S_IWUSR, true);
-        shm_sz = ROUND_UP(current_shadow->size, 8) / 8;
-    }
     else
     {
         bool found = false;
@@ -5519,15 +5512,7 @@ POSTCALL(shmat)
     {
         for (int i = 0; i < mvee::numvariants; i++)
             current_shadow->variant_shadows[i].variant_base = addresses[i];
-        shm_setup_state = SHM_SETUP_EXPECTING_BITMAP;
-    }
-    else if (shm_setup_state == SHM_SETUP_EXPECTING_BITMAP)
-    {
-        current_shadow->leader_bitmap.variant_base = addresses[0];
         shm_setup_state = SHM_SETUP_IDLE;
-        current_shadow = nullptr;
-        for (int i = 1; i < mvee::numvariants; i++)
-            call_postcall_set_variant_result(i, -1);
     }
 	else
 	{

@@ -139,8 +139,6 @@ public:
     size_t      size;
     std::vector<variant_mapping_info_t>
                 variant_shadows;
-    variant_mapping_info_t
-                leader_bitmap;
 
                 shared_monitor_map_info     (shared_monitor_map_info* monitor_map_from);
                 shared_monitor_map_info     (unsigned long long variant_base, __uint8_t* monitor_base,

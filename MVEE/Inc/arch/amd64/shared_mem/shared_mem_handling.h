@@ -207,7 +207,6 @@ warnf("\n%s\n", output.str().c_str());
 #define SHM_SETUP_EXPECTING_ERROR               -1
 #define SHM_SETUP_IDLE                          0
 #define SHM_SETUP_EXPECTING_SHADOW              1
-#define SHM_SETUP_EXPECTING_BITMAP              2
 // states for shared memory setup --------------------------------------------------------------------------------------
 
 
@@ -593,7 +592,7 @@ public:
 
 
 // =====================================================================================================================
-//      manipulation for bitmap and shadow
+//      manipulation for shadow
 // =====================================================================================================================
 #define NORMAL_TO_SHARED(__cast, __operation)                                                                          \
 __cast* typed_destination;                                                                                             \
@@ -606,7 +605,6 @@ if (!variant->variant_num)                                                      
 {                                                                                                                      \
     typed_destination = (__cast*) (mapping_info->monitor_base + offset);                                               \
     __operation;                                                                                                       \
-    shared_memory_bitmap::bitmap_set(sizeof(__cast), mapping_info->leader_bitmap.monitor_base, offset);                \
 }                                                                                                                      \
 typed_destination = (__cast*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);             \
 __operation;
@@ -632,17 +630,6 @@ public:
                                                          shared_monitor_map_info* mapping_info,
                                                          unsigned long long offset, unsigned long long size);
 };
-
-namespace shared_memory_bitmap
-{
-    void        bitmap_set                              (unsigned long long set_count, __uint8_t* bitmap_base,
-                                                         unsigned long long offset);
-    void        bitmap_clear                            (unsigned long long set_count, __uint8_t* bitmap_base,
-                                                         unsigned long long offset);
-    bool        bitmap_read                             (unsigned long long read_count, const __uint8_t* bitmap_base,
-                                                         unsigned long long offset);
-}
-
 
 // =====================================================================================================================
 //      instruction tracing
