@@ -2067,12 +2067,7 @@ auto* typed_destination = (__cast*)destination;                                 
 if (!variant->variant_num)                                                                                             \
 {                                                                                                                      \
     unsigned long long requested_size = 0;                                                                             \
-    if(!shared_memory_bitmap::bitmap_read(sizeof(__cast), mapping_info->leader_bitmap.monitor_base, offset))           \
-    {                                                                                                                  \
-        requested_size = sizeof(__cast);                                                                               \
-        shared_memory_bitmap::bitmap_set(sizeof(__cast), mapping_info->leader_bitmap.monitor_base, offset);            \
-    }                                                                                                                  \
-    else if (*typed_destination != *(__cast*)(mapping_info->variant_shadows[0].monitor_base + offset))                 \
+    if (*typed_destination != *(__cast*)(mapping_info->variant_shadows[0].monitor_base + offset))                 \
         requested_size = sizeof(__cast);                                                                               \
     void* buffer = nullptr;                                                                                            \
     int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, destination, instruction, &buffer,        \
@@ -2084,8 +2079,6 @@ if (!variant->variant_num)                                                      
     *(__cast*)(mapping_info->variant_shadows[0].monitor_base + offset) = orig_source;                                  \
     if (buffer)                                                                                                        \
         *(__cast*)buffer = *typed_source;                                                                              \
-                                                                                                                       \
-    shared_memory_bitmap::bitmap_set(sizeof(__cast), mapping_info->leader_bitmap.monitor_base, offset);                \
 }                                                                                                                      \
 else                                                                                                                   \
 {                                                                                                                      \

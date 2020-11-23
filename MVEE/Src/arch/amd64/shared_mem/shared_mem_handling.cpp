@@ -137,43 +137,29 @@ int             shm_handling::determine_source_from_shared_normal   (variantstat
     /* leader variant case */
     if (!variant->variant_num)
     {
-        /* area of memory is known to be written to by variants */
-        if (shared_memory_bitmap::bitmap_read(size, mapping_info->leader_bitmap.monitor_base, offset))
-        {
-            void* variant_shadow  = (void*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);
-            /* If area does not contain same content anymore, we detect it as bi-directional shared memory. */
-            /* In this case we take the data from the shared memory segment. */
-            if (memcmp(monitor_pointer, variant_shadow, size) != 0)
-            {
-                int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer,
-                        instruction, source, size);
-                if (result < 0)
-                    return result;
-                memcpy(*source, monitor_pointer, size);
+      /* area of memory is known to be written to by variants */
+      void* variant_shadow  = (void*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);
+      /* If area does not contain same content anymore, we detect it as bi-directional shared memory. */
+      /* In this case we take the data from the shared memory segment. */
+      if (memcmp(monitor_pointer, variant_shadow, size) != 0)
+      {
+        int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer,
+            instruction, source, size);
+        if (result < 0)
+          return result;
+        memcpy(*source, monitor_pointer, size);
+      }
+      /* Otherwise we'll just use the local copy instead */
+      else
+      {
+        *source = variant_shadow;
 
-                /* clear bitmap for related entries */
-                shared_memory_bitmap::bitmap_clear(size, mapping_info->leader_bitmap.monitor_base, offset);
-            }
-            /* Otherwise we'll just use the local copy instead */
-            else
-            {
-                *source = variant_shadow;
-
-                /* Essentially puts an empty entry in the replay buffer */
-                int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer,
-                        instruction, nullptr, 0);
-                if (result < 0)
-                    return result;
-            }
-        }
-        else
-        {
-            int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,
-                    source, size);
-            if (result < 0)
-                return result;
-            memcpy(*source, monitor_pointer, size);
-        }
+        /* Essentially puts an empty entry in the replay buffer */
+        int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer,
+            instruction, nullptr, 0);
+        if (result < 0)
+          return result;
+      }
     }
     /* followers */
     else
@@ -963,7 +949,6 @@ void            replay_buffer::debug_print                          ()
         , is_shmat(monitor_map_from->is_shmat)
         , size(monitor_map_from->size)
         , variant_shadows(mvee::numvariants)
-        , leader_bitmap(monitor_map_from->leader_bitmap)
 {
     for (int i = 0; i < mvee::numvariants; i++)
         variant_shadows[i] = monitor_map_from->variant_shadows[i];
@@ -976,7 +961,6 @@ void            replay_buffer::debug_print                          ()
         , is_shmat(is_shmat)
         , size(size)
         , variant_shadows(mvee::numvariants)
-        , leader_bitmap({ -1, nullptr, 0x00 })
 {
     for (int i = 0; i < mvee::numvariants; i++)
         variant_shadows[i] = { -1, nullptr, 0x00 };
@@ -1015,25 +999,6 @@ int                shared_monitor_map_info::setup_shm               ()
                 };
     }
 
-    int shmid = shmget(IPC_PRIVATE, ROUND_UP(this->size, 8) / 8, IPC_CREAT | S_IRUSR | S_IWUSR);
-    if (shmid == -1)
-    {
-        warnf("problem setting up bitmap - errno: %d\n", errno);
-        return -1;
-    }
-    auto* shm_addr = (__uint8_t*) shmat(shmid, nullptr, 0);
-    if (shm_addr == (void*) -1)
-    {
-        warnf("problem attaching to bitmap (shmid: %d) - errno: %d\n", shmid, errno);
-        return -1;
-    }
-
-    this->leader_bitmap =
-            {
-                    shmid,
-                    shm_addr,
-                    0x00
-            };
 
     return 0;
 }
@@ -1058,12 +1023,6 @@ void               shared_monitor_map_info::cleanup_shm             ()
             this->variant_shadows[i].variant_base = 0;
             this->variant_shadows[i].monitor_base = nullptr;
         }
-    }
-    if (this->leader_bitmap.monitor_base)
-    {
-        shmdt(this->leader_bitmap.monitor_base);
-        this->leader_bitmap.variant_base = 0;
-        this->leader_bitmap.monitor_base = nullptr;
     }
 
     this->is_shmat = false;
@@ -1282,97 +1241,6 @@ void            mmap_table::debug_shared                            ()
     output << "\n";
 
     warnf("%s\n", output.str().c_str());
-}
-
-
-// =====================================================================================================================
-//      manipulation for bitmap and shadow
-// =====================================================================================================================
-void            shared_memory_bitmap::bitmap_set                    (unsigned long long set_count,
-                                                                     __uint8_t* bitmap_base,
-                                                                     unsigned long long offset)
-{
-    if ((offset & 0b111u) + set_count <= 8)
-        ((__uint8_t*) bitmap_base)[offset >> 3u] |=
-                (__uint8_t) ((0xffu >> (8 - set_count)) << (offset & 0b111u));
-    else
-    {
-        /* locally used variables */
-        unsigned long long iterative_offset = offset;
-        auto iterative_count = (long long) (set_count + (offset & 0b111u));
-
-        /* first one might be middle of a bitmap byte */
-        ((__uint8_t*) bitmap_base)[offset >> 3u] |= (__uint8_t) (0xffu << (offset & 0b111u));
-
-        /* there might be some bits left */
-        while ((iterative_count-=8) > 0)
-        {
-            iterative_offset+=8;
-            /* write to bitmap */
-            ((__uint8_t*) bitmap_base)[iterative_offset >> 3u] |= (__uint8_t) (0xffu >>
-                    (iterative_count > 8u ? 0 : (unsigned) (8 - iterative_count)));
-        }
-    }
-}
-
-
-void            shared_memory_bitmap::bitmap_clear                  (unsigned long long set_count,
-                                                                     __uint8_t* bitmap_base,
-                                                                     unsigned long long offset)
-{
-    if ((offset & 0b111u) + set_count <= 8)
-        ((__uint8_t*) bitmap_base)[offset >> 3u] &=
-                (__uint8_t) ~((0xffu >> (8 - set_count)) << (offset & 0b111u));
-    else
-    {
-        /* locally used variables */
-        unsigned long long iterative_offset = offset;
-        auto iterative_count = (long long) (set_count + (offset & 0b111u));
-
-        /* first one might be middle of a bitmap byte */
-        ((__uint8_t*) bitmap_base)[offset >> 3u] &= (__uint8_t) ~(0xffu << (offset & 0b111u));
-
-        /* there might be some bits left */
-        while ((iterative_count-=8) > 0)
-        {
-            iterative_offset+=8;
-            /* write to bitmap */
-            ((__uint8_t*) bitmap_base)[iterative_offset >> 3u] &= (__uint8_t) ~(0xffu >>
-                    (iterative_count > 8u ? 0 : (unsigned) (8 - iterative_count)));
-        }
-    }
-}
-
-
-bool            shared_memory_bitmap::bitmap_read                   (unsigned long long read_count,
-                                                                     const __uint8_t* bitmap_base,
-                                                                     unsigned long long offset)
-{
-    if ((offset & 0b111u) + read_count <= 8)
-        return ((unsigned) (((__uint8_t*) bitmap_base)[offset >> 3u] >> (offset & 0b111u)) &
-            (0xffu >> (unsigned) (8 - read_count)));
-    /* locally used variables */
-    unsigned long long iterative_offset = offset;
-    auto iterative_count = (long long) read_count;
-
-    /* first one might be middle of a bitmap byte */
-    if ((((__uint8_t*) bitmap_base)[offset >> 3u] << (offset & 0b111u)) != 0)
-        return true;
-    iterative_count -= (offset & 0b111u);
-
-    /* there might be some bits left */
-    while (iterative_count > 0)
-    {
-        iterative_offset+=8;
-        /* write to bitmap */
-        if ((((__uint8_t*) bitmap_base)[iterative_offset >> 3u] >>
-                (iterative_count > 8u ? 0 : (unsigned) (8 - iterative_count))) != 0)
-            return true;
-        /* next bits to write */
-        iterative_count -= 8;
-    }
-
-    return false;
 }
 
 
