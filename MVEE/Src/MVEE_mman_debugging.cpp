@@ -1241,7 +1241,7 @@ char* mmap_table::get_normalized_maps_output (int variantnum, pid_t variantpid)
             // can't merge. write the prev region if any
             if (prev_region_start)
             {
-                char new_line[500];
+                char new_line[600];
                 sprintf(new_line, LONGPTRSTR "-" LONGPTRSTR " %c%c%c %08x %s\n", prev_region_start, prev_region_end, prev_flags[0], prev_flags[1], prev_flags[2], prev_region_file_offset, prev_name);
                 strcat(result, new_line);
             }
@@ -1253,7 +1253,7 @@ char* mmap_table::get_normalized_maps_output (int variantnum, pid_t variantpid)
         }
     }
 
-    char new_line[500];
+    char new_line[600];
     sprintf(new_line, LONGPTRSTR "-" LONGPTRSTR " %c%c%c %08x %s\n", prev_region_start, prev_region_end, prev_flags[0], prev_flags[1], prev_flags[2], prev_region_file_offset, prev_name);
     strcat(result, new_line);
     return result;
