@@ -29,7 +29,7 @@
     Forward Declarations
 -----------------------------------------------------------------------------*/
 class monitor;
-class detachedvariant;
+struct detachedvariant;
 class mmap_addr2line_proc;
 class dwarf_info;
 class shm_table;
