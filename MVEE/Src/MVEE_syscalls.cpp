@@ -257,12 +257,9 @@ unsigned char monitor::call_precall_get_call_type (int variantnum, long callnum)
 			{
                 // TODO: Review this. We might want this to be synced even while fast forwarding
 				if (variants[variantnum].fast_forwarding)
-				{
 					result = MVEE_CALL_TYPE_UNSYNCED;
-					break;
-				}
-            // TODO this might not be desirable, but gcc needs this here to not complain
-			} /* fallthrough */
+                break;
+			}
 
 			default:
 			{
@@ -545,10 +542,8 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 			case MVEE_GET_VIRTUALIZED_ARGV0:
 			{
 				// This is fine, though we might want to change this policy later
-				if (variants[variantnum].fast_forwarding)
-					break;
-            // TODO this might not be desirable, but gcc needs this "fallthrough" here to not complain
-			} /* fallthrough */
+                break;
+			}
 
 			//
 			// Only works if we're fast forwarding, which only happens if 
