@@ -12,6 +12,7 @@
 // *****************************************************************************
 
 #include <memory>
+#include <random>
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <algorithm>
@@ -504,11 +505,30 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 
                 if (ARG6(variantnum))
                 {
-                  uint16_t secret = variantnum; // TODO: generate proper secrets...
-                  unsigned long shm_tag = SHARED_MEMORY_ADDRESS_TAG + ((unsigned long)secret << 32);
-                  variants[variantnum].shm_tag = shm_tag;
-                  if(!rw::write_primitive<unsigned long>(variants[variantnum].variantpid, (void*) ARG6(variantnum), shm_tag))
-                    throw RwMemFailure(variantnum, "write runs_under_mvee_control shared memory tag");
+                    std::random_device rd;
+                    unsigned long shm_tag = 0;
+                    while (!shm_tag)
+                    {
+                        // We can only use 15 bits for our secret, but will generate 32 bits
+                        // The most significant bits are set anyway, and we're going to OR this
+                        uint32_t secret = rd();
+                        shm_tag = SHARED_MEMORY_ADDRESS_TAG | ((unsigned long)secret << 32);
+                        debugf("%s - SHM TAG => %lx\n", call_get_variant_pidstr(variantnum).c_str(), shm_tag);
+
+                        // Check whether there any duplicates. If so, re-generate the secret
+                        for (int iii = 0; iii < variantnum; iii++)
+                        {
+                            if (variants[variantnum].shm_tag == shm_tag)
+                            {
+                                shm_tag = 0;
+                                break;
+                            }
+                        }
+                    }
+
+                    variants[variantnum].shm_tag = shm_tag;
+                    if(!rw::write_primitive<unsigned long>(variants[variantnum].variantpid, (void*) ARG6(variantnum), shm_tag))
+                        throw RwMemFailure(variantnum, "write runs_under_mvee_control shared memory tag");
                 }
 
 #ifdef MVEE_DISABLE_SYNCHRONIZATION_REPLICATION
