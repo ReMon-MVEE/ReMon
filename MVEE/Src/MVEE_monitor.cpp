@@ -1590,8 +1590,7 @@ void monitor::handle_fork_event(int index, interaction::mvee_wait_status& status
 
         for (int i = 0; i < mvee::numvariants; ++i)
         {
-            detachedvariant* new_variant = new detachedvariant;
-            memset(new_variant, 0, sizeof(detachedvariant));
+            detachedvariant* new_variant = new detachedvariant();// Zero-initialized
 
             // init detachedvariant
             new_variant->variantpid          = variants[i].pendingpid;
