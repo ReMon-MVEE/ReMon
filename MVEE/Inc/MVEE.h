@@ -748,11 +748,7 @@ private:
 #define warnf mvee::warnf
 
 #ifdef MVEE_BENCHMARK
-# ifdef __clang__
-#  define debugf(...)
-# else
-#  define debugf(a...)
-# endif
+# define debugf(...) do {} while(0)
 # define DEBUGVAR __attribute__((unused))
 #else
 # define debugf mvee::logf
