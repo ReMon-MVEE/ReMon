@@ -285,15 +285,19 @@ unsigned long encode_address_tag(unsigned long address, const variantstate* vari
 
 // ugly syscall shared pointer redirection -----------------------------------------------------------------------------
 #define REPLACE_SHARED_POINTER_ARG(__var, __arg)                                                                       \
+if (IS_TAGGED_ADDRESS(ARG##__arg(__var)))                                                                              \
+{                                                                                                                      \
+    REPLACE_KNOWN_SHARED_POINTER_ARG(__var, __arg)                                                                     \
+}
+#define REPLACE_KNOWN_SHARED_POINTER_ARG(__var, __arg)                                                                 \
 if (set_mmap_table->get_shared_info(decode_address_tag(ARG##__arg(__var), &variants[__var])))                          \
 {                                                                                                                      \
-    variants[__var].have_overwritten_args = true;                                                                      \
-    overwritten_syscall_arg overwritten_arg;                                                                           \
-    overwritten_arg.syscall_arg_num = __arg;                                                                           \
-    overwritten_arg.arg_old_value = ARG##__arg(__var);                                                                 \
-    overwritten_arg.restore_data = false;                                                                              \
-    variants[__var].overwritten_args.push_back(overwritten_arg);                                                       \
-    SETARG##__arg(__var, decode_address_tag(ARG##__arg(__var), &variants[__var]));                                     \
+    call_overwrite_arg_value(__var, __arg, decode_address_tag(ARG##__arg(__var),&variants[__var]), true);              \
+}                                                                                                                      \
+else                                                                                                                   \
+{                                                                                                                      \
+    warnf("Attempting to replace shared memory pointer %p which is no longer valid\n", (void*) ARG##__arg(__var));     \
+    return MVEE_PRECALL_ARGS_MISMATCH(__arg) | MVEE_PRECALL_CALL_DENY;                                                 \
 }
 // ugly syscall shared pointer redirection -----------------------------------------------------------------------------
 

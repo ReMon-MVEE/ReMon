@@ -2895,17 +2895,18 @@ PRECALL(shmdt)
     {
         unsigned long long shared_address;
         shared_address = decode_address_tag(ARG1(0), &variants[0]);
-        REPLACE_SHARED_POINTER_ARG(0, 1)
-        else
-        {
-            warnf("Attempting to replace shared memory pointer %p which is no longer valid\n", (void*) ARG1(0));
-            return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
-        }
         for (int i = 1; i < mvee::numvariants; i++)
             if (!IS_TAGGED_ADDRESS(ARG1(i)) || decode_address_tag(ARG1(i), &variants[i]) != shared_address)
                 return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
 
+        REPLACE_KNOWN_SHARED_POINTER_ARG(0, 1)
         return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+    }
+    else
+    {
+        for (int i = 1; i < mvee::numvariants; i++)
+            if (IS_TAGGED_ADDRESS(ARG1(i)))
+                return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
     }
 
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
@@ -2916,8 +2917,8 @@ POSTCALL(shmdt)
     if (!call_succeeded || !IS_TAGGED_ADDRESS(ARG1(0)))
         return MVEE_POSTCALL_RESUME;
 
-    // realistically this shouldn't happen anyway
     if (set_mmap_table->remove_shared_info(decode_address_tag(ARG1(0), &variants[0])) == nullptr)
+        // realistically this shouldn't happen anyway
         warnf("An issue was encountered removing %p from the shared memory bookkeeping\n", (void*) ARG1(0));
     set_mmap_table->debug_shared();
 
@@ -3868,10 +3869,8 @@ PRECALL(munmap)
     // for further information
     if IS_UNSYNCED_CALL
     {
-        if (IS_TAGGED_ADDRESS(ARG1(variantnum)) &&
-                set_mmap_table->get_shared_info(decode_address_tag(ARG1(variantnum), &variants[variantnum])))
-            call_overwrite_arg_value(variantnum, 1, decode_address_tag(ARG1(variantnum),
-                    &variants[variantnum]), true);
+        if (IS_TAGGED_ADDRESS(ARG1(0)))
+            return MVEE_PRECALL_CALL_DENY | MVEE_PRECALL_ARGS_MISMATCH(1);
         return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
     }
 
@@ -3886,25 +3885,21 @@ PRECALL(munmap)
 	if (set_mmap_table->foreach_region(addresses, ARG2(0), this, handle_munmap_precall_callback) != 0)
 		return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
 
-    // exra checks in case of shared memory pointer (a.k.a. tagged pointer)
+    // extra checks in case of shared memory pointer (a.k.a. tagged pointer)
     if (IS_TAGGED_ADDRESS(ARG1(0)))
     {
         // reference pointer in leader variant
         unsigned long long decoded_address = decode_address_tag(ARG1(0), &variants[0]);
-        // decoded leader variant pointer should be known
-        if (set_mmap_table->get_shared_info(decoded_address))
+        // compare decoded pointers of all followers, should be equal
+        for (int i = 1; i < mvee::numvariants; i++)
         {
-            // compare decoded pointers of all followers, should be equal
-            for (int i = 1; i < mvee::numvariants; i++)
-            {
-                if (decoded_address != decode_address_tag(ARG1(i), &variants[i]))
-                    return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
-            }
-            // overwrite only the pointer argument in leader variant as this system call will run as a master call
-            call_overwrite_arg_value(0, 1, decode_address_tag(ARG1(0),
-                    &variants[0]), true);
-            return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+            if (decoded_address != decode_address_tag(ARG1(i), &variants[i]))
+                return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
         }
+        // overwrite only the pointer argument in leader variant as this system call will run as a master call
+        // this also returns an argument mismatch if the address is not a known shared memory region
+        REPLACE_KNOWN_SHARED_POINTER_ARG(0, 1)
+        return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
     }
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
@@ -3932,14 +3927,6 @@ POSTCALL(munmap)
 					//call_release_locks(MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN);
 				}
 			}
-			// removing tag on pointers
-			else if (IS_TAGGED_ADDRESS(address))
-            {
-			    unsigned long long decoded_address = decode_address_tag(address, &variants[variantnum]);
-			    if (set_mmap_table->get_shared_info(decoded_address))
-			        address = decoded_address;
-			    // leave pointer argument as is otherwise, call shouldn't even have succeeded here
-            }
 
             set_mmap_table->munmap_range(variantnum, address, ARG2(variantnum));
 			set_mmap_table->verify_mman_table(variantnum, variants[variantnum].variantpid);
@@ -3978,6 +3965,8 @@ POSTCALL(munmap)
 
                 set_mmap_table->munmap_range(i, address, ARG2(i));
             }
+            if (IS_TAGGED_ADDRESS(ARG1(0)))
+                set_mmap_table->remove_shared_info(decode_address_tag(ARG1(0), &variants[0]));
 
 			while (writeback_infos.size() > 0)
 			{
