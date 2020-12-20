@@ -877,7 +877,9 @@ int             replay_buffer::advance                              (unsigned in
                     variant->regs.rip += variant->instruction.size;
                     if (!interaction::write_all_regs(variant->variantpid, &variant->regs))
                     {
-                        warnf("writing follower regs failed\n");
+                        warnf("writing follower regs failed - errno: %d\n", errno);
+                        if (errno == ESRCH)
+                            continue;
                         return REPLAY_BUFFER_RETURN_ERROR;
                     }
 
