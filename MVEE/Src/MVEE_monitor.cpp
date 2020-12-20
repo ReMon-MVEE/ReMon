@@ -2220,7 +2220,12 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                         // update instruction pointer to skip instruction
                         variant->regs.rip += variant->instruction.size;
                         if (!interaction::write_all_regs(variant->variantpid, &variant->regs))
-                            warnf("\n\n\nerror\n\n\n");
+                        {
+                            // warnf("error - %llx accesses %llx\n\n\n", variant->regs.rip - instruction->size, (unsigned long long) instruction->effective_address);
+                            // set_mmap_table->print_mmap_table(debugf);
+                            if (errno == ESRCH)
+                                return;
+                        }
 
                         call_resume(variantnum);
                         return;
@@ -2264,6 +2269,7 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                     }
                     case UNKNOWN_MEMORY_TERMINATION:
                     {
+                        set_mmap_table->debug_shared();
                         debugf("unknown memory\n");
                         break;
                     }
