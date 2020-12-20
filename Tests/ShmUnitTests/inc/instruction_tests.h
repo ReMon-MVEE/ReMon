@@ -25,6 +25,8 @@ namespace instruction_tests
 
     void        test_0x03                           ();
 
+    void        test_0x29                           ();
+
     void        test_0x2b                           ();
 
     void        test_0x39                           ();

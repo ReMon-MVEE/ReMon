@@ -98,6 +98,7 @@ int             main                                                (int argc, c
     // tests -----------------------------------------------------------------------------------------------------------
     instruction_tests::test_0x01();
     instruction_tests::test_0x03();
+    instruction_tests::test_0x29();
     instruction_tests::test_0x2b();
     instruction_tests::test_0x39();
     instruction_tests::test_0x3b();
@@ -129,5 +130,10 @@ int             main                                                (int argc, c
     testing_general::log_stats(duration);
     logf_spacer;
     testing_general::terminate_log();
+
+    // cleanup ---------------------------------------------------------------------------------------------------------
+    buffers::cleanup();
+    // cleanup ---------------------------------------------------------------------------------------------------------
+
     return 0;
 }
