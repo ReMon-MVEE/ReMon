@@ -581,6 +581,35 @@ void            instruction_tests::test_0x89                        ()
     );
     TEST_RESULT("mov m32, r32", (__uint32_t) original == *(__uint32_t*) buffers::shared_sink &&
             *((__uint32_t*) buffers::shared_sink + 1) == 0x00)
+
+    *(unsigned long long*) buffers::shared_sink = 0x00;
+    *(unsigned long long*) (buffers::shared_sink + 0x12) = 0x00;
+    asm
+    (
+            ".intel_syntax noprefix;"
+            "mov DWORD PTR [rdx + 0x12], eax;"
+            ".att_syntax;"
+            :
+            : [dst] "d" (buffers::shared_sink), [src] "a" ((__uint32_t) original)
+            : "memory"
+    );
+    TEST_RESULT("mov [rdx + 0x12], r32", (__uint32_t) original == *(__uint32_t*) (buffers::shared_sink + 0x12) &&
+            *((__uint32_t*) buffers::shared_sink + 1) == 0x00)
+
+    *(unsigned long long*) (buffers::shared_sink + 0x12) = 0x00;
+    asm
+    (
+            ".intel_syntax noprefix;"
+            "mov r13, rdx;"
+            "mov DWORD PTR [r13 + 0x12], eax;"
+            ".att_syntax;"
+            :
+            : [dst] "d" (buffers::shared_sink), [src] "a" ((__uint32_t) original)
+            : "memory", "r13"
+    );
+    TEST_RESULT("mov [r13 + 0x12], r32", (__uint32_t) original == *(__uint32_t*) (buffers::shared_sink + 0x12) &&
+            *((__uint32_t*) buffers::shared_sink + 1) == 0x00)
+    *(unsigned long long*) (buffers::shared_sink + 0x12) = 0x00;
     // 32-bit ----------------------------------------------------------------------------------------------------------
 
 
@@ -640,9 +669,40 @@ void            instruction_tests::test_0x8b                        ()
     );
     TEST_RESULT("mov r32, DWORD PTR", *(__uint32_t*)&destination == *(__uint32_t*)&original &&
             *((__uint32_t*)&destination + 1) == 0x00)
+
+    *(unsigned long long*) buffers::shared_sink = 0;
+    *(unsigned long long*) (buffers::shared_sink + 0x12) = original;
+    destination = original_dst;
+    __asm
+    (
+            ".intel_syntax noprefix;"
+            "mov edx, DWORD PTR [rax + 0x12];"
+            ".att_syntax;"
+            : "+d" (destination)
+            : "a" (buffers::shared_sink)
+            :
+    );
+    TEST_RESULT("mov r32, DWORD PTR + 0x12", *(__uint32_t*)&destination == *(__uint32_t*)&original &&
+            *((__uint32_t*)&destination + 1) == 0x00)
+
+    *(unsigned long long*) buffers::shared_sink = 0;
+    *(unsigned long long*) (buffers::shared_sink + 0x12) = original;
+    destination = original_dst;
+    __asm
+    (
+            ".intel_syntax noprefix;"
+            "mov r13, rax;"
+            "mov edx, DWORD PTR [r13 + 0x12];"
+            ".att_syntax;"
+            : "+d" (destination)
+            : "a" (buffers::shared_sink)
+            : "r13"
+    );
+    TEST_RESULT("mov r32, DWORD PTR [r13] + 0x12", (__uint32_t)destination == (__uint32_t)original &&
+            *((__uint32_t*)&destination + 1) == 0x00)
     // 32-bit ----------------------------------------------------------------------------------------------------------
 
-    // 32-bit ----------------------------------------------------------------------------------------------------------
+    // 16-bit ----------------------------------------------------------------------------------------------------------
     *(unsigned long long*) buffers::shared_sink = original;
     destination = original_dst;
     __asm
@@ -656,7 +716,7 @@ void            instruction_tests::test_0x8b                        ()
     );
     TEST_RESULT("mov r16, WORD PTR", *(__uint16_t*)&destination == *(__uint16_t*)&original &&
             testing_aid::compare_buffers((__uint8_t*) &destination + 2, (__uint8_t*) &original_dst + 2, 3 * WORD_SIZE) == 0)
-    // 32-bit ----------------------------------------------------------------------------------------------------------
+    // 16-bit ----------------------------------------------------------------------------------------------------------
 
     *(__uint64_t*) buffers::shared_sink = 0x00;
     FINISH_TEST("mov (0x8b) tests successful!", "mov (0x8b) tests failed!");
@@ -1060,6 +1120,20 @@ void            instruction_tests::test_0xc7                        ()
     TEST_RESULT("mov m32, imm32 | zero",
                 *(__uint32_t*) buffers::shared_sink == (__uint32_t) zero &&
                 testing_aid::compare_buffers(buffers::shared_sink + DWORD_SIZE, ((__uint8_t*) &src) + DWORD_SIZE,
+                        QWORD_SIZE - DWORD_SIZE) == 0)
+
+
+    COPY_BUFFERS(buffers::shared_sink + 0x12, ((__uint8_t*) &src), QWORD_SIZE);
+    __asm(
+            ".intel_syntax noprefix;"
+            "mov DWORD PTR [rax + 0x12], 0x00000000;"
+            ".att_syntax;"
+            :
+            : "a" (buffers::shared_sink)
+    );
+    TEST_RESULT("mov [rax + 0x12], imm32 | zero",
+                *(__uint32_t*) (buffers::shared_sink + 0x12) == (__uint32_t) 0x00 &&
+                testing_aid::compare_buffers(buffers::shared_sink + 0x12 + DWORD_SIZE, ((__uint8_t*) &src) + DWORD_SIZE,
                         QWORD_SIZE - DWORD_SIZE) == 0)
     // 32-bit ----------------------------------------------------------------------------------------------------------
 
@@ -1643,9 +1717,27 @@ void            instruction_tests::test_0x0f_0xb7                   ()
             : "r8"
     );
     TEST_RESULT("movzx r32, m16", destination == source)
+
+    destination = original;
+    *(__uint64_t*) buffers::shared_sink = 0;
+    *(__uint64_t*) (buffers::shared_sink + 0x12) = source;
+    __asm
+    (
+            ".intel_syntax noprefix;"
+            "mov r8, rdx;"
+            "movzx r8d, WORD PTR [rax + 0x12];"
+            "mov rdx, r8;"
+            ".att_syntax;"
+            : [dst] "+d" (destination)
+            : [src] "a" (buffers::shared_sink)
+            : "r8"
+    );
+    TEST_RESULT("movzx r32, m16", destination == source)
+    *(__uint64_t*) (buffers::shared_sink + 0x12) = source;
     // 32-bit ----------------------------------------------------------------------------------------------------------
 
     *(__uint64_t*) buffers::shared_sink = 0x00;
+    *(__uint64_t*) (buffers::shared_sink + 0x12) = 0x00;
     FINISH_TEST("movsx tests successful!", "movsx tests failed!")
 }
 
