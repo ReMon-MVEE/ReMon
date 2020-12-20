@@ -170,6 +170,59 @@ void            instruction_tests::test_0x03                        ()
 }
 
 
+void            instruction_tests::test_0x29                        ()
+{
+    START_TEST("Running tests for sub (0x29)... \n")
+    unsigned long long flags;
+
+# define TEST_0x29(__src, __dst, __size, __cast, __message, __condition)                                               \
+flags = 0x00;                                                                                                          \
+*(__cast*) buffers::shared_sink = __dst;                                                                               \
+__asm__                                                                                                                \
+(                                                                                                                      \
+        ".intel_syntax noprefix;"                                                                                      \
+        "sub "                                                                                                         \
+        __size                                                                                                         \
+        " PTR [rax], rdx;"                                                                                             \
+        "pushf;"                                                                                                       \
+        "pop rcx;"                                                                                                     \
+        ".att_syntax;"                                                                                                 \
+        : "+m" (*buffers::shared_sink), "+c" (flags)                                                                   \
+        : "a" (buffers::shared_sink), "d" (__src)                                                                      \
+);                                                                                                                     \
+TEST_RESULT(__message, __condition)
+
+
+    // 64-bit ----------------------------------------------------------------------------------------------------------
+    TEST_0x29(
+            0x01,
+            0x09f0,
+            "QWORD",
+            uint64_t,
+            "sub m64, r64 | 0x9f0 - 0x1",
+            *(uint64_t*) buffers::shared_sink == 0x09ef && flags & AF_MASK
+    )
+    TEST_0x29(
+            0x01,
+            0x09ef,
+            "QWORD",
+            uint64_t,
+            "sub m64, r64 | 0x9ef - 0x1",
+            *(uint64_t*) buffers::shared_sink == 0x09ee && !(flags & AF_MASK)
+    )
+    // 64-bit ----------------------------------------------------------------------------------------------------------
+
+    // 32-bit ----------------------------------------------------------------------------------------------------------
+    // 32-bit ----------------------------------------------------------------------------------------------------------
+
+    // 16-bit ----------------------------------------------------------------------------------------------------------
+    // 16-bit ----------------------------------------------------------------------------------------------------------
+
+    *(uint64_t*) buffers::shared_sink = 0x00;
+    FINISH_TEST("sub tests successful!", "sub tests failed!")
+}
+
+
 void            instruction_tests::test_0x2b                        ()
 {
     START_TEST("Running tests for sub (0x2b)... \n")
