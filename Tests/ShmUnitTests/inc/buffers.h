@@ -27,6 +27,7 @@ namespace buffers
 
 
     int         setup                                   ();
+    int         cleanup                                 ();
 }
 
 #endif //INSTRUCTION_TESTING_BUFFERS_H
