@@ -220,6 +220,7 @@ std::string mvee::get_alias(int variantnum, std::string path)
 		return alias->second;
 
 	// built-in aliases
+	/* These are generally not aliased anymore, keeping this code here in case it is ever needed
 	if (path.find("/dev/shm/") == 0 ||
 		path.find("/run/shm/") == 0)
 	{
@@ -227,7 +228,8 @@ std::string mvee::get_alias(int variantnum, std::string path)
 		ss << path << "_variant" << variantnum;
 		return ss.str();
 	}
-	else if (path.find("/home/stijn/glibc-build/etc/") == 0)
+	else */
+	if (path.find("/home/stijn/glibc-build/etc/") == 0)
 	{
 		return path.replace(0, strlen("/home/stijn/glibc-build/etc/"), "/etc/");
 	}
