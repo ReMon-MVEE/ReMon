@@ -1879,6 +1879,33 @@ PRECALL(kill)
 }
 
 /*-----------------------------------------------------------------------------
+  sys_semget - (key_t key, int nsems, int semflg)
+-----------------------------------------------------------------------------*/
+GET_CALL_TYPE(semget)
+{
+    return MVEE_CALL_TYPE_NORMAL;
+}
+
+LOG_ARGS(semget)
+{
+    debugf("%s - SYS_SEMGET(0x%llx, %llu, 0x%llx)\n",
+           call_get_variant_pidstr(variantnum).c_str(),
+           ARG1(variantnum),
+           ARG2(variantnum),
+           ARG3(variantnum));
+    log_variant_backtrace(variantnum);
+}
+
+PRECALL(semget)
+{
+    CHECKARG(1)
+    CHECKARG(2)
+    CHECKARG(3)
+
+    return MVEE_PRECALL_ARGS_MATCH;
+}
+
+/*-----------------------------------------------------------------------------
   sys_rename - (const char *oldname, const char *newname)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(rename)
