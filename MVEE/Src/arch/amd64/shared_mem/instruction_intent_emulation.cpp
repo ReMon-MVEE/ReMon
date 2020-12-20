@@ -1622,7 +1622,26 @@ BYTE_EMULATOR_IMPL(0x80)
         switch (GET_REG_CODE(modrm))
         {
             case 0b000u: // ADD - not yet implemented
+                return -1;
             case 0b001u: // OR  - not yet implemented
+            {
+                // perform operation, note that the flags register is also changed here
+                __asm__
+                (
+                        ".intel_syntax noprefix;"
+                        "push %[flags];"
+                        "popf;"
+                        "or BYTE PTR [%[dst]], %[src];"
+                        "pushf;"
+                        "pop %[flags];"
+                        ".att_syntax;"
+                        : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                        : [dst] "r" (typed_destination), [src] "r" (*typed_source)
+                        : "cc"
+                );
+
+                break;
+            }
             case 0b010u: // ADC - not yet implemented
             case 0b011u: // SBB - not yet implemented
                 return -1;
