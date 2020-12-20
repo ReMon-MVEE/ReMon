@@ -260,7 +260,8 @@ unsigned char monitor::call_precall_get_call_type (int variantnum, long callnum)
 					result = MVEE_CALL_TYPE_UNSYNCED;
 					break;
 				}
-			}
+            // TODO this might not be desirable, but gcc needs this here to not complain
+			} /* fallthrough */
 
 			default:
 			{
@@ -501,14 +502,14 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 					!rw::write_primitive<unsigned char>(variants[variantnum].variantpid, (void*) ARG5(variantnum), 1))
 					throw RwMemFailure(variantnum, "write runs_under_mvee_control master byte");
 
-        if (ARG6(variantnum))
-        {
-          uint16_t secret = variantnum; // TODO: generate proper secrets...
-          unsigned long shm_tag = SHARED_MEMORY_ADDRESS_TAG + ((unsigned long)secret << 32);
-          variants[variantnum].shm_tag = shm_tag;
-          if(!rw::write_primitive<unsigned long>(variants[variantnum].variantpid, (void*) ARG6(variantnum), shm_tag))
-            throw RwMemFailure(variantnum, "write runs_under_mvee_control shared memory tag");
-        }
+                if (ARG6(variantnum))
+                {
+                  uint16_t secret = variantnum; // TODO: generate proper secrets...
+                  unsigned long shm_tag = SHARED_MEMORY_ADDRESS_TAG + ((unsigned long)secret << 32);
+                  variants[variantnum].shm_tag = shm_tag;
+                  if(!rw::write_primitive<unsigned long>(variants[variantnum].variantpid, (void*) ARG6(variantnum), shm_tag))
+                    throw RwMemFailure(variantnum, "write runs_under_mvee_control shared memory tag");
+                }
 
 #ifdef MVEE_DISABLE_SYNCHRONIZATION_REPLICATION
                 result = MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(1);
@@ -526,7 +527,8 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 				// This is fine, though we might want to change this policy later
 				if (variants[variantnum].fast_forwarding)
 					break;
-			}
+            // TODO this might not be desirable, but gcc needs this "fallthrough" here to not complain
+			} /* fallthrough */
 
 			//
 			// Only works if we're fast forwarding, which only happens if 
@@ -1256,12 +1258,12 @@ void monitor::call_execute_synced_call(bool at_syscall_exit, unsigned long calln
 
         switch(call_args[i].size())
         {
-            case 6: ARG6(i) = call_args[i][5];
-            case 5: ARG5(i) = call_args[i][4];
-            case 4: ARG4(i) = call_args[i][3];
-            case 3: ARG3(i) = call_args[i][2];
-            case 2: ARG2(i) = call_args[i][1];
-            case 1: ARG1(i) = call_args[i][0];
+            case 6: ARG6(i) = call_args[i][5]; /* fallthrough */
+            case 5: ARG5(i) = call_args[i][4]; /* fallthrough */
+            case 4: ARG4(i) = call_args[i][3]; /* fallthrough */
+            case 3: ARG3(i) = call_args[i][2]; /* fallthrough */
+            case 2: ARG2(i) = call_args[i][1]; /* fallthrough */
+            case 1: ARG1(i) = call_args[i][0]; /* fallthrough */
             default:
                 break;
         }
