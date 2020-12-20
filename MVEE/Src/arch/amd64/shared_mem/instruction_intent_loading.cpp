@@ -312,6 +312,11 @@ BYTE_LOADER_IMPL(0x11)
 /* Valid in second round */
 BYTE_LOADER_IMPL(0x29)
 {
+    if (round == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_FIRST_LEVEL)
+        LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
+    }
     if (round == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
         // illegal if REPZ or REPNZ prefix present

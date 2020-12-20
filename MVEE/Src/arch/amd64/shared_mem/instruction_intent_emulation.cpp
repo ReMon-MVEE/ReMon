@@ -134,6 +134,26 @@ else                                                                            
 }
 
 
+#define GET_BUFFER_CHECK_OR_FILL_WITH_FLAGS(monitor_pointer, to_check, size)                                           \
+void* buffer;                                                                                                          \
+int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction, &buffer,        \
+    size + sizeof(unsigned long long));                                                                                \
+if (result < 0)                                                                                                        \
+    return result;                                                                                                     \
+if (result == REPLAY_BUFFER_RETURN_FIRST)                                                                              \
+{                                                                                                                      \
+    memcpy(buffer, to_check, size);                                                                                    \
+}                                                                                                                      \
+else                                                                                                                   \
+{                                                                                                                      \
+    if (memcmp(buffer, to_check, size))                                                                                \
+        return -1;                                                                                                     \
+    regs_struct->eflags = *(unsigned long*) ((unsigned long) buffer + size);                                           \
+    REPLAY_BUFFER_ADVANCE                                                                                              \
+    return 0;                                                                                                          \
+}
+
+
 #define GET_BUFFER_REPLACE(monitor_pointer, size)                                                                      \
 void* buffer;                                                                                                          \
 int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction, &buffer, size); \
@@ -598,6 +618,86 @@ BYTE_EMULATOR_IMPL(0x11)
 /* Valid in second round */
 BYTE_EMULATOR_IMPL(0x29)
 {
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        // sub Ev, Gv
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        int access_size = GET_INSTRUCTION_ACCESS_SIZE;
+        LOAD_RM_CODE(destination, access_size)
+        LOAD_REG_CODE(source, general_purpose_lookup)
+        GET_BUFFER_CHECK_OR_FILL_WITH_FLAGS(destination, source, access_size)
+
+        // 64-bit
+        if (access_size == 8)
+        {
+            uint64_t* typed_destination = (uint64_t*) destination;
+            uint64_t* typed_source = (uint64_t*) source;
+            // warnf(" > sub m64, r64 | 0x%lx - 0x%lx\n",
+            //       (unsigned long) *typed_destination, (unsigned long) *typed_source);
+            __asm__
+            (
+                ".intel_syntax noprefix;"
+                "push %[flags];"
+                "popf;"
+                "sub QWORD PTR [%[dst]], %[src];"
+                "pushf;"
+                "pop %[flags];"
+                ".att_syntax;"
+                : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                : [dst] "r" (typed_destination), [src] "r" (*typed_source)
+                : "cc"
+            );
+        }
+        // 16-bit
+        else if (access_size == 2)
+        {
+            uint16_t* typed_destination = (uint16_t*) destination;
+            uint16_t* typed_source = (uint16_t*) source;
+            // warnf(" > sub m16, r16 | 0x%lx - 0x%lx\n",
+            //       ((unsigned long) *typed_destination)&0xffffu, ((unsigned long) *typed_source)&0xffffu);
+            __asm__
+            (
+                    ".intel_syntax noprefix;"
+                    "push %[flags];"
+                    "popf;"
+                    "sub WORD PTR [%[dst]], %[src];"
+                    "pushf;"
+                    "pop %[flags];"
+                    ".att_syntax;"
+                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                    : [dst] "r" (typed_destination), [src] "r" (*typed_source)
+                    : "cc"
+            );
+        }
+        // 32-bit
+        else
+        {
+            uint32_t* typed_destination = (uint32_t*) destination;
+            uint32_t* typed_source = (uint32_t*) source;
+            // warnf(" > sub m32, r32 | 0x%lx - 0x%lx\n",
+            //       ((unsigned long) *typed_destination)&0xffffffffu, ((unsigned long) *typed_source)&0xffffffffu);
+            __asm__
+            (
+                    ".intel_syntax noprefix;"
+                    "push %[flags];"
+                    "popf;"
+                    "sub DWORD PTR [%[dst]], %[src];"
+                    "pushf;"
+                    "pop %[flags];"
+                    ".att_syntax;"
+                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                    : [dst] "r" (typed_destination), [src] "r" (*typed_source)
+                    : "cc"
+            );
+        }
+
+        // save content of flags register to repliaction buffer
+        *(unsigned long*) ((unsigned long) buffer + access_size) = regs_struct->eflags;
+        // registers will be written back on resume.
+        REPLAY_BUFFER_ADVANCE
+        return 0;
+    }
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
         // size and register type is the same, regardless of prefix
