@@ -2879,6 +2879,52 @@ POSTCALL(ioctl)
 }
 
 /*-----------------------------------------------------------------------------
+    sys_shmdt -
+
+    man(2): (const void *shmaddr)
+-----------------------------------------------------------------------------*/
+PRECALL(shmdt)
+{
+    call_check_regs(0);
+    auto caller_info = set_mmap_table->get_caller_info(0, variants[0].variantpid, variants[0].regs.rip);
+    if (caller_info.find("mvee_shm_shmdt") == std::string::npos)
+        return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOMEM);
+
+    // either all variants shmdt a tagged pointer, or non of them do
+    if (IS_TAGGED_ADDRESS(ARG1(0)))
+    {
+        unsigned long long shared_address;
+        shared_address = decode_address_tag(ARG1(0), &variants[0]);
+        REPLACE_SHARED_POINTER_ARG(0, 1)
+        else
+        {
+            warnf("Attempting to replace shared memory pointer %p which is no longer valid\n", (void*) ARG1(0));
+            return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
+        }
+        for (int i = 1; i < mvee::numvariants; i++)
+            if (!IS_TAGGED_ADDRESS(ARG1(i)) || decode_address_tag(ARG1(i), &variants[i]) != shared_address)
+                return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
+
+        return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+    }
+
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+}
+
+POSTCALL(shmdt)
+{
+    if (!call_succeeded || !IS_TAGGED_ADDRESS(ARG1(0)))
+        return MVEE_POSTCALL_RESUME;
+
+    // realistically this shouldn't happen anyway
+    if (set_mmap_table->remove_shared_info(decode_address_tag(ARG1(0), &variants[0])) == nullptr)
+        warnf("An issue was encountered removing %p from the shared memory bookkeeping\n", (void*) ARG1(0));
+    set_mmap_table->debug_shared();
+
+    return MVEE_POSTCALL_RESUME;
+}
+
+/*-----------------------------------------------------------------------------
   sys_fcntl - 
 
   man(2): (int fd, int cmd, ...)
@@ -5539,6 +5585,8 @@ POSTCALL(shmat)
     {
         for (int i = 0; i < mvee::numvariants; i++)
             current_shadow->variant_shadows[i].variant_base = addresses[i];
+        region_size = current_shadow->size;
+        current_shadow = nullptr;
         shm_setup_state = SHM_SETUP_IDLE;
     }
 	else
@@ -5567,7 +5615,7 @@ POSTCALL(shmat)
             region_size = shm_info.shm_segsz;
 
             if (set_mmap_table->shadow_shmat(&variants[0], ARG1(0), addresses[0],
-                    &shadow, shm_info.shm_segsz) != 0)
+                    &shadow, region_size) != 0)
             {
                 shutdown(false);
                 return MVEE_POSTCALL_DONTRESUME;
@@ -7168,7 +7216,7 @@ PRECALL(mmap)
 				warnf("Please refer to our EuroSys 2017 paper for more details:\n");
 				warnf("\tTaming Parallelism in a Multi-Variant Execution Environment\n");
 				warnf("\tStijn Volckaert, Bart Coppens, Bjorn De Sutter, Koen De Bosschere, Per Larsen, and Michael Franz.\n");
-				warnf("\tIn 12th European Conference on Computer Systems (EuroSys'17). ACM, 2017.\n");				
+				warnf("\tIn 12th European Conference on Computer Systems (EuroSys'17). ACM, 2017.\n");
 				warnf("\n");
 			}
 		}		
@@ -11130,7 +11178,6 @@ void mvee::init_syslocks()
     DONTNEED PRECALL(rt_sigreturn)
     DONTNEED PRECALL(prlimit64)
     DONTNEED PRECALL(sigaltstack)
-    DONTNEED PRECALL(shmdt)
 	DONTNEED PRECALL(rt_sigtimedwait)
     DONTNEED PRECALL(mlock)
     DONTNEED PRECALL(clock_nanosleep)

@@ -221,7 +221,10 @@ mmap_table::mmap_table(const mmap_table& parent)
             full_map[i].insert(new_region);
 
             if (i == 0 && (*it)->shadow != nullptr)
-                variant_mappings.push_back(new shared_monitor_map_info((*it)->shadow));
+            {
+                new_region->shadow = new shared_monitor_map_info((*it)->shadow);
+                variant_mappings.push_back(new_region->shadow);
+            }
         }
     }
 }
@@ -977,12 +980,6 @@ bool mmap_table::mman_munmap_range_callback(mmap_table* table, mmap_region_info*
         region_info = table->split_region(__munmap_variantnum, region_info, __munmap_base + __munmap_size);
         if (region_info->shadow)
             table->split_variant_shadow_region(region_info->shadow, __munmap_base + __munmap_size);
-    }
-
-    if (__munmap_variantnum == 0 && region_info->shadow)
-    {
-        table->munmap_variant_shadow_region(region_info->shadow);
-        region_info->shadow = nullptr;
     }
 
     // delete the region from the table

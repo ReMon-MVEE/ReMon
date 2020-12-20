@@ -3338,6 +3338,8 @@ void* monitor::thread(void* param)
     sigaddset(&set, SIGINT);
     pthread_sigmask(SIG_BLOCK, &set, NULL);
 
+    mon->set_mmap_table->attach_shared_memory();
+
     // wait until we can run
     while (1)
     {
