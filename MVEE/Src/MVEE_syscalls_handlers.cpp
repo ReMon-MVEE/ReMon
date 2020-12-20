@@ -3965,8 +3965,11 @@ POSTCALL(munmap)
 
                 set_mmap_table->munmap_range(i, address, ARG2(i));
             }
-            if (IS_TAGGED_ADDRESS(ARG1(0)))
-                set_mmap_table->remove_shared_info(decode_address_tag(ARG1(0), &variants[0]));
+            if (IS_TAGGED_ADDRESS(ARG1(0)) &&
+                    !set_mmap_table->remove_shared_info(decode_address_tag(ARG1(0), &variants[0])))
+            {
+                warnf("An issue was encountered removing %p from the shared memory bookkeeping\n", (void*) ARG1(0));
+            }
 
 			while (writeback_infos.size() > 0)
 			{
