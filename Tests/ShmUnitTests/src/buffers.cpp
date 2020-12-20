@@ -51,3 +51,10 @@ int                 buffers::setup                                  ()
 
     return 0;
 }
+
+
+int                 buffers::cleanup                                ()
+{
+    munmap(buffers::shared_mapping, SHARED_SIZE);
+    munmap(buffers::shared_sink, SHARED_SIZE);
+}
