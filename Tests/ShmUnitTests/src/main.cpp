@@ -110,6 +110,7 @@ int             main                                                (int argc, c
     instruction_tests::test_0xa4();
     instruction_tests::test_0xab();
     instruction_tests::test_0xc7();
+    instruction_tests::test_0x0f_0x10();
     instruction_tests::test_0x0f_0x11();
     instruction_tests::test_0x0f_0x6f();
     instruction_tests::test_0x0f_0x7f();

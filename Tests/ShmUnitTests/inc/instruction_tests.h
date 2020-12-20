@@ -49,6 +49,8 @@ namespace instruction_tests
 
     void        test_0xc7                           ();
 
+    void        test_0x0f_0x10                      ();
+
     void        test_0x0f_0x11                      ();
 
     void        test_0x0f_0x6f                      ();

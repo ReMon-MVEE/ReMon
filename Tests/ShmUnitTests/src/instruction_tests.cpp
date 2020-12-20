@@ -1115,9 +1115,9 @@ void            instruction_tests::test_0xc7                        ()
 }
 
 
-void            instruction_tests::test_0x0f_0x11                   ()
+void            instruction_tests::test_0x0f_0x10                   ()
 {
-    START_TEST("Running tests for movups (0x0f 0x11)\n")
+    START_TEST("Running tests for movups (0x0f 0x10)\n")
 
 
     unsigned long long original[2] = { 0x1122334455667788, 0x8877665544332211 };
@@ -1128,12 +1128,107 @@ void            instruction_tests::test_0x0f_0x11                   ()
             "movups XMMWORD PTR [rdx], xmm0;"
             ".att_syntax;"
             :
-            : [dst] "d" (buffers::shared_sink), [src] "a" (original)
+            : [dst] "d" (original), [src] "a" (buffers::shared_sink)
     );
     TEST_RESULT("movups m128, xmm", testing_aid::compare_buffers(buffers::shared_sink,
             (__uint8_t*) original, DQWORD_SIZE) == 0)
+    asm
+    (
+            ".intel_syntax noprefix;"
+            "movups xmm0, XMMWORD PTR [rdi + 0x12];"
+            "movups XMMWORD PTR [rdx], xmm0;"
+            ".att_syntax;"
+            :
+            : [dst] "d" (original), [src] "D" (buffers::shared_sink)
+    );
+    TEST_RESULT("movups [rdi + 0x12], xmm", testing_aid::compare_buffers(buffers::shared_sink + 0x12,
+            (__uint8_t*) original, DQWORD_SIZE) == 0)
+    asm
+    (
+            ".intel_syntax noprefix;"
+            "movups xmm0, XMMWORD PTR [rdi + 1*rdx + 0x12];"
+            "movups XMMWORD PTR [rax], xmm0;"
+            ".att_syntax;"
+            :
+            : [dst] "a" (original), [src] "D" (buffers::shared_sink), "d" (0x20)
+    );
+    TEST_RESULT("movups [rdi + 1*rdx + 0x12], xmm", testing_aid::compare_buffers(buffers::shared_sink + 0x20 + 0x12,
+            (__uint8_t*) original, DQWORD_SIZE) == 0)
+    asm
+    (
+            ".intel_syntax noprefix;"
+            "movups xmm0, XMMWORD PTR [rdi + 1*rdx - 0x06];"
+            "movups XMMWORD PTR [rax], xmm0;"
+            ".att_syntax;"
+            :
+            : [dst] "a" (original), [src] "D" (buffers::shared_sink), "d" (0x20)
+    );
+    TEST_RESULT("movups [rdi + 1*rdx - 0x06], xmm", testing_aid::compare_buffers(buffers::shared_sink + 0x20 - 0x06,
+            (__uint8_t*) original, DQWORD_SIZE) == 0)
 
     testing_aid::clear_buffer(buffers::shared_sink, DQWORD_SIZE);
+    testing_aid::clear_buffer(buffers::shared_sink + 0x12, DQWORD_SIZE);
+    testing_aid::clear_buffer(buffers::shared_sink + 0x20 + 0x12, DQWORD_SIZE);
+    testing_aid::clear_buffer(buffers::shared_sink + 0x20 - 0x06, DQWORD_SIZE);
+    FINISH_TEST("movups tests successful!", "movups tests failed!")
+}
+
+
+void            instruction_tests::test_0x0f_0x11                   ()
+{
+    START_TEST("Running tests for movups (0x0f 0x11)\n")
+
+
+    unsigned long long original[2] = { 0x1122334455667788, 0x8877665544332211 };
+    asm
+    (
+            ".intel_syntax noprefix;"
+            "movups xmm0, XMMWORD PTR [rax];"
+            "movups XMMWORD PTR [rdi], xmm0;"
+            ".att_syntax;"
+            :
+            : [dst] "D" (buffers::shared_sink), [src] "a" (original)
+    );
+    TEST_RESULT("movups [rdi], xmm", testing_aid::compare_buffers(buffers::shared_sink,
+            (__uint8_t*) original, DQWORD_SIZE) == 0)
+    asm
+    (
+            ".intel_syntax noprefix;"
+            "movups xmm0, XMMWORD PTR [rax];"
+            "movups XMMWORD PTR [rdi + 0x12], xmm0;"
+            ".att_syntax;"
+            :
+            : [dst] "D" (buffers::shared_sink), [src] "a" (original)
+    );
+    TEST_RESULT("movups [rdi + 0x12], xmm", testing_aid::compare_buffers(buffers::shared_sink + 0x12,
+            (__uint8_t*) original, DQWORD_SIZE) == 0)
+    asm
+    (
+            ".intel_syntax noprefix;"
+            "movups xmm0, XMMWORD PTR [rax];"
+            "movups XMMWORD PTR [rdi + 1*rdx + 0x12], xmm0;"
+            ".att_syntax;"
+            :
+            : [dst] "D" (buffers::shared_sink), [src] "a" (original), "d" (0x20)
+    );
+    TEST_RESULT("movups [rdi + 1*0x20 + 0x12], xmm", testing_aid::compare_buffers(buffers::shared_sink + 0x20 + 0x12,
+            (__uint8_t*) original, DQWORD_SIZE) == 0)
+    asm
+    (
+            ".intel_syntax noprefix;"
+            "movups xmm0, XMMWORD PTR [rax];"
+            "movups XMMWORD PTR [rdi + 1*rdx - 0x06], xmm0;"
+            ".att_syntax;"
+            :
+            : [dst] "D" (buffers::shared_sink), [src] "a" (original), "d" (0x20)
+    );
+    TEST_RESULT("movups [rdi + 1*0x20 - 0x06], xmm", testing_aid::compare_buffers(buffers::shared_sink + 0x20 - 0x06,
+            (__uint8_t*) original, DQWORD_SIZE) == 0)
+
+    testing_aid::clear_buffer(buffers::shared_sink, DQWORD_SIZE);
+    testing_aid::clear_buffer(buffers::shared_sink + 0x12, DQWORD_SIZE);
+    testing_aid::clear_buffer(buffers::shared_sink + 0x20 + 0x12, DQWORD_SIZE);
+    testing_aid::clear_buffer(buffers::shared_sink + 0x20 - 0x06, DQWORD_SIZE);
     FINISH_TEST("movups tests successful!", "movups tests failed!")
 }
 
