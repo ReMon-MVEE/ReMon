@@ -239,7 +239,6 @@ else()
 
     # compiler flags
     target_compile_options(mvee PRIVATE
-            -flto
             -O3
             -ffast-math
             -std=c++14
