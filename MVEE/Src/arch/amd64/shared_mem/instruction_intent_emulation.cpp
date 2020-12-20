@@ -495,14 +495,13 @@ BYTE_EMULATOR_IMPL(0x11)
         // movups xmm/m128, xmm
         DEFINE_FPREGS_STRUCT
         DEFINE_MODRM
-        LOAD_RM_CODE(destination, 16)
+        LOAD_RM_CODE_NO_DEFINE(16)
         LOAD_REG_CODE(source, xmm_lookup)
 
-        GET_BUFFER_CHECK_OR_FILL(destination, source, 16)
-
         // perform operation
-        __asm__
-        (
+        XMM_TO_SHARED(
+                __asm__
+                (
                 ".intel_syntax noprefix;"
                 "movups xmm0, XMMWORD PTR [rdx];"
                 "movups XMMWORD PTR [rax], xmm0;"
@@ -510,8 +509,7 @@ BYTE_EMULATOR_IMPL(0x11)
                 :
                 : [dst] "a" (destination), [src] "d" (source)
                 : "xmm0"
-        );
-
+        ))
 
         // no write back needed
         REPLAY_BUFFER_ADVANCE

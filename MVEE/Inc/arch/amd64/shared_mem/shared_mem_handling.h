@@ -609,6 +609,21 @@ if (!variant->variant_num)                                                      
 typed_destination = (__cast*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);             \
 __operation;
 
+#define XMM_TO_SHARED(__operation)                                                                                     \
+void* destination;                                                                                                     \
+int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, mapping_info->monitor_base + offset,          \
+        instruction, nullptr, 0);                                                                                      \
+if (result < 0)                                                                                                        \
+    return result;                                                                                                     \
+                                                                                                                       \
+if (!variant->variant_num)                                                                                             \
+{                                                                                                                      \
+    destination = (void*) (mapping_info->monitor_base + offset);                                                       \
+    __operation;                                                                                                       \
+}                                                                                                                      \
+destination = (void*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);                     \
+__operation;
+
 
 #define NORMAL_FROM_SHARED(__cast)                                                                                     \
 __cast* typed_source;                                                                                                  \
