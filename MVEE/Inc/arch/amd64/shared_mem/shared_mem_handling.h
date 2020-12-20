@@ -284,19 +284,16 @@ unsigned long encode_address_tag(unsigned long address, const variantstate* vari
 
 
 // ugly syscall shared pointer redirection -----------------------------------------------------------------------------
-#define REPLACE_SHARED_POINTER_ARG(var, arg)                                                                           \
+#define REPLACE_SHARED_POINTER_ARG(__var, __arg)                                                                       \
+if (set_mmap_table->get_shared_info(decode_address_tag(ARG##__arg(__var), &variants[__var])))                          \
 {                                                                                                                      \
-    mmap_region_info* region = set_mmap_table->get_region_info(var, decode_address_tag(ARG##arg(var), &variants[var]));\
-    if (region && region->shadow)                                                                                      \
-    {                                                                                                                  \
-        variants[var].have_overwritten_args = true;                                                                    \
-        overwritten_syscall_arg overwritten_arg;                                                                       \
-        overwritten_arg.syscall_arg_num = arg;                                                                         \
-        overwritten_arg.arg_old_value = ARG##arg(var);                                                                 \
-        overwritten_arg.restore_data = false;                                                                          \
-        variants[var].overwritten_args.push_back(overwritten_arg);                                                     \
-        SETARG##arg(var, decode_address_tag(ARG##arg(var), &variants[var]));                                            \
-    }                                                                                                                  \
+    variants[__var].have_overwritten_args = true;                                                                      \
+    overwritten_syscall_arg overwritten_arg;                                                                           \
+    overwritten_arg.syscall_arg_num = __arg;                                                                           \
+    overwritten_arg.arg_old_value = ARG##__arg(__var);                                                                 \
+    overwritten_arg.restore_data = false;                                                                              \
+    variants[__var].overwritten_args.push_back(overwritten_arg);                                                       \
+    SETARG##__arg(__var, decode_address_tag(ARG##__arg(__var), &variants[__var]));                                     \
 }
 // ugly syscall shared pointer redirection -----------------------------------------------------------------------------
 
@@ -627,10 +624,10 @@ __operation;
 
 #define NORMAL_FROM_SHARED(__cast)                                                                                     \
 __cast* typed_source;                                                                                                  \
-int result = shm_handling::determine_source_from_shared_normal(variant, relevant_monitor, instruction,                 \
+int from_shared_result = shm_handling::determine_source_from_shared_normal(variant, relevant_monitor, instruction,     \
         (void**)&typed_source, mapping_info, offset, sizeof(__cast));                                                  \
-if (result < 0)                                                                                                        \
-    return result;
+if (from_shared_result < 0)                                                                                                        \
+    return from_shared_result;
 
 
 class shm_handling
