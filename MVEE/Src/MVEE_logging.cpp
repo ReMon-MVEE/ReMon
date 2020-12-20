@@ -1891,6 +1891,7 @@ void mvee::log_dump_locking_stats(monitor* mon, mmap_table* mmap_table, shm_tabl
 std::string mvee::log_do_hex_dump (const void* hexbuffer, int buffer_size)
 {
     std::stringstream out;
+    out << "\n";
     std::string chars;
     size_t line_len         = strlen("    xxxxxxxx    xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx    ................") + strlen("\n");
     size_t partial_line_len = strlen("    xxxxxxxx    xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx    ");
