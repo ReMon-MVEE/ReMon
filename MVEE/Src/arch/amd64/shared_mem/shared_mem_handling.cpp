@@ -711,7 +711,7 @@ void            replay_buffer::debug_print                          ()
                 shared_monitor_map_info::shared_monitor_map_info(shared_monitor_map_info* monitor_map_from)
         : variant_base(monitor_map_from->variant_base)
         , monitor_base(monitor_map_from->monitor_base)
-        , is_shmat(monitor_map_from->is_shmat)
+        , shmid(monitor_map_from->shmid)
         , size(monitor_map_from->size)
         , variant_shadows(mvee::numvariants)
 {
@@ -720,10 +720,10 @@ void            replay_buffer::debug_print                          ()
 }
                 shared_monitor_map_info::shared_monitor_map_info    (unsigned long long variant_base,
                                                                      __uint8_t* monitor_base, unsigned long long size,
-                                                                     bool is_shmat)
+                                                                     int shmid)
         : variant_base(variant_base)
         , monitor_base(monitor_base)
-        , is_shmat(is_shmat)
+        , shmid(shmid)
         , size(size)
         , variant_shadows(mvee::numvariants)
 {
@@ -773,7 +773,7 @@ void               shared_monitor_map_info::cleanup_shm             ()
 {
     if (this->monitor_base)
     {
-        if (!this->is_shmat)
+        if (this->shmid == -1)
             munmap(this->monitor_base, this->size);
         else
             shmdt(this->monitor_base);
@@ -790,7 +790,7 @@ void               shared_monitor_map_info::cleanup_shm             ()
         }
     }
 
-    this->is_shmat = false;
+    this->shmid = -1;
     this->size = 0;
 }
 
@@ -889,7 +889,7 @@ int             mmap_table::shadow_shmat                            (variantstat
     }
 
     // bookkeeping
-    *shadow = init_shared_info(variant_base, temp_shadow, size, true);
+    *shadow = init_shared_info(variant_base, temp_shadow, size, shmid);
     if (!(*shadow))
         return -1;
 
@@ -908,10 +908,10 @@ int             mmap_table::shadow_shmat                            (variantstat
 shared_monitor_map_info*
                 mmap_table::init_shared_info                        (unsigned long long variant_base,
                                                                      void* monitor_base, unsigned long long size,
-                                                                     bool shmat)
+                                                                     int shmid)
 {
     unsigned long long end = variant_base + size;
-    auto monitor_map = new shared_monitor_map_info(variant_base, (__uint8_t*) monitor_base, size, shmat);
+    auto monitor_map = new shared_monitor_map_info(variant_base, (__uint8_t*) monitor_base, size, shmid);
 
 
     if (variant_mappings.empty() || end <= (unsigned long long) variant_mappings.front()->variant_base)
@@ -949,18 +949,20 @@ shared_monitor_map_info*
 }
 
 
-int             mmap_table::munmap_variant_shadow_region            (shared_monitor_map_info* monitor_map)
+shared_monitor_map_info*
+                mmap_table::remove_shared_info                      (unsigned long long address)
 {
-    for (auto iter = variant_mappings.begin(); iter != variant_mappings.end(); iter++)
+    for (auto shadow = variant_mappings.begin(); shadow != variant_mappings.end(); shadow++)
     {
-        if ((*iter)->variant_base == monitor_map->variant_base)
+        if (address >= (*shadow)->variant_base && address < ((*shadow)->variant_base + (*shadow)->size))
         {
-            delete (*iter);
-            variant_mappings.erase(iter);
-            break;
+            (*shadow)->cleanup_shm();
+            variant_mappings.erase(shadow);
+            return (*shadow);
         }
     }
-    return 0;
+
+    return nullptr;
 }
 
 
@@ -999,13 +1001,26 @@ void            mmap_table::debug_shared                            ()
     std::stringstream output;
     output << "mappings:\n";
     for (const auto& iter: this->variant_mappings)
-        output << "\t  > variant: [ " << std::hex << iter->variant_base << "; "
+        output << "\t  > variant: [ " << std::hex << (unsigned long long) iter->variant_base << "; "
                 << std::hex << (unsigned long long) iter->variant_base + iter->size << " ) => "
-                << " monitor: [ " << std::hex << iter->monitor_base << "; "
+                << " monitor: [ " << std::hex << (unsigned long long) iter->monitor_base << "; "
                 << std::hex << (unsigned long long) iter->monitor_base + iter->size << " )\n";
     output << "\n";
 
     warnf("%s\n", output.str().c_str());
+}
+
+void            mmap_table::attach_shared_memory                    ()
+{
+    for (auto shared_mapping: variant_mappings)
+    {
+        if (shared_mapping->shmid != -1)
+            shared_mapping->monitor_base =
+                    (uint8_t*)shmat(shared_mapping->shmid, shared_mapping->monitor_base, SHM_REMAP);
+        for (auto shared_shadow: shared_mapping->variant_shadows)
+            shared_shadow.monitor_base =
+                    (uint8_t*) shmat(shared_shadow.shmid, shared_shadow.monitor_base, SHM_REMAP);
+    }
 }
 
 

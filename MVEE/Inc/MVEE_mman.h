@@ -135,14 +135,14 @@ public:
     unsigned long long
                 variant_base;
     __uint8_t*  monitor_base;
-    bool        is_shmat;
+    int         shmid;
     size_t      size;
     std::vector<variant_mapping_info_t>
                 variant_shadows;
 
                 shared_monitor_map_info     (shared_monitor_map_info* monitor_map_from);
                 shared_monitor_map_info     (unsigned long long variant_base, __uint8_t* monitor_base,
-                                             unsigned long long size, bool is_shmat);
+                                             unsigned long long size, int shmat);
                 ~shared_monitor_map_info    ();
 
     int         setup_shm                   ();
@@ -384,15 +384,17 @@ public:
                                                      unsigned long long size);
     shared_monitor_map_info*
                        init_shared_info             (unsigned long long variant_base, void* monitor_base,
-                                                     unsigned long long size, bool shmat = false);
+                                                     unsigned long long size, int shmid = -1);
     shared_monitor_map_info*
                        get_shared_info              (unsigned long long address);
-    int                munmap_variant_shadow_region (shared_monitor_map_info* region_info);
+    shared_monitor_map_info*
+                       remove_shared_info           (unsigned long long address);
     int                split_variant_shadow_region  (shared_monitor_map_info* monitor_map,
                                                      unsigned long long split_address);
     int                merge_variant_shadow_region  (shared_monitor_map_info* monitor_map1,
                                                      shared_monitor_map_info* monitor_map2);
     void               debug_shared                 ();
+    void               attach_shared_memory         ();
 
 
 private:
