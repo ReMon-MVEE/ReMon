@@ -328,7 +328,7 @@ BYTE_EMULATOR_IMPL(0x03)
         {
             GET_BUFFER_REPLACE(source, 8)
             uint64_t* typed_destination = (uint64_t*)destination;
-            uint64_t* typed_source = (uint64_t*)source;
+            NORMAL_FROM_SHARED(uint64_t)
             __asm__
             (
                     ".intel_syntax noprefix;"
@@ -348,7 +348,7 @@ BYTE_EMULATOR_IMPL(0x03)
         {
             GET_BUFFER_REPLACE(source, 2)
             uint16_t* typed_destination = (uint16_t*)destination;
-            uint16_t* typed_source = (uint16_t*)source;
+            NORMAL_FROM_SHARED(uint16_t)
             __asm__
             (
                     ".intel_syntax noprefix;"
@@ -368,7 +368,7 @@ BYTE_EMULATOR_IMPL(0x03)
         {
             GET_BUFFER_REPLACE(source, 4)
             uint32_t* typed_destination = (uint32_t*)destination;
-            uint32_t* typed_source = (uint32_t*)source;
+            NORMAL_FROM_SHARED(uint32_t)
             *(typed_destination + 1) = 0;
             __asm__
             (
