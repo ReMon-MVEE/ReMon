@@ -2887,7 +2887,8 @@ PRECALL(shmdt)
 {
     call_check_regs(0);
     auto caller_info = set_mmap_table->get_caller_info(0, variants[0].variantpid, variants[0].regs.rip);
-    if (caller_info.find("mvee_shm_shmdt") == std::string::npos)
+    if (caller_info.find("mvee_shm_shmdt") == std::string::npos &&
+            caller_info.find("mvee_shm_munmap") == std::string::npos)
         return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOMEM);
 
     // either all variants shmdt a tagged pointer, or non of them do
