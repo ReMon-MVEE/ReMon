@@ -59,7 +59,7 @@ run_docker() {
     #           This reduces container isolation, but as isolation is not the reason we're using x11docker that's not an issue.
     # 2nd line: the docker options (allow ptracing and mount volumes)
     # 3rd line: the actual docker image and the command to run in it
-    x11docker --hostdisplay --hostipc --gpu --pulseaudio --interactive --home --sudouser --clipboard -- \
+    x11docker --hostdisplay --hostipc --gpu --pulseaudio --interactive --home --sudouser --clipboard --cap-default -- \
         --cap-add SYS_PTRACE -ti $VOLUMES -- \
         $IMAGE bash
 }
