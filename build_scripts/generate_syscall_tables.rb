@@ -31,9 +31,11 @@ File.open('syscalls.c', 'w+') { |tmpfile|
   matches = line.match(/(\w*):(\d*)/)
   callname = matches[1]
   callnum = matches[2]
-  
-  @syscalls[callnum] = callname
-  @numcalls = callnum.to_i+1
+
+  if callname != "ipmon_invoke"
+    @syscalls[callnum] = callname
+    @numcalls = callnum.to_i+1
+  end
 }
 
 File.delete("syscalls.c")
