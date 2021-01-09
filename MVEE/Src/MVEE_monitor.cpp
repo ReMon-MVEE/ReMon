@@ -2209,8 +2209,9 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                 instruction_intent* instruction = &variant->instruction;
                 instruction->update((void*) variant->regs.rip, decode_address_tag(siginfo.si_addr, variant));
 
+#ifdef MVEE_LOG_NON_INSTRUMENTED_INSTRUCTION
                 mvee::log_non_instrumented(variant, this, instruction);
-
+#endif
                 switch (instruction_intent_emulation::lookup_table[instruction->opcode()].emulator(*instruction,
                         *this, variant))
                 {
@@ -2268,6 +2269,7 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                     }
                     case UNKNOWN_MEMORY_TERMINATION:
                     {
+                        warnf(" > pointer: %p\n", decode_address_tag(siginfo.si_addr, variant));
                         set_mmap_table->debug_shared();
                         debugf("unknown memory\n");
                         break;

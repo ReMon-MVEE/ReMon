@@ -1512,7 +1512,7 @@ void mvee::log_init()
 #ifdef MVEE_LOG_NON_INSTRUMENTED_INSTRUCTION
     printf("Opening log for non-instrumented instructions @ %s\n", NON_INSTRUMENTED_LOGNAME);
     mvee::non_instrumented_logfile = fopen64(NON_INSTRUMENTED_LOGNAME, "w");
-    if (mvee::logfile == NULL)
+    if (mvee::non_instrumented_logfile == nullptr)
         warnf("Failed to non instrumented instruction log");
 #endif
 
@@ -1985,6 +1985,7 @@ void mvee::log_sigaction(struct sigaction* action)
 }
 
 
+#ifdef MVEE_LOG_NON_INSTRUMENTED_INSTRUCTION
 /*-----------------------------------------------------------------------------
   log_non_instrumented - log non-instrumented instruction
 -----------------------------------------------------------------------------*/
@@ -2122,6 +2123,7 @@ void mvee::flush_non_instrumented_log()
     if (mvee::non_instrumented_logfile)
         fflush(mvee::non_instrumented_logfile);
 }
+#endif
 
 /*-----------------------------------------------------------------------------
   mvee_log_local_backtrace - log a monitor backtrace to stderr

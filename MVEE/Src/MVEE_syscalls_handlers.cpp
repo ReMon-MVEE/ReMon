@@ -1187,7 +1187,7 @@ CALL(execve)
 	{
 		warnf("Executing non-diversified variants: %s -- %s\n",
 			  set_mmap_table->mmap_startup_info[0].image.c_str(),
-			  set_mmap_table->mmap_startup_info[0].serialized_argv.c_str());		
+			  set_mmap_table->mmap_startup_info[0].serialized_argv.c_str());
 	}
 #endif
 
@@ -2921,7 +2921,6 @@ POSTCALL(shmdt)
     if (set_mmap_table->remove_shared_info(decode_address_tag(ARG1(0), &variants[0])) == nullptr)
         // realistically this shouldn't happen anyway
         warnf("An issue was encountered removing %p from the shared memory bookkeeping\n", (void*) ARG1(0));
-    set_mmap_table->debug_shared();
 
     return MVEE_POSTCALL_RESUME;
 }
