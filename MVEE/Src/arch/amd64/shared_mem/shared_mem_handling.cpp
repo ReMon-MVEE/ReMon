@@ -742,23 +742,23 @@ int                shared_monitor_map_info::setup_shm               ()
 {
     for (int variant_num = 0; variant_num < mvee::numvariants; variant_num++)
     {
-        int shmid = shmget(IPC_PRIVATE, this->size, IPC_CREAT | S_IRUSR | S_IWUSR);
-        if (shmid == -1)
+        int shadow_shmid = shmget(IPC_PRIVATE, this->size, IPC_CREAT | S_IRUSR | S_IWUSR);
+        if (shadow_shmid == -1)
         {
             warnf("problem setting up variant local shadow for variant %d - errno: %d\n", variant_num, errno);
             return -1;
         }
-        auto* shm_addr = (__uint8_t*) shmat(shmid, nullptr, 0);
+        auto* shm_addr = (__uint8_t*) shmat(shadow_shmid, nullptr, 0);
         if (shm_addr == (void*) -1)
         {
-            warnf("problem attaching to variant local shadow (shmid: %d) for variant %d - errno: %d\n", shmid,
+            warnf("problem attaching to variant local shadow (shmid: %d) for variant %d - errno: %d\n", shadow_shmid,
                   variant_num, errno);
             return -1;
         }
 
         this->variant_shadows[variant_num] =
                 {
-                        shmid,
+                        shadow_shmid,
                         shm_addr,
                         0x00
                 };
