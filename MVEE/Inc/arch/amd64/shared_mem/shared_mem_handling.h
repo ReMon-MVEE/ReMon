@@ -630,7 +630,15 @@ __operation;
 __cast* typed_source;                                                                                                  \
 int from_shared_result = shm_handling::determine_source_from_shared_normal(variant, relevant_monitor, instruction,     \
         (void**)&typed_source, mapping_info, offset, sizeof(__cast));                                                  \
-if (from_shared_result < 0)                                                                                                        \
+if (from_shared_result < 0)                                                                                            \
+    return from_shared_result;
+
+
+#define XMM_FROM_SHARED                                                                                                \
+void* source;                                                                                                          \
+int from_shared_result = shm_handling::determine_source_from_shared_normal(variant, relevant_monitor, instruction,     \
+        (void**)&source, mapping_info, offset, 16);                                                                    \
+if (from_shared_result < 0)                                                                                            \
     return from_shared_result;
 
 
