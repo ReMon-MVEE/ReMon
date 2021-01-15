@@ -12,6 +12,7 @@ $ patch -p1 < /path/to/ReMon/\!\!private\!\!/race-free-parsec/parsec-3.0-drf.pat
 $ patch -p1 < /path/to/ReMon/patches/parsec3-config.patch
 $ patch -p1 < /path/to/ReMon/patches/parsec3-volrend.patch
 $ patch -p1 < /path/to/ReMon/patches/parsec3-c++11.patch
+$ patch -p1 < /path/to/ReMon/patches/parsec3-ferret.patch
 
 3) Build PARSEC
 
