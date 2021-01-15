@@ -1,0 +1,12 @@
+diff -r --unified parsec-3.0/pkgs/apps/ferret/src/image/image.c parsec-3.0-patched/pkgs/apps/ferret/src/image/image.c
+--- parsec-3.0/pkgs/apps/ferret/src/image/image.c	2021-01-15 10:39:42.623375900 +0100
++++ parsec-3.0-patched/pkgs/apps/ferret/src/image/image.c	2021-01-15 00:11:11.813446283 +0100
+@@ -331,7 +331,7 @@
+   (void) jpeg_read_header(&cinfo, TRUE);
+   (void) jpeg_start_decompress(&cinfo);
+   row_stride = cinfo.output_width * cinfo.output_components;
+-  orig = (unsigned char *)malloc(cinfo.output_width * cinfo.output_height * cinfo.output_components);
++  orig = (unsigned char *)calloc(cinfo.output_width * cinfo.output_height * CHAN, 1);
+   if (orig == NULL) fatal("out of memory");
+   row_pointer[0] = orig;
+   while (cinfo.output_scanline < cinfo.output_height) {
