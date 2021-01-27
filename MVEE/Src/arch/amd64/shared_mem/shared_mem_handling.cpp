@@ -395,8 +395,9 @@ void instruction_intent::debug_print_minimal                        ()
     if (size)
     {
         START_OUTPUT_DEBUG
+        output << "variant number:      " << *variant_num << "\n";
         output << "instruction pointer: " << std::hex << instruction_pointer << " - " << (int) size << "\n";
-        output << "faulting address: " << std::hex << effective_address << "\n";
+        output << "faulting address:    " << std::hex << effective_address << "\n";
         ADD_OUTPUT_DEBUG("instruction:", instruction, size)
         PRINT_OUTPUT_DEBUG
     }
@@ -431,6 +432,7 @@ void instruction_intent::debug_print_minimal                        ()
     // set default values
     for (unsigned int i = 0; i < this->buffer_size; i++)
     {
+        this->buffer[i].lock            = false;
         this->buffer[i].passed          = this->passed_mask;
         this->buffer[i].buffer          = this->buffer[i].static_buffer;
     }
@@ -624,7 +626,17 @@ int             replay_buffer::obtain_buffer                        (unsigned in
     if (!variant_num)
     {
         // entry currently empty
-        if (current_entry->passed == this->passed_mask)
+        if (current_entry->lock)
+        {
+            if (requested && requested_size > 0)
+            {
+                *requested = current_entry->buffer;
+                requested_size = current_entry->buffer_size;
+            }
+            current_entry->lock = false;
+            return REPLAY_BUFFER_RETURN_FIRST;
+        }
+        else if (current_entry->passed == this->passed_mask)
         {
             // fill entry
             for (int i = 0; i < instruction.size; i++)
@@ -655,7 +667,36 @@ int             replay_buffer::obtain_buffer                        (unsigned in
 
             current_entry->monitor_pointer = monitor_pointer;
 
-            return REPLAY_BUFFER_RETURN_FIRST;
+            current_entry->lock = PREFIXES_GRP_ONE_PRESENT(instruction) &&
+                    (PREFIXES_GRP_ONE(instruction) == LOCK_PREFIX_CODE);
+
+            if (PREFIXES_GRP_ONE_PRESENT(instruction) && (PREFIXES_GRP_ONE(instruction) == LOCK_PREFIX_CODE))
+            {
+                current_entry->lock = true;
+                current_entry->passed = passed_mask;
+
+                // check which variants are already waiting
+                if (this->state & REPLAY_BUFFER_VARIANTS_WAITING)
+                {
+                    this->state &= ~REPLAY_BUFFER_VARIANTS_WAITING;
+
+                    for (unsigned int i = 1; i < this->variant_count; i++)
+                    {
+                        if (this->variant_states[i].state == REPLAY_STATE_WAITING)
+                        {
+                            this->variant_states[i].state = REPLAY_STATE_RUNNING;
+                            current_entry->passed &= ~(1u << (i - 1));
+                        }
+                    }
+                }
+
+                return current_entry->passed ? REPLAY_BUFFER_RETURN_HOLD : REPLAY_BUFFER_RETURN_CONTINUE;
+            }
+            else
+            {
+                current_entry->lock = false;
+                return REPLAY_BUFFER_RETURN_FIRST;
+            }
         }
         // entry not empty
         else
@@ -667,8 +708,13 @@ int             replay_buffer::obtain_buffer                        (unsigned in
     }
     else
     {
+        if (current_entry->lock)
+        {
+            current_entry->passed &= ~(1u << (variant_num - 1));
+            return current_entry->passed ? REPLAY_BUFFER_RETURN_HOLD : REPLAY_BUFFER_RETURN_CONTINUE;
+        }
         // entry currently empty
-        if (!(current_entry->passed & (1u << (variant_num - 1))))
+        else if (!(current_entry->passed & (1u << (variant_num - 1))))
         {
             // compare instruction
             if (instruction.size != current_entry->instruction_size)
@@ -784,21 +830,32 @@ int             replay_buffer::advance                              (unsigned in
             variantstate* variant = &this->relevant_monitor->variants[0];
             this->variant_states[0].state = REPLAY_STATE_RUNNING;
 
-            if (instruction_intent_emulation::lookup_table[variant->instruction.opcode()].emulator(
-                    variant->instruction, *this->relevant_monitor, variant) != 0)
-            {
-                warnf("leader emulation failed\n");
-                return REPLAY_BUFFER_RETURN_ERROR;
+            int result = instruction_intent_emulation::lookup_table[variant->instruction.opcode()].emulator(
+                    variant->instruction, *this->relevant_monitor, variant);
+            switch (result) {
+                case REPLAY_BUFFER_RETURN_HOLD:
+                {
+                    break;
+                }
+                case REPLAY_BUFFER_RETURN_OK:
+                {
+                    variant->regs.rip += variant->instruction.size;
+                    if (!interaction::write_all_regs(variant->variantpid, &variant->regs))
+                    {
+                        warnf("writing leader regs failed\n");
+                        return REPLAY_BUFFER_RETURN_ERROR;
+                    }
+
+                    this->relevant_monitor->call_resume((int) 0);
+                    break;
+                }
+                default:
+                {
+                    warnf("leader emulation failed - %d\n", result);
+                    return REPLAY_BUFFER_RETURN_ERROR;
+                }
             }
 
-            variant->regs.rip += variant->instruction.size;
-            if (!interaction::write_all_regs(variant->variantpid, &variant->regs))
-            {
-                warnf("writing leader regs failed\n");
-                return REPLAY_BUFFER_RETURN_ERROR;
-            }
-
-            this->relevant_monitor->call_resume((int) 0);
         }
     }
 

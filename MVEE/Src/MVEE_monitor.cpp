@@ -2235,6 +2235,41 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                         call_resume(variantnum);
                         return;
                     }
+                    case REPLAY_BUFFER_RETURN_CONTINUE:
+                    {
+                        // run emulation now that we are at sync point
+                        for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+                        {
+                            variantstate* variant_lock = &variants[variant_i];
+                            int lock_result;
+                            switch ((lock_result =
+                                    instruction_intent_emulation::lookup_table[instruction->opcode()].emulator(
+                                        variant_lock->instruction, *this, variant_lock)))
+                            {
+                                case 0:
+                                {
+                                    // update instruction pointer to skip instruction
+                                    variant_lock->regs.rip += variant_lock->instruction.size;
+                                    if (!interaction::write_all_regs(variant_lock->variantpid, &variant_lock->regs))
+                                    {
+                                        if (errno == ESRCH)
+                                            return;
+                                    }
+
+                                    call_resume(variant_i);
+                                    break;
+                                }
+                                default:
+                                {
+                                    warnf(" > something happened while emulating a lock prefixed instruction - %d\n",
+                                            lock_result);
+                                    signal_shutdown();
+                                    return;
+                                }
+                            }
+                        }
+                        return;
+                    }
                     case ILLEGAL_ACCESS_TERMINATION:
                     {
                         warnf("illegal access\n");
@@ -2256,20 +2291,27 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                             debugf("could not find location of access | %p\n", decode_address_tag(siginfo.si_addr, variant));
                         else
                         {
-                            debugf("access in %s at offset %llx | %p\n", accessed_region->region_backing_file_path.c_str(),
+                            debugf("access in %s at offset %llx | %p | [ %p ; %p )\n",
+                                   accessed_region->region_backing_file_path.c_str(),
                                     (unsigned long long) decode_address_tag(siginfo.si_addr, variant)
                                         - accessed_region->region_base_address,
-                                   decode_address_tag(siginfo.si_addr, variant));
+                                   decode_address_tag(siginfo.si_addr, variant),
+                                   (void*) accessed_region->region_base_address,
+                                   (void*) (accessed_region->region_base_address + region->region_size));
                         }
                         // set_mmap_table->print_mmap_table(debugf);
-                        log_backtraces();
-
-                        shutdown(false);
+                        log_variant_backtrace(variantnum);
+                        signal_shutdown();
                         return;
                     }
                     case REPLAY_BUFFER_RETURN_WAIT:
                     {
                         debugf("variant %d asked to wait\n\n", variantnum);
+                        return;
+                    }
+                    case REPLAY_BUFFER_RETURN_HOLD:
+                    {
+                        debugf("variant %d asked to hold\n\n", variantnum);
                         return;
                     }
                     case UNKNOWN_MEMORY_TERMINATION:

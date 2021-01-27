@@ -191,8 +191,10 @@ debugf("\n%s\n", output.str().c_str());
 #define REPLAY_STATE_WAITING                    0x02u
 
 // returns for buffer obtaining
-#define REPLAY_BUFFER_RETURN_WAIT               -2
-#define REPLAY_BUFFER_RETURN_ERROR              -1
+#define REPLAY_BUFFER_RETURN_CONTINUE           (-5)
+#define REPLAY_BUFFER_RETURN_HOLD               (-4)
+#define REPLAY_BUFFER_RETURN_WAIT               (-2)
+#define REPLAY_BUFFER_RETURN_ERROR              (-1)
 #define REPLAY_BUFFER_RETURN_OK                 0
 #define REPLAY_BUFFER_RETURN_FIRST              1
 // ---------------------------------------------------------------------------------------------------------------------
@@ -547,6 +549,7 @@ struct replay_entry
 
     void*           monitor_pointer;
     __uint64_t      passed;
+    bool            lock;
 };
 
 
