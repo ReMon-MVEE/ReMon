@@ -376,7 +376,8 @@ bool monitor::call_compare_io_vectors(std::vector<struct iovec*>& addresses, siz
 {
     bool                        result     = true;
     struct iovec*               slave_vec  = NULL;
-    struct iovec*               master_vec = (struct iovec*)rw::read_data(variants[0].variantpid, addresses[0], sizeof(struct iovec) * len);
+    struct iovec*               master_vec = (struct iovec*)rw::read_data(variants[0].variantpid, addresses[0],
+            sizeof(struct iovec) * len);
 
     if (!master_vec)
 		throw RwMemFailure(0, "read master iovec");
@@ -387,9 +388,16 @@ bool monitor::call_compare_io_vectors(std::vector<struct iovec*>& addresses, siz
     {
         for (size_t i = 0; i < len; ++i)
         {
-            master_io[i] = master_vec[i].iov_base ?
-                           rw::read_data(variants[0].variantpid, master_vec[i].iov_base, master_vec[i].iov_len) :
-                           NULL;
+            if (IS_TAGGED_ADDRESS(master_vec[i].iov_base))
+            {
+                master_io[i] = nullptr;
+                master_vec[i].iov_base =
+                        (unsigned char*)decode_address_tag(master_vec[i].iov_base, &variants[0]);
+            }
+            else
+                master_io[i] = master_vec[i].iov_base ?
+                               rw::read_data(variants[0].variantpid, master_vec[i].iov_base, master_vec[i].iov_len) :
+                               NULL;
         }
     }
 
@@ -420,7 +428,15 @@ bool monitor::call_compare_io_vectors(std::vector<struct iovec*>& addresses, siz
             }
             if (!layout_only)
             {
-                if (slave_vec[j].iov_base)
+                if (IS_TAGGED_ADDRESS(slave_vec[j].iov_base))
+                {
+                    if (decode_address_tag(slave_vec[j].iov_base, &variants[i]) != master_vec[j].iov_base)
+                    {
+                        result = false;
+                        goto out;
+                    }
+                }
+                else if (slave_vec[j].iov_base)
                 {
                     unsigned char* io = rw::read_data(variants[i].variantpid, slave_vec[j].iov_base, slave_vec[j].iov_len);
                     if ((!io || !master_io[j]) && (io || master_io[j]))
@@ -1074,13 +1090,33 @@ std::string monitor::call_serialize_io_vector(int variantnum, struct iovec* vec,
 		if (vec_len <= 0)
 			continue;			
 
-        char* elem = (char*)rw::read_data(variants[variantnum].variantpid, 
-											  vec[i].iov_base, 
-											  vec_len, 
-											  1);
+		char* elem;
+		if (IS_TAGGED_ADDRESS(vec[i].iov_base))
+		{
+		    void* address = decode_address_tag(vec[i].iov_base, &variants[variantnum]);
+            shared_monitor_map_info* mapping_info = set_mmap_table->get_shared_info((unsigned long long)address);
+
+            if (!mapping_info)
+                elem = nullptr;
+            else
+            {
+                elem = new(std::nothrow) char[vec_len + 1];
+                elem[vec_len] = 0x00;
+
+                memcpy(elem, mapping_info->variant_shadows[variantnum].monitor_base +
+                            ((unsigned long long)address
+                             - (unsigned long long)mapping_info->variant_shadows[variantnum].monitor_base),
+                        vec_len);
+            }
+		}
+        else
+            elem = (char*)rw::read_data(variants[variantnum].variantpid,
+                    vec[i].iov_base,
+                    vec_len,
+                    1);
 
 		if (!elem)
-			throw RwMemFailure(variantnum, "read iovec data");
+            throw RwMemFailure(variantnum, "read iovec data");
 
 		if (ss.str().length() > 0)
 			ss << ", ";

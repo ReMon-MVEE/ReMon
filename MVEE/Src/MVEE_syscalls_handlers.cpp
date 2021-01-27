@@ -6418,7 +6418,7 @@ LOG_ARGS(writev)
 
 	struct iovec* vec = new(std::nothrow) struct iovec[ARG3(variantnum)];
 
-	if (!vec || 
+	if (!vec ||
 		!rw::read_struct(variants[variantnum].variantpid, (void*) ARG2(variantnum), sizeof(struct iovec) * ARG3(variantnum), vec))
 		throw RwMemFailure(variantnum, "read iovec in sys_writev");
 
