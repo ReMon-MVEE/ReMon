@@ -33,7 +33,6 @@ fd_info::fd_info()
 	, unsynced_access(false)
 	, unlinked(false)
 	, original_file_size(0)
-	, shadow(nullptr)
 {
 	paths.resize(mvee::numvariants);
     fds.resize(mvee::numvariants);
@@ -60,7 +59,6 @@ fd_info::fd_info
 	, unlinked(unlinked)
 	, original_file_size(original_file_size)
     , file_type(type)
-	, shadow(nullptr)
 {
 #ifndef MVEE_BENCHMARK
 	if (!unsynced_access &&

@@ -805,13 +805,6 @@ int             mmap_table::shadow_map                              (variantstat
     int fd = -1;
     if (info->file_type == FT_MEMFD)
     {
-        if (info->shadow && info->shadow->size == size)
-        {
-            debugf("This file is already shadow mapped");
-            *shadow = info->shadow;
-            return 0;
-        }
-
         std::stringstream memfd_file_path;
         memfd_file_path << "/proc/" << variant->variantpid << "/fd/" << info->fds[0];
         fd = open(memfd_file_path.str().c_str(), info->access_flags & ~(O_TRUNC | O_CREAT));
@@ -1016,10 +1009,9 @@ void            mmap_table::attach_shared_memory                    ()
     {
         if (shared_mapping->shmid != -1)
             shared_mapping->monitor_base =
-                    (uint8_t*)shmat(shared_mapping->shmid, shared_mapping->monitor_base, SHM_REMAP);
-        for (auto shared_shadow: shared_mapping->variant_shadows)
-            shared_shadow.monitor_base =
-                    (uint8_t*) shmat(shared_shadow.shmid, shared_shadow.monitor_base, SHM_REMAP);
+                    (uint8_t*)shmat(shared_mapping->shmid, nullptr, 0);
+        for (auto &shared_shadow: shared_mapping->variant_shadows)
+            shared_shadow.monitor_base = (uint8_t*) shmat(shared_shadow.shmid, nullptr, 0);
     }
 }
 

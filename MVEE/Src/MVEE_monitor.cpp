@@ -212,7 +212,6 @@ void monitor::init()
 
 monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap_table, bool shares_sighand_table, bool shares_tgid)
         : buffer(this)
-        , shm_setup_state(SHM_SETUP_IDLE)
         , current_shadow(nullptr)
 {
     init();
@@ -223,6 +222,7 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
                         parent_monitor->set_fd_table :
                         std::shared_ptr<fd_table>(new fd_table(*parent_monitor->set_fd_table));
 
+    shm_setup_state   = shares_mmap_table ? SHM_SETUP_IDLE : SHM_SETUP_EXPECTING_ENTRY;
     set_mmap_table    = shares_mmap_table ?
                         parent_monitor->set_mmap_table :
                         std::shared_ptr<mmap_table>(new mmap_table(*parent_monitor->set_mmap_table));
@@ -802,6 +802,9 @@ void monitor::shutdown(bool success)
 {
 #ifdef MVEE_LOG_NON_INSTRUMENTED_INSTRUCTION
     mvee::flush_non_instrumented_log();
+#endif
+#ifdef MVEE_SHM_INSTRUCTION_ACCESS_DEBUGGING
+    print_instruction_list();
 #endif
 
 #ifndef MVEE_BENCHMARK
@@ -3341,7 +3344,9 @@ void* monitor::thread(void* param)
     sigaddset(&set, SIGINT);
     pthread_sigmask(SIG_BLOCK, &set, NULL);
 
-    mon->set_mmap_table->attach_shared_memory();
+    // this is needed to prevent the mmap table sharing to mess up
+    if (mon->shm_setup_state & SHM_SETUP_EXPECTING_ENTRY)
+        mon->set_mmap_table->attach_shared_memory();
 
     // wait until we can run
     while (1)

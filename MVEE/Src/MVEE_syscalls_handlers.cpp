@@ -5425,7 +5425,7 @@ PRECALL(shmat)
             (ipmon_buffer && (int)ARG1(0) == ipmon_buffer->id) ||
             (shm_buffer  && (int)ARG1(0) == shm_buffer->id))
         return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
-    else if (shm_setup_state == SHM_SETUP_EXPECTING_SHADOW)
+    else if (shm_setup_state & SHM_SETUP_EXPECTING_SHADOW)
         return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
     else
     {
@@ -5472,7 +5472,7 @@ CALL(shmat)
         disjoint_bases = false;
     shm_sz = shm_buffer->sz;
     }
-    else if (shm_setup_state == SHM_SETUP_EXPECTING_SHADOW)
+    else if (shm_setup_state & SHM_SETUP_EXPECTING_SHADOW)
     {
         disjoint_bases = false;
         for (int i = 0; i < mvee::numvariants; i++)
@@ -5573,11 +5573,23 @@ POSTCALL(shmat)
 		region_name = "[ipmon-file-map]";
 		region_size = info->sz;
 	}
-    else if (shm_setup_state == SHM_SETUP_EXPECTING_SHADOW)
+    else if (shm_setup_state & SHM_SETUP_EXPECTING_SHADOW)
     {
         for (int i = 0; i < mvee::numvariants; i++)
             current_shadow->variant_shadows[i].variant_base = addresses[i];
         region_size = current_shadow->size;
+
+        // copy shared content to shadow is initialisation
+        if (shm_setup_state & SHM_SETUP_SHOULD_COPY)
+        {
+            for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+                warnf(" > %p\n", (void*)current_shadow->variant_shadows[variant_i].monitor_base);
+            memcpy(current_shadow->variant_shadows[0].monitor_base, current_shadow->monitor_base, current_shadow->size);
+            for (int variant_i = 1; variant_i < mvee::numvariants; variant_i++)
+                memcpy(current_shadow->variant_shadows[variant_i].monitor_base,
+                        current_shadow->variant_shadows[0].monitor_base, current_shadow->size);
+        }
+
         current_shadow = nullptr;
         shm_setup_state = SHM_SETUP_IDLE;
     }
@@ -7214,17 +7226,73 @@ PRECALL(mmap)
 		}		
 	}
 #endif
+
+    shm_setup_state = SHM_SETUP_IDLE;
     if (ARG5(0) && ((int)ARG5(0) != -1) && (ARG4(0) & MAP_SHARED) &&
-            (ARG3(0) & ~PROT_EXEC))
+            !(ARG3(0) & PROT_EXEC))
     {
-        fd_info* info = set_fd_table->get_fd_info(ARG5(0));
+	    fd_info* info = set_fd_table->get_fd_info(ARG5(0));
         if (!info)
         {
-            warnf("unknown fd %llu for shared mapping.\n", ARG5(0));
-            shutdown(true);
+            warnf("Trying to set up shared memory using a file descriptor the monitor doesn't know (fd %llu)\n",
+                  ARG5(0));
+            shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
         }
-        else if (info->access_flags & O_RDWR)
-            return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+        call_check_regs(0);
+        auto caller_info = set_mmap_table->get_caller_info(0, variants[0].variantpid, variants[0].regs.rip);
+        if (caller_info.find("mvee_shm_mmap") == std::string::npos)
+        {
+            warnf("Trying to set up shared memory from a location other that mvee_shm_mmap\n");
+            shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
+        }
+
+        // check actual file
+        int fd;
+        unsigned long long protection;
+
+        for (unsigned long file_i = 0; file_i < (info->master_file ? 1: info->paths.size()); file_i++)
+        {
+            fd = open(info->paths[file_i].c_str(), O_RDONLY);
+            if (fd == -1)
+            {
+                std::stringstream memfd_file_path;
+                memfd_file_path << "/proc/" << variants[file_i].variantpid << "/fd/" << info->fds[file_i];
+                fd = open(memfd_file_path.str().c_str(), info->access_flags & ~(O_TRUNC | O_CREAT));
+
+                if (fd == -1)
+                {
+                    warnf("Failed shared memory check | could not open %s (%lu) - %d\n",
+                            info->paths[file_i].c_str(), file_i, errno);
+                    shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
+                    break;
+                }
+            }
+            struct stat fd_stat;
+            if (fstat(fd, &fd_stat))
+            {
+                warnf("Failed shared memory check | could not fstat %s - %d\n\n", info->paths[file_i].c_str(),
+                      errno);
+                shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
+                break;
+            }
+
+            if (!file_i)
+                protection = fd_stat.st_mode;
+            else if (fd_stat.st_mode != protection)
+            {
+                warnf("Failed shared memory check | Per variant file has different file mode: %llx != %du | %s\n",
+                      protection,
+                      fd_stat.st_mode,
+                      info->paths[file_i].c_str());
+                shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
+                break;
+            }
+
+            close(fd);
+        }
+        if (shm_setup_state & SHM_SETUP_IDLE && ((protection & S_IRUSR) && (protection & S_IWUSR)))
+            shm_setup_state = SHM_SETUP_EXPECTING_ENTRY;
+        return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
     }
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
@@ -7237,12 +7305,20 @@ CALL(mmap)
     for (int i = 0; i < mvee::numvariants; ++i)
         variants[i].last_mmap_result = 0;
 
+    // Something in the precall handler went wrong, but we need to return MVEE_DISPATCH_MASTER there if it doesn't go
+    // wrong and MVEE_CALL_DENY here if it does.
+    if (shm_setup_state & SHM_SETUP_EXPECTING_ERROR)
+    {
+        shm_setup_state = SHM_SETUP_IDLE;
+        return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOMEM);
+    }
+
     // anonymous shared mapping maps /dev/zero into our address space.
     // this mapping is only shared between the calling process and its decendants
     // => this is a safe form of shared memory
     if (ARG4(0) & MAP_ANONYMOUS)
 	{
-		if (ARG1(0) == 0 && 
+		if (ARG1(0) == 0 &&
 			(ARG4(0) & MAP_PRIVATE) &&
 			(*mvee::config_variant_global)["mvee_controlled_aslr"].asInt() > 0)
 		{
@@ -7254,7 +7330,7 @@ CALL(mmap)
 
 				debugf("%s - replaced call by SYS_MMAP(0x" PTRSTR ", %lu, %s, %s, %d, %lu)\n",
 					   call_get_variant_pidstr(i).c_str(),
-					   address, 
+					   address,
 					   (unsigned long)ARG2(i),
 					   getTextualProtectionFlags(ARG3(i)).c_str(),
 					   getTextualMapType(ARG4(i)).c_str(),
@@ -7340,12 +7416,6 @@ CALL(mmap)
                         }
                     }
                 }
-            } else if (ARG3(0) & (PROT_READ | PROT_WRITE))
-            {
-                call_check_regs(0);
-                auto caller_info = set_mmap_table->get_caller_info(0, variants[0].variantpid, variants[0].regs.rip);
-                if (caller_info.find("mvee_shm_mmap") == std::string::npos)
-                    return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOMEM);
             }
 #ifndef MVEE_ALLOW_SHM
             if ((ARG3(0) & PROT_WRITE) || (ARG3(0) & PROT_EXEC))
@@ -7491,7 +7561,7 @@ POSTCALL(mmap)
 
         shared_monitor_map_info* shadow = nullptr;
 #ifdef MVEE_EMULATE_SHARED_MEMORY
-        if (info && (info->access_flags & O_RDWR) && (ARG4(0) & MAP_SHARED) && (ARG3(0) & ~PROT_EXEC))
+        if (shm_setup_state & SHM_SETUP_EXPECTING_ENTRY)
         {
             if (set_mmap_table->shadow_map(&variants[0], info, results[0], &shadow,
                     ARG2(0), ARG3(0), ARG4(0), ARG6(0)) < 0)
@@ -7505,6 +7575,7 @@ POSTCALL(mmap)
                 call_postcall_set_variant_result(i, encode_address_tag(results[0], &variants[i]));
 
             shm_setup_state = SHM_SETUP_EXPECTING_SHADOW;
+            shm_setup_state |= SHM_SETUP_SHOULD_COPY;
             current_shadow = shadow;
         }
 #endif
@@ -7616,8 +7687,7 @@ POSTCALL(mmap)
 		}
 
 #ifdef MVEE_EMULATE_SHARED_MEMORY
-        if (info && (info->access_flags & O_RDWR) && (ARG4(variantnum) & MAP_SHARED) &&
-                (ARG3(variantnum) & ~PROT_EXEC))
+        if (SHM_SETUP_EXPECTING_ENTRY)
         {
             warnf("unsynched MAP_SHARED mmap call\n");
             return MVEE_POSTCALL_DONTRESUME;

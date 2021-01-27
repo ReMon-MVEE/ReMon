@@ -204,9 +204,11 @@ warnf("\n%s\n", output.str().c_str());
 
 
 // states for shared memory setup --------------------------------------------------------------------------------------
-#define SHM_SETUP_EXPECTING_ERROR               -1
-#define SHM_SETUP_IDLE                          0
-#define SHM_SETUP_EXPECTING_SHADOW              1
+#define SHM_SETUP_EXPECTING_ERROR               (1<<31)
+#define SHM_SETUP_IDLE                          2
+#define SHM_SETUP_EXPECTING_ENTRY               4
+#define SHM_SETUP_EXPECTING_SHADOW              8
+#define SHM_SETUP_SHOULD_COPY                   16
 // states for shared memory setup --------------------------------------------------------------------------------------
 
 
