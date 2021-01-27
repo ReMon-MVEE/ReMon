@@ -114,15 +114,125 @@ unsigned long long
                                                                      unsigned long long access_size)
 {
 
-    if (variant_address < monitor_map->variant_base &&
-        ((unsigned long long) variant_address + access_size) > monitor_map->variant_base + monitor_map->size)
+    if (variant_address < monitor_map->variant_base ||
+            ((unsigned long long) variant_address + access_size) >
+            ROUND_UP(monitor_map->variant_base + monitor_map->size, PAGE_SIZE))
     {
-        warnf("Instruction, %p + %llx, will go out of range of shared mapping.\n", (void*) variant_address,
-                access_size);
+        warnf("Instruction, %p + %llx, will go out of range of shared mapping. [ %p ; %p )\n",
+              (void*) variant_address, access_size,
+              (void*) monitor_map->variant_base,
+              (void*) (monitor_map->variant_base + monitor_map->size));
         return -1;
     }
 
     return (unsigned long long) variant_address - monitor_map->variant_base;
+}
+
+int             shm_handling::determine_from_shared_proxy           (variantstate* variant, monitor &relevant_monitor,
+                                                                     instruction_intent &instruction,
+                                                                     void** typed, uint8_t* proxy, void* shared,
+                                                                     shared_monitor_map_info* mapping_info,
+                                                                     unsigned long long offset, unsigned long long size,
+                                                                     bool try_shadow)
+{
+    void* shared_address = mapping_info->monitor_base + offset;
+    void* shadow_address = mapping_info->variant_shadows[variant->variant_num].monitor_base + offset;
+    if (!variant->variant_num)
+    {
+        memcpy(proxy, shared ? shared : shared_address, size);
+        if (try_shadow && (memcmp(proxy, shadow_address, size) == 0))
+        {
+            int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, shared_address, instruction,
+                    nullptr, (size = 0));
+            if (result < 0)
+                return result;
+            *typed = (uint8_t*)shadow_address;
+            // warnf(" > new leader using shadow\n");
+        }
+        else
+        {
+            void* buffer;
+            int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, shared_address, instruction,
+                    &buffer, size);
+            if (result < 0)
+                return result;
+            memcpy(buffer, proxy, size);
+            *typed = proxy;
+        }
+    }
+    else
+    {
+        void* buffer;
+        int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, shared_address,
+                instruction, &buffer, size);
+        if (result < 0)
+            return result;
+        if (buffer)
+        {
+            memcpy(proxy, buffer, size);
+            *typed = proxy;
+        }
+        else
+        {
+            // warnf(" > new follower using shadow\n");
+            *typed = (uint8_t*)shadow_address;
+        }
+    }
+    return 0;
+}
+
+int             shm_handling::determine_from_shared_proxy_buffer    (variantstate* variant, monitor &relevant_monitor,
+                                                                     instruction_intent &instruction,
+                                                                     void** typed, uint8_t* proxy, void* shared,
+                                                                     shared_monitor_map_info* mapping_info,
+                                                                     unsigned long long offset, void** buffer,
+                                                                     unsigned long long &size,
+                                                                     unsigned long long raw_size, bool try_shadow)
+{
+    void* shared_address = mapping_info->monitor_base + offset;
+    void* shadow_address = mapping_info->variant_shadows[variant->variant_num].monitor_base + offset;
+    if (!variant->variant_num)
+    {
+        memcpy(proxy, shared ? shared : shared_address, size);
+        if (try_shadow && (memcmp(proxy, shadow_address, size) == 0))
+        {
+            size = raw_size;
+            int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, shared_address, instruction,
+                    buffer, raw_size);
+            if (result < 0)
+                return result;
+            *typed = (uint8_t*)shadow_address;
+            // warnf(" > new leader using shadow\n");
+        }
+        else
+        {
+            size += raw_size;
+            int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, shared_address, instruction,
+                    buffer, size);
+            if (result < 0)
+                return result;
+            memcpy(buffer, proxy, size);
+            *typed = proxy;
+        }
+    }
+    else
+    {
+        int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, shared_address,
+                instruction, buffer, size);
+        if (result < 0)
+            return result;
+        if (size > raw_size)
+        {
+            memcpy(proxy, buffer, size);
+            *typed = proxy;
+        }
+        else
+        {
+            // warnf(" > new follower using shadow\n");
+            *typed = (uint8_t*)shadow_address;
+        }
+    }
+    return 0;
 }
 
 int             shm_handling::determine_source_from_shared_normal   (variantstate* variant,
@@ -131,47 +241,48 @@ int             shm_handling::determine_source_from_shared_normal   (variantstat
                                                                      void** source,
                                                                      shared_monitor_map_info* mapping_info,
                                                                      unsigned long long offset,
-                                                                     unsigned long long size)
+                                                                     unsigned long long size, bool try_shadow)
 {
     void* monitor_pointer = (void*) (mapping_info->monitor_base + offset);
     /* leader variant case */
     if (!variant->variant_num)
     {
-      /* area of memory is known to be written to by variants */
-      void* variant_shadow  = (void*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);
-      /* If area does not contain same content anymore, we detect it as bi-directional shared memory. */
-      /* In this case we take the data from the shared memory segment. */
-      if (memcmp(monitor_pointer, variant_shadow, size) != 0)
-      {
-        int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer,
-            instruction, source, size);
-        if (result < 0)
-          return result;
-        memcpy(*source, monitor_pointer, size);
-      }
-      /* Otherwise we'll just use the local copy instead */
-      else
-      {
-        *source = variant_shadow;
+        /* area of memory is known to be written to by variants */
+        void* variant_shadow = (void*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);
+        /* If area does not contain same content anymore, we detect it as bi-directional shared memory. */
+        /* In this case we take the data from the shared memory segment. */
+        if (try_shadow && memcmp(monitor_pointer, variant_shadow, size) == 0)
+        {
+            *source = variant_shadow;
 
-        /* Essentially puts an empty entry in the replay buffer */
-        int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer,
-            instruction, nullptr, 0);
-        if (result < 0)
-          return result;
-      }
+            /* Essentially puts an empty entry in the replay buffer */
+
+            int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer,
+                instruction, nullptr, (size = 0));
+            if (result < 0)
+                return result;
+        }
+        /* Otherwise we'll just use the local copy instead */
+        else
+        {
+            int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer,
+                    instruction, source, size);
+            if (result < 0)
+                return result;
+            memcpy(*source, monitor_pointer, size);
+        }
     }
     /* followers */
     else
     {
         int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, monitor_pointer, instruction,
-                source, 0);
+                source, size);
         if (result < 0)
             return result;
 
         /* If buffer has not been filled, use local copy */
-        if (!*source)
-            *source = (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);
+        if (!*source) {
+            *source = (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset); }
     }
 
     return 0;
@@ -498,7 +609,7 @@ int             replay_buffer::advance                              (unsigned in
 #else
 int             replay_buffer::obtain_buffer                        (unsigned int variant_num, void* monitor_pointer,
                                                                      instruction_intent &instruction, void** requested,
-                                                                     unsigned long long requested_size)
+                                                                     unsigned long long &requested_size)
 {
     if (variant_num >= this->variant_count)
     {
@@ -559,14 +670,6 @@ int             replay_buffer::obtain_buffer                        (unsigned in
         // entry currently empty
         if (!(current_entry->passed & (1u << (variant_num - 1))))
         {
-            // compare monitor pointer
-            if (current_entry->monitor_pointer != monitor_pointer)
-            {
-                warnf("monitor_pointer differs | leader %p - variant %d %p\n", current_entry->monitor_pointer,
-                      variant_num, monitor_pointer);
-                return REPLAY_BUFFER_RETURN_ERROR;
-            }
-
             // compare instruction
             if (instruction.size != current_entry->instruction_size)
             {
@@ -574,11 +677,21 @@ int             replay_buffer::obtain_buffer                        (unsigned in
                 return REPLAY_BUFFER_RETURN_ERROR;
             }
             for (int i = 0; i < current_entry->instruction_size; i++)
+            {
                 if (current_entry->instruction[i] != instruction.instruction[i])
                 {
                     warnf("instruction intent differs\n");
                     return REPLAY_BUFFER_RETURN_ERROR;
                 }
+            }
+
+            // compare monitor pointer
+            if (current_entry->monitor_pointer != monitor_pointer)
+            {
+                warnf("monitor_pointer differs | leader %p - variant %d %p\n", current_entry->monitor_pointer,
+                      variant_num, monitor_pointer);
+                return REPLAY_BUFFER_RETURN_ERROR;
+            }
 
             // return buffer
             if (requested)
@@ -590,6 +703,7 @@ int             replay_buffer::obtain_buffer                        (unsigned in
                     return REPLAY_BUFFER_RETURN_ERROR;
                 }
                 */
+                requested_size = current_entry->buffer_size;
                 *requested = current_entry->buffer;
             }
             // ok

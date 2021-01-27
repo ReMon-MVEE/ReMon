@@ -57,7 +57,7 @@ for (int i = 0; i < byte_count; i++)                                            
 output << "\n";
 
 #define PRINT_OUTPUT_DEBUG                                                                                             \
-warnf("\n%s\n", output.str().c_str());
+debugf("\n%s\n", output.str().c_str());
 
 
 // =====================================================================================================================
@@ -584,7 +584,7 @@ public:
     // access and updating ---------------------------------------------------------------------------------------------
     int             obtain_buffer                       (unsigned int variant_num, void* monitor_pointer,
                                                          instruction_intent &instruction, void** requested,
-                                                         unsigned long long requested_size);
+                                                         unsigned long long &requested_size);
     int             advance                             (unsigned int variant_num);
     // access and updating ---------------------------------------------------------------------------------------------
 
@@ -598,26 +598,107 @@ public:
 //      manipulation for shadow
 // =====================================================================================================================
 #define NORMAL_TO_SHARED(__cast, __operation)                                                                          \
-__cast* typed_destination;                                                                                             \
-int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, mapping_info->monitor_base + offset,          \
-        instruction, nullptr, 0);                                                                                      \
-if (result < 0)                                                                                                        \
-    return result;                                                                                                     \
+{                                                                                                                      \
+    unsigned long long size = 0;                                                                                       \
+    int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, mapping_info->monitor_base + offset,      \
+            instruction, nullptr, size);                                                                               \
+    if (result < 0)                                                                                                    \
+        return result;                                                                                                 \
+}                                                                                                                      \
                                                                                                                        \
 if (!variant->variant_num)                                                                                             \
 {                                                                                                                      \
-    typed_destination = (__cast*) (mapping_info->monitor_base + offset);                                               \
+    auto* typed_destination = (__cast*) (mapping_info->monitor_base + offset);                                         \
     __operation;                                                                                                       \
 }                                                                                                                      \
-typed_destination = (__cast*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);             \
-__operation;
+{                                                                                                                      \
+    auto* typed_destination = (__cast*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);   \
+    __operation;                                                                                                       \
+}
+
+#define NORMAL_TO_SHARED_REPLICATE_FLAGS(__cast, __core)                                                               \
+/* leader variant */                                                                                                   \
+auto* typed_destination = (__cast*) (mapping_info->monitor_base + offset);                                             \
+auto* shadow_destination = (__cast*)                                                                                   \
+        (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);                                   \
+GET_BUFFER_RAW(typed_destination, sizeof(unsigned long long))                                                          \
+if (!variant->variant_num)                                                                                             \
+{                                                                                                                      \
+    *(unsigned long long*) buffer = regs_struct->eflags;                                                               \
+    __asm__                                                                                                            \
+    (                                                                                                                  \
+            ".intel_syntax noprefix;"                                                                                  \
+            "push %[flags];"                                                                                           \
+            "popf;"                                                                                                    \
+            __core                                                                                                     \
+            "pushf;"                                                                                                   \
+            "pop %[flags];"                                                                                            \
+            ".att_syntax;"                                                                                             \
+            : [flags] "+r" (*(unsigned long long*) buffer), "+m" (*typed_destination)                                  \
+            : [dst] "r" (typed_destination), [src] "r" ((__cast)*typed_source)                                         \
+            : "cc"                                                                                                     \
+    );                                                                                                                 \
+}                                                                                                                      \
+__asm__                                                                                                                \
+(                                                                                                                      \
+        ".intel_syntax noprefix;"                                                                                      \
+        __core                                                                                                         \
+        ".att_syntax;"                                                                                                 \
+        : "+m" (*shadow_destination)                                                                                   \
+        : [dst] "r" (shadow_destination), [src] "r" ((__cast)*typed_source)                                            \
+        : "cc"                                                                                                         \
+);                                                                                                                     \
+regs_struct->eflags = *(unsigned long long*) buffer;
+
+#define PROXY_SHARED(__src_dst, __cast)                                                                                \
+PROXY_SHARED_RAW(__src_dst, __cast, nullptr)
+
+#define PROXY_SHARED_RAW(__src_dst, __cast, __shared)                                                                  \
+uint8_t __src_dst##_proxy[sizeof(__cast)];                                                                             \
+__cast* typed_##__src_dst = nullptr;                                                                                   \
+                                                                                                                       \
+{                                                                                                                      \
+    int result = shm_handling::determine_from_shared_proxy(variant, relevant_monitor, instruction,                     \
+            (void**)&typed_destination, destination_proxy, __shared, mapping_info, offset, sizeof(__cast), false);     \
+    if (result < 0)                                                                                                    \
+        return result;                                                                                                 \
+}
+
+#define PROXY_REPLACE_DESTINATION(__cast)                                                                              \
+__cast* typed_destination = (__cast*) (mapping_info->monitor_base + offset)
+
+#define PROXY_OPERATION(__cast, __operation, __leader_change)                                                          \
+if (!variant->variant_num)                                                                                             \
+{                                                                                                                      \
+    __leader_change;                                                                                                   \
+    __operation;                                                                                                       \
+}                                                                                                                      \
+{                                                                                                                      \
+    __operation;                                                                                                       \
+}
+
+#define PROXY_WRITE_SHARED(__src_dst, __cast)                                                                          \
+if (!variant->variant_num)                                                                                             \
+    memcpy(mapping_info->monitor_base + offset, typed_##__src_dst, sizeof(__cast));
+
+#define PROXY_WRITE_SHADOW(__src_dst, __cast)                                                                         \
+if ((void*)typed_##__src_dst == (void*)__src_dst##_proxy)                                                              \
+    memcpy(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset, typed_##__src_dst,               \
+            sizeof(__cast));
+
+#define PROXY_WRITE_BACK(__src_dst, __cast)                                                                            \
+PROXY_WRITE_SHARED(__src_dst, __cast)                                                                                  \
+PROXY_WRITE_SHADOW(__src_dst, __cast)
 
 #define XMM_TO_SHARED(__operation)                                                                                     \
 void* destination;                                                                                                     \
-int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, mapping_info->monitor_base + offset,          \
-        instruction, nullptr, 0);                                                                                      \
-if (result < 0)                                                                                                        \
-    return result;                                                                                                     \
+{                                                                                                                      \
+    unsigned long long size = 0;                                                                                       \
+    int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, mapping_info->monitor_base + offset,      \
+            instruction, nullptr, size);                                                                              \
+    if (result < 0)                                                                                                    \
+        return result;                                                                                                 \
+}                                                                                                                      \
                                                                                                                        \
 if (!variant->variant_num)                                                                                             \
 {                                                                                                                      \
@@ -632,6 +713,14 @@ __operation;
 __cast* typed_source;                                                                                                  \
 int from_shared_result = shm_handling::determine_source_from_shared_normal(variant, relevant_monitor, instruction,     \
         (void**)&typed_source, mapping_info, offset, sizeof(__cast));                                                  \
+if (from_shared_result < 0)                                                                                            \
+    return from_shared_result;
+
+
+#define NORMAL_DESTINATION_FROM_SHARED(__cast)                                                                         \
+__cast* typed_destination;                                                                                             \
+int from_shared_result = shm_handling::determine_source_from_shared_normal(variant, relevant_monitor, instruction,     \
+        (void**)&typed_destination, mapping_info, offset, sizeof(__cast));                                             \
 if (from_shared_result < 0)                                                                                            \
     return from_shared_result;
 
@@ -654,7 +743,21 @@ public:
     static int  determine_source_from_shared_normal     (variantstate* variant, monitor &relevant_monitor,
                                                          instruction_intent &instruction, void** source,
                                                          shared_monitor_map_info* mapping_info,
-                                                         unsigned long long offset, unsigned long long size);
+                                                         unsigned long long offset, unsigned long long size,
+                                                         bool try_shadow = true);
+    static int  determine_from_shared_proxy             (variantstate* variant, monitor &relevant_monitor,
+                                                         instruction_intent &instruction,
+                                                         void** typed, uint8_t* proxy, void* shared,
+                                                         shared_monitor_map_info* mapping_info,
+                                                         unsigned long long offset, unsigned long long size,
+                                                         bool try_shadow = true);
+    static int  determine_from_shared_proxy_buffer      (variantstate* variant, monitor &relevant_monitor,
+                                                         instruction_intent &instruction,
+                                                         void** typed, uint8_t* proxy, void* shared,
+                                                         shared_monitor_map_info* mapping_info,
+                                                         unsigned long long offset, void** buffer,
+                                                         unsigned long long &size,
+                                                         unsigned long long raw_size = 0, bool try_shadow = true);
 };
 
 // =====================================================================================================================
