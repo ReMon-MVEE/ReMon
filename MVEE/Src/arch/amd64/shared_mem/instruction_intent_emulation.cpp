@@ -583,9 +583,88 @@ BYTE_EMULATOR_IMPL(0x11)
 // BYTE_EMULATOR_IMPL(0x22)
 
 
-/* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0x23)
+/* Valid in first round */
+BYTE_EMULATOR_IMPL(0x23)
+{
+    // and Gv, Ev
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        LOAD_REG_CODE(destination, general_purpose_lookup)
 
+        // 64-bit
+        if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
+        {
+            auto* typed_destination = (uint64_t*)destination;
+            LOAD_RM_CODE_NO_DEFINE(sizeof(uint64_t))
+            NORMAL_FROM_SHARED(uint64_t)
+
+            asm
+            (
+                    ".intel_syntax noprefix;"
+                    "push %[flags];"
+                    "popf;"
+                    "and %[dst], QWORD PTR[%[src]];"
+                    "pushf;"
+                    "pop %[flags];"
+                    ".att_syntax;"
+                    : [flags] "+r" (regs_struct->eflags), [dst] "+r" (*typed_destination)
+                    : [src] "r" (typed_source)
+                    : "cc"
+            );
+        }
+        // 16-bit
+        else if (PREFIXES_GRP_ONE_PRESENT(instruction))
+        {
+            auto* typed_destination = (uint16_t*)destination;
+            LOAD_RM_CODE_NO_DEFINE(sizeof(uint16_t))
+            NORMAL_FROM_SHARED(uint16_t)
+
+            asm
+            (
+                    ".intel_syntax noprefix;"
+                    "push %[flags];"
+                    "popf;"
+                    "and %[dst], WORD PTR[%[src]];"
+                    "pushf;"
+                    "pop %[flags];"
+                    ".att_syntax;"
+                    : [flags] "+r" (regs_struct->eflags), [dst] "+r" (*typed_destination)
+                    : [src] "r" (typed_source)
+                    : "cc"
+            );
+        }
+        // 32-bit
+        else
+        {
+            auto* typed_destination = (uint32_t*)destination;
+            LOAD_RM_CODE_NO_DEFINE(sizeof(uint32_t))
+            NORMAL_FROM_SHARED(uint32_t)
+
+            asm
+            (
+                    ".intel_syntax noprefix;"
+                    "push %[flags];"
+                    "popf;"
+                    "and %[dst], DWORD PTR[%[src]];"
+                    "pushf;"
+                    "pop %[flags];"
+                    ".att_syntax;"
+                    : [flags] "+r" (regs_struct->eflags), [dst] "+r" (*typed_destination)
+                    : [src] "r" (typed_source)
+                    : "cc"
+            );
+        }
+
+        // registers will be written back by default
+        REPLAY_BUFFER_ADVANCE
+        return 0;
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 /* Not implemented - blocked */
 // BYTE_EMULATOR_IMPL(0x24)
@@ -745,7 +824,7 @@ BYTE_EMULATOR_IMPL(0x29)
 // BYTE_EMULATOR_IMPL(0x2a)
 
 
-/* Valid in first round */
+/* Valid in first and second round */
 BYTE_EMULATOR_IMPL(0x2b)
 {
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
@@ -902,8 +981,40 @@ BYTE_EMULATOR_IMPL(0x2b)
 // BYTE_EMULATOR_IMPL(0x37)
 
 
-/* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0x38)
+/* Valid in first round */
+BYTE_EMULATOR_IMPL(0x38)
+{
+    // cmp Eb, Gb
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        LOAD_RM_CODE_NO_DEFINE(1)
+        LOAD_REG_CODE(source, general_purpose_lookup)
+
+        PROXY_SHARED(destination, uint8_t)
+
+        PROXY_OPERATION(uint_8_t,
+        __asm__(
+               ".intel_syntax noprefix;"
+               "push %[flags];"
+               "popf;"
+               "cmp BYTE PTR [%[dst]], %[src];"
+               "pushf;"
+               "pop %[flags];"
+               ".att_syntax"
+               : [flags] "+r" (regs_struct->eflags)
+               : [dst] "r" (typed_destination), "m" (*typed_destination), [src] "r" (*(uint8_t*) source)
+               : "cc"
+        ), PROXY_REPLACE_DESTINATION(uint8_t))
+
+        REPLAY_BUFFER_ADVANCE
+        return 0;
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 /* Valid in first round */
 BYTE_EMULATOR_IMPL(0x39)
