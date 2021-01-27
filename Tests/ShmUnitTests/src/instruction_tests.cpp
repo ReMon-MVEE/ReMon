@@ -8,6 +8,106 @@
 #include "buffers.h"
 
 // =====================================================================================================================
+//      general tests
+// =====================================================================================================================
+void            instruction_tests::test_memcmp                      ()
+{
+    START_TEST("Running tests for memcmp...\n")
+    // we don't really need to do big buffer tests here, we just need to test the different cases
+    unsigned long long non_shared1, non_shared2;
+
+    // from and to non-shared memory -----------------------------------------------------------------------------------
+    non_shared1 = 0x1122334455667788;
+    non_shared2 = 0x1122444455667788;
+    TEST_RESULT("from and to non-shared memory - not equal, differing byte smaller in first",
+            memcmp(&non_shared1, &non_shared2, 8) < 0)
+    TEST_RESULT("from and to non-shared memory - not equal, differing byte larger in first",
+            memcmp(&non_shared2, &non_shared1, 8) > 0)
+    non_shared2 = non_shared1;
+    TEST_RESULT("from and to non-shared memory - equal",
+            memcmp(&non_shared2, &non_shared1, 8) == 0)
+
+    non_shared1 = (unsigned long long)&non_shared1;
+    non_shared2 = (unsigned long long)&non_shared1;
+    TEST_RESULT("from and to non-shared memory - equal, pointer",
+            memcmp(&non_shared1, &non_shared2, 8) == 0)
+    non_shared2 = (unsigned long long)&non_shared2;
+    TEST_RESULT("from and to non-shared memory - not equal, pointer",
+            memcmp(&non_shared1, &non_shared2, 8) < 0)
+    // from and to non-shared memory -----------------------------------------------------------------------------------
+
+    // from shared to non-shared memory --------------------------------------------------------------------------------
+    *(unsigned long long*)buffers::shared_sink = 0x1122334455667788;
+    non_shared2                                = 0x1122444455667788;
+    TEST_RESULT("from shared to non-shared memory - not equal, differing byte smaller in first",
+            memcmp(buffers::shared_sink, &non_shared2, 8) < 0)
+    *(unsigned long long*)buffers::shared_sink = 0x1122444455667788;
+    non_shared2                                = 0x1122334455667788;
+    TEST_RESULT("from shared to non-shared memory - not equal, differing byte larger in first",
+            memcmp(buffers::shared_sink, &non_shared2, 8) > 0)
+    *(unsigned long long*)buffers::shared_sink = non_shared2;
+    TEST_RESULT("from shared to non-shared memory - equal",
+            memcmp(buffers::shared_sink, &non_shared2, 8) == 0)
+
+    *(unsigned long long*)buffers::shared_sink = (unsigned long long)&non_shared1;
+    non_shared2                                = (unsigned long long)&non_shared1;
+    TEST_RESULT("from shared to non-shared memory - equal, pointer",
+                memcmp(buffers::shared_sink, &non_shared2, 8) == 0)
+    non_shared2 = (unsigned long long)&non_shared2;
+    TEST_RESULT("from shared to non-shared memory - not equal, pointer",
+                memcmp(buffers::shared_sink, &non_shared2, 8) < 0)
+    // from shared to non-shared memory --------------------------------------------------------------------------------
+
+    // from non-shared to shared memory --------------------------------------------------------------------------------
+    non_shared1                                = 0x1122334455667788;
+    *(unsigned long long*)buffers::shared_sink = 0x1122444455667788;
+    TEST_RESULT("from non-shared to shared memory - not equal, differing byte smaller in first",
+            memcmp(&non_shared1, buffers::shared_sink, 8) < 0)
+    non_shared1                                = 0x1122444455667788;
+    *(unsigned long long*)buffers::shared_sink = 0x1122334455667788;
+    TEST_RESULT("from non-shared to shared memory - not equal, differing byte larger in first",
+            memcmp(&non_shared1, buffers::shared_sink, 8) > 0)
+    *(unsigned long long*)buffers::shared_sink = non_shared1;
+    TEST_RESULT("from non-shared to shared memory - equal",
+            memcmp(&non_shared1, buffers::shared_sink, 8) == 0)
+
+    *(unsigned long long*)buffers::shared_sink = (unsigned long long)&non_shared1;
+    non_shared2                                = (unsigned long long)&non_shared1;
+    TEST_RESULT("from non-shared to shared memory - equal, pointer",
+                memcmp(buffers::shared_sink, &non_shared2, 8) == 0)
+    *(unsigned long long*)buffers::shared_sink = (unsigned long long)&non_shared2;
+    TEST_RESULT("from non-shared to shared memory - not equal, pointer",
+                memcmp(buffers::shared_sink, &non_shared2, 8) > 0)
+    // from non-shared to shared memory --------------------------------------------------------------------------------
+
+    // from and to shared memory ---------------------------------------------------------------------------------------
+    unsigned long long* shared2                = ((unsigned long long*)buffers::shared_sink) + 1;
+    *shared2                                   = 0x1122334455667788;
+    *(unsigned long long*)buffers::shared_sink = 0x1122444455667788;
+    TEST_RESULT("from and to shared memory - not equal, differing byte smaller in first",
+                memcmp(shared2, buffers::shared_sink, 8) < 0)
+    *shared2                                   = 0x1122444455667788;
+    *(unsigned long long*)buffers::shared_sink = 0x1122334455667788;
+    TEST_RESULT("from and to shared memory - not equal, differing byte larger in first",
+                memcmp(shared2, buffers::shared_sink, 8) > 0)
+    *(unsigned long long*)buffers::shared_sink = *shared2;
+    TEST_RESULT("from and to shared memory - equal",
+                memcmp(shared2, buffers::shared_sink, 8) == 0)
+
+    *(unsigned long long*)buffers::shared_sink = (unsigned long long)&non_shared1;
+    *shared2                                   = (unsigned long long)&non_shared1;
+    TEST_RESULT("from and to shared memory - equal, pointer",
+                memcmp(buffers::shared_sink, shared2, 8) == 0)
+    *shared2 = (unsigned long long)&non_shared2;
+    TEST_RESULT("from and to shared memory - not equal, pointer",
+                memcmp(buffers::shared_sink, shared2, 8) < 0)
+    // from and to shared memory ---------------------------------------------------------------------------------------
+
+    FINISH_TEST("memcmp tests successful!", "memcmp tests failed!")
+}
+
+
+// =====================================================================================================================
 //      instruction tests
 // =====================================================================================================================
 void            instruction_tests::test_0x01                        ()
@@ -1343,12 +1443,6 @@ void            instruction_tests::test_0x0f_0xb1                   ()
             testing_aid::compare_buffers(buffers::shared_sink, rax, QWORD_SIZE) != 0 &&
             testing_aid::compare_buffers(orig_rax, rax, QWORD_SIZE) == 0 &&
             testing_aid::compare_buffers(rcx, orig_rcx, QWORD_SIZE) == 0)
-    // printf("first: %s\n", testing_aid::compare_buffers(buffers::shared_sink, orig_rcx, QWORD_SIZE) == 0 ?
-    //                       "good" : "bad");
-    // printf("first: %s\n", testing_aid::compare_buffers(buffers::shared_sink, rax, QWORD_SIZE) != 0 ?
-    //                       "good" : "bad");
-    // printf("first: %s\n", testing_aid::compare_buffers(orig_rax, rax, QWORD_SIZE) == 0 ? "good" : "bad");
-    // printf("first: %s\n", testing_aid::compare_buffers(rcx, orig_rcx, QWORD_SIZE) == 0 ? "good" : "bad");
     *(__uint64_t*) buffers::shared_sink = 0x00;
 
 
@@ -1375,12 +1469,6 @@ void            instruction_tests::test_0x0f_0xb1                   ()
             testing_aid::compare_buffers(buffers::shared_sink, rax, QWORD_SIZE) == 0 &&
             testing_aid::compare_buffers(orig_rax, rax, QWORD_SIZE) != 0 &&
             testing_aid::compare_buffers(rcx, orig_rcx, QWORD_SIZE) == 0)
-    // printf("first: %s\n", testing_aid::compare_buffers(buffers::shared_sink, rcx, QWORD_SIZE) != 0 ?
-    //         "good" : "bad");
-    // printf("first: %s\n", testing_aid::compare_buffers(buffers::shared_sink, rax, QWORD_SIZE) == 0 ?
-    //         "good" : "bad");
-    // printf("first: %s\n", testing_aid::compare_buffers(orig_rax, rax, QWORD_SIZE) != 0 ? "good" : "bad");
-    // printf("first: %s\n", testing_aid::compare_buffers(rcx, orig_rcx, QWORD_SIZE) == 0 ? "good" : "bad");
     COPY_BUFFERS(rax, orig_rax, QWORD_SIZE);
     // 64-bit ==========================================================================================================
 
@@ -1419,12 +1507,6 @@ void            instruction_tests::test_0x0f_0xb1                   ()
                     QWORD_SIZE - DWORD_SIZE) == 0 &&
             testing_aid::compare_buffers(orig_rax, rax, DWORD_SIZE) == 0 &&
             testing_aid::compare_buffers(rcx, orig_rcx, DWORD_SIZE) == 0)
-    // printf("first: %s\n", testing_aid::compare_buffers(buffers::shared_sink, orig_rcx, QWORD_SIZE) == 0 ?
-    //                       "good" : "bad");
-    // printf("first: %s\n", testing_aid::compare_buffers(buffers::shared_sink, rax, QWORD_SIZE) != 0 ?
-    //                       "good" : "bad");
-    // printf("first: %s\n", testing_aid::compare_buffers(orig_rax, rax, QWORD_SIZE) == 0 ? "good" : "bad");
-    // printf("first: %s\n", testing_aid::compare_buffers(rcx, orig_rcx, QWORD_SIZE) == 0 ? "good" : "bad");
     *(__uint64_t*) buffers::shared_sink = 0x00;
 
 
@@ -1460,12 +1542,6 @@ void            instruction_tests::test_0x0f_0xb1                   ()
                                          QWORD_SIZE - DWORD_SIZE) == 0 &&
             testing_aid::compare_buffers(orig_rax, rax, DWORD_SIZE) != 0 &&
             testing_aid::compare_buffers(rcx, orig_rcx, DWORD_SIZE) == 0)
-    // printf("first: %s\n", testing_aid::compare_buffers(buffers::shared_sink, rcx, QWORD_SIZE) != 0 ?
-    //         "good" : "bad");
-    // printf("first: %s\n", testing_aid::compare_buffers(buffers::shared_sink, rax, QWORD_SIZE) == 0 ?
-    //         "good" : "bad");
-    // printf("first: %s\n", testing_aid::compare_buffers(orig_rax, rax, QWORD_SIZE) != 0 ? "good" : "bad");
-    // printf("first: %s\n", testing_aid::compare_buffers(rcx, orig_rcx, QWORD_SIZE) == 0 ? "good" : "bad");
     COPY_BUFFERS(rax, orig_rax, QWORD_SIZE);
     // 32-bit ==========================================================================================================
 
@@ -1504,10 +1580,6 @@ void            instruction_tests::test_0x0f_0xb1                   ()
                                          QWORD_SIZE - WORD_SIZE) == 0 &&
             testing_aid::compare_buffers(orig_rax, rax, WORD_SIZE) == 0 &&
             testing_aid::compare_buffers(rcx, orig_rcx, WORD_SIZE) == 0)
-    // printf("first: %s\n", testing_aid::compare_buffers(buffers::shared_sink, rax, QWORD_SIZE) != 0 ?
-    //                       "good" : "bad");
-    // printf("first: %s\n", testing_aid::compare_buffers(orig_rax, rax, QWORD_SIZE) == 0 ? "good" : "bad");
-    // printf("first: %s\n", testing_aid::compare_buffers(rcx, orig_rcx, QWORD_SIZE) == 0 ? "good" : "bad");
     *(__uint64_t*) buffers::shared_sink = 0x00;
 
 
@@ -1540,12 +1612,6 @@ void            instruction_tests::test_0x0f_0xb1                   ()
                                          QWORD_SIZE - WORD_SIZE) == 0 &&
             testing_aid::compare_buffers(orig_rax, rax, WORD_SIZE) != 0 &&
             testing_aid::compare_buffers(rcx, orig_rcx, WORD_SIZE) == 0)
-    // printf("first: %s\n", testing_aid::compare_buffers(buffers::shared_sink, rcx, QWORD_SIZE) != 0 ?
-    //         "good" : "bad");
-    // printf("first: %s\n", testing_aid::compare_buffers(buffers::shared_sink, rax, QWORD_SIZE) == 0 ?
-    //         "good" : "bad");
-    // printf("first: %s\n", testing_aid::compare_buffers(orig_rax, rax, QWORD_SIZE) != 0 ? "good" : "bad");
-    // printf("first: %s\n", testing_aid::compare_buffers(rcx, orig_rcx, QWORD_SIZE) == 0 ? "good" : "bad");
     COPY_BUFFERS(rax, orig_rax, QWORD_SIZE);
     // 16-bit ==========================================================================================================
 
@@ -1693,7 +1759,7 @@ void            instruction_tests::test_0x0f_0xb6                   ()
 
 void            instruction_tests::test_0x0f_0xb7                   ()
 {
-    START_TEST("running tests for movzx (0x0f 0xbe)\n")
+    START_TEST("running tests for movzx (0x0f 0xb7)\n")
 
     unsigned long long source      = 0xffff;
     unsigned long long original    = 0x1122334455667788;
@@ -1767,7 +1833,7 @@ void            instruction_tests::test_0x0f_0xbe                   ()
             : [src] "a" (buffers::shared_sink)
             : "r8"
     );
-    TEST_RESULT("movsx r32, m16", (__uint32_t) destination == (__uint32_t) -1 &&
+    TEST_RESULT("movsx r32, m8", (__uint32_t) destination == (__uint32_t) -1 &&
             (destination & ~DWORD_MASK) == 0)
     // 32-bit ----------------------------------------------------------------------------------------------------------
     

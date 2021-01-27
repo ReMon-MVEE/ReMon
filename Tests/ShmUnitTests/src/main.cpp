@@ -96,6 +96,7 @@ int             main                                                (int argc, c
 #endif
 
     // tests -----------------------------------------------------------------------------------------------------------
+    instruction_tests::test_memcmp();
     instruction_tests::test_0x01();
     instruction_tests::test_0x03();
     instruction_tests::test_0x29();
