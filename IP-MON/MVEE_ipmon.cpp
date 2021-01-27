@@ -2472,6 +2472,7 @@ CALCSIZE(recvfrom)
 	COUNTREG(ARG);
 	COUNTREG(ARG);
 	COUNTREG(ARG);
+    COUNTBUFFER(ARG, ARG6, sizeof(socklen_t));
 	COUNTBUFFER(RET, ARG2, ARG3);
 	if (ARG6 && *(socklen_t*)ARG6 > 0)
 		COUNTBUFFER(RET, ARG5, *(socklen_t*)ARG6);
