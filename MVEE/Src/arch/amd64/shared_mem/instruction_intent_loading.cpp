@@ -285,8 +285,19 @@ BYTE_LOADER_IMPL(0x11)
 // BYTE_LOADER_IMPL(0x22)
 
 
-/* Not implemented - blocked */
-// BYTE_LOADER_IMPL(0x23)
+/* Valid in first round */
+BYTE_LOADER_IMPL(0x23)
+{
+    // valid
+    if (round == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_FIRST_LEVEL)
+        LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
+    }
+    // illegal access
+    else
+        return -1;
+}
 
 
 /* Not implemented - blocked */
@@ -405,8 +416,18 @@ BYTE_LOADER_IMPL(0x2b)
 // BYTE_LOADER_IMPL(0x37)
 
 
-/* Not implemented - blocked */
-// BYTE_LOADER_IMPL(0x38)
+/* Valid in first round */
+BYTE_LOADER_IMPL(0x38)
+{
+    if (round == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_FIRST_LEVEL)
+        LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Valid in first round */
