@@ -754,13 +754,15 @@ long monitor::call_call_dispatch ()
 				}
                 else if (buffer_type == MVEE_SHM_BUFFER)
                 {
-                  if (!shm_buffer)
-                  {
-                    shm_buffer = new _shm_info();
-                    alloc_size =  SHARED_QUEUE_SLOTS * actual_slot_size;
-                  }
+                    if (!shm_buffer)
+                    {
+                      shm_buffer = new _shm_info();
+                      alloc_size =  SHARED_QUEUE_SLOTS * actual_slot_size;
+                    }
+                    for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+                        variants[variant_i].mvee_shm_buffer_location = ARG6(variant_i);
 
-                  info = shm_buffer;
+                    info = shm_buffer;
                 }
                 else if (buffer_type <= MVEE_MAX_SHM_TYPES)
                 {

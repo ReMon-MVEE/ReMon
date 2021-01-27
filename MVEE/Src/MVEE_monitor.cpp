@@ -89,6 +89,7 @@ variantstate::variantstate()
     , orig_controllen (0)
     , config (NULL)
     , instruction (&this->variantpid, &this->variant_num)
+    , mvee_shm_buffer_location(0)
 #ifdef __NR_socketcall
     , orig_arg1 (0)
 #endif
@@ -242,7 +243,8 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
 #ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
         variants[i].syscall_pointer = parent_monitor->variants[i].syscall_pointer;
 #endif
-        variants[i].shm_tag = parent_monitor->variants[i].shm_tag;
+        variants[i].shm_tag                  = parent_monitor->variants[i].shm_tag;
+        variants[i].mvee_shm_buffer_location = parent_monitor->variants[i].mvee_shm_buffer_location;
     }
 
     // variant monitors are a different story. New variants (forks/vforks/clones) always
