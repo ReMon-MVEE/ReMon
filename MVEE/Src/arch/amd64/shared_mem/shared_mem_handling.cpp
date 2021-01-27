@@ -281,8 +281,8 @@ int             shm_handling::determine_source_from_shared_normal   (variantstat
             return result;
 
         /* If buffer has not been filled, use local copy */
-        if (!*source) {
-            *source = (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset); }
+        if (!*source)
+            *source = (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);
     }
 
     return 0;

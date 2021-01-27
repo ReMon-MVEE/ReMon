@@ -1612,10 +1612,7 @@ void mvee::log_fini(bool terminated)
 
 #ifdef MVEE_LOG_NON_INSTRUMENTED_INSTRUCTION
     if (mvee::non_instrumented_logfile)
-    {
         fflush(mvee::non_instrumented_logfile);
-        fclose(mvee::non_instrumented_logfile);
-    }
 #endif
 }
 
