@@ -225,7 +225,7 @@ int             testing_aid::compare_buffers                        (const __uin
                                                                      unsigned int size)
 {
     for (unsigned int i = 0; i < size; i++)
-        if (first[i] != second[i])
+        if ((uint8_t)first[i] != (uint8_t)second[i])
             return -1;
     // ok
     return 0;
