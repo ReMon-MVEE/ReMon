@@ -1451,6 +1451,10 @@ void monitor::handle_resume_event(int index)
 
     // We do not actually resume until all of our variants are ready. This way we can set tids if needed
     debugf("%s - ready to resume variant\n", call_get_variant_pidstr(index).c_str());
+    if (variants[index].mvee_shm_buffer_location &&
+            !interaction::write_memory_word(variants[index].variantpid,
+                (void*)variants[index].mvee_shm_buffer_location, 0))
+        warnf("Could not clear mvee_shm_buffer for variant %d (%d) - %d\n", index, variants[index].variantpid, errno);
 
     bool all_resumed = true;
     for (int i = 0; i < mvee::numvariants; ++i)
