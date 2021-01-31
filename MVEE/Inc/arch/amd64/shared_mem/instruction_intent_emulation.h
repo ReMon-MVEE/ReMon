@@ -521,9 +521,20 @@ public:
     BYTE_LOADER_DEFINITION(0x29)
     BYTE_EMULATOR_DEFINITION(0x29)
 
-    /* Not implemented - blocked */
-    // BYTE_LOADER_DEFINITION(0x2a)
-    // BYTE_EMULATOR_DEFINITION(0x2a)
+    /* Valid in second round
+     *
+     * ## Second round ##
+     *
+     * repnz prefix
+     *  cvtsi2sd xmm, r32/m32
+     *
+     * ## Other rounds ##
+     *
+     * If encountered in other rounds, ILLEGAL_ACCESS should be set as operation and the decoding should be terminated
+     * returning ILLEGAL_ACCESS_TERMINATION.
+     */
+    BYTE_LOADER_DEFINITION(0x2a)
+    BYTE_EMULATOR_DEFINITION(0x2a)
 
     /* Valid in first round
      *
@@ -2177,8 +2188,18 @@ public:
     // BYTE_LOADER_DEFINITION(0xf1)
     // BYTE_EMULATOR_DEFINITION(0xf1)
 
-    /* Not implemented - blocked */
-    // BYTE_LOADER_DEFINITION(0xf2)
+    /* Valid in first round
+     *
+     * ## First round ##
+     *
+     * repnz prefix
+     *
+     * ## Other rounds ##
+     *
+     * If encountered in other rounds, ILLEGAL_ACCESS should be set as operation and the decoding should be terminated
+     * returning ILLEGAL_ACCESS_TERMINATION.
+     */
+    BYTE_LOADER_DEFINITION(0xf2)
     // BYTE_EMULATOR_DEFINITION(0xf2)
 
     /* Valid in first round
@@ -2294,7 +2315,7 @@ public:
             {&block_loader          , &block_emulator},                                              // 0x27
             {&block_loader          , &block_emulator},                                              // 0x28
             {&BYTE_LOADER_NAME(0x29), &BYTE_EMULATOR_NAME(0x29)},                               // 0x29
-            {&block_loader          , &block_emulator},                                              // 0x2a
+            {&BYTE_LOADER_NAME(0x2a), &BYTE_EMULATOR_NAME(0x2a)},                               // 0x2a
             {&BYTE_LOADER_NAME(0x2b), &BYTE_EMULATOR_NAME(0x2b)},                               // 0x2b
             {&block_loader          , &block_emulator},                                              // 0x2c
             {&block_loader          , &block_emulator},                                              // 0x2d
@@ -2494,7 +2515,7 @@ public:
             {&block_loader          , &block_emulator},                                              // 0xef
             {&BYTE_LOADER_NAME(0xf0), &block_emulator},                                              // 0xf0
             {&block_loader          , &block_emulator},                                              // 0xf1
-            {&block_loader          , &block_emulator},                                              // 0xf2
+            {&BYTE_LOADER_NAME(0xf2), &block_emulator},                                              // 0xf2
             {&BYTE_LOADER_NAME(0xf3), &block_emulator},                                              // 0xf3
             {&block_loader          , &block_emulator},                                              // 0xf4
             {&block_loader          , &block_emulator},                                              // 0xf5
