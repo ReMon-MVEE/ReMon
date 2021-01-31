@@ -441,28 +441,52 @@ BYTE_EMULATOR_IMPL(0x10)
 {
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
-        if (PREFIXES_GRP_ONE_PRESENT(instruction) || PREFIXES_GRP_THREE_PRESENT(instruction))
+        if (PREFIXES_GRP_THREE_PRESENT(instruction))
             return -1;
 
         // movups xmm, xmm/m128
         DEFINE_FPREGS_STRUCT
         DEFINE_MODRM
         LOAD_REG_CODE(destination, xmm_lookup)
-        LOAD_RM_CODE_NO_DEFINE(16)
 
-        XMM_FROM_SHARED
 
         // perform operation
-        __asm__
-        (
-                ".intel_syntax noprefix;"
-                "movups xmm0, XMMWORD PTR [rdx];"
-                "movups XMMWORD PTR [rax], xmm0;"
-                ".att_syntax;"
-                :
-                : [dst] "a" (destination), [src] "d" (source)
-                : "xmm0"
-        );
+        if (PREFIXES_GRP_ONE_PRESENT(instruction))
+        {
+            // we don't support this yet, one step at a time
+            if (PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE)
+                return -1;
+
+            LOAD_RM_CODE_NO_DEFINE(8)
+            NORMAL_FROM_SHARED(uint64_t)
+
+            __asm__
+            (
+                    ".intel_syntax noprefix;"
+                    "movdqu xmm0, XMMWORD PTR [%[dst]];"
+                    "movsd xmm0, QWORD PTR[%[src]];"
+                    "movdqu XMMWORD PTR [%[dst]], xmm0;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "r" (destination), [src] "r" (typed_source)
+                    : "xmm0"
+            );
+        }
+        else
+        {
+            LOAD_RM_CODE_NO_DEFINE(16)
+            XMM_FROM_SHARED
+            __asm__
+            (
+                    ".intel_syntax noprefix;"
+                    "movups xmm0, XMMWORD PTR [rdx];"
+                    "movups XMMWORD PTR [rax], xmm0;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "a" (destination), [src] "d" (source)
+                    : "xmm0"
+            );
+        }
 
         // writeback required
         if (interaction::write_all_fpregs(*instruction.variant_pid, regs_struct))
@@ -820,8 +844,47 @@ BYTE_EMULATOR_IMPL(0x29)
 }
 
 
-/* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0x2a)
+/* Valid in second round */
+BYTE_EMULATOR_IMPL(0x2a)
+{
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
+    {
+        // cvtsi2sd xmm, r32/m32
+        if (PREFIXES_GRP_ONE_PRESENT(instruction) && PREFIXES_GRP_ONE(instruction) == REPNZ_PREFIX_CODE)
+        {
+            DEFINE_FPREGS_STRUCT
+            DEFINE_MODRM
+            LOAD_RM_CODE_NO_DEFINE(4)
+            LOAD_REG_CODE(destination, xmm_lookup)
+
+            NORMAL_FROM_SHARED(uint32_t)
+            __asm__
+            (
+                    ".intel_syntax noprefix;"
+                    "movdqu xmm1, XMMWORD PTR [%[dst]];"
+                    "cvtsi2sd xmm1, DWORD PTR [%[src]];"
+                    "movdqu XMMWORD PTR [%[dst]], xmm1;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "r" (destination), [src] "r" (typed_source)
+                    : "xmm1"
+            );
+
+            // write back fpregs
+            if (interaction::write_all_fpregs(*instruction.variant_pid, regs_struct))
+            {
+                REPLAY_BUFFER_ADVANCE
+                return 0;
+            }
+        }
+        // illegal otherwise
+        else
+            return -1;
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Valid in first and second round */

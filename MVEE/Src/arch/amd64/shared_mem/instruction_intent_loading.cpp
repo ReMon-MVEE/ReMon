@@ -345,8 +345,18 @@ BYTE_LOADER_IMPL(0x29)
 }
 
 
-/* Not implemented - blocked */
-// BYTE_LOADER_IMPL(0x2a)
+/* Valid in second round */
+BYTE_LOADER_IMPL(0x2a)
+{
+    if (round == INSTRUCTION_DECODING_SECOND_LEVEL)
+    {
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_SECOND_LEVEL)
+        LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Valid in first round */
@@ -1978,7 +1988,25 @@ BYTE_LOADER_IMPL(0xf0)
 
 
 /* Not implemented - blocked */
-// BYTE_LOADER_IMPL(0xf2)
+BYTE_LOADER_IMPL(0xf2)
+{
+    // repnz prefix
+    if (round == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        // set group one prefix as used
+        instruction.prefixes |= PREFIXES_GRP_ONE_PRESENT_MASK;
+
+        // set repnz prefix code
+        instruction.prefixes &= ~PREFIXES_GRP_ONE_VALUES_MASK;
+        instruction.prefixes |= (REPNZ_PREFIX_CODE << PREFIXES_GRP_ONE_VALUES_OFFSET) & PREFIXES_GRP_ONE_VALUES_MASK;
+
+        // go to next byte, same level
+        LOAD_NEXT_INSTRUCTION_BYTE(INSTRUCTION_DECODING_FIRST_LEVEL)
+    }
+
+    // illegal otherwise
+    return ILLEGAL_ACCESS_TERMINATION;
+}
 
 
 /* Implemented - allowed in round 1 */
