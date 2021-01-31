@@ -5582,8 +5582,6 @@ POSTCALL(shmat)
         // copy shared content to shadow is initialisation
         if (shm_setup_state & SHM_SETUP_SHOULD_COPY)
         {
-            for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
-                warnf(" > %p\n", (void*)current_shadow->variant_shadows[variant_i].monitor_base);
             memcpy(current_shadow->variant_shadows[0].monitor_base, current_shadow->monitor_base, current_shadow->size);
             for (int variant_i = 1; variant_i < mvee::numvariants; variant_i++)
                 memcpy(current_shadow->variant_shadows[variant_i].monitor_base,
