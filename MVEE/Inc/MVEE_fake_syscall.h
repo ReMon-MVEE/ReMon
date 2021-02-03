@@ -182,12 +182,6 @@ enum mvee_shared_buffer_types
 #define MVEE_DISABLE_XCHECKS           MVEE_FAKE_SYSCALL_BASE + 19
 
 //
-// MVEE_LOG_SHM_MEM_OP: log the invocation of a glibc mem* function for
-// a shared memory access. Includes type, size, and a backtrace.
-//
-#define MVEE_LOG_SHM_MEM_OP            MVEE_FAKE_SYSCALL_BASE + 20
-
-//
 // MVEE Semaphore emulation calls. One weakness of our synchronization agents is
 // that they capture synchronization operations on virtual addresses.  This does
 // not work for inter-process semaphores because one and the same semaphore can

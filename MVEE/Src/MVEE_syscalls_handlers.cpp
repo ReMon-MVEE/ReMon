@@ -8369,7 +8369,14 @@ CALL(gettid)
 				  master_callee.c_str(), actual_callee.c_str());
 
 			shutdown(false);
-		}
+        }
+		else if (ARG3(i) == 100)
+        {
+            debugf("[PID:%05d] - [SHM_OP] - [TYPE:%llu] - [SIZE:%llu]\n",
+                    variants[i].variantpid, ARG4(i), ARG5(i));
+            log_variant_backtrace(i, 5);
+        }
+
 
 		return MVEE_CALL_ALLOW;
     }
