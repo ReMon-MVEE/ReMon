@@ -8307,6 +8307,43 @@ LOG_ARGS(gettid)
 				  variants[variantnum].variantpid, (int)ARG4(variantnum), (int)ARG5(variantnum), (int)ARG6(variantnum));
 			shutdown(false);
 		}
+		else if (ARG3(variantnum) == 101)
+		{
+			warnf("[PID:%05d] - [INEQUIVALENT_SHM_OP_ADDRESS] - [MASTER ADDRESS:0x" PTRSTR "] - [ACTUAL ADDRESS:0x" PTRSTR "]\n",
+				  variants[variantnum].variantpid, (unsigned long)ARG4(variantnum), (unsigned long)ARG5(variantnum));
+
+			shutdown(false);
+		}
+		else if (ARG3(variantnum) == 102)
+		{
+			warnf("[PID:%05d] - [INEQUIVALENT_SHM_OP_SIZE] - [MASTER SIZE:0x%lx] - [ACTUAL SIZE:0x%lx]\n",
+				  variants[variantnum].variantpid, (unsigned long)ARG4(variantnum), (unsigned long)ARG5(variantnum));
+
+			shutdown(false);
+		}
+		else if (ARG3(variantnum) == 103)
+		{
+			auto buf1 = call_serialize_io_buffer(variantnum, (const unsigned char*) ARG4(variantnum), ARG6(variantnum));
+			auto buf2 = call_serialize_io_buffer(variantnum, (const unsigned char*) ARG5(variantnum), ARG6(variantnum));
+			warnf("[PID:%05d] - [INEQUIVALENT_SHM_OP_DATA] - [SIZE:%d] - [MASTER DATA:%s] - [ACTUAL DATA:%s]\n",
+				  variants[variantnum].variantpid, (int)ARG6(variantnum), buf1.c_str(), buf2.c_str());
+
+			shutdown(false);
+		}
+		else if (ARG3(variantnum) == 104)
+		{
+			warnf("[PID:%05d] - [INEQUIVALENT_SHM_OP_TYPE] - [MASTER TYPE:%d] - [ACTUAL TYPE:%d]\n",
+				  variants[variantnum].variantpid, (int)ARG4(variantnum), (int)ARG5(variantnum));
+
+			shutdown(false);
+		}
+		else if (ARG3(variantnum) == 105)
+		{
+			warnf("[PID:%05d] - [INEQUIVALENT_SHM_OP_VALUE] - [MASTER VALUE:%ld] - [ACTUAL VALUE:%ld]\n",
+				  variants[variantnum].variantpid, (unsigned long)ARG4(variantnum), (unsigned long)ARG5(variantnum));
+
+			shutdown(false);
+		}
 		else if (ARG3(variantnum) < 59 || ARG3(variantnum) > 61)
 		{
 			debugf("[PID:%05d] - [UNKNOWN_DEBUG_EVENT:%d]\n",
