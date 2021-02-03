@@ -241,7 +241,6 @@ unsigned char monitor::call_precall_get_call_type (int variantnum, long callnum)
 			case MVEE_RUNS_UNDER_MVEE_CONTROL:
 			case MVEE_ENABLE_XCHECKS:
 			case MVEE_DISABLE_XCHECKS:
-			case MVEE_LOG_SHM_MEM_OP:
             {
                 result = MVEE_CALL_TYPE_UNSYNCED;
                 break;
@@ -582,14 +581,6 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 			case MVEE_ALL_HEAPS_ALIGNED:
 			{
 				result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(1);
-				break;
-			}
-
-			case MVEE_LOG_SHM_MEM_OP:
-			{
-                debugf("%s - MVEE SHM mem* OP of type %llu and size %llu\n", call_get_variant_pidstr(variantnum).c_str(), ARG1(variantnum), ARG2(variantnum));
-                log_variant_backtrace(variantnum, 5);
-                result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
 				break;
 			}
 
