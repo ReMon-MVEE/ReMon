@@ -1,0 +1,107 @@
+diff -ur MPlayer-1.4-orig/sub/osd.c MPlayer-1.4/sub/osd.c
+--- MPlayer-1.4-orig/sub/osd.c	2017-09-07 00:05:41.000000000 +0200
++++ MPlayer-1.4/sub/osd.c	2021-01-26 09:51:33.503889300 +0100
+@@ -37,36 +37,8 @@
+ static const unsigned long long mask24hl  __attribute__((aligned(8))) = 0x0000FFFFFFFFFFFFULL;
+ #endif
+ 
+-//Note: we have C, X86-nommx, MMX, MMX2, 3DNOW version therse no 3DNOW+MMX2 one
+-//Plain C versions
+-#if !HAVE_MMX || CONFIG_RUNTIME_CPUDETECT
+ #define COMPILE_C
+-#endif
+-
+-#if ARCH_X86
+-
+-#if (HAVE_MMX && !HAVE_AMD3DNOW && !HAVE_MMX2) || CONFIG_RUNTIME_CPUDETECT
+-#define COMPILE_MMX
+-#endif
+-
+-#if HAVE_MMX2 || CONFIG_RUNTIME_CPUDETECT
+-#define COMPILE_MMX2
+-#endif
+-
+-#if (HAVE_AMD3DNOW && !HAVE_MMX2) || CONFIG_RUNTIME_CPUDETECT
+-#define COMPILE_3DNOW
+-#endif
+-
+-#endif /* ARCH_X86 */
+-
+-#undef HAVE_MMX
+-#undef HAVE_MMX2
+-#undef HAVE_AMD3DNOW
+-#define HAVE_MMX 0
+-#define HAVE_MMX2 0
+-#define HAVE_AMD3DNOW 0
+ 
+-#if ! ARCH_X86
+ 
+ #ifdef COMPILE_C
+ #undef HAVE_MMX
+@@ -77,64 +49,11 @@
+ #define HAVE_AMD3DNOW 0
+ #define RENAME(a) a ## _C
+ #include "osd_template.c"
+-#endif
+-
+-#else
+-
+-//X86 noMMX versions
+-#ifdef COMPILE_C
+-#undef RENAME
+-#undef HAVE_MMX
+-#undef HAVE_MMX2
+-#undef HAVE_AMD3DNOW
+-#define HAVE_MMX 0
+-#define HAVE_MMX2 0
+-#define HAVE_AMD3DNOW 0
+-#define RENAME(a) a ## _X86
+-#include "osd_template.c"
+-#endif
+-
+-//MMX versions
+-#ifdef COMPILE_MMX
+-#undef RENAME
+-#undef HAVE_MMX
+-#undef HAVE_MMX2
+-#undef HAVE_AMD3DNOW
+-#define HAVE_MMX 1
+-#define HAVE_MMX2 0
+-#define HAVE_AMD3DNOW 0
+-#define RENAME(a) a ## _MMX
+-#include "osd_template.c"
+-#endif
+-
+-//MMX2 versions
+-#ifdef COMPILE_MMX2
+-#undef RENAME
+-#undef HAVE_MMX
+-#undef HAVE_MMX2
+-#undef HAVE_AMD3DNOW
+-#define HAVE_MMX 1
+-#define HAVE_MMX2 1
+-#define HAVE_AMD3DNOW 0
+-#define RENAME(a) a ## _MMX2
+-#include "osd_template.c"
+-#endif
+-
+-//3DNOW versions
+-#ifdef COMPILE_3DNOW
+-#undef RENAME
+-#undef HAVE_MMX
+-#undef HAVE_MMX2
+-#undef HAVE_AMD3DNOW
+-#define HAVE_MMX 1
+-#define HAVE_MMX2 0
+-#define HAVE_AMD3DNOW 1
+-#define RENAME(a) a ## _3DNow
+-#include "osd_template.c"
+-#endif
+ 
+ #endif /* ARCH_X86 */
+ 
++#undef ARCH_X86
++
+ void vo_draw_alpha_yv12(int w,int h, unsigned char* src, unsigned char *srca, int srcstride, unsigned char* dstbase,int dststride){
+ #if CONFIG_RUNTIME_CPUDETECT
+ #if ARCH_X86

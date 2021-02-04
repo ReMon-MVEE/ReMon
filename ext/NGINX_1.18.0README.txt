@@ -1,0 +1,29 @@
+1) Download and unpack src
+
+$ wget http://nginx.org/download/nginx-1.18.0.tar.gz
+$ tar -xf nginx-1.18.0.tar.gz
+
+2) Patch to activate use of shared memory
+
+$ cd nginx-1.18.0
+$ patch -p1 < /path/to/ReMon/patches/nginx-1.18.0-shm.patch
+
+3) Build
+
+For initial run use:
+$ export CFLAGS="-g O3"
+$ export CXXFLAGS="-g O3"
+$ export CC=/opt/deps/llvm/build-tree/bin/clang
+$ export CXX=/opt/deps/llvm/build-tree/bin/clang++
+
+For wrapping run use:
+$ export CFLAGS="-g -O3"
+$ export CXXFLAGS="-g -O3"
+$ export CC="/opt/deps/llvm/build-tree/bin/clang -fshm_support=/projects/nginx-1.18.0/shm_lines"
+$ export CXX="/opt/deps/llvm/build-tree/bin/clang++ -fshm_support=/projects/nginx-1.18.0/shm_lines"
+
+Configuration:
+$ ./configure
+
+Build:
+$ sudo make -j$(nproc) install

@@ -1,0 +1,98 @@
+================================================================================
+=================================== MPLAYER ====================================
+================================================================================
+1) Download and unpack src
+
+$ wget http://www.mplayerhq.hu/MPlayer/releases/MPlayer-1.4.tar.xz
+$ tar -xf MPlayer-1.4.tar.xz
+
+2) (optionally) Apply patch to make OSD use C instead of inline assembly
+
+$ cd MPlayer-1.4
+$ patch -p1 < /path/to/ReMon/patches/mplayer-1.4-osd.patch
+
+3) Build (optionally without the mplayer-provided so-called "fast" memcpy)
+
+For initial run use:
+$ export CFLAGS="-g O3"
+$ export CXXFLAGS="-g O3"
+$ export CC=/opt/deps/llvm/build-tree/bin/clang
+$ export CXX=/opt/deps/llvm/build-tree/bin/clang++
+
+For wrapping run use:
+$ export CFLAGS="-g -O3"
+$ export CXXFLAGS="-g -O3"
+$ export CC="/opt/deps/llvm/build-tree/bin/clang -fshm_support=/projects/MPlayer-1.4/shm_lines"
+$ export CXX="/opt/deps/llvm/build-tree/bin/clang++ -fshm_support=/projects/MPlayer-1.4/shm_lines"
+
+Configuration:
+$ ./configure --disable-fastmemcpy
+
+Build:
+$ make -j$(nproc)
+
+And the 'mplayer' binary is in the top directory.
+
+================================================================================
+================================= PULSEAUDIO ===================================
+================================================================================
+1) Download source
+
+$ apt source libpulse0 
+
+2) Build
+
+$ cd pulseaudio-13.99.1
+$ mkdir build
+
+For initial run use:
+$ export CFLAGS="-g O3"
+$ export CXXFLAGS="-g O3"
+$ export CC=/opt/deps/llvm/build-tree/bin/clang
+$ export CXX=/opt/deps/llvm/build-tree/bin/clang++
+
+For wrapping run use:
+$ export CFLAGS="-g -O3"
+$ export CXXFLAGS="-g -O3"
+$ export CC="/opt/deps/llvm/build-tree/bin/clang -fshm_support=/projects/pulseaudio-13.99.1/shm_lines"
+$ export CXX="/opt/deps/llvm/build-tree/bin/clang++ -fshm_support=/projects/pulseaudio-13.99.1/shm_lines"
+
+Configuration:
+$ ../configure
+
+Build:
+$ make -j$(nproc)
+
+And you can find the binary at build/src/.libs/libpulsecommon-13.99.so
+
+================================================================================
+================================ LIBFONTCONFIG =================================
+================================================================================
+1) Download source
+
+$ apt source libfontconfig1
+
+2) Build
+
+$ cd fontconfig-2.13.1
+$ mkdir build
+
+For initial run use:
+$ export CFLAGS="-g O3"
+$ export CXXFLAGS="-g O3"
+$ export CC=/opt/deps/llvm/build-tree/bin/clang
+$ export CXX=/opt/deps/llvm/build-tree/bin/clang++
+
+For wrapping run use:
+$ export CFLAGS="-g -O3"
+$ export CXXFLAGS="-g -O3"
+$ export CC="/opt/deps/llvm/build-tree/bin/clang -fshm_support=/projects/fontconfig-2.13.1/shm_lines"
+$ export CXX="/opt/deps/llvm/build-tree/bin/clang++ -fshm_support=/projects/fontconfig-2.13.1/shm_lines"
+
+Configuration:
+$ ../configure
+
+Build:
+$ make -j$(nproc)
+
+And you can find the binary at build/src/.libs/libfontconfig.so.1
