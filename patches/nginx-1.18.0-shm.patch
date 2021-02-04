@@ -1,0 +1,38 @@
+diff -ur nginx-1.18.0/conf/nginx.conf nginx-1.18.0-patched/conf/nginx.conf
+--- nginx-1.18.0/conf/nginx.conf	2020-04-21 16:09:01.000000000 +0200
++++ nginx-1.18.0-patched/conf/nginx.conf	2021-02-02 16:28:28.321320422 +0100
+@@ -17,6 +17,7 @@
+ http {
+     include       mime.types;
+     default_type  application/octet-stream;
++    limit_req_zone $binary_remote_addr zone=one:10m rate=1r/s;
+ 
+     #log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+     #                  '$status $body_bytes_sent "$http_referer" '
+@@ -42,6 +43,7 @@
+ 
+         location / {
+             root   html;
++            limit_req zone=one burst=5;
+             index  index.html index.htm;
+         }
+ 
+diff -ur nginx-1.18.0/src/os/unix/ngx_shmem.c nginx-1.18.0-patched/src/os/unix/ngx_shmem.c
+--- nginx-1.18.0/src/os/unix/ngx_shmem.c	2020-04-21 16:09:01.000000000 +0200
++++ nginx-1.18.0-patched/src/os/unix/ngx_shmem.c	2021-02-02 16:35:25.568891898 +0100
+@@ -9,6 +9,7 @@
+ #include <ngx_core.h>
+ 
+ 
++#if 0
+ #if (NGX_HAVE_MAP_ANON)
+ 
+ ngx_int_t
+@@ -78,6 +79,7 @@
+     }
+ }
+ 
++#endif
+ #elif (NGX_HAVE_SYSVSHM)
+ 
+ #include <sys/ipc.h>
