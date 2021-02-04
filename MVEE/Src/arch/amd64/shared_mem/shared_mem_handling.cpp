@@ -926,6 +926,7 @@ int                shared_monitor_map_info::setup_shm               ()
                   variant_num, errno);
             return -1;
         }
+        shmctl(shadow_shmid, IPC_RMID, NULL);
 
         this->variant_shadows[variant_num] =
                 {
