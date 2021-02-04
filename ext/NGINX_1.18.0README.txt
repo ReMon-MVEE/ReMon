@@ -26,4 +26,4 @@ Configuration:
 $ ./configure
 
 Build:
-$ sudo make -j$(nproc) install
+$ make -j$(nproc) install

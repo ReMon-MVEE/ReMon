@@ -93,6 +93,6 @@ Configuration:
 $ ../configure
 
 Build:
-$ make -j$(nproc)
+$ make -j$(nproc) install
 
 And you can find the binary at build/src/.libs/libfontconfig.so.1
