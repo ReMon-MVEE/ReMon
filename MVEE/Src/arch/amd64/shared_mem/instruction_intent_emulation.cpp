@@ -1024,8 +1024,86 @@ BYTE_EMULATOR_IMPL(0x2b)
 // BYTE_EMULATOR_IMPL(0x32)
 
 
-/* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0x33)
+/* Valid in first round */
+BYTE_EMULATOR_IMPL(0x33)
+{
+    // xor Gv, Ev
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        LOAD_REG_CODE(destination, general_purpose_lookup)
+        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE)
+
+        // 64-bit
+        if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
+        {
+            uint64_t* typed_destination = (uint64_t*)destination;
+            NORMAL_FROM_SHARED(uint64_t)
+
+            __asm__
+            (
+                    ".intel_syntax noprefix;"
+                    "push %[flags];"
+                    "popf;"
+                    "xor QWORD PTR [%[dst]], %[src];"
+                    "pushf;"
+                    "pop %[flags];"
+                    ".att_syntax;"
+                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                    : [dst] "r" (typed_destination), "m" (*typed_destination), [src] "r" (*typed_source)
+                    : "cc"
+            );
+        }
+        // 16-bit
+        else if (PREFIXES_GRP_THREE_PRESENT(instruction))
+        {
+            uint16_t* typed_destination = (uint16_t*)destination;
+            NORMAL_FROM_SHARED(uint16_t)
+
+            __asm__
+            (
+                    ".intel_syntax noprefix;"
+                    "push %[flags];"
+                    "popf;"
+                    "xor WORD PTR [%[dst]], %[src];"
+                    "pushf;"
+                    "pop %[flags];"
+                    ".att_syntax;"
+                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                    : [dst] "r" (typed_destination), "m" (*typed_destination), [src] "r" (*typed_source)
+                    : "cc"
+            );
+        }
+        // 32-bit
+        else
+        {
+            uint32_t* typed_destination = (uint32_t*)destination;
+            NORMAL_FROM_SHARED(uint32_t)
+
+            __asm__
+            (
+                    ".intel_syntax noprefix;"
+                    "push %[flags];"
+                    "popf;"
+                    "xor DWORD PTR [%[dst]], %[src];"
+                    "pushf;"
+                    "pop %[flags];"
+                    ".att_syntax;"
+                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
+                    : [dst] "r" (typed_destination), "m" (*typed_destination), [src] "r" (*typed_source)
+                    : "cc"
+            );
+        }
+
+        // registers will be written back anyway
+        REPLAY_BUFFER_ADVANCE
+        return 0;
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */
