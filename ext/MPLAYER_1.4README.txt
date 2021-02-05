@@ -75,7 +75,6 @@ $ apt source libfontconfig1
 2) Build
 
 $ cd fontconfig-2.13.1
-$ mkdir build
 
 For initial run use:
 $ export CFLAGS="-g O3"
@@ -90,9 +89,10 @@ $ export CC="/opt/deps/llvm/build-tree/bin/clang -fshm_support=/projects/fontcon
 $ export CXX="/opt/deps/llvm/build-tree/bin/clang++ -fshm_support=/projects/fontconfig-2.13.1/shm_lines"
 
 Configuration:
-$ ../configure
+$ ./configure
 
 Build:
-$ make -j$(nproc) install
+$ make -j$(nproc)
+$ make install
 
-And you can find the binary at build/src/.libs/libfontconfig.so.1
+And you can find the binary at src/.libs/libfontconfig.so.1
