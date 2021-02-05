@@ -417,8 +417,85 @@ BYTE_EMULATOR_IMPL(0x03)
 // BYTE_EMULATOR_IMPL(0x0a)
 
 
-/* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0x0b)
+/* Valid in first round */
+BYTE_EMULATOR_IMPL(0x0b)
+{
+    // or Gv, Ev
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        LOAD_REG_CODE(destination, general_purpose_lookup)
+
+        // 64-bit
+        if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
+        {
+            auto* typed_destination = (uint64_t*) destination;
+            LOAD_RM_CODE_NO_DEFINE(sizeof(uint64_t))
+            NORMAL_FROM_SHARED(uint64_t)
+
+            __asm__(
+                    ".intel_syntax noprefix;"
+                    "push %[flags];"
+                    "popf;"
+                    "or %[dst], QWORD PTR [%[src]];"
+                    "pushf;"
+                    "pop %[flags];"
+                    ".att_syntax;"
+                    : [flags] "+r" (regs_struct->eflags), [dst] "+r" (*typed_destination), "+m" (*typed_source)
+                    : [src] "r" (typed_source)
+                    : "cc"
+            );
+        }
+        // 16-bit
+        else if (PREFIXES_GRP_ONE_PRESENT(instruction))
+        {
+            auto* typed_destination = (uint16_t*) destination;
+            LOAD_RM_CODE_NO_DEFINE(sizeof(uint16_t))
+            NORMAL_FROM_SHARED(uint16_t)
+
+            __asm__(
+                    ".intel_syntax noprefix;"
+                    "push %[flags];"
+                    "popf;"
+                    "or %[dst], WORD PTR [%[src]];"
+                    "pushf;"
+                    "pop %[flags];"
+                    ".att_syntax;"
+                    : [flags] "+r" (regs_struct->eflags), [dst] "+r" (*typed_destination), "+m" (*typed_source)
+                    : [src] "r" (typed_source)
+                    : "cc"
+            );
+        }
+        // 32-bit
+        else
+        {
+            auto* typed_destination = (uint32_t*) destination;
+            LOAD_RM_CODE_NO_DEFINE(sizeof(uint32_t))
+            NORMAL_FROM_SHARED(uint32_t)
+
+            __asm__(
+                    ".intel_syntax noprefix;"
+                    "push %[flags];"
+                    "popf;"
+                    "or %[dst], DWORD PTR [%[src]];"
+                    "pushf;"
+                    "pop %[flags];"
+                    ".att_syntax;"
+                    : [flags] "+r" (regs_struct->eflags), [dst] "+r" (*typed_destination), "+m" (*typed_source)
+                    : [src] "r" (typed_source)
+                    : "cc"
+            );
+        }
+
+        // registers will be written back anyway
+        REPLAY_BUFFER_ADVANCE
+        return 0;
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */
@@ -897,7 +974,6 @@ BYTE_EMULATOR_IMPL(0x2b)
         DEFINE_MODRM
         LOAD_REG_CODE(destination, general_purpose_lookup)
         LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE)
-
 
         // 64-bit
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
