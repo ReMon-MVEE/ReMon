@@ -3726,8 +3726,62 @@ BYTE_EMULATOR_IMPL(0xe7)
 // BYTE_EMULATOR_IMPL(0xf5)
 
 
-/* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0xf6)
+/* Valid in first round */
+BYTE_EMULATOR_IMPL(0xf6)
+{
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_B(instruction))
+        {
+            DEFINE_REGS_STRUCT
+            DEFINE_MODRM
+            LOAD_RM_CODE_NO_DEFINE(1)
+
+            // ModR/M reg field used as opcode extension
+            switch (GET_REG_CODE(modrm))
+            {
+                case 0b000u: // TEST - test r/m8, imm8
+                case 0b001u: // TEST - test r/m8, imm8
+                    {
+                        LOAD_IMM(source)
+                        uint8_t* typed_source = (uint8_t*)source;
+                        PROXY_SHARED(destination, uint8_t)
+                        PROXY_OPERATION(uint_8_t,
+                        __asm__
+                        (
+                               ".intel_syntax noprefix;"
+                               "push %[flags];"
+                               "popf;"
+                               "test BYTE PTR [%[dst]], %[src];"
+                               "pushf;"
+                               "pop %[flags];"
+                               ".att_syntax"
+                               : [flags] "+r" (regs_struct->eflags)
+                               : [dst] "r" (typed_destination), "m" (*typed_destination), [src] "r" (*typed_source)
+                               : "cc"
+                        ), PROXY_REPLACE_DESTINATION(uint8_t))
+                        break;
+                    }
+                case 0b010u: // NOT - not yet implemented
+                case 0b011u: // NEG - not yet implemented
+                case 0b100u: // MUL - not yet implemented
+                case 0b101u: // IMUL - not yet implemented
+                case 0b110u: // DIV - not yet implemented
+                case 0b111u: // IDIV - not yet implemented
+                default:
+                    return -1;
+            }
+
+            REPLAY_BUFFER_ADVANCE
+            return 0;
+        }
+        // illegal otherwise
+        return -1;
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */

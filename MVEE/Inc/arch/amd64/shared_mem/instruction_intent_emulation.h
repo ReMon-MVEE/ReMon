@@ -2227,9 +2227,29 @@ public:
     // BYTE_LOADER_DEFINITION(0xf5)
     // BYTE_EMULATOR_DEFINITION(0xf5)
 
-    /* Not implemented - blocked */
-    // BYTE_LOADER_DEFINITION(0xf6)
-    // BYTE_EMULATOR_DEFINITION(0xf6)
+    /* Valid in first round
+     *
+     * ## First round ##
+     *
+     * Immediate Grp 1 Eb, Ib - ModR/M bits [5,3] used as opcode extension
+     *
+     * opcode extensions
+     *   * 000: TEST - test r/m8, imm8
+     *   * 001: TEST  - test r/m8, imm8
+     *   * 010: NOT - not yet implemented
+     *   * 011: NEG - not yet implemented
+     *   * 100: MUL - not yet implemented
+     *   * 101: IMUL - not yet implemented
+     *   * 110: DIV - not yet implemented
+     *   * 111: IDIV - not yet implemented
+     *
+     * ## Other round ##
+     *
+     * If encountered in other rounds, ILLEGAL_ACCESS should be set as operation and the decoding should be terminated
+     * returning ILLEGAL_ACCESS_TERMINATION.
+     */
+    BYTE_LOADER_DEFINITION(0xf6)
+    BYTE_EMULATOR_DEFINITION(0xf6)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xf7)
@@ -2519,7 +2539,7 @@ public:
             {&BYTE_LOADER_NAME(0xf3), &block_emulator},                                              // 0xf3
             {&block_loader          , &block_emulator},                                              // 0xf4
             {&block_loader          , &block_emulator},                                              // 0xf5
-            {&block_loader          , &block_emulator},                                              // 0xf6
+            {&BYTE_LOADER_NAME(0xf6), &BYTE_EMULATOR_NAME(0xf6)},                                    // 0xf6
             {&block_loader          , &block_emulator},                                              // 0xf7
             {&block_loader          , &block_emulator},                                              // 0xf8
             {&block_loader          , &block_emulator},                                              // 0xf9
