@@ -726,7 +726,21 @@ int             replay_buffer::obtain_buffer                        (unsigned in
             {
                 if (current_entry->instruction[i] != instruction.instruction[i])
                 {
-                    warnf("instruction intent differs\n");
+                    std::stringstream ss;
+                    ss << "[" << variant_num << "] Instruction intent differs";
+                    ss << "\n\t> entry:  ";
+                    for (int j = 0; j < current_entry->instruction_size; j++)
+                        ss << (current_entry->instruction[j] < 0x10 ? "0" : "")
+                                << std::hex << (unsigned long) current_entry->instruction[j] << " ";
+                    ss << "\n\t> intent: ";
+                    for (int j = 0; j < instruction.size; j++)
+                        ss << (instruction.instruction[j] < 0x10 ? "0" : "")
+                                << std::hex << (unsigned long) instruction.instruction[j] << " ";
+                    ss << "\n\t          ";
+                    for (int j = 0; j < i; j++)
+                        ss << "   ";
+                    ss << "^^\n";
+                    warnf("%s", ss.str().c_str());
                     return REPLAY_BUFFER_RETURN_ERROR;
                 }
             }

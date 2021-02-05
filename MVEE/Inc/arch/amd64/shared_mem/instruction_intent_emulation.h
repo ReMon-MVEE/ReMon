@@ -328,9 +328,19 @@ public:
     // BYTE_LOADER_DEFINITION(0x0a)
     // BYTE_EMULATOR_DEFINITION(0x0a)
 
-    /* Not implemented - blocked */
-    // BYTE_LOADER_DEFINITION(0x0b)
-    // BYTE_EMULATOR_DEFINITION(0x0b)
+    /* Valid in first round
+     *
+     * ## First round ##
+     *
+     * or Gv, Ev
+     *
+     * ## Other rounds ##
+     *
+     * If encountered in other rounds, ILLEGAL_ACCESS should be set as operation and the decoding should be terminated
+     * returning ILLEGAL_ACCESS_TERMINATION.
+     */
+    BYTE_LOADER_DEFINITION(0x0b)
+    BYTE_EMULATOR_DEFINITION(0x0b)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x0c)
@@ -2314,7 +2324,7 @@ public:
             {&block_loader          , &block_emulator},                                              // 0x08
             {&block_loader          , &block_emulator},                                              // 0x09
             {&block_loader          , &block_emulator},                                              // 0x0a
-            {&block_loader          , &block_emulator},                                              // 0x0b
+            {&BYTE_LOADER_NAME(0x0b), &BYTE_EMULATOR_NAME(0x0b)},                               // 0x0b
             {&block_loader          , &block_emulator},                                              // 0x0c
             {&block_loader          , &block_emulator},                                              // 0x0d
             {&block_loader          , &block_emulator},                                              // 0x0e
