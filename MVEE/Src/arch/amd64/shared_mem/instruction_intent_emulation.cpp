@@ -103,9 +103,9 @@ void* __src_or_dst = &instruction.instruction[instruction.immediate_operand_inde
 void* buffer;                                                                                                          \
 int result;                                                                                                            \
 {                                                                                                                      \
-    unsigned long long size = __size;                                                                                  \
+    unsigned long long __raw_size = __size;                                                                            \
     result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, __monitor_pointer, instruction,               \
-            &buffer, size);                                                                                            \
+            &buffer, __raw_size);                                                                                      \
     if (result < 0)                                                                                                    \
         return result;                                                                                                 \
 }
