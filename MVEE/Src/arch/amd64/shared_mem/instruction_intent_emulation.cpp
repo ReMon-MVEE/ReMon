@@ -2683,7 +2683,7 @@ BYTE_EMULATOR_IMPL(0xa4)
                     : "cc", "memory"
             );
 
-            if (dst_spoof && !interaction::write_memory(variant->variantpid, (void*) dst, (long) size, spoof))
+            if (dst_spoof && !interaction::write_memory(variant->variantpid, (void*) dst, (long) size, actual_buffer))
             {
                 warnf("movsb could not write back destination\n");
                 return -1;
