@@ -68,7 +68,7 @@ void            test                                                ()
     TEST_RESULT("shared == shared, buffer not cleared | null",
                 testing_aid::compare_buffers(shared_mapping_copy, buffers::shared_sink, SHARED_SIZE) == 0)
 
-    FINISH_TEST("functionality okay", "functionality issues")
+    FINISH_TEST
 
 
     munmap(shared_mapping_copy, SHARED_SIZE);
