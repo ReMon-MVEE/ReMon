@@ -608,32 +608,32 @@ if (memcmp(buffer, source, 16) != 0)                                            
 
 #define WRITE_DIVERGENCE_XMM_PTR_CHECK(__buffer, __source, __message)                                                  \
 {                                                                                                                      \
-    if (*(void**)buffer != *(void**)source)                                                                            \
+    if (*(void**)(__buffer) != *(void**)(__source))                                                                    \
     {                                                                                                                  \
-        if (decode_address_tag(*(void**)source, variant) !=                                                            \
-                decode_address_tag(*(void**)buffer, &relevant_monitor.variants[0]))                                    \
+        if (decode_address_tag(*(void**)(__source), variant) !=                                                        \
+                decode_address_tag(*(void**)(__buffer), &relevant_monitor.variants[0]))                                \
         {                                                                                                              \
-            warnf(" > first quadword: %p != %p\n", *(void**)buffer, *(void**)source);                                  \
-            warnf(" > first quadword: %p != %p\n", decode_address_tag(*(void**)source, variant),                       \
-                    decode_address_tag(*(void**)buffer, &relevant_monitor.variants[0]));                               \
+            warnf(" > first quadword: %p != %p\n", *(void**)(__buffer), *(void**)(__source));                          \
+            warnf(" > first quadword: %p != %p\n", decode_address_tag(*(void**)(__source), variant),                   \
+                    decode_address_tag(*(void**)(__buffer), &relevant_monitor.variants[0]));                           \
             WRITE_DIVERGENCE_ERROR(__message)                                                                          \
         }                                                                                                              \
     }                                                                                                                  \
-    if (*((void**)buffer + 1) != *((void**)source + 1))                                                                \
+    if (*((void**)(__buffer) + 1) != *((void**)(__source) + 1))                                                        \
     {                                                                                                                  \
-        if (decode_address_tag(*((void**)source + 1), variant) !=                                                      \
-                decode_address_tag(*((void**)buffer + 1), &relevant_monitor.variants[0]))                              \
+        if (decode_address_tag(*((void**)(__source) + 1), variant) !=                                                  \
+                decode_address_tag(*((void**)(__buffer) + 1), &relevant_monitor.variants[0]))                          \
         {                                                                                                              \
-            warnf(" > second quadword: %p != %p\n", *((void**)buffer + 1), *((void**)source + 1));                     \
-            warnf(" > second quadword: %p != %p\n", decode_address_tag(*((void**)source + 1), variant),                \
-                    decode_address_tag(*((void**)buffer + 1), &relevant_monitor.variants[0]));                         \
+            warnf(" > second quadword: %p != %p\n", *((void**)(__buffer) + 1), *((void**)(__source) + 1));             \
+            warnf(" > second quadword: %p != %p\n", decode_address_tag(*((void**)(__source) + 1), variant),            \
+                    decode_address_tag(*((void**)(__buffer) + 1), &relevant_monitor.variants[0]));                     \
             WRITE_DIVERGENCE_ERROR(__message)                                                                          \
         }                                                                                                              \
     }                                                                                                                  \
 }
 
 #define WRITE_DIVERGENCE_PTR_CHECK(__buffer, __source, __message)                                                      \
-if (decode_address_tag(*__source, variant) != decode_address_tag(*__buffer, &relevant_monitor.variants[0]))            \
+if (decode_address_tag(*(__source), variant) != decode_address_tag(*(__buffer), &relevant_monitor.variants[0]))        \
 {                                                                                                                      \
     warnf(" > %p != %p\n", (void*)*(__buffer), (void*)*(__source));                                                    \
     WRITE_DIVERGENCE_ERROR(__message)                                                                                  \

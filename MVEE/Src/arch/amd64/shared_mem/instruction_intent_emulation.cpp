@@ -2170,7 +2170,7 @@ BYTE_EMULATOR_IMPL(0x83)
 
 
 /* Valid in first round */
-#define EXCHANGE_TO_SHARED(__cast)                                                                                     \
+#define EXCHANGE_TO_SHARED(__cast, __divergence)                                                                       \
 LOAD_RM_CODE_NO_DEFINE(sizeof(__cast))                                                                                 \
 auto* typed_source = (__cast*)source;                                                                                  \
 auto* typed_destination = (__cast*)((unsigned long long) mapping_info->monitor_base + offset);                         \
@@ -2202,17 +2202,10 @@ else                                                                            
                                                                                                                        \
     if (*((__cast*)buffer + 1) != *typed_source)                                                                       \
     {                                                                                                                  \
-        warnf(" > diverging write in 0x87 - source\n");                                                                \
-        warnf(" > 0x%llx != 0x%llx\n", (unsigned long long)*typed_source, (unsigned long long)*((__cast*)buffer + 1)); \
-        return -1;                                                                                                     \
+        __divergence                                                                                                   \
     }                                                                                                                  \
     typed_destination = (__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);          \
     __atomic_exchange(typed_destination, typed_source, typed_source, __ATOMIC_ACQ_REL);                                \
-    if (*(__cast*)buffer != *typed_source)                                                                             \
-    {                                                                                                                  \
-        warnf(" > diverging write in 0x87 - destination\n");                                                           \
-        return -1;                                                                                                     \
-    }                                                                                                                  \
     if (*((__cast*)buffer + 2) != *(__cast*)buffer)                                                                    \
         *typed_source = *(__cast*)buffer;                                                                              \
 }
@@ -2229,17 +2222,21 @@ BYTE_EMULATOR_IMPL(0x87)
         // 64-bit
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            EXCHANGE_TO_SHARED(uint64_t)
+            EXCHANGE_TO_SHARED(uint64_t, WRITE_DIVERGENCE_PTR_CHECK(((uint64_t *)buffer + 1),
+                                                                    typed_source,
+                                                                    " > diverging write in 0x87 - source\n"))
         }
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            EXCHANGE_TO_SHARED(uint16_t)
+            EXCHANGE_TO_SHARED(uint16_t, WRITE_DIVERGENCE_ERROR(
+                    " > diverging write in 0x87 - source\n"))
         }
         // 32-bit
         else
         {
-            EXCHANGE_TO_SHARED(uint32_t)
+            EXCHANGE_TO_SHARED(uint32_t, WRITE_DIVERGENCE_ERROR(
+                    " > diverging write in 0x87 - source\n"))
         }
 
         // no need to write back registers here
