@@ -600,33 +600,82 @@ public:
 // =====================================================================================================================
 //      manipulation for shadow
 // =====================================================================================================================
-#define NORMAL_TO_SHARED(__cast, __operation)                                                                          \
+#define WRITE_DIVERGENCE_XMM_EQUAL(__buffer, __source, __message)                                                      \
+if (memcmp(buffer, source, 16) != 0)                                                                                   \
 {                                                                                                                      \
-    unsigned long long size = 0;                                                                                       \
+    WRITE_DIVERGENCE_ERROR(__message)                                                                                  \
+}
+
+#define WRITE_DIVERGENCE_XMM_PTR_CHECK(__buffer, __source, __message)                                                  \
+{                                                                                                                      \
+    if (*(void**)buffer != *(void**)source)                                                                            \
+    {                                                                                                                  \
+        if (decode_address_tag(*(void**)source, variant) !=                                                            \
+                decode_address_tag(*(void**)buffer, &relevant_monitor.variants[0]))                                    \
+        {                                                                                                              \
+            warnf(" > first quadword: %p != %p\n", *(void**)buffer, *(void**)source);                                  \
+            warnf(" > first quadword: %p != %p\n", decode_address_tag(*(void**)source, variant),                       \
+                    decode_address_tag(*(void**)buffer, &relevant_monitor.variants[0]));                               \
+            WRITE_DIVERGENCE_ERROR(__message)                                                                          \
+        }                                                                                                              \
+    }                                                                                                                  \
+    if (*((void**)buffer + 1) != *((void**)source + 1))                                                                \
+    {                                                                                                                  \
+        if (decode_address_tag(*((void**)source + 1), variant) !=                                                      \
+                decode_address_tag(*((void**)buffer + 1), &relevant_monitor.variants[0]))                              \
+        {                                                                                                              \
+            warnf(" > second quadword: %p != %p\n", *((void**)buffer + 1), *((void**)source + 1));                     \
+            warnf(" > second quadword: %p != %p\n", decode_address_tag(*((void**)source + 1), variant),                \
+                    decode_address_tag(*((void**)buffer + 1), &relevant_monitor.variants[0]));                         \
+            WRITE_DIVERGENCE_ERROR(__message)                                                                          \
+        }                                                                                                              \
+    }                                                                                                                  \
+}
+
+#define WRITE_DIVERGENCE_PTR_CHECK(__buffer, __source, __message)                                                      \
+if (decode_address_tag(*__source, variant) != decode_address_tag(*__buffer, &relevant_monitor.variants[0]))            \
+{                                                                                                                      \
+    warnf(" > %p != %p\n", (void*)*(__buffer), (void*)*(__source));                                                    \
+    WRITE_DIVERGENCE_ERROR(__message)                                                                                  \
+}
+
+#define WRITE_DIVERGENCE_ERROR(__message)                                                                              \
+warnf(__message);                                                                                                      \
+instruction.debug_print();                                                                                             \
+return -1;                                                                                                             \
+
+#define NORMAL_TO_SHARED(__cast, __operation, __divergence)                                                            \
+__cast* buffer = nullptr;                                                                                              \
+{                                                                                                                      \
+    unsigned long long size = sizeof(__cast);                                                                          \
     int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, mapping_info->monitor_base + offset,      \
-            instruction, nullptr, size);                                                                               \
+            instruction, (void**) &buffer, size);                                                                      \
     if (result < 0)                                                                                                    \
         return result;                                                                                                 \
 }                                                                                                                      \
                                                                                                                        \
 if (!variant->variant_num)                                                                                             \
 {                                                                                                                      \
+    *buffer = *typed_source;                                                                                           \
     auto* typed_destination = (__cast*) (mapping_info->monitor_base + offset);                                         \
     __operation;                                                                                                       \
+}                                                                                                                      \
+else if (*buffer != *typed_source)                                                                                     \
+{                                                                                                                      \
+    __divergence                                                                                                       \
 }                                                                                                                      \
 {                                                                                                                      \
     auto* typed_destination = (__cast*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);   \
     __operation;                                                                                                       \
 }
 
-#define NORMAL_TO_SHARED_REPLICATE_FLAGS(__cast, __core)                                                               \
+#define NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER(__cast, __core, __divergence)                                          \
 /* leader variant */                                                                                                   \
 auto* typed_destination = (__cast*) (mapping_info->monitor_base + offset);                                             \
-auto* shadow_destination = (__cast*)                                                                                   \
-        (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);                                   \
-GET_BUFFER_RAW(typed_destination, sizeof(unsigned long long))                                                          \
+GET_BUFFER_RAW(typed_destination, sizeof(unsigned long long) + sizeof(__cast))                                         \
 if (!variant->variant_num)                                                                                             \
 {                                                                                                                      \
+    *(__cast*)((unsigned long long*) buffer + 1) = *typed_source;                                                      \
     *(unsigned long long*) buffer = regs_struct->eflags;                                                               \
     __asm__                                                                                                            \
     (                                                                                                                  \
@@ -642,6 +691,17 @@ if (!variant->variant_num)                                                      
             : "cc"                                                                                                     \
     );                                                                                                                 \
 }                                                                                                                      \
+else if (*(__cast*)((unsigned long long*) buffer + 1) != *typed_source)                                                \
+{                                                                                                                      \
+    __divergence                                                                                                       \
+}                                                                                                                      \
+regs_struct->eflags = *(unsigned long long*) buffer;
+
+
+#define NORMAL_TO_SHARED_REPLICATE_FLAGS(__cast, __core, __divergence)                                                 \
+auto* shadow_destination = (__cast*)                                                                                   \
+        (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);                                   \
+NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER(__cast, __core, __divergence)                                                  \
 __asm__                                                                                                                \
 (                                                                                                                      \
         ".intel_syntax noprefix;"                                                                                      \
@@ -650,64 +710,26 @@ __asm__                                                                         
         : "+m" (*shadow_destination)                                                                                   \
         : [dst] "r" (shadow_destination), [src] "r" ((__cast)*typed_source)                                            \
         : "cc"                                                                                                         \
-);                                                                                                                     \
-regs_struct->eflags = *(unsigned long long*) buffer;
+);
 
-#define PROXY_SHARED(__src_dst, __cast)                                                                                \
-PROXY_SHARED_RAW(__src_dst, __cast, nullptr)
-
-#define PROXY_SHARED_RAW(__src_dst, __cast, __shared)                                                                  \
-uint8_t __src_dst##_proxy[sizeof(__cast)];                                                                             \
-__cast* typed_##__src_dst = nullptr;                                                                                   \
-                                                                                                                       \
-{                                                                                                                      \
-    int result = shm_handling::determine_from_shared_proxy(variant, relevant_monitor, instruction,                     \
-            (void**)&typed_destination, destination_proxy, __shared, mapping_info, offset, sizeof(__cast), false);     \
-    if (result < 0)                                                                                                    \
-        return result;                                                                                                 \
-}
-
-#define PROXY_REPLACE_DESTINATION(__cast)                                                                              \
-__cast* typed_destination = (__cast*) (mapping_info->monitor_base + offset)
-
-#define PROXY_OPERATION(__cast, __operation, __leader_change)                                                          \
-if (!variant->variant_num)                                                                                             \
-{                                                                                                                      \
-    __leader_change;                                                                                                   \
-    __operation;                                                                                                       \
-}                                                                                                                      \
-{                                                                                                                      \
-    __operation;                                                                                                       \
-}
-
-#define PROXY_WRITE_SHARED(__src_dst, __cast)                                                                          \
-if (!variant->variant_num)                                                                                             \
-    memcpy(mapping_info->monitor_base + offset, typed_##__src_dst, sizeof(__cast));
-
-#define PROXY_WRITE_SHADOW(__src_dst, __cast)                                                                         \
-if ((void*)typed_##__src_dst == (void*)__src_dst##_proxy)                                                              \
-    memcpy(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset, typed_##__src_dst,               \
-            sizeof(__cast));
-
-#define PROXY_WRITE_BACK(__src_dst, __cast)                                                                            \
-PROXY_WRITE_SHARED(__src_dst, __cast)                                                                                  \
-PROXY_WRITE_SHADOW(__src_dst, __cast)
-
-#define XMM_TO_SHARED(__operation)                                                                                     \
+#define XMM_TO_SHARED(__operation, __divergence)                                                                       \
 void* destination;                                                                                                     \
+void* buffer = nullptr;                                                                                                \
 {                                                                                                                      \
-    unsigned long long size = 0;                                                                                       \
+    unsigned long long size = 16;                                                                                      \
     int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, mapping_info->monitor_base + offset,      \
-            instruction, nullptr, size);                                                                              \
+            instruction, &buffer, size);                                                                               \
     if (result < 0)                                                                                                    \
         return result;                                                                                                 \
 }                                                                                                                      \
                                                                                                                        \
 if (!variant->variant_num)                                                                                             \
 {                                                                                                                      \
+    memcpy(buffer, source, 16);                                                                                        \
     destination = (void*) (mapping_info->monitor_base + offset);                                                       \
     __operation;                                                                                                       \
 }                                                                                                                      \
+else __divergence                                                                                                      \
 destination = (void*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);                     \
 __operation;
 
@@ -720,20 +742,61 @@ if (from_shared_result < 0)                                                     
     return from_shared_result;
 
 
-#define NORMAL_DESTINATION_FROM_SHARED(__cast)                                                                         \
-__cast* typed_destination;                                                                                             \
-int from_shared_result = shm_handling::determine_source_from_shared_normal(variant, relevant_monitor, instruction,     \
-        (void**)&typed_destination, mapping_info, offset, sizeof(__cast));                                             \
-if (from_shared_result < 0)                                                                                            \
-    return from_shared_result;
-
-
 #define XMM_FROM_SHARED                                                                                                \
 void* source;                                                                                                          \
 int from_shared_result = shm_handling::determine_source_from_shared_normal(variant, relevant_monitor, instruction,     \
         (void**)&source, mapping_info, offset, 16);                                                                    \
 if (from_shared_result < 0)                                                                                            \
     return from_shared_result;
+
+/*
+#define CMP_TO_SHARED(__cast, __core)                                                                                  \
+__cast* buffer = nullptr;                                                                                              \
+auto monitor_pointer = (__cast*)((unsigned long long)mapping_info->monitor_base + offset);                             \
+unsigned long long size = 3 * sizeof(__cast);                                                                          \
+int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, (void*)monitor_pointer, instruction,          \
+        (void**)&buffer, size);                                                                                        \
+if (result < 0)                                                                                                        \
+    return result;                                                                                                     \
+                                                                                                                       \
+__cast* destination = nullptr;                                                                                         \
+if (!variant->variant_num)                                                                                             \
+{                                                                                                                      \
+    *buffer = *monitor_pointer;                                                                                        \
+    *(buffer + 1) = *(__cast*) source;                                                                                 \
+    *(buffer + 2) = *(__cast*)                                                                                         \
+            ((unsigned long long)mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);           \
+                                                                                                                       \
+    destination = buffer;                                                                                              \
+}                                                                                                                      \
+else                                                                                                                   \
+{                                                                                                                      \
+    if (*(buffer + 1) != *(__cast*) source)                                                                            \
+    {                                                                                                                  \
+        warnf(" > compare with diverging source\n");                                                                   \
+        instruction.debug_print();                                                                                     \
+        return -1;                                                                                                     \
+    }                                                                                                                  \
+    if (*buffer != *(buffer + 2))                                                                                      \
+        destination = buffer;                                                                                          \
+    else                                                                                                               \
+        destination = (__cast*)                                                                                        \
+                ((unsigned long long)mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);       \
+}                                                                                                                      \
+                                                                                                                       \
+__asm__(                                                                                                               \
+        ".intel_syntax noprefix;"                                                                                      \
+        "push %[flags];"                                                                                               \
+        "popf;"                                                                                                        \
+        __core                                                                                                         \
+        "pushf;"                                                                                                       \
+        "pop %[flags];"                                                                                                \
+        ".att_syntax"                                                                                                  \
+        : [flags] "+r" (regs_struct->eflags)                                                                           \
+        : [dst] "r" (destination), "m" (*destination), [src] "r" (*typed_source)                                       \
+        : "cc"                                                                                                         \
+);
+*/
 
 
 class shm_handling
