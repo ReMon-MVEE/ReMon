@@ -44,15 +44,15 @@
     }                                                                                                                  \
     test_parts++;
 
-#define FINISH_TEST(message_success, message_fail)                                                                     \
+#define FINISH_TEST                                                                                                    \
     if (test_parts == test_parts_success)                                                                              \
     {                                                                                                                  \
         stats::success++;                                                                                              \
-        logf("%s - %d / %d\n", message_success, test_parts_success, test_parts - test_parts_success);                  \
+        logf("success/failed: %d / %d\n", test_parts_success, test_parts - test_parts_success);                        \
     }                                                                                                                  \
     else                                                                                                               \
     {                                                                                                                  \
-        logf("%s - %d / %d\n", message_fail, test_parts_success, test_parts - test_parts_success);                     \
+        logf("success/failed: %d / %d\n", test_parts_success, test_parts - test_parts_success);                        \
     }                                                                                                                  \
     logf_spacer;
 

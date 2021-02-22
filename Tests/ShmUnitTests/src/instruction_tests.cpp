@@ -103,7 +103,7 @@ void            instruction_tests::test_memcmp                      ()
                 memcmp(buffers::shared_sink, shared2, 8) < 0)
     // from and to shared memory ---------------------------------------------------------------------------------------
 
-    FINISH_TEST("memcmp tests successful!", "memcmp tests failed!")
+    FINISH_TEST
 }
 
 
@@ -239,7 +239,7 @@ void            instruction_tests::test_0x01                        ()
     // 16-bit ----------------------------------------------------------------------------------------------------------
 
     *(__uint64_t*) buffers::shared_sink = 0x00;
-    FINISH_TEST("add tests successful!", "add tests failed!");
+    FINISH_TEST
 }
 
 
@@ -266,7 +266,7 @@ void            instruction_tests::test_0x03                        ()
     // 32-bit ----------------------------------------------------------------------------------------------------------
     
     *(__uint64_t*) buffers::shared_sink = 0x00;
-    FINISH_TEST("add tests successful!", "add tests failed!");
+    FINISH_TEST
 }
 
 
@@ -319,7 +319,7 @@ TEST_RESULT(__message, __condition)
     // 16-bit ----------------------------------------------------------------------------------------------------------
 
     *(uint64_t*) buffers::shared_sink = 0x00;
-    FINISH_TEST("sub tests successful!", "sub tests failed!")
+    FINISH_TEST
 }
 
 
@@ -346,9 +346,51 @@ void            instruction_tests::test_0x2b                        ()
     // 32-bit ----------------------------------------------------------------------------------------------------------
 
     *(__uint64_t*) buffers::shared_sink = 0x00;
-    FINISH_TEST("sub tests successful!", "sub tests failed!")
+    FINISH_TEST
 }
 
+
+void            instruction_tests::test_0x38                        ()
+{
+    START_TEST("Running tests for cmp (0x38)\n");
+
+    uint8_t original_equal   = 0x12;
+    uint8_t original_unequal = 0x21;
+    unsigned long long flags = 0;
+
+    // cmp -------------------------------------------------------------------------------------------------------------
+    // equal
+    *buffers::shared_sink = original_equal;
+    __asm(
+            ".intel_syntax noprefix;"
+            "cmp BYTE PTR[%[dst]], %[src];"
+            "pushf;"
+            "pop %[flags];"
+            ".att_syntax;"
+            : [flags] "=r" (flags)
+            : [dst] "r" (buffers::shared_sink), "m" (*buffers::shared_sink), [src] "r" (original_equal)
+            : "cc"
+    );
+    TEST_RESULT("equal", (flags&ZF_MASK) && (flags&PF_MASK))
+
+    // unequal
+    *buffers::shared_sink = original_unequal;
+    __asm(
+            ".intel_syntax noprefix;"
+            "cmp BYTE PTR[%[dst]], %[src];"
+            "pushf;"
+            "pop %[flags];"
+            ".att_syntax;"
+            : [flags] "=r" (flags)
+            : [dst] "r" (buffers::shared_sink), "m" (*buffers::shared_sink), [src] "r" (original_equal)
+            : "cc"
+    );
+    TEST_RESULT("unequal", !(flags&ZF_MASK) && (flags&PF_MASK))
+    // cmp -------------------------------------------------------------------------------------------------------------
+
+    *buffers::shared_sink = 0;
+    FINISH_TEST
+}
 
 void            instruction_tests::test_0x39                        ()
 {
@@ -395,11 +437,87 @@ void            instruction_tests::test_0x39                        ()
             : "+c" (flags)
             : "a" (buffers::shared_sink), "d" (source), "m" (buffers::shared_sink)
     );
-    TEST_RESULT("cmp m64, r64 - equal", !(flags & ZF_MASK))
+    TEST_RESULT("cmp m64, r64 - unequal", !(flags & ZF_MASK))
     // 64-bit ----------------------------------------------------------------------------------------------------------
-    
+
+    // 16-bit ----------------------------------------------------------------------------------------------------------
+    source = original_src;
+    *(unsigned long long*) buffers::shared_sink = original_src;
+    flags = 0;
+    __asm(
+            ".intel_syntax noprefix;"
+            "pushf;"
+            "push rcx;"
+            "popf;"
+            "cmp WORD PTR [rax], dx;"
+            "pushf;"
+            "pop rcx;"
+            "popf;"
+            ".att_syntax;"
+            : "+c" (flags)
+            : "a" (buffers::shared_sink), "d" (source), "m" (*buffers::shared_sink)
+    );
+    TEST_RESULT("cmp m16, r16 - equal", (flags & ZF_MASK))
+
+    source = original_src;
+    *(unsigned long long*) buffers::shared_sink = original_dst;
+    flags = 0;
+    __asm(
+            ".intel_syntax noprefix;"
+            "pushf;"
+            "push rcx;"
+            "popf;"
+            "cmp WORD PTR [rax], dx;"
+            "pushf;"
+            "pop rcx;"
+            "popf;"
+            ".att_syntax;"
+            : "+c" (flags)
+            : "a" (buffers::shared_sink), "d" (source), "m" (*buffers::shared_sink)
+    );
+    TEST_RESULT("cmp m16, r16 - unequal", !(flags & ZF_MASK))
+    // 32-bit ----------------------------------------------------------------------------------------------------------
+
+    // 32-bit ----------------------------------------------------------------------------------------------------------
+    source = original_src;
+    *(unsigned long long*) buffers::shared_sink = original_src;
+    flags = 0;
+    __asm(
+            ".intel_syntax noprefix;"
+            "pushf;"
+            "push rcx;"
+            "popf;"
+            "cmp DWORD PTR [rax], edx;"
+            "pushf;"
+            "pop rcx;"
+            "popf;"
+            ".att_syntax;"
+            : "+c" (flags)
+            : "a" (buffers::shared_sink), "d" (source), "m" (*buffers::shared_sink)
+    );
+    TEST_RESULT("cmp m32, r32 - equal", (flags & ZF_MASK))
+
+    source = original_src;
+    *(unsigned long long*) buffers::shared_sink = original_dst;
+    flags = 0;
+    __asm(
+            ".intel_syntax noprefix;"
+            "pushf;"
+            "push rcx;"
+            "popf;"
+            "cmp DWORD PTR [rax], edx;"
+            "pushf;"
+            "pop rcx;"
+            "popf;"
+            ".att_syntax;"
+            : "+c" (flags)
+            : "a" (buffers::shared_sink), "d" (source), "m" (*buffers::shared_sink)
+    );
+    TEST_RESULT("cmp m32, r32 - unequal", !(flags & ZF_MASK))
+    // 32-bit ----------------------------------------------------------------------------------------------------------
+
     *(__uint64_t*) buffers::shared_sink = 0x00;
-    FINISH_TEST("cmp tests successful!", "cmp tests failed!")
+    FINISH_TEST
 }
 
 
@@ -445,7 +563,7 @@ void            instruction_tests::test_0x3b                        ()
     // 32-bit ----------------------------------------------------------------------------------------------------------
 
     *(__uint64_t*) buffers::shared_sink = 0x00;
-    FINISH_TEST("cmp tests successful!", "cmp tests failed!")
+    FINISH_TEST
 }
 
 
@@ -455,6 +573,7 @@ void            instruction_tests::test_0x83                        ()
 
     unsigned long long eflags;
     unsigned long long original = 0x8877665544332211;
+    unsigned long long original_extended = 0xffffffffffffff80;
 
     // 111 - cmp -------------------------------------------------------------------------------------------------------
     *(unsigned long long*) buffers::shared_sink = original;
@@ -485,20 +604,11 @@ void            instruction_tests::test_0x83                        ()
 
     TEST_RESULT("cmp | equal", !(eflags & ZF_MASK));
 
-    FINISH_TEST("Grp 1 tests successful!", "Grp 1 tests failed!")
-}
 
-void            instruction_tests::test_0x81                        ()
-{
-    START_TEST("Running tests for 0x81\n")
-
-    unsigned long long eflags;
-    unsigned long long original = 0xfffffffff0000000;
-
-    *(unsigned long long*) buffers::shared_sink = original;
+    *(unsigned long long*) buffers::shared_sink = original_extended;
     __asm(
             ".intel_syntax noprefix;"
-            "cmp DWORD PTR [rax], 0xf0000000;"
+            "cmp QWORD PTR [rax], 0xffffffffffffff80;"
             "pushf;"
             "pop r8;"
             "mov QWORD PTR [rdx], r8;"
@@ -506,7 +616,144 @@ void            instruction_tests::test_0x81                        ()
             :
             : "a" (buffers::shared_sink), "d" (&eflags)
     );
-    TEST_RESULT("cmp | 32 bit", (eflags & ZF_MASK));
+
+    TEST_RESULT("cmp | equal extended", (eflags & ZF_MASK));
+
+    FINISH_TEST
+}
+
+void            instruction_tests::test_0x80                        ()
+{
+    START_TEST("Running tests for 0x80\n")
+
+    uint8_t original_equal   = 0x12;
+    uint8_t original_unequal = 0x21;
+    unsigned long long flags = 0;
+
+    // equal
+    *buffers::shared_sink = original_equal;
+    __asm(
+            ".intel_syntax noprefix;"
+            "push %[flags];"
+            "popf;"
+            "cmp BYTE PTR[%[dst]], 0x12;"
+            "pushf;"
+            "pop %[flags];"
+            ".att_syntax;"
+            : [flags] "+r" (flags)
+            : [dst] "r" (buffers::shared_sink), "m" (*buffers::shared_sink)
+            : "cc"
+    );
+    TEST_RESULT("equal", (flags&ZF_MASK) && (flags&PF_MASK))
+
+    // unequal
+    *buffers::shared_sink = original_unequal;
+    __asm(
+            ".intel_syntax noprefix;"
+            "push %[flags];"
+            "popf;"
+            "cmp BYTE PTR[%[dst]], 0x12;"
+            "pushf;"
+            "pop %[flags];"
+            ".att_syntax;"
+            : [flags] "+r" (flags)
+            : [dst] "r" (buffers::shared_sink), "m" (*buffers::shared_sink)
+            : "cc"
+    );
+    TEST_RESULT("unequal", !(flags&ZF_MASK) && (flags&PF_MASK))
+
+    // unequal
+
+    FINISH_TEST
+}
+
+void            instruction_tests::test_0x81                        ()
+{
+    START_TEST("Running tests for 0x81\n")
+
+    unsigned long long eflags = 0;
+    unsigned long long original = 0x1212121212121212;
+    unsigned long long original_unequal = 0x2121212121212121;
+    unsigned long long original_extend = 0xfffffffff0000000;
+
+    // cmp -------------------------------------------------------------------------------------------------------------
+    // 64-bit
+    *(unsigned long long*) buffers::shared_sink = (original & DWORD_MASK);
+    __asm(
+            ".intel_syntax noprefix;"
+            "push %[flags];"
+            "popf;"
+            "cmp QWORD PTR [%[dst]], 0x12121212;"
+            "pushf;"
+            "pop %[flags];"
+            ".att_syntax;"
+            : [flags] "+r" (eflags)
+            : [dst] "r" (buffers::shared_sink), "m" (*buffers::shared_sink)
+            : "cc"
+    );
+    TEST_RESULT("cmp | 64 bit equal", (eflags & ZF_MASK));
+
+    *(unsigned long long*) buffers::shared_sink = original_unequal;
+    __asm(
+            ".intel_syntax noprefix;"
+            "push %[flags];"
+            "popf;"
+            "cmp QWORD PTR [%[dst]], 0x12121212;"
+            "pushf;"
+            "pop %[flags];"
+            ".att_syntax;"
+            : [flags] "+r" (eflags)
+            : [dst] "r" (buffers::shared_sink), "m" (*buffers::shared_sink)
+            : "cc"
+    );
+    TEST_RESULT("cmp | 64 bit unequal by extension", !(eflags & ZF_MASK));
+
+    *(unsigned long long*) buffers::shared_sink = original_extend;
+    __asm(
+            ".intel_syntax noprefix;"
+            "push %[flags];"
+            "popf;"
+            "cmp QWORD PTR [%[dst]], 0xfffffffff0000000;"
+            "pushf;"
+            "pop %[flags];"
+            ".att_syntax;"
+            : [flags] "+r" (eflags)
+            : [dst] "r" (buffers::shared_sink), "m" (*buffers::shared_sink)
+            : "cc"
+    );
+    TEST_RESULT("cmp | 64 bit equal by extension", (eflags & ZF_MASK));
+
+    // 32-bit
+    *(unsigned long long*) buffers::shared_sink = original;
+    __asm(
+            ".intel_syntax noprefix;"
+            "push %[flags];"
+            "popf;"
+            "cmp DWORD PTR [%[dst]], 0x12121212;"
+            "pushf;"
+            "pop %[flags];"
+            ".att_syntax;"
+            : [flags] "+r" (eflags)
+            : [dst] "r" (buffers::shared_sink), "m" (*buffers::shared_sink)
+            : "cc"
+    );
+    TEST_RESULT("cmp | 32 bit equal", (eflags & ZF_MASK));
+
+    *(unsigned long long*) buffers::shared_sink = original_unequal;
+    __asm(
+            ".intel_syntax noprefix;"
+            "push %[flags];"
+            "popf;"
+            "cmp DWORD PTR [%[dst]], 0x12121212;"
+            "pushf;"
+            "pop %[flags];"
+            ".att_syntax;"
+            : [flags] "+r" (eflags)
+            : [dst] "r" (buffers::shared_sink), "m" (*buffers::shared_sink)
+            : "cc"
+    );
+    TEST_RESULT("cmp | 32 bit equal", !(eflags & ZF_MASK));
+    // cmp -------------------------------------------------------------------------------------------------------------
 
     // 111 - cmp -------------------------------------------------------------------------------------------------------
 
@@ -522,11 +769,11 @@ void            instruction_tests::test_0x81                        ()
             : "a" (buffers::shared_sink), "d" (&eflags)
     );
 
-    TEST_RESULT("and | 32 bit", !(eflags & ZF_MASK));
-    TEST_RESULT("and | 32 bit", *(__uint64_t*)buffers::shared_sink == 0xffffffff11111111);
+    TEST_RESULT("and | 32 bit", !(eflags & ZF_MASK) &&
+            *(__uint64_t*)buffers::shared_sink == 0xffffffff11111111);
 
     *(__uint64_t*) buffers::shared_sink = 0x00;
-    FINISH_TEST("cmp (0x81) tests successful!", "0x81 tests failed!")
+    FINISH_TEST
 }
 
 
@@ -641,7 +888,7 @@ void            instruction_tests::test_0x87                        ()
     // 64-bit ----------------------------------------------------------------------------------------------------------
 
     *(__uint64_t*) buffers::shared_sink = 0x00;
-    FINISH_TEST("xchg tests successful!", "xchg tests failed!");
+    FINISH_TEST
 }
 
 
@@ -728,7 +975,7 @@ void            instruction_tests::test_0x89                        ()
     // 64-bit ----------------------------------------------------------------------------------------------------------
     
     *(__uint64_t*) buffers::shared_sink = 0x00;
-    FINISH_TEST("move tests successful!", "move tests failed!")
+    FINISH_TEST
 }
 
 
@@ -819,7 +1066,7 @@ void            instruction_tests::test_0x8b                        ()
     // 16-bit ----------------------------------------------------------------------------------------------------------
 
     *(__uint64_t*) buffers::shared_sink = 0x00;
-    FINISH_TEST("mov (0x8b) tests successful!", "mov (0x8b) tests failed!");
+    FINISH_TEST
 }
 
 
@@ -1034,7 +1281,7 @@ void            instruction_tests::test_0xa4                        ()
     // rep tests -------------------------------------------------------------------------------------------------------
 
     // success or failure
-    FINISH_TEST("movsb tests successful!", "movsb tests failed!")
+    FINISH_TEST
 }
 
 
@@ -1150,7 +1397,7 @@ void            instruction_tests::test_0xab                        ()
     *(__uint64_t*) buffers::shared_sink = 0x00;
     // 64-bit ----------------------------------------------------------------------------------------------------------
 
-    FINISH_TEST("stos tests successful!", "stos tests failed!")
+    FINISH_TEST
 }
 
 
@@ -1285,7 +1532,7 @@ void            instruction_tests::test_0xc7                        ()
 
 
     *(__uint64_t*) buffers::shared_sink = 0x00;
-    FINISH_TEST("Grp 11 - mov m ,imm tests successful!", "Grp 11 - mov m ,imm tests failed!")
+    FINISH_TEST
 }
 
 
@@ -1344,7 +1591,7 @@ void            instruction_tests::test_0x0f_0x10                   ()
     testing_aid::clear_buffer(buffers::shared_sink + 0x12, DQWORD_SIZE);
     testing_aid::clear_buffer(buffers::shared_sink + 0x20 + 0x12, DQWORD_SIZE);
     testing_aid::clear_buffer(buffers::shared_sink + 0x20 - 0x06, DQWORD_SIZE);
-    FINISH_TEST("movups tests successful!", "movups tests failed!")
+    FINISH_TEST
 }
 
 
@@ -1403,7 +1650,7 @@ void            instruction_tests::test_0x0f_0x11                   ()
     testing_aid::clear_buffer(buffers::shared_sink + 0x12, DQWORD_SIZE);
     testing_aid::clear_buffer(buffers::shared_sink + 0x20 + 0x12, DQWORD_SIZE);
     testing_aid::clear_buffer(buffers::shared_sink + 0x20 - 0x06, DQWORD_SIZE);
-    FINISH_TEST("movups tests successful!", "movups tests failed!")
+    FINISH_TEST
 }
 
 
@@ -1616,7 +1863,7 @@ void            instruction_tests::test_0x0f_0xb1                   ()
     // 16-bit ==========================================================================================================
 
     *(__uint64_t*) buffers::shared_sink = 0x00;
-    FINISH_TEST("cmpxchg tests successful!", "cmpxchg tests failed!")
+    FINISH_TEST
 }
 
 
@@ -1644,7 +1891,7 @@ void            instruction_tests::test_0x0f_0x6f                   ()
     TEST_RESULT("movq m64, mm",
                 testing_aid::compare_buffers((__uint8_t*) mm64_result, (__uint8_t*) destination, DQWORD_SIZE) == 0);
 
-    FINISH_TEST("0x0f 0x6f tests successful!", "0x0f 0x6f tests failed!")
+    FINISH_TEST
 }
 
 
@@ -1703,8 +1950,8 @@ void            instruction_tests::test_0x0f_0x7f                   ()
             testing_aid::compare_buffers((__uint8_t*) original, buffers::shared_sink, 2 + QWORD_SIZE) == 0);
     testing_aid::clear_buffer(buffers::shared_sink, DQWORD_SIZE);
     // movdqu ----------------------------------------------------------------------------------------------------------
-    
-    FINISH_TEST("0x0f 0x7f tests successful!", "0x0f 0x7f tests failed!")
+
+    FINISH_TEST
 }
 
 
@@ -1753,7 +2000,7 @@ void            instruction_tests::test_0x0f_0xb6                   ()
     // 16-bit ----------------------------------------------------------------------------------------------------------
 
     *(__uint64_t*) buffers::shared_sink = 0x00;
-    FINISH_TEST("movzx tests successful!", "movzx tests failed!")
+    FINISH_TEST
 }
 
 
@@ -1804,7 +2051,7 @@ void            instruction_tests::test_0x0f_0xb7                   ()
 
     *(__uint64_t*) buffers::shared_sink = 0x00;
     *(__uint64_t*) (buffers::shared_sink + 0x12) = 0x00;
-    FINISH_TEST("movsx tests successful!", "movsx tests failed!")
+    FINISH_TEST
 }
 
 
@@ -1841,7 +2088,7 @@ void            instruction_tests::test_0x0f_0xbe                   ()
     // 16-bit ----------------------------------------------------------------------------------------------------------
 
     *(__uint64_t*) buffers::shared_sink = 0x00;
-    FINISH_TEST("movsx tests successful!", "movsx tests failed!")
+    FINISH_TEST
 }
 
 
@@ -1910,7 +2157,7 @@ void            instruction_tests::test_0x0f_0xc1                   ()
     // 64-bit ----------------------------------------------------------------------------------------------------------
 
     *(__uint64_t*) buffers::shared_sink = 0x00;
-    FINISH_TEST("xadd tests succesful!", "xadd tests failed!")
+    FINISH_TEST
 }
 
 
@@ -1954,7 +2201,7 @@ void            instruction_tests::test_0x0f_0xe7                   ()
     // movntq ---------------------------------------------------------------------------------------------------------
 
     testing_aid::clear_buffer(buffers::shared_sink, DQWORD_SIZE);
-    FINISH_TEST("0x0f 0xe7 tests successful!", "0x0f 0xe7 tests failed!")
+    FINISH_TEST
 }
 
 
@@ -2152,5 +2399,5 @@ void            instruction_tests::test_extras                      ()
                 *(__uint32_t*)(buffers::shared_sink + 0xbc + 4) == *((__uint32_t*)&original + 1))
 
     *(__uint64_t*) buffers::shared_sink = 0x00;
-    FINISH_TEST("extra tests successful\n", "extra tests failed\n");
+    FINISH_TEST
 }
