@@ -14,7 +14,7 @@
 
 
 #include "shared_mem_operations.h"
-#include "instruction_intent_emulation.h"
+#include "shared_memory_emulation.h"
 
 #include "MVEE_mman.h"
 

@@ -5,7 +5,7 @@
 
 // implemented header
 #include <MVEE.h>
-#include "instruction_intent_emulation.h"
+#include "shared_memory_emulation.h"
 
 
 // =====================================================================================================================
@@ -22,7 +22,7 @@ instruction.effective_opcode_index = instruction.byte_accessed;
 // =====================================================================================================================
 //      lookup table definition
 // =====================================================================================================================
-constexpr const emulation_lookup instruction_intent_emulation::lookup_table[256];
+#include "shared_memory_emulation_table.h"
 
 
 // =====================================================================================================================
