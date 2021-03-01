@@ -1906,6 +1906,122 @@ unsigned long encode_address_tag(unsigned long address, const variantstate* vari
 }
 
 
+// =====================================================================================================================
+//      shared memory access emulation
+// =====================================================================================================================
+int             instruction_intent_emulation::handle_emulation      (variantstate* variant, monitor* relevant_monitor)
+{
+    instruction_intent* instruction = &variant->instruction;
+    if (!variant->variant_num)
+        instruction->debug_print_minimal();
+#ifdef MVEE_LOG_NON_INSTRUMENTED_INSTRUCTION
+    mvee::log_non_instrumented(variant, relevant_monitor, instruction);
+#endif
+    switch (instruction_intent_emulation::lookup_table[instruction->opcode()].emulator(*instruction, *relevant_monitor,
+            variant))
+    {
+        case 0:
+        {
+            // update instruction pointer to skip instruction
+            variant->regs.rip += variant->instruction.size;
+            if (!interaction::write_all_regs(variant->variantpid, &variant->regs) && errno == ESRCH)
+                return 0;
+
+            relevant_monitor->call_resume(variant->variant_num);
+            return 0;
+        }
+        case REPLAY_BUFFER_RETURN_CONTINUE:
+        {
+            // run emulation now that we are at sync point
+            for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+            {
+                variantstate* variant_lock = &relevant_monitor->variants[variant_i];
+                int lock_result;
+                switch ((lock_result = instruction_intent_emulation::lookup_table[instruction->opcode()].emulator(
+                        variant_lock->instruction, *relevant_monitor, variant_lock)))
+                {
+                    case 0:
+                    {
+                        // update instruction pointer to skip instruction
+                        variant_lock->regs.rip += variant_lock->instruction.size;
+                        if (!interaction::write_all_regs(variant_lock->variantpid, &variant_lock->regs))
+                        {
+                            if (errno == ESRCH)
+                                break;
+                        }
+
+                        relevant_monitor->call_resume(variant_i);
+                        break;
+                    }
+                    default:
+                    {
+                        warnf(" > something happened while emulating a lock prefixed instruction - %d\n",
+                              lock_result);
+                        relevant_monitor->shutdown(false);
+                        return ILLEGAL_ACCESS_TERMINATION;
+                    }
+                }
+            }
+            return REPLAY_BUFFER_RETURN_CONTINUE;
+        }
+        case ILLEGAL_ACCESS_TERMINATION:
+        {
+            warnf("illegal access\n");
+
+            variant->instruction.debug_print();
+            mmap_region_info* region = relevant_monitor->set_mmap_table->get_region_info(variant->variant_num,
+                    variant->regs.rip, 0);
+            if (!region)
+                debugf("variant %d | could not find location of instruction\n", variant->variant_num);
+            else
+            {
+                debugf("variant %d | instruction in %s at offset %llx\n", variant->variant_num,
+                       region->region_backing_file_path.c_str(), variant->regs.rip - region->region_base_address);
+            }
+            mmap_region_info* accessed_region = relevant_monitor->set_mmap_table->get_region_info(variant->variant_num,
+                    (unsigned long long) instruction->effective_address, 0);
+            if (!accessed_region)
+                debugf("could not find location of access | %p\n", instruction->effective_address);
+            else
+            {
+                debugf("access in %s at offset %llx | %p | [ %p ; %p )\n",
+                       accessed_region->region_backing_file_path.c_str(),
+                       (unsigned long long) instruction->effective_address - accessed_region->region_base_address,
+                       instruction->effective_address,
+                       (void*) accessed_region->region_base_address,
+                       (void*) (accessed_region->region_base_address + region->region_size));
+            }
+            relevant_monitor->log_variant_backtrace(variant->variant_num);
+            relevant_monitor->shutdown(false);
+            return ILLEGAL_ACCESS_TERMINATION;
+        }
+        case REPLAY_BUFFER_RETURN_WAIT:
+        {
+            debugf("variant %d asked to wait\n\n", variant->variant_num);
+            return REPLAY_BUFFER_RETURN_WAIT;
+        }
+        case REPLAY_BUFFER_RETURN_HOLD:
+        {
+            debugf("variant %d asked to hold\n\n", variant->variant_num);
+            return REPLAY_BUFFER_RETURN_HOLD;
+        }
+        case UNKNOWN_MEMORY_TERMINATION:
+        {
+            warnf(" > pointer: %p\n", instruction->effective_address);
+            relevant_monitor->set_mmap_table->debug_shared();
+            debugf("unknown memory\n");
+            return UNKNOWN_MEMORY_TERMINATION;
+        }
+        default:
+        {
+            warnf("unexpected emulation result\n");
+            instruction->debug_print_minimal();
+            relevant_monitor->shutdown(false);
+        }
+    }
+    return ILLEGAL_ACCESS_TERMINATION;
+}
+
 #ifdef MVEE_SHM_INSTRUCTION_ACCESS_DEBUGGING
 void            monitor::add_instruction                            (int variant_num, instruction_intent* intent)
 {
