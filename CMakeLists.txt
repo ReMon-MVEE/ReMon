@@ -64,6 +64,20 @@ add_custom_command(
         DEPENDS ${CMAKE_SOURCE_DIR}/MVEE/Src/MVEE_syscalls_handlers.cpp ${UNISTD_HDR}
 )
 
+# generate shared memory access table
+add_custom_target(shm_table
+        DEPENDS ${CMAKE_SOURCE_DIR}/MVEE/Inc/arch/${ARCH}/shared_mem/shared_memory_emulation_table.h
+        COMMENT "Generating syscall tables"
+)
+
+add_custom_command(
+        OUTPUT  ${CMAKE_SOURCE_DIR}/MVEE/Inc/arch/${ARCH}/shared_mem/shared_memory_emulation_table.h
+        COMMAND python ${CMAKE_SOURCE_DIR}/build_scripts/generate_shm_table.py
+                ${CMAKE_SOURCE_DIR}/MVEE/Inc/arch/${ARCH}/shared_mem/shared_memory_emulation.h
+                ${CMAKE_SOURCE_DIR}/MVEE/Inc/arch/${ARCH}/shared_mem/shared_memory_emulation_table.h
+        DEPENDS ${CMAKE_SOURCE_DIR}/MVEE/Inc/arch/${ARCH}/shared_mem/shared_memory_emulation.h
+)
+
 if(DEPS_PRESENT_IN_SYSTEM)
     set(MUSL_GCC musl-gcc)
 else()
@@ -156,6 +170,7 @@ add_executable(mvee
 
 add_dependencies(mvee
         syscall_tables
+        shm_table
 )
 
 # include directories for mvee executable

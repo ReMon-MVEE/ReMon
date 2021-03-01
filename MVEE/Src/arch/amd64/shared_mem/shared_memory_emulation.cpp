@@ -10,7 +10,7 @@
 #include <MVEE_monitor.h>
 #include <arch/amd64/shared_mem/shared_mem_reg_access.h>
 #include <sys/mman.h>
-#include "instruction_intent_emulation.h"
+#include "shared_memory_emulation.h"
 
 
 // =====================================================================================================================
