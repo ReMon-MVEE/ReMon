@@ -36,6 +36,7 @@ class variantstate;
 #define ACCESS_OK_TERMINATION                0
 #define ILLEGAL_ACCESS_TERMINATION          -1
 #define UNKNOWN_MEMORY_TERMINATION          -3
+#define WRITE_SPLIT                         -6
 // ---------------------------------------------------------------------------------------------------------------------
 
 
@@ -113,6 +114,174 @@ static int  BYTE_EMULATOR_NAME(byte)                    BYTE_EMULATOR_ARGUMENTS;
 #define BYTE_EMULATOR_IMPL(byte)                                                                                       \
 int         instruction_intent_emulation::BYTE_EMULATOR_NAME(byte)                                                     \
                                                         BYTE_EMULATOR_ARGUMENTS
+
+#define BYTE_WRITE_ARGUMENTS                            BYTE_EMULATOR_ARGUMENTS
+#define BYTE_WRITE_NAME(byte)               write_##byte##_byte
+#define BYTE_WRITE_DEFINITION(byte)                                                                                    \
+static int  BYTE_WRITE_NAME(byte)                       BYTE_WRITE_ARGUMENTS;
+#define BYTE_WRITE_IMPL(byte)                                                                                          \
+int         instruction_intent_emulation::BYTE_WRITE_NAME(byte)                                                        \
+                                                        BYTE_WRITE_ARGUMENTS
+typedef int (*shm_write_handler_t) BYTE_WRITE_ARGUMENTS;
+
+
+// =====================================================================================================================
+//      emulation and writing macros
+// =====================================================================================================================
+#define DEFINE_REGS_STRUCT                                                                                             \
+    user_regs_struct* regs_struct = &variant->regs;                                                                    \
+    relevant_monitor.call_check_regs(variant->variant_num);
+
+
+#define DEFINE_FPREGS_STRUCT                                                                                           \
+    user_fpregs_struct* regs_struct = &variant->fpregs;                                                                \
+    relevant_monitor.call_check_fpregs(variant->variant_num);
+
+
+#define DEFINE_MODRM                                                                                                   \
+uint8_t modrm = instruction[instruction.effective_opcode_index + 1];
+
+
+#define LOAD_RM_CODE(__src_or_dst, __size)                                                                             \
+LOAD_RM_CODE_NO_DEFINE(__size)                                                                                         \
+void* __src_or_dst = (void*) ((unsigned long long) mapping_info->monitor_base + offset);                               \
+
+
+#define LOAD_RM_CODE_NO_DEFINE(__size)                                                                                 \
+/* register if mod bits equal 0b11 */                                                                                  \
+if (GET_MOD_CODE((unsigned) modrm) == 0b11u)                                                                           \
+    /* For shared memory emulation, this shouldn't happen */                                                           \
+    return -1;                                                                                                         \
+/* memory reference otherwise, so determine the monitor relevant pointer */                                            \
+OBTAIN_SHARED_MAPPING_INFO(__size)                                                                                     \
+
+
+#define OBTAIN_SHARED_MAPPING_INFO(__size)                                                                             \
+shared_monitor_map_info* mapping_info;                                                                                 \
+unsigned long long offset;                                                                                             \
+if (!(mapping_info = relevant_monitor.set_mmap_table->get_shared_info(                                                 \
+        (unsigned long long) instruction.effective_address)))                                                          \
+    return UNKNOWN_MEMORY_TERMINATION;                                                                                 \
+if ((offset = shm_handling::shared_memory_determine_offset(mapping_info,                                               \
+        (unsigned long long) instruction.effective_address, __size)) == (unsigned long long) -1)                       \
+    return -1;
+
+
+#define OBTAIN_SHARED_MAPPING_INFO_NO_DEF(__variant_address, __mapping_info, __offset, __size)                         \
+if (!(__mapping_info = relevant_monitor.set_mmap_table->get_shared_info(__variant_address)))                           \
+    return UNKNOWN_MEMORY_TERMINATION;                                                                                 \
+if ((__offset = shm_handling::shared_memory_determine_offset(__mapping_info, __variant_address, __size))               \
+        == (unsigned long long) -1)                                                                                    \
+    return -1;
+
+
+#define LOAD_REG_CODE(__src_or_dst, lookup)                                                                            \
+uint8_t reg_rex_extra = PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_R(instruction) ?                       \
+        0b1000u : 0;                                                                                                   \
+void* __src_or_dst = shared_mem_register_access::lookup[reg_rex_extra | GET_REG_CODE((unsigned) modrm)](regs_struct);
+
+
+#define LOAD_REG_CODE_BYTE(__src_or_dst, lookup)                                                                       \
+uint8_t reg_code = GET_REG_CODE((unsigned) modrm);                                                                     \
+if (PREFIXES_REX_PRESENT(instruction))                                                                                 \
+{                                                                                                                      \
+    if (PREFIXES_REX_FIELD_R(instruction))                                                                             \
+        reg_code |= 0b1000u;                                                                                           \
+}                                                                                                                      \
+else                                                                                                                   \
+    reg_code &= ~0b100u;                                                                                               \
+void* __src_or_dst = shared_mem_register_access::lookup[reg_code](regs_struct);
+
+#define LOAD_IMM(__src_or_dst)                                                                                         \
+if (!instruction.immediate_operand_index)                                                                              \
+    return -1;                                                                                                         \
+void* __src_or_dst = &instruction.instruction[instruction.immediate_operand_index];
+
+
+#define GET_INSTRUCTION_ACCESS_SIZE                                                                                    \
+((PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction)) ?                                            \
+        8 : (PREFIXES_GRP_THREE_PRESENT(instruction) ? 2 : 4))
+
+
+#define RETURN_ADVANCE                                                                                                 \
+{                                                                                                                      \
+    int __replay_result;                                                                                               \
+    if ((__replay_result = relevant_monitor.buffer.advance(variant->variant_num)) != 0)                                \
+        return __replay_result;                                                                                        \
+}                                                                                                                      \
+return 0;
+
+#define RETURN_WRITE(__handler)                                                                                        \
+if (!variant->variant_num)                                                                                             \
+    if (relevant_monitor.buffer.start_waiting(BYTE_WRITE_NAME(__handler)) < 0)                                         \
+        return -1;                                                                                                     \
+return WRITE_SPLIT;
+
+
+#define GET_BUFFER_RAW(__monitor_pointer, __size)                                                                      \
+void* buffer;                                                                                                          \
+{                                                                                                                      \
+    int __raw_result;                                                                                                  \
+    unsigned long long __raw_size = __size;                                                                            \
+    __raw_result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, __monitor_pointer, instruction,         \
+            &buffer, __raw_size);                                                                                      \
+    if (__raw_result < 0)                                                                                              \
+        return __raw_result;                                                                                           \
+}
+
+
+#define GET_LAST_BUFFER_RAW(__cast)                                                                                    \
+__cast* buffer = nullptr;                                                                                              \
+{                                                                                                                      \
+    unsigned long long __buffer_size;                                                                                  \
+    int __last_raw_result = relevant_monitor.buffer.obtain_last_buffer(variant->variant_num, (void**) &buffer,         \
+            __buffer_size);                                                                                            \
+    if (__last_raw_result < 0)                                                                                         \
+        return __last_raw_result;                                                                                      \
+}
+
+
+// =====================================================================================================================
+//      emulation structs, this makes some things a bit easier
+// =====================================================================================================================
+#define MOVS_STRUCT                    \
+struct temp_t                          \
+{                                      \
+    unsigned long long offset;         \
+    shared_monitor_map_info* dst_info; \
+    shared_monitor_map_info* src_info; \
+    unsigned long long dst;            \
+    unsigned long long size;           \
+    void* buffer;                      \
+};
+
+#define STOS_STRUCT(__cast)   \
+struct temp_t                 \
+{                             \
+    __cast source;            \
+    unsigned long long count; \
+    unsigned long long flags; \
+};
+
+#define XADD_STRUCT(__cast)      \
+struct temp_t                    \
+{                                \
+    __cast original_source;      \
+    __cast original_destination; \
+    __cast leader_destination;   \
+    unsigned long long flags;    \
+};
+
+#define CMPXCHG_STRUCT(__cast) \
+struct temp_t                  \
+{                              \
+    __cast source;             \
+    __cast original_rax;       \
+    __cast replaced_rax;       \
+    __cast leader_rax;         \
+    __cast flags;              \
+};                             \
+
 
 // =====================================================================================================================
 //      struct definition
@@ -260,6 +429,9 @@ public:
     static int      block_emulator                             BYTE_EMULATOR_ARGUMENTS;
 
 
+    static int      block_write                                BYTE_EMULATOR_ARGUMENTS;
+
+
     static int      rest_check                          (instruction_intent& instruction, unsigned int options,
                                                          unsigned int immediate_size);
 
@@ -272,6 +444,7 @@ public:
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x00)
     // BYTE_EMULATOR_DEFINITION(0x00)
+    // BYTE_WRITE_DEFINITION(0x00)
 
     /* Valid in first round
      *
@@ -286,10 +459,12 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x01)
     BYTE_EMULATOR_DEFINITION(0x01)
+    BYTE_WRITE_DEFINITION(0x01)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x02)
     // BYTE_EMULATOR_DEFINITION(0x02)
+    // BYTE_WRITE_DEFINITION(0x02)
 
     /* Valid in first round
      *
@@ -304,34 +479,42 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x03)
     BYTE_EMULATOR_DEFINITION(0x03)
+    // BYTE_WRITE_DEFINITION(0x03)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x04)
     // BYTE_EMULATOR_DEFINITION(0x04)
+    // BYTE_WRITE_DEFINITION(0x04)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x05)
     // BYTE_EMULATOR_DEFINITION(0x05)
+    // BYTE_WRITE_DEFINITION(0x05)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x06)
     // BYTE_EMULATOR_DEFINITION(0x06)
+    // BYTE_WRITE_DEFINITION(0x06)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x07)
     // BYTE_EMULATOR_DEFINITION(0x07)
+    // BYTE_WRITE_DEFINITION(0x07)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x08)
     // BYTE_EMULATOR_DEFINITION(0x08)
+    // BYTE_WRITE_DEFINITION(0x08)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x09)
     // BYTE_EMULATOR_DEFINITION(0x09)
+    // BYTE_WRITE_DEFINITION(0x09)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x0a)
     // BYTE_EMULATOR_DEFINITION(0x0a)
+    // BYTE_WRITE_DEFINITION(0x0a)
 
     /* Valid in first round
      *
@@ -346,18 +529,22 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x0b)
     BYTE_EMULATOR_DEFINITION(0x0b)
+    // BYTE_WRITE_DEFINITION(0x0b)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x0c)
     // BYTE_EMULATOR_DEFINITION(0x0c)
+    // BYTE_WRITE_DEFINITION(0x0c)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x0d)
     // BYTE_EMULATOR_DEFINITION(0x0d)
+    // BYTE_WRITE_DEFINITION(0x0d)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x0e)
     // BYTE_EMULATOR_DEFINITION(0x0e)
+    // BYTE_WRITE_DEFINITION(0x0e)
 
     /* Valid in: first round
      *
@@ -375,6 +562,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x0f)
     // BYTE_EMULATOR_DEFINITION(0x0f)
+    // BYTE_WRITE_DEFINITION(0x0f)
 
     /* Valid in second round
      *
@@ -392,6 +580,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x10)
     BYTE_EMULATOR_DEFINITION(0x10)
+    // BYTE_WRITE_DEFINITION(0x10)
 
     /* Valid in second round
      *
@@ -409,74 +598,92 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x11)
     BYTE_EMULATOR_DEFINITION(0x11)
+    BYTE_WRITE_DEFINITION(0x11)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x12)
     // BYTE_EMULATOR_DEFINITION(0x12)
+    // BYTE_WRITE_DEFINITION(0x12)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x13)
     // BYTE_EMULATOR_DEFINITION(0x13)
+    // BYTE_WRITE_DEFINITION(0x13)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x14)
     // BYTE_EMULATOR_DEFINITION(0x14)
+    // BYTE_WRITE_DEFINITION(0x14)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x15)
     // BYTE_EMULATOR_DEFINITION(0x15)
+    // BYTE_WRITE_DEFINITION(0x15)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x16)
     // BYTE_EMULATOR_DEFINITION(0x16)
+    // BYTE_WRITE_DEFINITION(0x16)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x17)
     // BYTE_EMULATOR_DEFINITION(0x17)
+    // BYTE_WRITE_DEFINITION(0x17)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x18)
     // BYTE_EMULATOR_DEFINITION(0x18)
+    // BYTE_WRITE_DEFINITION(0x18)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x19)
     // BYTE_EMULATOR_DEFINITION(0x19)
+    // BYTE_WRITE_DEFINITION(0x19)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x1a)
     // BYTE_EMULATOR_DEFINITION(0x1a)
+    // BYTE_WRITE_DEFINITION(0x1a)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x1b)
     // BYTE_EMULATOR_DEFINITION(0x1b)
+    // BYTE_WRITE_DEFINITION(0x1b)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x1c)
     // BYTE_EMULATOR_DEFINITION(0x1c)
+    // BYTE_WRITE_DEFINITION(0x1c)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x1d)
     // BYTE_EMULATOR_DEFINITION(0x1d)
+    // BYTE_WRITE_DEFINITION(0x1d)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x1e)
     // BYTE_EMULATOR_DEFINITION(0x1e)
+    // BYTE_WRITE_DEFINITION(0x1e)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x1f)
     // BYTE_EMULATOR_DEFINITION(0x1f)
+    // BYTE_WRITE_DEFINITION(0x1f)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x20)
     // BYTE_EMULATOR_DEFINITION(0x20)
+    // BYTE_WRITE_DEFINITION(0x20)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x21)
     // BYTE_EMULATOR_DEFINITION(0x21)
+    // BYTE_WRITE_DEFINITION(0x21)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x22)
     // BYTE_EMULATOR_DEFINITION(0x22)
+    // BYTE_WRITE_DEFINITION(0x22)
 
     /* Valid in first round
      *
@@ -491,26 +698,32 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x23)
     BYTE_EMULATOR_DEFINITION(0x23)
+    // BYTE_WRITE_DEFINITION(0x23)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x24)
     // BYTE_EMULATOR_DEFINITION(0x24)
+    // BYTE_WRITE_DEFINITION(0x24)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x25)
     // BYTE_EMULATOR_DEFINITION(0x25)
+    // BYTE_WRITE_DEFINITION(0x25)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x26)
     // BYTE_EMULATOR_DEFINITION(0x26)
+    // BYTE_WRITE_DEFINITION(0x26)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x27)
     // BYTE_EMULATOR_DEFINITION(0x27)
+    // BYTE_WRITE_DEFINITION(0x27)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x28)
     // BYTE_EMULATOR_DEFINITION(0x28)
+    // BYTE_WRITE_DEFINITION(0x28)
 
     /* Valid in first and second round
      *
@@ -535,6 +748,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x29)
     BYTE_EMULATOR_DEFINITION(0x29)
+    BYTE_WRITE_DEFINITION(0x29)
 
     /* Valid in second round
      *
@@ -550,6 +764,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x2a)
     BYTE_EMULATOR_DEFINITION(0x2a)
+    // BYTE_WRITE_DEFINITION(0x2a)
 
     /* Valid in first round
      *
@@ -568,34 +783,42 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x2b)
     BYTE_EMULATOR_DEFINITION(0x2b)
+    BYTE_WRITE_DEFINITION(0x2b)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x2c)
     // BYTE_EMULATOR_DEFINITION(0x2c)
+    // BYTE_WRITE_DEFINITION(0x2c)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x2d)
     // BYTE_EMULATOR_DEFINITION(0x2d)
+    // BYTE_WRITE_DEFINITION(0x2d)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x2e)
     // BYTE_EMULATOR_DEFINITION(0x2e)
+    // BYTE_WRITE_DEFINITION(0x2e)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x2f)
     // BYTE_EMULATOR_DEFINITION(0x2f)
+    // BYTE_WRITE_DEFINITION(0x2f)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x30)
     // BYTE_EMULATOR_DEFINITION(0x30)
+    // BYTE_WRITE_DEFINITION(0x30)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x31)
     // BYTE_EMULATOR_DEFINITION(0x31)
+    // BYTE_WRITE_DEFINITION(0x31)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x32)
     // BYTE_EMULATOR_DEFINITION(0x32)
+    // BYTE_WRITE_DEFINITION(0x32)
 
     /* Valid in first round
      *
@@ -610,22 +833,27 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x33)
     BYTE_EMULATOR_DEFINITION(0x33)
+    // BYTE_WRITE_DEFINITION(0x33)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x34)
     // BYTE_EMULATOR_DEFINITION(0x34)
+    // BYTE_WRITE_DEFINITION(0x34)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x35)
     // BYTE_EMULATOR_DEFINITION(0x35)
+    // BYTE_WRITE_DEFINITION(0x35)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x36)
     // BYTE_EMULATOR_DEFINITION(0x36)
+    // BYTE_WRITE_DEFINITION(0x36)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x37)
     // BYTE_EMULATOR_DEFINITION(0x37)
+    // BYTE_WRITE_DEFINITION(0x37)
 
     /* Valid in first round
      *
@@ -640,6 +868,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x38)
     BYTE_EMULATOR_DEFINITION(0x38)
+    BYTE_WRITE_DEFINITION(0x38)
 
     /* Valid in first round
      *
@@ -654,10 +883,12 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x39)
     BYTE_EMULATOR_DEFINITION(0x39)
+    BYTE_WRITE_DEFINITION(0x39)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x3a)
     // BYTE_EMULATOR_DEFINITION(0x3a)
+    // BYTE_WRITE_DEFINITION(0x3a)
 
     /* Valid in first round
      *
@@ -672,22 +903,27 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x3b)
     BYTE_EMULATOR_DEFINITION(0x3b)
+    // BYTE_WRITE_DEFINITION(0x3b)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x3c)
     // BYTE_EMULATOR_DEFINITION(0x3c)
+    // BYTE_WRITE_DEFINITION(0x3c)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x3d)
     // BYTE_EMULATOR_DEFINITION(0x3d)
+    // BYTE_WRITE_DEFINITION(0x3d)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x3e)
     // BYTE_EMULATOR_DEFINITION(0x3e)
+    // BYTE_WRITE_DEFINITION(0x3e)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x3f)
     // BYTE_EMULATOR_DEFINITION(0x3f)
+    // BYTE_WRITE_DEFINITION(0x3f)
 
     /* Valid in: first round
      *
@@ -707,6 +943,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x40)
     // BYTE_EMULATOR_DEFINITION(0x40)
+    // BYTE_WRITE_DEFINITION(0x40)
 
     /* Valid in: first round
      *
@@ -726,6 +963,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x41)
     // BYTE_EMULATOR_DEFINITION(0x41)
+    // BYTE_WRITE_DEFINITION(0x41)
 
     /* Valid in: first round
      *
@@ -745,6 +983,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x42)
     // BYTE_EMULATOR_DEFINITION(0x42)
+    // BYTE_WRITE_DEFINITION(0x42)
 
     /* Valid in: first round
      *
@@ -764,6 +1003,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x43)
     // BYTE_EMULATOR_DEFINITION(0x43)
+    // BYTE_WRITE_DEFINITION(0x43)
 
     /* Valid in: first round
      *
@@ -783,6 +1023,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x44)
     // BYTE_EMULATOR_DEFINITION(0x44)
+    // BYTE_WRITE_DEFINITION(0x44)
 
     /* Valid in: first round
      *
@@ -802,6 +1043,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x45)
     // BYTE_EMULATOR_DEFINITION(0x45)
+    // BYTE_WRITE_DEFINITION(0x45)
 
     /* Valid in: first round
      *
@@ -821,6 +1063,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x46)
     // BYTE_EMULATOR_DEFINITION(0x46)
+    // BYTE_WRITE_DEFINITION(0x46)
 
     /* Valid in: first round
      *
@@ -840,6 +1083,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x47)
     // BYTE_EMULATOR_DEFINITION(0x47)
+    // BYTE_WRITE_DEFINITION(0x47)
 
     /* Valid in: first round
      *
@@ -859,6 +1103,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x48)
     // BYTE_EMULATOR_DEFINITION(0x48)
+    // BYTE_WRITE_DEFINITION(0x48)
 
     /* Valid in: first round
      *
@@ -878,6 +1123,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x49)
     // BYTE_EMULATOR_DEFINITION(0x49)
+    // BYTE_WRITE_DEFINITION(0x49)
 
     /* Valid in: first round
      *
@@ -897,6 +1143,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x4a)
     // BYTE_EMULATOR_DEFINITION(0x4a)
+    // BYTE_WRITE_DEFINITION(0x4a)
 
     /* Valid in: first round
      *
@@ -916,6 +1163,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x4b)
     // BYTE_EMULATOR_DEFINITION(0x4b)
+    // BYTE_WRITE_DEFINITION(0x4b)
 
     /* Valid in: first round
      *
@@ -935,6 +1183,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x4c)
     // BYTE_EMULATOR_DEFINITION(0x4c)
+    // BYTE_WRITE_DEFINITION(0x4c)
 
     /* Valid in: first round
      *
@@ -954,6 +1203,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x4d)
     // BYTE_EMULATOR_DEFINITION(0x4d)
+    // BYTE_WRITE_DEFINITION(0x4d)
 
     /* Valid in: first round
      *
@@ -973,6 +1223,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x4e)
     // BYTE_EMULATOR_DEFINITION(0x4e)
+    // BYTE_WRITE_DEFINITION(0x4e)
 
     /* Valid in: first round
      *
@@ -992,82 +1243,102 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x4f)
     // BYTE_EMULATOR_DEFINITION(0x4f)
+    // BYTE_WRITE_DEFINITION(0x4f)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x50)
     // BYTE_EMULATOR_DEFINITION(0x50)
+    // BYTE_WRITE_DEFINITION(0x50)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x51)
     // BYTE_EMULATOR_DEFINITION(0x51)
+    // BYTE_WRITE_DEFINITION(0x51)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x52)
     // BYTE_EMULATOR_DEFINITION(0x52)
+    // BYTE_WRITE_DEFINITION(0x52)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x53)
     // BYTE_EMULATOR_DEFINITION(0x53)
+    // BYTE_WRITE_DEFINITION(0x53)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x54)
     // BYTE_EMULATOR_DEFINITION(0x54)
+    // BYTE_WRITE_DEFINITION(0x54)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x55)
     // BYTE_EMULATOR_DEFINITION(0x55)
+    // BYTE_WRITE_DEFINITION(0x55)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x56)
     // BYTE_EMULATOR_DEFINITION(0x56)
+    // BYTE_WRITE_DEFINITION(0x56)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x57)
     // BYTE_EMULATOR_DEFINITION(0x57)
+    // BYTE_WRITE_DEFINITION(0x57)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x58)
     // BYTE_EMULATOR_DEFINITION(0x58)
+    // BYTE_WRITE_DEFINITION(0x58)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x59)
     // BYTE_EMULATOR_DEFINITION(0x59)
+    // BYTE_WRITE_DEFINITION(0x59)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x5a)
     // BYTE_EMULATOR_DEFINITION(0x5a)
+    // BYTE_WRITE_DEFINITION(0x5a)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x5b)
     // BYTE_EMULATOR_DEFINITION(0x5b)
+    // BYTE_WRITE_DEFINITION(0x5b)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x5c)
     // BYTE_EMULATOR_DEFINITION(0x5c)
+    // BYTE_WRITE_DEFINITION(0x5c)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x5d)
     // BYTE_EMULATOR_DEFINITION(0x5d)
+    // BYTE_WRITE_DEFINITION(0x5d)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x5e)
     // BYTE_EMULATOR_DEFINITION(0x5e)
+    // BYTE_WRITE_DEFINITION(0x5e)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x5f)
     // BYTE_EMULATOR_DEFINITION(0x5f)
+    // BYTE_WRITE_DEFINITION(0x5f)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x60)
     // BYTE_EMULATOR_DEFINITION(0x60)
+    // BYTE_WRITE_DEFINITION(0x60)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x61)
     // BYTE_EMULATOR_DEFINITION(0x61)
+    // BYTE_WRITE_DEFINITION(0x61)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x62)
     // BYTE_EMULATOR_DEFINITION(0x62)
+    // BYTE_WRITE_DEFINITION(0x62)
 
     /* Valid in first round
      *
@@ -1084,14 +1355,17 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x63)
     BYTE_EMULATOR_DEFINITION(0x63)
+    // BYTE_WRITE_DEFINITION(0x63)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x64)
     // BYTE_EMULATOR_DEFINITION(0x64)
+    // BYTE_WRITE_DEFINITION(0x64)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x65)
     // BYTE_EMULATOR_DEFINITION(0x65)
+    // BYTE_WRITE_DEFINITION(0x65)
 
     /* Valid in: first round
      *
@@ -1107,6 +1381,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x66)
     // BYTE_EMULATOR_DEFINITION(0x66)
+    // BYTE_WRITE_DEFINITION(0x66)
 
     /* Valid in: first round
      * ## First round ##
@@ -1121,34 +1396,42 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x67)
     // BYTE_EMULATOR_DEFINITION(0x67)
+    // BYTE_WRITE_DEFINITION(0x67)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x68)
     // BYTE_EMULATOR_DEFINITION(0x68)
+    // BYTE_WRITE_DEFINITION(0x68)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x69)
     // BYTE_EMULATOR_DEFINITION(0x69)
+    // BYTE_WRITE_DEFINITION(0x69)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x6a)
     // BYTE_EMULATOR_DEFINITION(0x6a)
+    // BYTE_WRITE_DEFINITION(0x6a)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x6b)
     // BYTE_EMULATOR_DEFINITION(0x6b)
+    // BYTE_WRITE_DEFINITION(0x6b)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x6c)
     // BYTE_EMULATOR_DEFINITION(0x6c)
+    // BYTE_WRITE_DEFINITION(0x6c)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x6d)
     // BYTE_EMULATOR_DEFINITION(0x6d)
+    // BYTE_WRITE_DEFINITION(0x6d)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x6e)
     // BYTE_EMULATOR_DEFINITION(0x6e)
+    // BYTE_WRITE_DEFINITION(0x6e)
 
     /* Valid in second round
      *
@@ -1174,22 +1457,27 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x6f)
     BYTE_EMULATOR_DEFINITION(0x6f)
+    // BYTE_WRITE_DEFINITION(0x6f)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x70)
     // BYTE_EMULATOR_DEFINITION(0x70)
+    // BYTE_WRITE_DEFINITION(0x70)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x71)
     // BYTE_EMULATOR_DEFINITION(0x71)
+    // BYTE_WRITE_DEFINITION(0x71)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x72)
     // BYTE_EMULATOR_DEFINITION(0x72)
+    // BYTE_WRITE_DEFINITION(0x72)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x73)
     // BYTE_EMULATOR_DEFINITION(0x73)
+    // BYTE_WRITE_DEFINITION(0x73)
 
     /* Valid in: second round
      *
@@ -1223,46 +1511,57 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x74)
     BYTE_EMULATOR_DEFINITION(0x74)
+    // BYTE_WRITE_DEFINITION(0x74)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x75)
     // BYTE_EMULATOR_DEFINITION(0x75)
+    // BYTE_WRITE_DEFINITION(0x75)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x76)
     // BYTE_EMULATOR_DEFINITION(0x76)
+    // BYTE_WRITE_DEFINITION(0x76)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x77)
     // BYTE_EMULATOR_DEFINITION(0x77)
+    // BYTE_WRITE_DEFINITION(0x77)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x78)
     // BYTE_EMULATOR_DEFINITION(0x78)
+    // BYTE_WRITE_DEFINITION(0x78)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x79)
     // BYTE_EMULATOR_DEFINITION(0x79)
+    // BYTE_WRITE_DEFINITION(0x79)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x7a)
     // BYTE_EMULATOR_DEFINITION(0x7a)
+    // BYTE_WRITE_DEFINITION(0x7a)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x7b)
     // BYTE_EMULATOR_DEFINITION(0x7b)
+    // BYTE_WRITE_DEFINITION(0x7b)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x7c)
     // BYTE_EMULATOR_DEFINITION(0x7c)
+    // BYTE_WRITE_DEFINITION(0x7c)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x7d)
     // BYTE_EMULATOR_DEFINITION(0x7d)
+    // BYTE_WRITE_DEFINITION(0x7d)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x7e)
     // BYTE_EMULATOR_DEFINITION(0x7e)
+    // BYTE_WRITE_DEFINITION(0x7e)
 
     /* Valid in second round
      *
@@ -1308,6 +1607,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x7f)
     BYTE_EMULATOR_DEFINITION(0x7f)
+    BYTE_WRITE_DEFINITION(0x7f)
 
     /* Valid in first round
      *
@@ -1342,6 +1642,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x80)
     BYTE_EMULATOR_DEFINITION(0x80)
+    BYTE_WRITE_DEFINITION(0x80)
 
     /* Valid in first round
      *
@@ -1368,6 +1669,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x81)
     BYTE_EMULATOR_DEFINITION(0x81)
+    BYTE_WRITE_DEFINITION(0x81)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x82)
@@ -1398,18 +1700,22 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x83)
     BYTE_EMULATOR_DEFINITION(0x83)
+    BYTE_WRITE_DEFINITION(0x83)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x84)
     // BYTE_EMULATOR_DEFINITION(0x84)
+    // BYTE_WRITE_DEFINITION(0x84)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x85)
     // BYTE_EMULATOR_DEFINITION(0x85)
+    // BYTE_WRITE_DEFINITION(0x85)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x86)
     // BYTE_EMULATOR_DEFINITION(0x86)
+    // BYTE_WRITE_DEFINITION(0x86)
 
     /* Valid in first round
      *
@@ -1424,6 +1730,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x87)
     BYTE_EMULATOR_DEFINITION(0x87)
+    BYTE_WRITE_DEFINITION(0x87)
 
     /* Valid in: first round
      *
@@ -1445,6 +1752,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x88)
     BYTE_EMULATOR_DEFINITION(0x88)
+    BYTE_WRITE_DEFINITION(0x88)
 
     /* Valid in: first round
      *
@@ -1467,6 +1775,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x89)
     BYTE_EMULATOR_DEFINITION(0x89)
+    BYTE_WRITE_DEFINITION(0x89)
 
     /* Valid in: first round
      *
@@ -1488,6 +1797,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x8a)
     BYTE_EMULATOR_DEFINITION(0x8a)
+    // BYTE_WRITE_DEFINITION(0x8a)
 
     /* Valid in: first round
      *
@@ -1509,6 +1819,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x8b)
     BYTE_EMULATOR_DEFINITION(0x8b)
+    // BYTE_WRITE_DEFINITION(0x8b)
 
     /* Valid in: first round
      *
@@ -1534,10 +1845,12 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x8c)
     BYTE_EMULATOR_DEFINITION(0x8c)
+    // BYTE_WRITE_DEFINITION(0x8c)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x8d)
     // BYTE_EMULATOR_DEFINITION(0x8d)
+    // BYTE_WRITE_DEFINITION(0x8d)
 
     /* Valid in: first round
      *
@@ -1561,82 +1874,102 @@ public:
      */
     BYTE_LOADER_DEFINITION(0x8e)
     BYTE_EMULATOR_DEFINITION(0x8e)
+    // BYTE_WRITE_DEFINITION(0x8e)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x8f)
     // BYTE_EMULATOR_DEFINITION(0x8f)
+    // BYTE_WRITE_DEFINITION(0x8f)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x90)
     // BYTE_EMULATOR_DEFINITION(0x90)
+    // BYTE_WRITE_DEFINITION(0x90)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x91)
     // BYTE_EMULATOR_DEFINITION(0x91)
+    // BYTE_WRITE_DEFINITION(0x91)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x92)
     // BYTE_EMULATOR_DEFINITION(0x92)
+    // BYTE_WRITE_DEFINITION(0x92)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x93)
     // BYTE_EMULATOR_DEFINITION(0x93)
+    // BYTE_WRITE_DEFINITION(0x93)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x94)
     // BYTE_EMULATOR_DEFINITION(0x94)
+    // BYTE_WRITE_DEFINITION(0x94)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x95)
     // BYTE_EMULATOR_DEFINITION(0x95)
+    // BYTE_WRITE_DEFINITION(0x95)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x96)
     // BYTE_EMULATOR_DEFINITION(0x96)
+    // BYTE_WRITE_DEFINITION(0x96)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x97)
     // BYTE_EMULATOR_DEFINITION(0x97)
+    // BYTE_WRITE_DEFINITION(0x97)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x98)
     // BYTE_EMULATOR_DEFINITION(0x98)
+    // BYTE_WRITE_DEFINITION(0x98)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x99)
     // BYTE_EMULATOR_DEFINITION(0x99)
+    // BYTE_WRITE_DEFINITION(0x99)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x9a)
     // BYTE_EMULATOR_DEFINITION(0x9a)
+    // BYTE_WRITE_DEFINITION(0x9a)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x9b)
     // BYTE_EMULATOR_DEFINITION(0x9b)
+    // BYTE_WRITE_DEFINITION(0x9b)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x9c)
     // BYTE_EMULATOR_DEFINITION(0x9c)
+    // BYTE_WRITE_DEFINITION(0x9c)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x9d)
     // BYTE_EMULATOR_DEFINITION(0x9d)
+    // BYTE_WRITE_DEFINITION(0x9d)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x9e)
     // BYTE_EMULATOR_DEFINITION(0x9e)
+    // BYTE_WRITE_DEFINITION(0x9e)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0x9f)
     // BYTE_EMULATOR_DEFINITION(0x9f)
+    // BYTE_WRITE_DEFINITION(0x9f)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xa0)
     // BYTE_EMULATOR_DEFINITION(0xa0)
+    // BYTE_WRITE_DEFINITION(0xa0)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xa1)
     // BYTE_EMULATOR_DEFINITION(0xa1)
+    // BYTE_WRITE_DEFINITION(0xa1)
 
     /* Valid in second round
      *
@@ -1685,6 +2018,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0xa2)
     BYTE_EMULATOR_DEFINITION(0xa2)
+    // BYTE_WRITE_DEFINITION(0xa2)
 #define FEATURE_ECX_BLOCKS                  ~((0b1u <<  0u) |                                                          \
                                               (0b1u <<  9u) |                                                          \
                                               (0b1u << 12u) |                                                          \
@@ -1716,6 +2050,7 @@ public:
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xa3)
     // BYTE_EMULATOR_DEFINITION(0xa3)
+    // BYTE_WRITE_DEFINITION(0xa3)
 
     /* Valid in first round
      *
@@ -1732,26 +2067,32 @@ public:
      */
     BYTE_LOADER_DEFINITION(0xa4)
     BYTE_EMULATOR_DEFINITION(0xa4)
+    BYTE_WRITE_DEFINITION(0xa4)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xa5)
     // BYTE_EMULATOR_DEFINITION(0xa5)
+    // BYTE_WRITE_DEFINITION(0xa5)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xa6)
     // BYTE_EMULATOR_DEFINITION(0xa6)
+    // BYTE_WRITE_DEFINITION(0xa6)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xa7)
     // BYTE_EMULATOR_DEFINITION(0xa7)
+    // BYTE_WRITE_DEFINITION(0xa7)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xa8)
     // BYTE_EMULATOR_DEFINITION(0xa8)
+    // BYTE_WRITE_DEFINITION(0xa8)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xa9)
     // BYTE_EMULATOR_DEFINITION(0xa9)
+    // BYTE_WRITE_DEFINITION(0xa9)
 
     /* Valid in first round
      *
@@ -1766,6 +2107,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0xaa)
     BYTE_EMULATOR_DEFINITION(0xaa)
+    BYTE_WRITE_DEFINITION(0xaa)
 
     /* Valid in first round
      *
@@ -1791,26 +2133,32 @@ public:
      */
     BYTE_LOADER_DEFINITION(0xab)
     BYTE_EMULATOR_DEFINITION(0xab)
+    BYTE_WRITE_DEFINITION(0xab)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xac)
     // BYTE_EMULATOR_DEFINITION(0xac)
+    // BYTE_WRITE_DEFINITION(0xac)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xad)
     // BYTE_EMULATOR_DEFINITION(0xad)
+    // BYTE_WRITE_DEFINITION(0xad)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xae)
     // BYTE_EMULATOR_DEFINITION(0xae)
+    // BYTE_WRITE_DEFINITION(0xae)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xaf)
     // BYTE_EMULATOR_DEFINITION(0xaf)
+    // BYTE_WRITE_DEFINITION(0xaf)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xb0)
     // BYTE_EMULATOR_DEFINITION(0xb0)
+    // BYTE_WRITE_DEFINITION(0xb0)
 
     /* Valid in second round
      *
@@ -1827,22 +2175,27 @@ public:
      */
     BYTE_LOADER_DEFINITION(0xb1)
     BYTE_EMULATOR_DEFINITION(0xb1)
+    BYTE_WRITE_DEFINITION(0xb1)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xb2)
     // BYTE_EMULATOR_DEFINITION(0xb2)
+    // BYTE_WRITE_DEFINITION(0xb2)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xb3)
     // BYTE_EMULATOR_DEFINITION(0xb3)
+    // BYTE_WRITE_DEFINITION(0xb3)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xb4)
     // BYTE_EMULATOR_DEFINITION(0xb4)
+    // BYTE_WRITE_DEFINITION(0xb4)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xb5)
     // BYTE_EMULATOR_DEFINITION(0xb5)
+    // BYTE_WRITE_DEFINITION(0xb5)
 
     /* Valid in: second round
      *
@@ -1862,6 +2215,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0xb6)
     BYTE_EMULATOR_DEFINITION(0xb6)
+    // BYTE_WRITE_DEFINITION(0xb6)
 
     /* Valid in: second round
      *
@@ -1881,30 +2235,37 @@ public:
      */
     BYTE_LOADER_DEFINITION(0xb7)
     BYTE_EMULATOR_DEFINITION(0xb7)
+    // BYTE_WRITE_DEFINITION(0xb7)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xb8)
     // BYTE_EMULATOR_DEFINITION(0xb8)
+    // BYTE_WRITE_DEFINITION(0xb8)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xb9)
     // BYTE_EMULATOR_DEFINITION(0xb9)
+    // BYTE_WRITE_DEFINITION(0xb9)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xba)
     // BYTE_EMULATOR_DEFINITION(0xba)
+    // BYTE_WRITE_DEFINITION(0xba)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xbb)
     // BYTE_EMULATOR_DEFINITION(0xbb)
+    // BYTE_WRITE_DEFINITION(0xbb)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xbc)
     // BYTE_EMULATOR_DEFINITION(0xbc)
+    // BYTE_WRITE_DEFINITION(0xbc)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xbd)
     // BYTE_EMULATOR_DEFINITION(0xbd)
+    // BYTE_WRITE_DEFINITION(0xbd)
 
     /* Valid in second round
      *
@@ -1919,26 +2280,32 @@ public:
      */
     BYTE_LOADER_DEFINITION(0xbe)
     BYTE_EMULATOR_DEFINITION(0xbe)
+    // BYTE_WRITE_DEFINITION(0xbe)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xbf)
     // BYTE_EMULATOR_DEFINITION(0xbf)
+    // BYTE_WRITE_DEFINITION(0xbf)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xc0)
     // BYTE_EMULATOR_DEFINITION(0xc0)
+    // BYTE_WRITE_DEFINITION(0xc0)
 
     /* Not implemented - blocked */
     BYTE_LOADER_DEFINITION(0xc1)
     BYTE_EMULATOR_DEFINITION(0xc1)
+    BYTE_WRITE_DEFINITION(0xc1)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xc2)
     // BYTE_EMULATOR_DEFINITION(0xc2)
+    // BYTE_WRITE_DEFINITION(0xc2)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xc3)
     // BYTE_EMULATOR_DEFINITION(0xc3)
+    // BYTE_WRITE_DEFINITION(0xc3)
 
     /* Valid in: first round
      *
@@ -1960,6 +2327,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0xc4)
     // BYTE_EMULATOR_DEFINITION(0xc4)
+    // BYTE_WRITE_DEFINITION(0xc4)
 
     /* Valid in: first round
      *
@@ -1981,6 +2349,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0xc5)
     // BYTE_EMULATOR_DEFINITION(0xc5)
+    // BYTE_WRITE_DEFINITION(0xc5)
 
     /* Valid in first round
      *
@@ -2000,6 +2369,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0xc6)
     BYTE_EMULATOR_DEFINITION(0xc6)
+    BYTE_WRITE_DEFINITION(0xc6)
 
     /* Valid in first round
      *
@@ -2014,78 +2384,97 @@ public:
      */
     BYTE_LOADER_DEFINITION(0xc7)
     BYTE_EMULATOR_DEFINITION(0xc7)
+    BYTE_WRITE_DEFINITION(0xc7)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xc8)
     // BYTE_EMULATOR_DEFINITION(0xc8)
+    // BYTE_WRITE_DEFINITION(0xc8)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xc9)
     // BYTE_EMULATOR_DEFINITION(0xc9)
+    // BYTE_WRITE_DEFINITION(0xc9)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xca)
     // BYTE_EMULATOR_DEFINITION(0xca)
+    // BYTE_WRITE_DEFINITION(0xca)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xcb)
     // BYTE_EMULATOR_DEFINITION(0xcb)
+    // BYTE_WRITE_DEFINITION(0xcb)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xcc)
     // BYTE_EMULATOR_DEFINITION(0xcc)
+    // BYTE_WRITE_DEFINITION(0xcc)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xcd)
     // BYTE_EMULATOR_DEFINITION(0xcd)
+    // BYTE_WRITE_DEFINITION(0xcd)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xce)
     // BYTE_EMULATOR_DEFINITION(0xce)
+    // BYTE_WRITE_DEFINITION(0xce)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xcf)
     // BYTE_EMULATOR_DEFINITION(0xcf)
+    // BYTE_WRITE_DEFINITION(0xcf)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xd0)
     // BYTE_EMULATOR_DEFINITION(0xd0)
+    // BYTE_WRITE_DEFINITION(0xd0)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xd1)
     // BYTE_EMULATOR_DEFINITION(0xd1)
+    // BYTE_WRITE_DEFINITION(0xd1)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xd2)
     // BYTE_EMULATOR_DEFINITION(0xd2)
+    // BYTE_WRITE_DEFINITION(0xd2)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xd3)
     // BYTE_EMULATOR_DEFINITION(0xd3)
+    // BYTE_WRITE_DEFINITION(0xd3)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xd4)
     // BYTE_EMULATOR_DEFINITION(0xd4)
+    // BYTE_WRITE_DEFINITION(0xd4)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xd5)
     // BYTE_EMULATOR_DEFINITION(0xd5)
+    // BYTE_WRITE_DEFINITION(0xd5)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xd6)
     // BYTE_EMULATOR_DEFINITION(0xd6)
+    // BYTE_WRITE_DEFINITION(0xd6)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xd7)
     // BYTE_EMULATOR_DEFINITION(0xd7)
+    // BYTE_WRITE_DEFINITION(0xd7)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xd8)
     // BYTE_EMULATOR_DEFINITION(0xd8)
+    // BYTE_WRITE_DEFINITION(0xd8)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xd9)
     // BYTE_EMULATOR_DEFINITION(0xd9)
+    // BYTE_WRITE_DEFINITION(0xd9)
 
     /* Valid in: second round
      *
@@ -2109,54 +2498,67 @@ public:
      */
     BYTE_LOADER_DEFINITION(0xda)
     BYTE_EMULATOR_DEFINITION(0xda)
+    // BYTE_WRITE_DEFINITION(0xda)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xdb)
     // BYTE_EMULATOR_DEFINITION(0xdb)
+    // BYTE_WRITE_DEFINITION(0xdb)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xdc)
     // BYTE_EMULATOR_DEFINITION(0xdc)
+    // BYTE_WRITE_DEFINITION(0xdc)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xdd)
     // BYTE_EMULATOR_DEFINITION(0xdd)
+    // BYTE_WRITE_DEFINITION(0xdd)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xde)
     // BYTE_EMULATOR_DEFINITION(0xde)
+    // BYTE_WRITE_DEFINITION(0xde)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xdf)
     // BYTE_EMULATOR_DEFINITION(0xdf)
+    // BYTE_WRITE_DEFINITION(0xdf)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xe0)
     // BYTE_EMULATOR_DEFINITION(0xe0)
+    // BYTE_WRITE_DEFINITION(0xe0)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xe1)
     // BYTE_EMULATOR_DEFINITION(0xe1)
+    // BYTE_WRITE_DEFINITION(0xe1)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xe2)
     // BYTE_EMULATOR_DEFINITION(0xe2)
+    // BYTE_WRITE_DEFINITION(0xe2)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xe3)
     // BYTE_EMULATOR_DEFINITION(0xe3)
+    // BYTE_WRITE_DEFINITION(0xe3)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xe4)
     // BYTE_EMULATOR_DEFINITION(0xe4)
+    // BYTE_WRITE_DEFINITION(0xe4)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xe5)
     // BYTE_EMULATOR_DEFINITION(0xe5)
+    // BYTE_WRITE_DEFINITION(0xe5)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xe6)
     // BYTE_EMULATOR_DEFINITION(0xe6)
+    // BYTE_WRITE_DEFINITION(0xe6)
 
     /* Valid in second round
      *
@@ -2172,46 +2574,57 @@ public:
      */
     BYTE_LOADER_DEFINITION(0xe7)
     BYTE_EMULATOR_DEFINITION(0xe7)
+    BYTE_WRITE_DEFINITION(0xe7)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xe8)
     // BYTE_EMULATOR_DEFINITION(0xe8)
+    // BYTE_WRITE_DEFINITION(0xe8)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xe9)
     // BYTE_EMULATOR_DEFINITION(0xe9)
+    // BYTE_WRITE_DEFINITION(0xe9)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xea)
     // BYTE_EMULATOR_DEFINITION(0xea)
+    // BYTE_WRITE_DEFINITION(0xea)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xeb)
     // BYTE_EMULATOR_DEFINITION(0xeb)
+    // BYTE_WRITE_DEFINITION(0xeb)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xec)
     // BYTE_EMULATOR_DEFINITION(0xec)
+    // BYTE_WRITE_DEFINITION(0xec)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xed)
     // BYTE_EMULATOR_DEFINITION(0xed)
+    // BYTE_WRITE_DEFINITION(0xed)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xee)
     // BYTE_EMULATOR_DEFINITION(0xee)
+    // BYTE_WRITE_DEFINITION(0xee)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xef)
     // BYTE_EMULATOR_DEFINITION(0xef)
+    // BYTE_WRITE_DEFINITION(0xef)
 
     /* Not implemented - blocked */
     BYTE_LOADER_DEFINITION(0xf0)
     // BYTE_EMULATOR_DEFINITION(0xf0)
+    // BYTE_WRITE_DEFINITION(0xf0)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xf1)
     // BYTE_EMULATOR_DEFINITION(0xf1)
+    // BYTE_WRITE_DEFINITION(0xf1)
 
     /* Valid in first round
      *
@@ -2226,6 +2639,7 @@ public:
      */
     BYTE_LOADER_DEFINITION(0xf2)
     // BYTE_EMULATOR_DEFINITION(0xf2)
+    // BYTE_WRITE_DEFINITION(0xf2)
 
     /* Valid in first round
      *
@@ -2243,14 +2657,17 @@ public:
      */
     BYTE_LOADER_DEFINITION(0xf3)
     // BYTE_EMULATOR_DEFINITION(0xf3)
+    // BYTE_WRITE_DEFINITION(0xf3)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xf4)
     // BYTE_EMULATOR_DEFINITION(0xf4)
+    // BYTE_WRITE_DEFINITION(0xf4)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xf5)
     // BYTE_EMULATOR_DEFINITION(0xf5)
+    // BYTE_WRITE_DEFINITION(0xf5)
 
     /* Valid in first round
      *
@@ -2275,42 +2692,52 @@ public:
      */
     BYTE_LOADER_DEFINITION(0xf6)
     BYTE_EMULATOR_DEFINITION(0xf6)
+    BYTE_WRITE_DEFINITION(0xf6)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xf7)
     // BYTE_EMULATOR_DEFINITION(0xf7)
+    // BYTE_WRITE_DEFINITION(0xf7)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xf8)
     // BYTE_EMULATOR_DEFINITION(0xf8)
+    // BYTE_WRITE_DEFINITION(0xf8)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xf9)
     // BYTE_EMULATOR_DEFINITION(0xf9)
+    // BYTE_WRITE_DEFINITION(0xf9)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xfa)
     // BYTE_EMULATOR_DEFINITION(0xfa)
+    // BYTE_WRITE_DEFINITION(0xfa)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xfb)
     // BYTE_EMULATOR_DEFINITION(0xfb)
+    // BYTE_WRITE_DEFINITION(0xfb)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xfc)
     // BYTE_EMULATOR_DEFINITION(0xfc)
+    // BYTE_WRITE_DEFINITION(0xfc)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xfd)
     // BYTE_EMULATOR_DEFINITION(0xfd)
+    // BYTE_WRITE_DEFINITION(0xfd)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xfe)
     // BYTE_EMULATOR_DEFINITION(0xfe)
+    // BYTE_WRITE_DEFINITION(0xfe)
 
     /* Not implemented - blocked */
     // BYTE_LOADER_DEFINITION(0xff)
     // BYTE_EMULATOR_DEFINITION(0xff)
+    // BYTE_WRITE_DEFINITION(0xff)
 
     // -----------------------------------------------------------------------------------------------------------------
     //      lookup table

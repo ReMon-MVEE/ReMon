@@ -434,6 +434,7 @@ void instruction_intent::debug_print_minimal                        ()
     {
         this->buffer[i].lock            = false;
         this->buffer[i].passed          = this->passed_mask;
+        this->buffer[i].checked         = this->passed_mask;
         this->buffer[i].buffer          = this->buffer[i].static_buffer;
     }
     for (unsigned int i = 0; i < this->variant_count; i++)
@@ -442,6 +443,8 @@ void instruction_intent::debug_print_minimal                        ()
         this->variant_states[i].current_index = 0;
     }
 
+    write_handler = nullptr;
+    waiting = 0;
 }
 
 
@@ -638,6 +641,7 @@ int             replay_buffer::obtain_buffer                        (unsigned in
         }
         else if (current_entry->passed == this->passed_mask)
         {
+            current_entry->passed = 0;
             // fill entry
             for (int i = 0; i < instruction.size; i++)
                 current_entry->instruction[i] = instruction.instruction[i];
@@ -719,7 +723,17 @@ int             replay_buffer::obtain_buffer                        (unsigned in
             // compare instruction
             if (instruction.size != current_entry->instruction_size)
             {
-                warnf("instruction size differs\n");
+                std::stringstream ss;
+                ss << "[" << variant_num << "] Instruction size differs";
+                ss << "\n\t> entry:  ";
+                for (int j = 0; j < current_entry->instruction_size; j++)
+                    ss << (current_entry->instruction[j] < 0x10 ? "0" : "")
+                            << std::hex << (unsigned long) current_entry->instruction[j] << " ";
+                ss << "\n\t> intent: ";
+                for (int j = 0; j < instruction.size; j++)
+                    ss << (instruction.instruction[j] < 0x10 ? "0" : "")
+                            << std::hex << (unsigned long) instruction.instruction[j] << " ";
+                warnf("%s\n", ss.str().c_str());
                 return REPLAY_BUFFER_RETURN_ERROR;
             }
             for (int i = 0; i < current_entry->instruction_size; i++)
@@ -779,6 +793,27 @@ int             replay_buffer::obtain_buffer                        (unsigned in
 }
 
 
+int             replay_buffer::obtain_last_buffer                   (unsigned int variant_num, void** requested,
+                                                                     unsigned long long &requested_size)
+{
+    if (variant_num >= this->variant_count)
+    {
+        warnf("variant_num out of bounds %d\n", variant_num);
+        return REPLAY_BUFFER_RETURN_ERROR;
+    }
+
+    // get current state and entry
+    replay_state* current_state = &this->variant_states[variant_num];
+    replay_entry* current_entry = &this->buffer[current_state->current_index];
+
+    // return entry data
+    *requested     = current_entry->buffer;
+    requested_size = current_entry->buffer_size;
+
+    return 0;
+}
+
+
 int             replay_buffer::advance                              (unsigned int variant_num)
 {
     if (variant_num >= this->variant_count)
@@ -792,7 +827,6 @@ int             replay_buffer::advance                              (unsigned in
     current_state->current_index = (current_state->current_index + 1) % this->buffer_size;
     if (!variant_num)
     {
-        current_entry->passed = 0;
         if (this->state & REPLAY_BUFFER_VARIANTS_WAITING)
         {
             this->state &= ~REPLAY_BUFFER_VARIANTS_WAITING;
@@ -835,6 +869,7 @@ int             replay_buffer::advance                              (unsigned in
         if (current_entry->buffer && current_entry->buffer != current_entry->static_buffer)
             free(current_entry->buffer);
         current_entry->buffer = nullptr;
+        current_entry->checked = passed_mask;
 
         // check if variants were waiting for this
         if (this->state & REPLAY_BUFFER_LEADER_WAITING)
@@ -869,13 +904,73 @@ int             replay_buffer::advance                              (unsigned in
                     return REPLAY_BUFFER_RETURN_ERROR;
                 }
             }
-
         }
     }
 
     return REPLAY_BUFFER_RETURN_OK;
 }
 #endif
+
+
+int             replay_buffer::start_waiting                        (shm_write_handler_t handler)
+{
+    if (waiting)
+    {
+        warnf(" > replay buffer state issue - still waiting variants and attempting to set write handler");
+        return -1;
+    }
+    if (write_handler)
+    {
+        warnf(" > replay buffer state issue - attempting to overwrite write handler");
+        return -1;
+    }
+
+    write_handler = handler;
+    waiting       = mvee::numvariants;
+    return 0;
+}
+
+
+int             replay_buffer::wait                                 ()
+{
+    if (state & REPLAY_BUFFER_VARIANTS_WAITING)
+    {
+        for (int i = 1; i < mvee::numvariants; i++)
+        {
+            if (!(variant_states[i].state & REPLAY_STATE_WAITING))
+                continue;
+            variant_states[i].state = REPLAY_STATE_RUNNING;
+            if (instruction_intent_emulation::handle_emulation(&relevant_monitor->variants[i], relevant_monitor)
+                    != WRITE_SPLIT)
+                return -1;
+        }
+    }
+
+    // see if all variants have reached this point
+    if (--waiting > 0)
+        return 1;
+    // this indicated the state is wrong somehow
+    if (waiting < 0 || !write_handler)
+        return -1;
+
+    for (int i = 0; i < mvee::numvariants; i -=- 1)
+    {
+        variantstate* variant = &relevant_monitor->variants[i];
+
+        if (write_handler(variant->instruction, *relevant_monitor, variant) < 0)
+            return -1;
+
+        variant->regs.rip += variant->instruction.size;
+        if (!interaction::write_all_regs(variant->variantpid, &variant->regs) && errno != ESRCH)
+            return -1;
+
+        relevant_monitor->call_resume(i);
+    }
+
+    waiting = 0;
+    write_handler = nullptr;
+    return 0;
+}
 
 
 void            replay_buffer::debug_print                          ()
@@ -1953,6 +2048,17 @@ int             instruction_intent_emulation::handle_emulation      (variantstat
                         relevant_monitor->call_resume(variant_i);
                         break;
                     }
+                    case WRITE_SPLIT:
+                    {
+                        if (relevant_monitor->buffer.wait() < 0)
+                        {
+                            relevant_monitor->variants[variant_i].instruction.debug_print();
+                            warnf("A problem occurred performing write split - side\n");
+                            relevant_monitor->shutdown(false);
+                            return ILLEGAL_ACCESS_TERMINATION;
+                        }
+                        break;
+                    }
                     default:
                     {
                         warnf(" > something happened while emulating a lock prefixed instruction - %d\n",
@@ -2011,6 +2117,16 @@ int             instruction_intent_emulation::handle_emulation      (variantstat
             relevant_monitor->set_mmap_table->debug_shared();
             debugf("unknown memory\n");
             return UNKNOWN_MEMORY_TERMINATION;
+        }
+        case WRITE_SPLIT:
+        {
+            if (relevant_monitor->buffer.wait() < 0)
+            {
+                warnf("A problem occurred performing write split - main\n");
+                relevant_monitor->shutdown(false);
+                return WRITE_SPLIT;
+            }
+            return WRITE_SPLIT;
         }
         default:
         {

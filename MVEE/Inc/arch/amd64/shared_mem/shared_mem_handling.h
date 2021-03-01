@@ -200,11 +200,6 @@ debugf("\n%s\n", output.str().c_str());
 // ---------------------------------------------------------------------------------------------------------------------
 
 
-// stuff to return information to prevent re-executing some stuff ------------------------------------------------------
-#define NO_REGION_INFO                          -2
-// ---------------------------------------------------------------------------------------------------------------------
-
-
 // states for shared memory setup --------------------------------------------------------------------------------------
 #define SHM_SETUP_EXPECTING_ERROR               (1<<31)
 #define SHM_SETUP_IDLE                          2
@@ -549,6 +544,7 @@ struct replay_entry
 
     void*           monitor_pointer;
     __uint64_t      passed;
+    __uint64_t      checked;
     bool            lock;
 };
 
@@ -565,6 +561,7 @@ struct replay_state
 // =====================================================================================================================
 class replay_buffer
 {
+    friend monitor;
 private:
     replay_entry*   buffer;
     unsigned int    buffer_size;
@@ -577,6 +574,10 @@ private:
     monitor*        relevant_monitor;
 
     __uint64_t      passed_mask;
+
+    int             waiting;
+    shm_write_handler_t
+                    write_handler;
 public:
     // construction ----------------------------------------------------------------------------------------------------
                     replay_buffer                       (monitor* relevant_monitor,
@@ -588,8 +589,15 @@ public:
     int             obtain_buffer                       (unsigned int variant_num, void* monitor_pointer,
                                                          instruction_intent &instruction, void** requested,
                                                          unsigned long long &requested_size);
+    int             obtain_last_buffer                  (unsigned int variant_num, void** requested,
+                                                         unsigned long long &requested_size);
     int             advance                             (unsigned int variant_num);
     // access and updating ---------------------------------------------------------------------------------------------
+
+    // waiting for writes ----------------------------------------------------------------------------------------------
+    int             start_waiting                       (shm_write_handler_t new_handler);
+    int             wait                                ();
+    // waiting for writes ----------------------------------------------------------------------------------------------
 
     // debug print -----------------------------------------------------------------------------------------------------
     void            debug_print                         ();
@@ -642,9 +650,18 @@ if (decode_address_tag(*(__source), variant) != decode_address_tag(*(__buffer), 
 #define WRITE_DIVERGENCE_ERROR(__message)                                                                              \
 warnf(__message);                                                                                                      \
 instruction.debug_print();                                                                                             \
-return -1;                                                                                                             \
+return -1;
 
-#define NORMAL_TO_SHARED(__cast, __operation, __divergence)                                                            \
+#define IMM_TO_SHARED_EMULATE                                                                                          \
+{                                                                                                                      \
+    unsigned long long size = 0;                                                                                       \
+    int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, mapping_info->monitor_base + offset,      \
+            instruction, nullptr, size);                                                                               \
+    if (result < 0)                                                                                                    \
+        return result;                                                                                                 \
+}
+
+#define NORMAL_TO_SHARED_EMULATE(__cast, __divergence)                                                                 \
 __cast* buffer = nullptr;                                                                                              \
 {                                                                                                                      \
     unsigned long long size = sizeof(__cast);                                                                          \
@@ -657,25 +674,74 @@ __cast* buffer = nullptr;                                                       
 if (!variant->variant_num)                                                                                             \
 {                                                                                                                      \
     *buffer = *typed_source;                                                                                           \
-    auto* typed_destination = (__cast*) (mapping_info->monitor_base + offset);                                         \
-    __operation;                                                                                                       \
 }                                                                                                                      \
 else if (*buffer != *typed_source)                                                                                     \
 {                                                                                                                      \
     __divergence                                                                                                       \
+}
+
+#define NORMAL_TO_SHARED_WRITE(__cast, __operation)                                                                    \
+__cast* buffer = nullptr;                                                                                              \
+{                                                                                                                      \
+    unsigned long long size = sizeof(__cast);                                                                          \
+    int result = relevant_monitor.buffer.obtain_last_buffer(variant->variant_num, (void**) &buffer, size);             \
+    if (result < 0)                                                                                                    \
+        return result;                                                                                                 \
+}                                                                                                                      \
+                                                                                                                       \
+if (!variant->variant_num)                                                                                             \
+{                                                                                                                      \
+    auto* typed_destination = (__cast*) (mapping_info->monitor_base + offset);                                         \
+    __operation;                                                                                                       \
 }                                                                                                                      \
 {                                                                                                                      \
     auto* typed_destination = (__cast*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);   \
     __operation;                                                                                                       \
 }
 
-#define NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER(__cast, __core, __divergence)                                          \
-/* leader variant */                                                                                                   \
+#define IMM_TO_SHARED_WRITE(__cast, __operation)                                                                       \
+if (!variant->variant_num)                                                                                             \
+{                                                                                                                      \
+    auto* typed_destination = (__cast*) (mapping_info->monitor_base + offset);                                         \
+    __operation;                                                                                                       \
+}                                                                                                                      \
+{                                                                                                                      \
+    auto* typed_destination = (__cast*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);   \
+    __operation;                                                                                                       \
+}
+
+#define IMM_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE                                                                   \
+{                                                                                                                      \
+    void* __buffer;                                                                                                    \
+    int __result;                                                                                                      \
+    unsigned long long __raw_size = sizeof(unsigned long long);                                                        \
+    __result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, mapping_info->monitor_base + offset,        \
+            instruction, &__buffer, __raw_size);                                                                       \
+    if (__result < 0)                                                                                                  \
+        return __result;                                                                                               \
+}
+
+#define NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE(__cast, __divergence)                                          \
 auto* typed_destination = (__cast*) (mapping_info->monitor_base + offset);                                             \
 GET_BUFFER_RAW(typed_destination, sizeof(unsigned long long) + sizeof(__cast))                                         \
 if (!variant->variant_num)                                                                                             \
-{                                                                                                                      \
     *(__cast*)((unsigned long long*) buffer + 1) = *typed_source;                                                      \
+else if (*(__cast*)((unsigned long long*) buffer + 1) != *typed_source)                                                \
+{                                                                                                                      \
+    __divergence                                                                                                       \
+}
+
+#define NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_WRITE(__cast, __core)                                                  \
+auto* typed_destination = (__cast*) (mapping_info->monitor_base + offset);                                             \
+__cast* buffer = nullptr;                                                                                              \
+{                                                                                                                      \
+    unsigned long long size;                                                                                           \
+    int result = relevant_monitor.buffer.obtain_last_buffer(variant->variant_num, (void**) &buffer, size);             \
+    if (result < 0)                                                                                                    \
+        return result;                                                                                                 \
+}                                                                                                                      \
+if (!variant->variant_num)                                                                                             \
+{                                                                                                                      \
     *(unsigned long long*) buffer = regs_struct->eflags;                                                               \
     __asm__                                                                                                            \
     (                                                                                                                  \
@@ -691,17 +757,19 @@ if (!variant->variant_num)                                                      
             : "cc"                                                                                                     \
     );                                                                                                                 \
 }                                                                                                                      \
-else if (*(__cast*)((unsigned long long*) buffer + 1) != *typed_source)                                                \
-{                                                                                                                      \
-    __divergence                                                                                                       \
-}                                                                                                                      \
 regs_struct->eflags = *(unsigned long long*) buffer;
 
 
-#define NORMAL_TO_SHARED_REPLICATE_FLAGS(__cast, __core, __divergence)                                                 \
+#define IMM_TO_SHARED_REPLICATE_FLAGS_EMULATE                                                                          \
+IMM_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE
+
+#define NORMAL_TO_SHARED_REPLICATE_FLAGS_EMULATE(__cast, __divergence)                                                 \
+NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE(__cast, __divergence)
+
+#define NORMAL_TO_SHARED_REPLICATE_FLAGS_WRITE(__cast, __core)                                                         \
 auto* shadow_destination = (__cast*)                                                                                   \
         (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);                                   \
-NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER(__cast, __core, __divergence)                                                  \
+NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_WRITE(__cast, __core)                                                          \
 __asm__                                                                                                                \
 (                                                                                                                      \
         ".intel_syntax noprefix;"                                                                                      \
@@ -712,8 +780,7 @@ __asm__                                                                         
         : "cc"                                                                                                         \
 );
 
-#define XMM_TO_SHARED(__operation, __divergence)                                                                       \
-void* destination;                                                                                                     \
+#define XMM_TO_SHARED_EMULATE(__divergence)                                                                            \
 void* buffer = nullptr;                                                                                                \
 {                                                                                                                      \
     unsigned long long size = 16;                                                                                      \
@@ -724,12 +791,27 @@ void* buffer = nullptr;                                                         
 }                                                                                                                      \
                                                                                                                        \
 if (!variant->variant_num)                                                                                             \
-{                                                                                                                      \
     memcpy(buffer, source, 16);                                                                                        \
+else                                                                                                                   \
+    __divergence
+
+#define XMM_TO_SHARED_WRITE(__operation)                                                                               \
+void* destination;                                                                                                     \
+void* buffer = nullptr;                                                                                                \
+{                                                                                                                      \
+    unsigned long long size;                                                                                           \
+    int result = relevant_monitor.buffer.obtain_last_buffer(variant->variant_num, (void**) &buffer, size);             \
+    if (result < 0)                                                                                                    \
+        return result;                                                                                                 \
+    if (size != 16)                                                                                                    \
+        return -1;                                                                                                     \
+}                                                                                                                      \
+                                                                                                                       \
+if (!variant->variant_num)                                                                                             \
+{                                                                                                                      \
     destination = (void*) (mapping_info->monitor_base + offset);                                                       \
     __operation;                                                                                                       \
 }                                                                                                                      \
-else __divergence                                                                                                      \
 destination = (void*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);                     \
 __operation;
 
@@ -748,55 +830,6 @@ int from_shared_result = shm_handling::determine_source_from_shared_normal(varia
         (void**)&source, mapping_info, offset, 16);                                                                    \
 if (from_shared_result < 0)                                                                                            \
     return from_shared_result;
-
-/*
-#define CMP_TO_SHARED(__cast, __core)                                                                                  \
-__cast* buffer = nullptr;                                                                                              \
-auto monitor_pointer = (__cast*)((unsigned long long)mapping_info->monitor_base + offset);                             \
-unsigned long long size = 3 * sizeof(__cast);                                                                          \
-int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, (void*)monitor_pointer, instruction,          \
-        (void**)&buffer, size);                                                                                        \
-if (result < 0)                                                                                                        \
-    return result;                                                                                                     \
-                                                                                                                       \
-__cast* destination = nullptr;                                                                                         \
-if (!variant->variant_num)                                                                                             \
-{                                                                                                                      \
-    *buffer = *monitor_pointer;                                                                                        \
-    *(buffer + 1) = *(__cast*) source;                                                                                 \
-    *(buffer + 2) = *(__cast*)                                                                                         \
-            ((unsigned long long)mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);           \
-                                                                                                                       \
-    destination = buffer;                                                                                              \
-}                                                                                                                      \
-else                                                                                                                   \
-{                                                                                                                      \
-    if (*(buffer + 1) != *(__cast*) source)                                                                            \
-    {                                                                                                                  \
-        warnf(" > compare with diverging source\n");                                                                   \
-        instruction.debug_print();                                                                                     \
-        return -1;                                                                                                     \
-    }                                                                                                                  \
-    if (*buffer != *(buffer + 2))                                                                                      \
-        destination = buffer;                                                                                          \
-    else                                                                                                               \
-        destination = (__cast*)                                                                                        \
-                ((unsigned long long)mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);       \
-}                                                                                                                      \
-                                                                                                                       \
-__asm__(                                                                                                               \
-        ".intel_syntax noprefix;"                                                                                      \
-        "push %[flags];"                                                                                               \
-        "popf;"                                                                                                        \
-        __core                                                                                                         \
-        "pushf;"                                                                                                       \
-        "pop %[flags];"                                                                                                \
-        ".att_syntax"                                                                                                  \
-        : [flags] "+r" (regs_struct->eflags)                                                                           \
-        : [dst] "r" (destination), "m" (*destination), [src] "r" (*typed_source)                                       \
-        : "cc"                                                                                                         \
-);
-*/
 
 
 class shm_handling

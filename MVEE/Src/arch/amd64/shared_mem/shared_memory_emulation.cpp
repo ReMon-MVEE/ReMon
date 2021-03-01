@@ -14,104 +14,6 @@
 
 
 // =====================================================================================================================
-//      macros
-// =====================================================================================================================
-#define DEFINE_REGS_STRUCT                                                                                             \
-    user_regs_struct* regs_struct = &variant->regs;                                                                    \
-    relevant_monitor.call_check_regs(variant->variant_num);
-
-
-#define DEFINE_FPREGS_STRUCT                                                                                           \
-    user_fpregs_struct* regs_struct = &variant->fpregs;                                                                \
-    relevant_monitor.call_check_fpregs(variant->variant_num);
-
-
-#define DEFINE_MODRM                                                                                                   \
-uint8_t modrm = instruction[instruction.effective_opcode_index + 1];
-
-
-#define LOAD_RM_CODE(__src_or_dst, __size)                                                                             \
-LOAD_RM_CODE_NO_DEFINE(__size)                                                                                         \
-void* __src_or_dst = (void*) ((unsigned long long) mapping_info->monitor_base + offset);                               \
-
-
-#define LOAD_RM_CODE_NO_DEFINE(__size)                                                                                 \
-/* register if mod bits equal 0b11 */                                                                                  \
-if (GET_MOD_CODE((unsigned) modrm) == 0b11u)                                                                           \
-    /* For shared memory emulation, this shouldn't happen */                                                           \
-    return -1;                                                                                                         \
-/* memory reference otherwise, so determine the monitor relevant pointer */                                            \
-OBTAIN_SHARED_MAPPING_INFO(__size)                                                                                     \
-
-
-#define OBTAIN_SHARED_MAPPING_INFO(__size)                                                                             \
-shared_monitor_map_info* mapping_info;                                                                                 \
-unsigned long long offset;                                                                                             \
-if (!(mapping_info = relevant_monitor.set_mmap_table->get_shared_info(                                                 \
-        (unsigned long long) instruction.effective_address)))                                                          \
-    return UNKNOWN_MEMORY_TERMINATION;                                                                                 \
-if ((offset = shm_handling::shared_memory_determine_offset(mapping_info,                                               \
-        (unsigned long long) instruction.effective_address, __size)) == (unsigned long long) -1)                       \
-    return -1;
-
-
-#define OBTAIN_SHARED_MAPPING_INFO_NO_DEF(__variant_address, __mapping_info, __offset, __size)                         \
-if (!(__mapping_info = relevant_monitor.set_mmap_table->get_shared_info(__variant_address)))                           \
-    return UNKNOWN_MEMORY_TERMINATION;                                                                                 \
-if ((__offset = shm_handling::shared_memory_determine_offset(__mapping_info, __variant_address, __size))               \
-        == (unsigned long long) -1)                                                                                    \
-    return -1;
-
-
-#define LOAD_REG_CODE(__src_or_dst, lookup)                                                                            \
-uint8_t reg_rex_extra = PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_R(instruction) ?                       \
-        0b1000u : 0;                                                                                                   \
-void* __src_or_dst = shared_mem_register_access::lookup[reg_rex_extra | GET_REG_CODE((unsigned) modrm)](regs_struct);
-
-
-#define LOAD_REG_CODE_BYTE(__src_or_dst, lookup)                                                                       \
-uint8_t reg_code = GET_REG_CODE((unsigned) modrm);                                                                     \
-if (PREFIXES_REX_PRESENT(instruction))                                                                                 \
-{                                                                                                                      \
-    if (PREFIXES_REX_FIELD_R(instruction))                                                                             \
-        reg_code |= 0b1000u;                                                                                           \
-}                                                                                                                      \
-else                                                                                                                   \
-    reg_code &= ~0b100u;                                                                                               \
-void* __src_or_dst = shared_mem_register_access::lookup[reg_code](regs_struct);
-
-#define LOAD_IMM(__src_or_dst)                                                                                         \
-if (!instruction.immediate_operand_index)                                                                              \
-    return -1;                                                                                                         \
-void* __src_or_dst = &instruction.instruction[instruction.immediate_operand_index];
-
-
-#define GET_INSTRUCTION_ACCESS_SIZE                                                                                    \
-((PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction)) ?                                            \
-        8 : (PREFIXES_GRP_THREE_PRESENT(instruction) ? 2 : 4))
-
-
-#define REPLAY_BUFFER_ADVANCE                                                                                          \
-{                                                                                                                      \
-    int __replay_result;                                                                                               \
-    if ((__replay_result = relevant_monitor.buffer.advance(variant->variant_num)) != 0)                                \
-        return __replay_result;                                                                                        \
-}
-
-
-#define GET_BUFFER_RAW(__monitor_pointer, __size)                                                                      \
-void* buffer;                                                                                                          \
-int result;                                                                                                            \
-{                                                                                                                      \
-    unsigned long long __raw_size = __size;                                                                            \
-    result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, __monitor_pointer, instruction,               \
-            &buffer, __raw_size);                                                                                      \
-    if (result < 0)                                                                                                    \
-        return result;                                                                                                 \
-}
-
-
-// =====================================================================================================================
 //      byte emulators
 // =====================================================================================================================
 
@@ -140,70 +42,28 @@ BYTE_EMULATOR_IMPL(0x01)
         // 64-bit
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            uint64_t* typed_source = (uint64_t*)source;
-
-            NORMAL_TO_SHARED(uint64_t,
-                    __asm__
-                    (
-                            ".intel_syntax noprefix;"
-                            "push %[flags];"
-                            "popf;"
-                            "lock add QWORD PTR [%[dst]], %[src];"
-                            "pushf;"
-                            "pop %[flags];"
-                            ".att_syntax;"
-                            : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
-                            : [dst] "r" (typed_destination), [src] "r" (*typed_source)
-                            : "cc"
-                    ), WRITE_DIVERGENCE_ERROR(" > write divergence in add m64, reg64\n")
-            )
+            auto* typed_source = (uint64_t*)source;
+            NORMAL_TO_SHARED_EMULATE(uint64_t,
+                    WRITE_DIVERGENCE_ERROR(" > write divergence in add m64, reg64\n"))
         }
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            uint16_t* typed_source = (uint16_t*)source;
-
-            NORMAL_TO_SHARED(uint16_t,
-                    __asm__
-                    (
-                            ".intel_syntax noprefix;"
-                            "push %[flags];"
-                            "popf;"
-                            "lock add WORD PTR [%[dst]], %[src];"
-                            "pushf;"
-                            "pop %[flags];"
-                            ".att_syntax;"
-                            : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
-                            : [dst] "r" (typed_destination), [src] "r" (*typed_source)
-                            : "cc"
-                    ),WRITE_DIVERGENCE_ERROR(" > write divergence in add m16, reg16\n")
+            auto* typed_source = (uint16_t*)source;
+            NORMAL_TO_SHARED_EMULATE(uint16_t,
+                    WRITE_DIVERGENCE_ERROR(" > write divergence in add m16, reg16\n")
             )
         }
         // 32-bit
         else
         {
-            uint32_t* typed_source = (uint32_t*)source;
-
-            NORMAL_TO_SHARED(uint32_t,
-                    __asm__
-                    (
-                            ".intel_syntax noprefix;"
-                            "push %[flags];"
-                            "popf;"
-                            "lock add DWORD PTR [%[dst]], %[src];"
-                            "pushf;"
-                            "pop %[flags];"
-                            ".att_syntax;"
-                            : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
-                            : [dst] "r" (typed_destination), [src] "r" (*typed_source)
-                            : "cc"
-                    ), WRITE_DIVERGENCE_ERROR(" > write divergence in add m32, reg32\n")
-            )
+            auto* typed_source = (uint32_t*)source;
+            NORMAL_TO_SHARED_EMULATE(uint32_t,
+                    WRITE_DIVERGENCE_ERROR(" > write divergence in add m32, reg32\n"))
         }
 
-        // no need to do any write backs here, only general purpose registers changed
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        // do NOT advance the buffer here
+        RETURN_WRITE(0x01)
     }
 
     // illegal otherwise
@@ -290,8 +150,7 @@ BYTE_EMULATOR_IMPL(0x03)
         }
 
         // registers will be written back anyway
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        RETURN_ADVANCE
     }
 
     // illegal otherwise
@@ -399,8 +258,7 @@ BYTE_EMULATOR_IMPL(0x0b)
         }
 
         // registers will be written back anyway
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        RETURN_ADVANCE
     }
 
     // illegal otherwise
@@ -478,8 +336,7 @@ BYTE_EMULATOR_IMPL(0x10)
         // writeback required
         if (interaction::write_all_fpregs(*instruction.variant_pid, regs_struct))
         {
-            REPLAY_BUFFER_ADVANCE
-            return 0;
+            RETURN_ADVANCE
         }
     }
 
@@ -504,22 +361,11 @@ BYTE_EMULATOR_IMPL(0x11)
         LOAD_REG_CODE(source, xmm_lookup)
 
         // perform operation
-        XMM_TO_SHARED(
-                __asm__
-                (
-                ".intel_syntax noprefix;"
-                "movups xmm0, XMMWORD PTR [rdx];"
-                "movups XMMWORD PTR [rax], xmm0;"
-                ".att_syntax;"
-                :
-                : [dst] "a" (destination), [src] "d" (source)
-                : "xmm0", "cc"
-        ), WRITE_DIVERGENCE_XMM_PTR_CHECK(buffer, source,
+        XMM_TO_SHARED_EMULATE(WRITE_DIVERGENCE_XMM_PTR_CHECK(buffer, source,
                 " > write divergence in movups m128, xmm\n"))
 
         // no write back needed
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        RETURN_WRITE(0x11)
     }
 
     // illegal otherwise
@@ -670,8 +516,7 @@ BYTE_EMULATOR_IMPL(0x23)
         }
 
         // registers will be written back by default
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        RETURN_ADVANCE
     }
 
     // illegal otherwise
@@ -714,74 +559,26 @@ BYTE_EMULATOR_IMPL(0x29)
         if (access_size == 8)
         {
             uint64_t* typed_source = (uint64_t*) source;
-
-            NORMAL_TO_SHARED(
-                    uint64_t,
-                    __asm__
-                    (
-                        ".intel_syntax noprefix;"
-                        "push %[flags];"
-                        "popf;"
-                        "sub QWORD PTR [%[dst]], %[src];"
-                        "pushf;"
-                        "pop %[flags];"
-                        ".att_syntax;"
-                        : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
-                        : [dst] "r" (typed_destination), [src] "r" (*typed_source)
-                        : "cc"
-                    ), WRITE_DIVERGENCE_ERROR(" > write divergence in sub m64, reg64\n")
-            )
+            NORMAL_TO_SHARED_EMULATE(uint64_t,
+                    WRITE_DIVERGENCE_ERROR(" > write divergence in sub m64, reg64\n"))
         }
         // 16-bit
         else if (access_size == 2)
         {
             uint16_t* typed_source = (uint16_t*) source;
-
-            NORMAL_TO_SHARED(
-                    uint16_t,
-                    __asm__
-                    (
-                            ".intel_syntax noprefix;"
-                            "push %[flags];"
-                            "popf;"
-                            "sub WORD PTR [%[dst]], %[src];"
-                            "pushf;"
-                            "pop %[flags];"
-                            ".att_syntax;"
-                            : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
-                            : [dst] "r" (typed_destination), [src] "r" (*typed_source)
-                            : "cc"
-                    ), WRITE_DIVERGENCE_ERROR(" > write divergence in sub m16, reg16\n")
-            )
+            NORMAL_TO_SHARED_EMULATE(uint16_t,
+                    WRITE_DIVERGENCE_ERROR(" > write divergence in sub m16, reg16\n"))
         }
         // 32-bit
         else
         {
             uint32_t* typed_source = (uint32_t*) source;
-
-            NORMAL_TO_SHARED(
-                    uint32_t,
-                    __asm__
-                    (
-                            ".intel_syntax noprefix;"
-                            "push %[flags];"
-                            "popf;"
-                            "sub DWORD PTR [%[dst]], %[src];"
-                            "pushf;"
-                            "pop %[flags];"
-                            ".att_syntax;"
-                            : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
-                            : [dst] "r" (typed_destination), [src] "r" (*typed_source)
-                            : "cc"
-                    ), WRITE_DIVERGENCE_ERROR(" > write divergence in sub m32, reg32\n")
-            )
+            NORMAL_TO_SHARED_EMULATE(uint32_t,
+                    WRITE_DIVERGENCE_ERROR(" > write divergence in sub m32, reg32\n"))
         }
 
-        // save content of flags register to repliaction buffer
-        // *(unsigned long*) ((unsigned long) buffer + access_size) = regs_struct->eflags;
-        // registers will be written back on resume.
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        // do NOT advance buffer here
+        RETURN_WRITE(0x29)
     }
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
@@ -794,39 +591,20 @@ BYTE_EMULATOR_IMPL(0x29)
         // movapd xmm/m128, xmm
         if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            XMM_TO_SHARED(
-                    __asm__(
-                            ".intel_syntax noprefix;"
-                            "movups xmm0, XMMWORD PTR [rdx];"
-                            "movapd XMMWORD PTR [rax], xmm0;"
-                            ".att_syntax"
-                            :
-                            : [dst] "a" (destination), [src] "d" (source)
-                            : "xmm0"
-                    ), WRITE_DIVERGENCE_XMM_EQUAL(buffer, source,
-                            " > write divergence in movapd m128, xmm\n")
+            XMM_TO_SHARED_EMULATE(WRITE_DIVERGENCE_XMM_EQUAL(buffer, source,
+                    " > write divergence in movapd m128, xmm\n")
             )
         }
         // movaps xmm/m128, xmm
         else
         {
-            XMM_TO_SHARED(
-                    __asm__(
-                            ".intel_syntax noprefix;"
-                            "movups xmm0, XMMWORD PTR [rdx];"
-                            "movaps XMMWORD PTR [rax], xmm0;"
-                            ".att_syntax"
-                            :
-                            : [dst] "a" (destination), [src] "d" (source)
-                            : "xmm0"
-                    ), WRITE_DIVERGENCE_XMM_EQUAL(__buffer, __source,
-                            " > write divergence in movaps m128, xmm\n")
+            XMM_TO_SHARED_EMULATE(WRITE_DIVERGENCE_XMM_EQUAL(__buffer, __source,
+                    " > write divergence in movaps m128, xmm\n")
             )
         }
 
-        // source is register, no write back needed
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        // do NOT advance buffer here
+        RETURN_WRITE(0x29)
     }
 
     // illegal otherwise
@@ -863,13 +641,9 @@ BYTE_EMULATOR_IMPL(0x2a)
             // write back fpregs
             if (interaction::write_all_fpregs(*instruction.variant_pid, regs_struct))
             {
-                REPLAY_BUFFER_ADVANCE
-                return 0;
+                RETURN_ADVANCE
             }
         }
-        // illegal otherwise
-        else
-            return -1;
     }
 
     // illegal otherwise
@@ -952,8 +726,7 @@ BYTE_EMULATOR_IMPL(0x2b)
         }
 
         // registers will be written back anyway
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        RETURN_ADVANCE
     }
 
     // movntps m128, xmm
@@ -964,21 +737,10 @@ BYTE_EMULATOR_IMPL(0x2b)
         LOAD_RM_CODE_NO_DEFINE(16)
         LOAD_REG_CODE(source, xmm_lookup)
 
-        XMM_TO_SHARED(
-        __asm__
-        (
-                ".intel_syntax noprefix;"
-                "movdqu xmm0, XMMWORD PTR [rdx];"
-                "movntps XMMWORD PTR [rax], xmm0;"
-                ".att_syntax;"
-                :
-                : "a" (destination), "d" (source)
-                : "xmm0"
-        ), WRITE_DIVERGENCE_XMM_EQUAL(__buffer, __source,
+        XMM_TO_SHARED_EMULATE(WRITE_DIVERGENCE_XMM_EQUAL(__buffer, __source,
                 " > write divergence in movntps m128, xmm\n"))
 
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        RETURN_ADVANCE
     }
 
     // illegal otherwise
@@ -1087,8 +849,7 @@ BYTE_EMULATOR_IMPL(0x33)
         }
 
         // registers will be written back anyway
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        RETURN_ADVANCE
     }
 
     // illegal otherwise
@@ -1123,11 +884,12 @@ BYTE_EMULATOR_IMPL(0x38)
         LOAD_RM_CODE_NO_DEFINE(1)
         LOAD_REG_CODE(source, general_purpose_lookup)
         auto* typed_source = (uint8_t*) source;
-        NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER(uint8_t, "cmp BYTE PTR [%[dst]], %[src];",
+        NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE(uint8_t,
                 WRITE_DIVERGENCE_ERROR(" > write divergence in cmp m8, reg8\n"))
 
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+
+        // do NOT advance buffer here
+        RETURN_WRITE(0x38)
     }
 
     // illegal otherwise
@@ -1149,7 +911,7 @@ BYTE_EMULATOR_IMPL(0x39)
         {
             LOAD_RM_CODE_NO_DEFINE(8)
             auto typed_source = (uint64_t*) source;
-            NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER(uint64_t, "cmp QWORD PTR [%[dst]], %[src];",
+            NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE(uint64_t,
                     WRITE_DIVERGENCE_PTR_CHECK(((uint64_t*)((unsigned long long*) buffer + 1)),
                             typed_source,
                             " > write divergence in cmp m64, reg64\n"))
@@ -1159,7 +921,7 @@ BYTE_EMULATOR_IMPL(0x39)
         {
             LOAD_RM_CODE_NO_DEFINE(2)
             auto typed_source = (uint16_t*) source;
-            NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER(uint16_t, "cmp WORD PTR [%[dst]], %[src];",
+            NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE(uint16_t,
                     WRITE_DIVERGENCE_ERROR(" > write divergence in cmp m16, reg16\n"))
         }
         // 32-bit
@@ -1167,13 +929,12 @@ BYTE_EMULATOR_IMPL(0x39)
         {
             LOAD_RM_CODE_NO_DEFINE(4)
             auto typed_source = (uint32_t*) source;
-            NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER(uint32_t, "cmp DWORD PTR [%[dst]], %[src];",
+            NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE(uint32_t,
                     WRITE_DIVERGENCE_ERROR(" > write divergence in cmp m32, reg32\n"))
         }
 
-        // registers will be written back anyway
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        // do NOT advance buffer here
+        RETURN_WRITE(0x39)
     }
 
     // illegal otherwise
@@ -1260,8 +1021,7 @@ BYTE_EMULATOR_IMPL(0x3b)
         }
 
         // registers will be written back anyway
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        RETURN_ADVANCE
     }
 
     // illegal otherwise
@@ -1450,8 +1210,7 @@ BYTE_EMULATOR_IMPL(0x63)
         }
 
         // general purpose regs will be written back by default
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        RETURN_ADVANCE
     }
 
     // illegal otherwise
@@ -1571,8 +1330,7 @@ BYTE_EMULATOR_IMPL(0x6f)
         // write back regs, always needed here
         if (interaction::write_all_fpregs(*instruction.variant_pid, regs_struct))
         {
-            REPLAY_BUFFER_ADVANCE
-            return 0;
+            RETURN_ADVANCE
         }
     }
 
@@ -1652,8 +1410,7 @@ BYTE_EMULATOR_IMPL(0x74)
         // we always write to a register, so we have to write it back
         if (interaction::write_all_fpregs(*instruction.variant_pid, regs_struct))
         {
-            REPLAY_BUFFER_ADVANCE
-            return 0;
+            RETURN_ADVANCE
         }
     }
     // illegal otherwise
@@ -1714,17 +1471,7 @@ BYTE_EMULATOR_IMPL(0x7f)
             LOAD_RM_CODE_NO_DEFINE(16)
             LOAD_REG_CODE(source, xmm_lookup)
 
-            XMM_TO_SHARED(
-            __asm__
-            (
-                    ".intel_syntax noprefix;"
-                    "movdqu xmm0, XMMWORD PTR [rdx];"
-                    "movdqu XMMWORD PTR [rax], xmm0;"
-                    ".att_syntax;"
-                    :
-                    : [dst] "a" (destination), [src] "d" (source)
-                    : "xmm0"
-            ), WRITE_DIVERGENCE_XMM_EQUAL(__buffer, __source,
+            XMM_TO_SHARED_EMULATE(WRITE_DIVERGENCE_XMM_EQUAL(__buffer, __source,
                     " > write divergence in movdqu m128, xmm\n"))
         }
         // movdqa xmm/m128, xmm if f3 prefix is not present
@@ -1735,17 +1482,7 @@ BYTE_EMULATOR_IMPL(0x7f)
             LOAD_RM_CODE_NO_DEFINE(16)
             LOAD_REG_CODE(source, xmm_lookup)
 
-            XMM_TO_SHARED(
-            __asm__
-            (
-                    ".intel_syntax noprefix;"
-                    "movdqu xmm0, XMMWORD PTR [rdx];"
-                    "movdqa XMMWORD PTR [rax], xmm0;"
-                    ".att_syntax;"
-                    :
-                    : [dst] "a" (destination), [src] "d" (source)
-                    : "xmm0"
-            ), WRITE_DIVERGENCE_XMM_EQUAL(__buffer, __source,
+            XMM_TO_SHARED_EMULATE(WRITE_DIVERGENCE_XMM_EQUAL(__buffer, __source,
                     " > write divergence in movdqa m128, xmm\n"))
         }
         // movq m64, mm
@@ -1757,23 +1494,11 @@ BYTE_EMULATOR_IMPL(0x7f)
             LOAD_REG_CODE(source, mm_lookup)
             auto* typed_source = (uint64_t*) source;
 
-            NORMAL_TO_SHARED(uint64_t,
-            __asm__
-            (
-                    ".intel_syntax noprefix;"
-                    "movq mm0, QWORD PTR [rdx];"
-                    "movq QWORD PTR [rax], mm0;"
-                    ".att_syntax;"
-                    :
-                    : [dst] "a" (typed_destination), [src] "d" (source)
-                    : "mm0"
-            ), WRITE_DIVERGENCE_ERROR(" > write divergence in movq m64, mm\n"))
+            NORMAL_TO_SHARED_EMULATE(uint64_t, WRITE_DIVERGENCE_ERROR(" > write divergence in movq m64, mm\n"))
         }
 
-
-        // no write back needed here
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        // do NOT advance the buffer here
+        RETURN_WRITE(0x7f)
     }
 
     // illegal access otherwise
@@ -1787,13 +1512,8 @@ BYTE_EMULATOR_IMPL(0x80)
     // Immediate Grp 1 Eb, Ib
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        DEFINE_REGS_STRUCT
         DEFINE_MODRM
         LOAD_RM_CODE_NO_DEFINE(1)
-        LOAD_IMM(source)
-
-        // replay no spoofing needed
-        auto* typed_source = (uint8_t*)source;
 
         // ModR/M reg field used as opcode extension
         switch (GET_REG_CODE(modrm))
@@ -1802,23 +1522,7 @@ BYTE_EMULATOR_IMPL(0x80)
                 return -1;
             case 0b001u: // OR  - not yet implemented
             {
-                // perform operation, note that the flags register is also changed here
-                NORMAL_TO_SHARED(uint8_t,
-                        __asm__
-                        (
-                                ".intel_syntax noprefix;"
-                                "push %[flags];"
-                                "popf;"
-                                "or BYTE PTR [%[dst]], %[src];"
-                                "pushf;"
-                                "pop %[flags];"
-                                ".att_syntax;"
-                                : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
-                                : [dst] "r" (typed_destination), [src] "r" (*typed_source)
-                                : "cc"
-                        ), WRITE_DIVERGENCE_ERROR(" > write divergence in od m8, imm8\n")
-                )
-
+                IMM_TO_SHARED_REPLICATE_FLAGS_EMULATE
                 break;
             }
             case 0b010u: // ADC - not yet implemented
@@ -1826,23 +1530,7 @@ BYTE_EMULATOR_IMPL(0x80)
                 return -1;
             case 0b100u: // AND - and r/m8, imm8
             {
-                // perform operation, note that the flags register is also changed here
-                NORMAL_TO_SHARED(uint8_t,
-                        __asm__
-                        (
-                                ".intel_syntax noprefix;"
-                                "push %[flags];"
-                                "popf;"
-                                "and BYTE PTR [%[dst]], %[src];"
-                                "pushf;"
-                                "pop %[flags];"
-                                ".att_syntax;"
-                                : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
-                                : [dst] "r" (typed_destination), [src] "r" (*typed_source)
-                                : "cc"
-                        ), WRITE_DIVERGENCE_ERROR(" > write divergence in and n8, imm8\n")
-                )
-
+                IMM_TO_SHARED_REPLICATE_FLAGS_EMULATE
                 break;
             }
             case 0b101u: // SUB - not yet implemented
@@ -1851,8 +1539,7 @@ BYTE_EMULATOR_IMPL(0x80)
             case 0b111u: // CMP - CMP r/m8, imm8
             {
                 // perform operation, note that the flags register is also changed here
-                NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER(uint8_t, "cmp BYTE PTR [%[dst]], %[src];",
-                        WRITE_DIVERGENCE_ERROR(" > write divergence in cmp m8, imm8\n"))
+                IMM_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE
                 break;
             }
 
@@ -1860,9 +1547,8 @@ BYTE_EMULATOR_IMPL(0x80)
                 return -1;
         }
 
-        // registers will be written back with rip
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        // do NOT advance buffer here
+        RETURN_WRITE(0x80)
     }
 
     // illegal otherwise
@@ -1876,10 +1562,8 @@ BYTE_EMULATOR_IMPL(0x81)
     // immediate grp 1 Ev, Iz
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        DEFINE_REGS_STRUCT
         DEFINE_MODRM
         LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE)
-        LOAD_IMM(source)
 
         switch (GET_REG_CODE(modrm))
         {
@@ -1890,66 +1574,7 @@ BYTE_EMULATOR_IMPL(0x81)
                 return -1;
             case 0b100u: // AND - and r/m(16,32,64), imm(16,32,32)
             {
-                // perform operation, note that the flags register is also changed here
-                // and r/m64, imm32
-                if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
-                {
-                    uint64_t source_extended = (int64_t)*(int32_t*)source;
-                    auto* typed_source = &source_extended;
-                    NORMAL_TO_SHARED(uint64_t,
-                    __asm__
-                    (
-                            ".intel_syntax noprefix;"
-                            "push %[flags];"
-                            "popf;"
-                            "and QWORD PTR [%[dst]], %[src];"
-                            "pushf;"
-                            "pop %[flags];"
-                            ".att_syntax;"
-                            : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
-                            : [dst] "r" (typed_destination), [src] "r" (*typed_source)
-                            : "cc"
-                    ), WRITE_DIVERGENCE_ERROR(" > write divergence in and m674, imm32\n"))
-                }
-                // and r/m16, imm16
-                else if (PREFIXES_GRP_THREE_PRESENT(instruction))
-                {
-                    auto* typed_source = (uint16_t*)source;
-                    NORMAL_TO_SHARED(uint16_t,
-                    __asm__
-                    (
-                            ".intel_syntax noprefix;"
-                            "push %[flags];"
-                            "popf;"
-                            "and WORD PTR [%[dst]], %[src];"
-                            "pushf;"
-                            "pop %[flags];"
-                            ".att_syntax;"
-                            : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
-                            : [dst] "r" (typed_destination), [src] "r" (*typed_source)
-                            : "cc"
-                    ), WRITE_DIVERGENCE_ERROR(" > write divergence in and m16, imm16\n"))
-                }
-                // and r/m32, imm32
-                else
-                {
-                    auto* typed_source = (uint32_t*)source;
-                    NORMAL_TO_SHARED(uint32_t,
-                     __asm__
-                    (
-                            ".intel_syntax noprefix;"
-                            "push %[flags];"
-                            "popf;"
-                            "and DWORD PTR [%[dst]], %[src];"
-                            "pushf;"
-                            "pop %[flags];"
-                            ".att_syntax;"
-                            : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination)
-                            : [dst] "r" (typed_destination), [src] "r" (*typed_source)
-                            : "cc"
-                    ), WRITE_DIVERGENCE_ERROR(" > write divergence in and m32, imm32\n"))
-                }
-
+                IMM_TO_SHARED_REPLICATE_FLAGS_EMULATE
                 break;
             }
             case 0b101u: // SUB - not yet implemented
@@ -1957,30 +1582,7 @@ BYTE_EMULATOR_IMPL(0x81)
                 return -1;
             case 0b111u: // CMP - CMP r/m, imm
             {
-                // cmp r/m64, imm32
-                if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
-                {
-                    uint64_t source_extended = (int64_t)*(int32_t*)source;
-                    auto* typed_source = &source_extended;
-                    NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER(uint64_t, "cmp QWORD PTR [%[dst]], %[src];",
-                            WRITE_DIVERGENCE_ERROR(" > write divergence in cmp m64, imm32\n"))
-                }
-                // cmp r/m16, imm16
-                else if (PREFIXES_GRP_THREE_PRESENT(instruction))
-                {
-                    auto* typed_source = (uint16_t*)source;
-                    NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER(uint16_t, "cmp WORD PTR [%[dst]], %[src];",
-                            WRITE_DIVERGENCE_ERROR(" > write divergence in cmp m16, imm16\n"))
-                }
-                // cmp r/m32, imm32
-                else
-                {
-                    auto* typed_source = (uint32_t*)source;
-                    warnf(" > %llx\n", (unsigned long long)*typed_source);
-                    NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER(uint32_t, "cmp DWORD PTR [%[dst]], %[src];",
-                            WRITE_DIVERGENCE_ERROR(" > write divergence in cmp m32, imm32\n"))
-                }
-
+                IMM_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE
                 break;
             }
 
@@ -1988,9 +1590,7 @@ BYTE_EMULATOR_IMPL(0x81)
                 return -1;
         }
 
-        // general purpose registers will be written back by default
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        RETURN_WRITE(0x81)
     }
 
     // illegal otherwise
@@ -2008,71 +1608,19 @@ BYTE_EMULATOR_IMPL(0x83)
     // grp 1 r/m(16,32,64), imm8
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        DEFINE_REGS_STRUCT
         DEFINE_MODRM
         LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE)
-        LOAD_IMM(source)
 
         switch (GET_REG_CODE((unsigned ) instruction[instruction.effective_opcode_index + 1]))
         {
             case 0b000u: // ADD - add r/m(16,32,64), imm8
             {
-                // perform operation, note that the flags register is also changed here
-                // add r/m64, imm8
-                if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
-                {
-                    uint64_t source_extended = (int64_t)*(int8_t*)source;
-                    auto* typed_source = &source_extended;
-                    NORMAL_TO_SHARED_REPLICATE_FLAGS(uint64_t, "lock add QWORD PTR [%[dst]], %[src];",
-                            WRITE_DIVERGENCE_ERROR(" > write divergence in add m64, imm8\n"))
-                }
-                // add r/m16, imm8
-                else if (PREFIXES_GRP_THREE_PRESENT(instruction))
-                {
-                    uint16_t source_extended = (int16_t)*(int8_t*)source;
-                    auto* typed_source = &source_extended;
-                    NORMAL_TO_SHARED_REPLICATE_FLAGS(uint16_t, "lock add WORD PTR [%[dst]], %[src];",
-                            WRITE_DIVERGENCE_ERROR(" > write divergence in add m16m imm8\n"))
-                }
-                // add r/m32, imm8
-                else
-                {
-                    uint32_t source_extended = (int32_t)*(int8_t*)source;
-                    auto* typed_source = &source_extended;
-                    NORMAL_TO_SHARED_REPLICATE_FLAGS(uint32_t, "lock add DWORD PTR [%[dst]], %[src];",
-                            WRITE_DIVERGENCE_ERROR(" > write divergence in add m32, imm8\n"))
-                }
-
+                IMM_TO_SHARED_REPLICATE_FLAGS_EMULATE
                 break;
             }
             case 0b001u: // OR  - not yet implemented
             {
-                // perform operation, note that the flags register is also changed here
-                // or r/m64, imm8
-                if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
-                {
-                    uint64_t source_extended = (int64_t)*(int8_t*)source;
-                    auto* typed_source = &source_extended;
-                    NORMAL_TO_SHARED_REPLICATE_FLAGS(uint64_t, "lock or QWORD PTR [%[dst]], %[src];",
-                            WRITE_DIVERGENCE_ERROR(" > write divergence in or m64, imm8\n"))
-                }
-                // or r/m16, imm8
-                else if (PREFIXES_GRP_THREE_PRESENT(instruction))
-                {
-                    uint16_t source_extended = (int16_t)*(int8_t*)source;
-                    auto* typed_source = &source_extended;
-                    NORMAL_TO_SHARED_REPLICATE_FLAGS(uint16_t, "lock or WORD PTR [%[dst]], %[src];",
-                            WRITE_DIVERGENCE_ERROR(" > write divergence in or m16, imm8\n"))
-                }
-                // or r/m32, imm8
-                else
-                {
-                    uint32_t source_extended = (int32_t)*(int8_t*)source;
-                    auto* typed_source = &source_extended;
-                    NORMAL_TO_SHARED_REPLICATE_FLAGS(uint32_t, "lock or DWORD PTR [%[dst]], %[src];",
-                            WRITE_DIVERGENCE_ERROR(" > write divergence in or m32, imm8\n") )
-                }
-
+                IMM_TO_SHARED_REPLICATE_FLAGS_EMULATE
                 break;
             }
             case 0b010u: // ADC - not yet implemented
@@ -2083,73 +1631,21 @@ BYTE_EMULATOR_IMPL(0x83)
                 return -1;
             case 0b101u: // SUB - not yet implemented
             {
-                // perform operation, note that the flags register is also changed here
-                // sub r/m64, imm8
-                if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
-                {
-                    uint64_t source_extended = (int64_t)*(int8_t*)source;
-                    auto* typed_source = &source_extended;
-                    NORMAL_TO_SHARED_REPLICATE_FLAGS(uint64_t, "lock sub QWORD PTR [%[dst]], %[src];",
-                            WRITE_DIVERGENCE_ERROR(" > write divergence in sub m64, imm8\n"))
-                }
-                // sub r/m16, imm8
-                else if (PREFIXES_GRP_THREE_PRESENT(instruction))
-                {
-                    uint16_t source_extended = (int16_t)*(int8_t*)source;
-                    auto* typed_source = &source_extended;
-                    NORMAL_TO_SHARED_REPLICATE_FLAGS(uint16_t, "lock sub WORD PTR [%[dst]], %[src];",
-                            WRITE_DIVERGENCE_ERROR(" > write divergence in sub m16, imm8\n"))
-                }
-                // sub r/m32, imm8
-                else
-                {
-                    uint32_t source_extended = (int32_t)*(int8_t*)source;
-                    auto* typed_source = &source_extended;
-                    NORMAL_TO_SHARED_REPLICATE_FLAGS(uint32_t, "lock sub DWORD PTR [%[dst]], %[src];",
-                            WRITE_DIVERGENCE_ERROR(" > write divergence in sub m32, imm8\n"))
-                }
-
+                IMM_TO_SHARED_REPLICATE_FLAGS_EMULATE
                 break;
             }
             case 0b110u: // XOR - not yet implemented
                 return -1;
             case 0b111u: // CMP - cmp r/m(16,32,64), imm8
             {
-                // perform operation, note that the flags register is also changed here
-                // cmp r/m64, imm8
-                if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
-                {
-                    uint64_t source_extended = (int64_t)*(int8_t*)source;
-                    auto* typed_source = &source_extended;
-                    NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER(uint64_t, "cmp QWORD PTR [%[dst]], %[src];",
-                            WRITE_DIVERGENCE_ERROR(" > write divergence in cmp m64, imm8\n"))
-                }
-                // cmp r/m16, imm8
-                else if (PREFIXES_GRP_THREE_PRESENT(instruction))
-                {
-                    uint16_t source_extended = (int16_t)*(int8_t*)source;
-                    auto* typed_source = &source_extended;
-                    NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER(uint16_t, "cmp WORD PTR [%[dst]], %[src];",
-                            WRITE_DIVERGENCE_ERROR(" > write divergence in cmp m16, imm8\n"))
-                }
-                // cmp r/m32, imm8
-                else
-                {
-                    uint32_t source_extended = (int32_t)*(int8_t*)source;
-                    auto* typed_source = &source_extended;
-                    NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER(uint32_t, "cmp DWORD PTR [%[dst]], %[src];",
-                            WRITE_DIVERGENCE_ERROR(" > write divergence in cmp m32, imm8\n"))
-                }
-
+                IMM_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE
                 break;
             }
             default:
                 return -1;
         }
 
-        // general purpose registers will be written back by default
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        RETURN_WRITE(0x83)
     }
 
     // illegal otherwise
@@ -2240,8 +1736,7 @@ BYTE_EMULATOR_IMPL(0x87)
         }
 
         // no need to write back registers here
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        RETURN_ADVANCE
     }
 
     // illegal otherwise
@@ -2267,12 +1762,11 @@ BYTE_EMULATOR_IMPL(0x88)
         uint8_t* typed_source = (uint8_t*)source;
 
         // execute operation
-        NORMAL_TO_SHARED(uint8_t , *typed_destination = *typed_source,
-                WRITE_DIVERGENCE_ERROR(" > write divergence in mov m8, reg8\n"));
+        NORMAL_TO_SHARED_EMULATE(uint8_t,
+                                 WRITE_DIVERGENCE_ERROR(" > write divergence in mov m8, reg8\n"));
 
-        // we don't have to write anything back here, destination shouldn't be able to be a register
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        // do NOT advance buffer here
+        RETURN_WRITE(0x88)
     }
 
     // illegal otherwise
@@ -2295,28 +1789,27 @@ BYTE_EMULATOR_IMPL(0x89)
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
             auto* typed_source = (uint64_t*)source;
-            NORMAL_TO_SHARED(uint64_t, *typed_destination = *typed_source,
-                    WRITE_DIVERGENCE_PTR_CHECK(buffer, typed_source,
+            NORMAL_TO_SHARED_EMULATE(uint64_t,
+                                     WRITE_DIVERGENCE_PTR_CHECK(buffer, typed_source,
                             " > pointer check failed in mov m64, reg64\n"))
         }
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
             auto* typed_source = (uint16_t*)source;
-            NORMAL_TO_SHARED(uint16_t, *typed_destination = *typed_source,
-                    WRITE_DIVERGENCE_ERROR(" > write divergence in mov m16, reg16\n"))
+            NORMAL_TO_SHARED_EMULATE(uint16_t,
+                                     WRITE_DIVERGENCE_ERROR(" > write divergence in mov m16, reg16\n"))
         }
         // default 32-bit
         else
         {
             auto* typed_source = (uint32_t*)source;
-            NORMAL_TO_SHARED(uint32_t, *typed_destination = *typed_source,
-                    WRITE_DIVERGENCE_ERROR(" > write divergence in mov m32, reg32\n"))
+            NORMAL_TO_SHARED_EMULATE(uint32_t,
+                                     WRITE_DIVERGENCE_ERROR(" > write divergence in mov m32, reg32\n"))
         }
 
-        // no need to write back any registers
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        // do NOT advance buffer here
+        RETURN_WRITE(0x89)
     }
 
     // illegal otherwise
@@ -2346,8 +1839,7 @@ BYTE_EMULATOR_IMPL(0x8a)
         *typed_destination = *typed_source;
 
         // registers will be written back with rip
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        RETURN_ADVANCE
     }
 
     // illegal otherwise
@@ -2389,8 +1881,7 @@ BYTE_EMULATOR_IMPL(0x8b)
         }
 
         // registers will be written back with rip
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        RETURN_ADVANCE
     }
 
     // illegal otherwise
@@ -2555,10 +2046,8 @@ BYTE_EMULATOR_IMPL(0xa4)
         unsigned long long dst = regs_struct->rdi;
         unsigned long long src_offset;
         unsigned long long dst_offset;
-        shared_monitor_map_info* src_info;
-        shared_monitor_map_info* dst_info;
-        bool src_spoof = true;
-        bool dst_spoof = true;
+        shared_monitor_map_info* src_info = nullptr;
+        shared_monitor_map_info* dst_info = nullptr;
         unsigned long long size = PREFIXES_GRP_ONE_PRESENT(instruction) &&
                 (PREFIXES_GRP_ONE(instruction) == REPNZ_PREFIX_CODE ||
                  PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE) ? regs_struct->rcx : 1;
@@ -2570,41 +2059,75 @@ BYTE_EMULATOR_IMPL(0xa4)
             src = decode_address_tag(src, variant);
             OBTAIN_SHARED_MAPPING_INFO_NO_DEF(src, src_info, src_offset, size)
             src = (unsigned long long) src_info->monitor_base + src_offset;
-            src_spoof = false;
         }
         // destination is shared memory
-        else if (IS_TAGGED_ADDRESS(dst))
+        if (IS_TAGGED_ADDRESS(dst))
         {
             dst = decode_address_tag(dst, variant);
             OBTAIN_SHARED_MAPPING_INFO_NO_DEF(dst, dst_info, dst_offset, size)
             dst = (unsigned long long) dst_info->monitor_base + dst_offset;
-            dst_spoof = false;
         }
         // we would expect one of the two to be known shared memory
-        if (dst_spoof && src_spoof)
+        if (!dst_info && !src_info)
             return -1;
 
-
         // replay and spoofing
-        GET_BUFFER_RAW((void*) (src_spoof ? dst : src),
-                       ((!src_spoof && !dst_spoof) ? sizeof(void*) : size) + (sizeof(unsigned long long) * 3))
-        auto rcx_result = (unsigned long long*) buffer;
-        auto efalgs_result = (unsigned long long*) buffer + 1;
-        *((unsigned long long*) buffer + 2) = size;
-        void** actual_buffer = src_spoof ? nullptr : (void**) ((unsigned long long*) buffer + 3);
+        MOVS_STRUCT
+        GET_BUFFER_RAW((void*) (src_info ? src : dst), sizeof(temp_t) + size)
+        auto typed_buffer = (temp_t*)buffer;
+        typed_buffer->buffer = (void*)((unsigned long long)buffer + sizeof(temp_t));
 
         // imitate
-        if (result != REPLAY_BUFFER_RETURN_FIRST)
+        if (!variant->variant_num)
         {
-            if (!dst_spoof && !src_spoof)
+            typed_buffer->size     = size;
+            typed_buffer->offset   = dst_offset;
+            typed_buffer->src_info = src_info;
+            typed_buffer->dst_info = dst_info;
+            if (dst_info && src_info)
+                typed_buffer->dst = dst;
+
+
+            if (src_info)
+                memcpy(typed_buffer->buffer, (void*)src, size);
+            else
             {
-                if ((void*) dst != *actual_buffer)
+                if (!interaction::read_memory(variant->variantpid, (void*) src, (long long)size, typed_buffer->buffer))
                 {
-                    warnf("second address mismatch\n");
+                    warnf("could not read data from source check, %llu bytes at %p\n", size, (void*) src);
                     return -1;
                 }
             }
-            else if (src_spoof)
+
+            if (dst_info)
+            {
+                RETURN_WRITE(0xa4)
+            }
+            else
+            {
+                if (!interaction::read_memory(variant->variantpid, (void*) dst, (long long)size, typed_buffer->buffer))
+                {
+                    warnf("could not write data to destination, %llu bytes at %p\n", size, (void*) dst);
+                    return -1;
+                }
+                regs_struct->rcx = 0;
+                RETURN_ADVANCE
+            }
+        }
+        else
+        {
+            if (dst_info && src_info && dst != typed_buffer->dst)
+            {
+                warnf("second address mismatch\n");
+                return -1;
+            }
+            if (typed_buffer->size != size)
+            {
+                warnf(" > size mismatches for 0xa4");
+                return -1;
+            }
+
+            if (!src_info)
             {
                 void* src_check = malloc(size);
                 if (!src_check)
@@ -2617,7 +2140,7 @@ BYTE_EMULATOR_IMPL(0xa4)
                     warnf("could not read data from source check, %llu bytes at %p\n", size, (void*) src);
                     return -1;
                 }
-                if (memcmp(src_check, actual_buffer, size) != 0)
+                if (memcmp(src_check, typed_buffer->buffer, size) != 0)
                 {
                     warnf(" > variant %d attempting to write diverging data, %llu bytes using movsb %p %p\n",
                           variant->variant_num, size, (void*)dst, (void*)src);
@@ -2625,79 +2148,23 @@ BYTE_EMULATOR_IMPL(0xa4)
                 }
                 free(src_check);
             }
-            if (dst_spoof)
+
+            if (!dst_info)
             {
-                if (!interaction::write_memory(variant->variantpid, (void*) dst, (long long) size, actual_buffer))
+                if (!interaction::write_memory(variant->variantpid, (void*) dst, (long long) size,
+                        typed_buffer->buffer))
                 {
                     warnf("could not write data to variant\n");
                     return -1;
                 }
-                if (*((unsigned long long*) buffer + 2) != size)
-                {
-                    warnf(" > size mismatches for 0xa4");
-                    return -1;
-                }
+
+                regs_struct->rcx = 0;
+                RETURN_ADVANCE
             }
-
-            regs_struct->rcx    = *rcx_result;
-            regs_struct->eflags = *efalgs_result;
-
-            REPLAY_BUFFER_ADVANCE
-            return 0;
-        }
-
-
-        // spoof
-        if (src_spoof)
-        {
-            if (!interaction::read_memory(variant->variantpid, (void*) src, (long long) size, actual_buffer))
+            else
             {
-                warnf("could not read source to spoof\n");
-                return -1;
+                RETURN_WRITE(0xa4)
             }
-        }
-
-
-        // different option for repeating
-        if (PREFIXES_GRP_ONE_PRESENT(instruction) &&
-            (PREFIXES_GRP_ONE(instruction) == REPNZ_PREFIX_CODE ||
-             PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE))
-        {
-            void* asm_dst = dst_spoof ? actual_buffer : (void*) dst;
-            void* asm_src = src_spoof ? actual_buffer : (void*) src;
-            __asm__
-            (
-                    ".intel_syntax noprefix;"
-                    "push %[flags];"
-                    "popf;"
-                    "rep movsb;"
-                    "pushf;"
-                    "pop %[flags];"
-                    ".att_syntax;"
-                    : [count] "+c" (regs_struct->rcx), [flags] "+g" (regs_struct->eflags), "+D" (asm_dst),
-                            "+S" (asm_src)
-                    : "m" (asm_src), "m" (asm_dst)
-                    : "cc", "memory"
-            );
-
-            if (dst_spoof && !interaction::write_memory(variant->variantpid, (void*) dst, (long) size, actual_buffer))
-            {
-                warnf("movsb could not write back destination\n");
-                return -1;
-            }
-
-            *rcx_result    = regs_struct->rcx;
-            *efalgs_result = regs_struct->eflags;
-            if (!src_spoof && !dst_spoof)
-                *actual_buffer = (void*) dst;
-
-            REPLAY_BUFFER_ADVANCE
-            return 0;
-        }
-        // non repeating
-        else
-        {
-            return -1;
         }
     }
 
@@ -2726,6 +2193,41 @@ BYTE_EMULATOR_IMPL(0xa4)
 // BYTE_EMULATOR_IMPL(0xa9)
 
 
+#define STOS_EMULATE(__cast)                                                                                           \
+OBTAIN_SHARED_MAPPING_INFO(count)                                                                                      \
+void* destination = (void*) ((unsigned long long) mapping_info->monitor_base + offset);                                \
+void* source = shared_mem_register_access::ACCESS_GENERAL_NAME(rax)(regs_struct);                                      \
+                                                                                                                       \
+STOS_STRUCT(__cast)                                                                                                    \
+GET_BUFFER_RAW(destination, sizeof(temp_t))                                                                            \
+auto typed_buffer = (temp_t*)buffer;                                                                                   \
+if (!variant->variant_num)                                                                                             \
+{                                                                                                                      \
+    typed_buffer->source = *(__cast*) source;                                                                          \
+    typed_buffer->count = count;                                                                                       \
+    typed_buffer->flags = regs_struct->eflags;                                                                         \
+}                                                                                                                      \
+else                                                                                                                   \
+{                                                                                                                      \
+    if (typed_buffer->source != *(__cast*) source)                                                                     \
+    {                                                                                                                  \
+        warnf(" > stos(%lu) with diverging source | %llx != %llx\n", sizeof(__cast),                                   \
+                (unsigned long long) typed_buffer->source, (unsigned long long) *(__cast*) source);                    \
+        return -1;                                                                                                     \
+    }                                                                                                                  \
+    else if (typed_buffer->count != count)                                                                             \
+    {                                                                                                                  \
+        warnf(" > stos(%lu) with diverging count | %llx != %llx\n", sizeof(__cast),                                    \
+                typed_buffer->count, (unsigned long long) count);                                                      \
+        return -1;                                                                                                     \
+    }                                                                                                                  \
+    else if ((typed_buffer->flags & (0b1u << 10u)) != (regs_struct->eflags & (0b1u << 10u)))                           \
+    {                                                                                                                  \
+        warnf(" > stos(%lu) with diverging ZF\n", sizeof(__cast));                                                     \
+        return -1;                                                                                                     \
+    }                                                                                                                  \
+}
+
 /* Valid in first round */
 BYTE_EMULATOR_IMPL(0xaa)
 {
@@ -2736,60 +2238,8 @@ BYTE_EMULATOR_IMPL(0xaa)
     if (PREFIXES_GRP_ONE_PRESENT(instruction) && (PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE ||
                                                   PREFIXES_GRP_ONE(instruction) == REPNZ_PREFIX_CODE))
         count = regs_struct->rcx;
-
-    OBTAIN_SHARED_MAPPING_INFO(count)
-    void* destination = (void*) ((unsigned long long) mapping_info->monitor_base + offset);
-    void* source = shared_mem_register_access::ACCESS_GENERAL_NAME(rax)(regs_struct);
-
-    GET_BUFFER_RAW(destination, 1 + sizeof(unsigned long long))
-    if (result == REPLAY_BUFFER_RETURN_FIRST)
-    {
-        *(uint8_t *) buffer = *(uint8_t *) source;
-        *(unsigned long long*) ((uint8_t *) buffer + 1) = count;
-    }
-    else if (*(uint8_t*) buffer == *(uint8_t*) source)
-    {
-        if (PREFIXES_GRP_ONE_PRESENT(instruction) && (PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE ||
-                PREFIXES_GRP_ONE(instruction) == REPNZ_PREFIX_CODE)
-                && *(unsigned long long*) ((uint8_t *) buffer + 1) != count)
-        {
-            warnf(" > stosb with diverging count | %llx != %llx\n", (unsigned long long) *((uint8_t *) buffer + 1),
-                    (unsigned long long) count);
-            return -1;
-        }
-
-        if (regs_struct->eflags & (0b1u << 10u))
-            regs_struct->rdi -= count;
-        else
-            regs_struct->rdi += count;
-
-        REPLAY_BUFFER_ADVANCE
-        return 0;
-    }
-    else
-    {
-        warnf(" > stosb with diverging source | %llx != %llx\n", (unsigned long long) *(uint8_t*) buffer,
-                (unsigned long long) *(uint8_t*) source);
-        return -1;
-    }
-
-    __asm__
-    (
-            ".intel_syntax noprefix;"
-            "rep stosb;"
-            ".att_syntax;"
-            : "+D" (destination)
-            : "a" (*(uint8_t*) source), "c" (count), "m" (destination)
-            : "memory"
-    );
-
-    if (regs_struct->eflags & (0b1u << 10u))
-        regs_struct->rdi -= count;
-    else
-        regs_struct->rdi += count;
-
-    REPLAY_BUFFER_ADVANCE
-    return 0;
+    STOS_EMULATE(uint8_t)
+    RETURN_WRITE(0xaa)
 }
 
 
@@ -2798,134 +2248,31 @@ BYTE_EMULATOR_IMPL(0xab)
 {
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        if (PREFIXES_GRP_ONE_PRESENT(instruction) && (PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE ||
-                PREFIXES_GRP_ONE(instruction) == REPNZ_PREFIX_CODE))
-            return -1;
-
         // we're in need of rax as source
         DEFINE_REGS_STRUCT
 
-        OBTAIN_SHARED_MAPPING_INFO(GET_INSTRUCTION_ACCESS_SIZE)
-        void* destination = (void*) ((unsigned long long) mapping_info->monitor_base + offset);
-        void* source = shared_mem_register_access::ACCESS_GENERAL_NAME(rax)(regs_struct);
+        unsigned long long count = 1;
+        if (PREFIXES_GRP_ONE_PRESENT(instruction) && (PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE ||
+                PREFIXES_GRP_ONE(instruction) == REPNZ_PREFIX_CODE))
+            count = regs_struct->rcx;
 
         // stos m64
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            GET_BUFFER_RAW(destination, 8)
-            if (result == REPLAY_BUFFER_RETURN_FIRST)
-                *(uint64_t*) buffer = *(uint64_t*) source;
-            else if (*(uint64_t*) buffer == *(uint64_t*) source)
-            {
-                if (regs_struct->eflags & (0b1u << 10u))
-                    regs_struct->rdi -= 8;
-                else
-                    regs_struct->rdi += 8;
-
-                REPLAY_BUFFER_ADVANCE
-                return 0;
-            }
-            else
-            {
-                warnf(" > stosb with diverging source | %llx != %llx\n", (unsigned long long) *(uint64_t*) buffer,
-                        (unsigned long long) *(uint64_t*) source);
-                return -1;
-            }
-
-            __asm__
-            (
-                    ".intel_syntax noprefix;"
-                    "stosq;"
-                    ".att_syntax;"
-                    : "+D" (destination)
-                    : "a" (*(uint64_t*) source), "m" (destination)
-                    : "memory"
-            );
-
-            if (regs_struct->eflags & (0b1u << 10u))
-                regs_struct->rdi -= 8;
-            else
-                regs_struct->rdi += 8;
+            STOS_EMULATE(uint64_t)
         }
         // stos m16
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            GET_BUFFER_RAW(destination, 2)
-            if (result == REPLAY_BUFFER_RETURN_FIRST)
-                *(uint16_t*) buffer = *(uint16_t*) source;
-            else if (*(uint16_t*) buffer == *(uint16_t*) source)
-            {
-                if (regs_struct->eflags & (0b1u << 10u))
-                    regs_struct->rdi -= 2;
-                else
-                    regs_struct->rdi += 2;
-
-                REPLAY_BUFFER_ADVANCE
-                return 0;
-            }
-            else
-            {
-                warnf(" > stosb with diverging source | %llx != %llx\n", (unsigned long long) *(uint16_t*) buffer,
-                      (unsigned long long) *(uint16_t *) source);
-                return -1;
-            }
-
-            __asm__
-            (
-                    ".intel_syntax noprefix;"
-                    "stosw;"
-                    ".att_syntax;"
-                    : "+D" (destination)
-                    : "a" (*(uint16_t*) source), "m" (destination)
-                    : "memory"
-            );
-
-            if (regs_struct->eflags & (0b1u << 10u))
-                regs_struct->rdi -= 2;
-            else
-                regs_struct->rdi += 2;
+            STOS_EMULATE(uint16_t)
         }
         // stos m32
         else
         {
-            GET_BUFFER_RAW(destination, 4)
-            if (result == REPLAY_BUFFER_RETURN_FIRST)
-                *(uint32_t*) buffer = *(uint32_t*) source;
-            else if (*(uint32_t*) buffer == *(uint32_t*) source)
-            {
-                if (regs_struct->eflags & (0b1u << 10u))
-                    regs_struct->rdi -= 4;
-                else
-                    regs_struct->rdi += 4;
-
-                REPLAY_BUFFER_ADVANCE
-                return 0;
-            }
-            else
-            {
-                warnf(" > stosb with diverging source | %llx != %llx\n", (unsigned long long) *(uint32_t*) buffer,
-                      (unsigned long long) *(uint32_t*) source);
-                return -1;
-            }
-
-            __asm__
-            (
-                    ".intel_syntax noprefix;"
-                    "stosd;"
-                    ".att_syntax;"
-                    : "+D" (destination)
-                    : "a" (*(uint32_t*) source), "m" (destination)
-                    : "memory"
-            );
-
-            if (regs_struct->eflags & (0b1u << 10u))
-                regs_struct->rdi -= 4;
-            else
-                regs_struct->rdi += 4;
+            STOS_EMULATE(uint32_t)
         }
 
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        RETURN_WRITE(0xab)
     }
 
     // illegal otherwise
@@ -2953,116 +2300,59 @@ BYTE_EMULATOR_IMPL(0xab)
 // BYTE_EMULATOR_IMPL(0xb0)
 
 
+#define CMPXCHG_EMULATE(__cast)                                                                                        \
+CMPXCHG_STRUCT(__cast)                                                                                                 \
+GET_BUFFER_RAW(destination, sizeof(temp_t))                                                                            \
+auto typed_buffer = (temp_t*)buffer;                                                                                   \
+if (!variant->variant_num)                                                                                             \
+{                                                                                                                      \
+    typed_buffer->original_rax = (__cast)variant->regs.rax;                                                            \
+    typed_buffer->source       = *(__cast*)source;                                                                     \
+}                                                                                                                      \
+else                                                                                                                   \
+{                                                                                                                      \
+    if (typed_buffer->source != *(__cast*) source)                                                                     \
+    {                                                                                                                  \
+        warnf(" > mismatching source for 0xb1 (%lu) | %llx != %llx", sizeof(__cast),                                   \
+                (unsigned long long)typed_buffer->source, (unsigned long long)*(__cast*)source);                       \
+            return -1;                                                                                                 \
+    }                                                                                                                  \
+    if (typed_buffer->original_rax != (__cast)regs_struct->rax)                                                        \
+    {                                                                                                                  \
+        warnf(" > mismatching rax for 0xb1 (%lu) | %llx != %llx", sizeof(__cast),                                      \
+                (unsigned long long)typed_buffer->original_rax, (unsigned long long)(__cast)regs_struct->rax);         \
+            return -1;                                                                                                 \
+    }                                                                                                                  \
+}
 /* Valid in second round */
 BYTE_EMULATOR_IMPL(0xb1)
 {
     // cmpxchg Ev, Gv
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
-        // todo - might need fixing
-        // warnf(" > this one might need some attention\n");
-        // return -1;
         // affects flags as well
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
         LOAD_RM_CODE(destination, GET_INSTRUCTION_ACCESS_SIZE)
         LOAD_REG_CODE(source, general_purpose_lookup)
 
-        // we're saving the source to compare later, the result to imitate it later, and the eflags to imitate as well
-        GET_BUFFER_RAW(destination, (sizeof(unsigned long long) * 4))
-        auto buffer_source   = (unsigned long long*) buffer;
-        auto buffer_orig_rax = (unsigned long long*) buffer + 1;
-        auto buffer_rax      = (unsigned long long*) buffer + 2;
-        auto buffer_eflags   = (unsigned long long*) buffer + 3;
-
-        if (result == REPLAY_BUFFER_RETURN_FIRST)
-        {
-            *buffer_orig_rax = variant->regs.rax;
-            *buffer_source = *(unsigned long long*) source;
-        }
-        else if (result != REPLAY_BUFFER_RETURN_FIRST)
-        {
-            if (*buffer_source != *(unsigned long long*) source && regs_struct->rax != *buffer_orig_rax)
-                return -1;
-            unsigned long long mask = (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction)) ?
-                    0xffffffffffffffff : (PREFIXES_GRP_THREE_PRESENT(instruction) ? 0xffff : 0xffffffff);
-            regs_struct->rax &= ~mask;
-            regs_struct->rax |= mask & *buffer_rax;
-            regs_struct->eflags = *buffer_eflags;
-
-            REPLAY_BUFFER_ADVANCE
-            return 0;
-        }
-
-
         // 64-bit
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            uint64_t* typed_destination = (uint64_t*)destination;
-            uint64_t* typed_source = (uint64_t*)source;
-
-            // todo - always executed with LOCK for now, might not be the best
-            __asm__
-            (
-                    ".intel_syntax noprefix;"
-                    "push %[flags];"
-                    "popf;"
-                    "lock cmpxchg QWORD PTR [%[dst]], %[src];"
-                    "pushf;"
-                    "pop %[flags];"
-                    ".att_syntax;"
-                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination), "+a" (regs_struct->rax)
-                    : [dst] "r" (typed_destination), [src] "r" (*typed_source)
-                    : "cc"
-            );
+            CMPXCHG_EMULATE(uint64_t)
         }
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            uint16_t* typed_destination = (uint16_t*)destination;
-            uint16_t* typed_source = (uint16_t*)source;
-
-            __asm__
-            (
-                    ".intel_syntax noprefix;"
-                    "push %[flags];"
-                    "popf;"
-                    "lock cmpxchg WORD PTR [%[dst]], %[src];"
-                    "pushf;"
-                    "pop %[flags];"
-                    ".att_syntax;"
-                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination), "+a" (regs_struct->rax)
-                    : [dst] "r" (typed_destination), [src] "r" (*typed_source)
-                    : "cc"
-            );
+            CMPXCHG_EMULATE(uint16_t)
         }
         // 32-bit
         else
         {
-            uint32_t* typed_destination = (uint32_t*)destination;
-            uint32_t* typed_source = (uint32_t*)source;
-
-            __asm__
-            (
-                    ".intel_syntax noprefix;"
-                    "push %[flags];"
-                    "popf;"
-                    "lock cmpxchg DWORD PTR [%[dst]], %[src];"
-                    "pushf;"
-                    "pop %[flags];"
-                    ".att_syntax;"
-                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination), "+a" (regs_struct->rax)
-                    : [dst] "r" (typed_destination), [src] "r" (*typed_source)
-                    : "cc"
-            );
+            CMPXCHG_EMULATE(uint32_t)
         }
 
-        *buffer_rax = regs_struct->rax;
-        *buffer_eflags = regs_struct->eflags;
-
-        // general purpose registers are written back with rip by default
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        RETURN_WRITE(0xb1)
     }
 
     // illegal otherwise
@@ -3102,25 +2392,24 @@ BYTE_EMULATOR_IMPL(0xb6)
         // 64-bit size
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            uint64_t* typed_destination = (uint64_t*)destination;
+            auto* typed_destination = (uint64_t*)destination;
             *typed_destination = *typed_source;
         }
         // 16-bit size
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            uint16_t* typed_destination = (uint16_t*)destination;
+            auto* typed_destination = (uint16_t*)destination;
             *typed_destination = *typed_source;
         }
         // 32-bit size
         else
         {
-            uint64_t* typed_destination = (uint64_t*)destination;
+            auto* typed_destination = (uint64_t*)destination;
             *typed_destination = *typed_source;
         }
 
         // registers will be written back with rip
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        RETURN_ADVANCE
     }
 
     // illegal operation otherwise
@@ -3144,25 +2433,24 @@ BYTE_EMULATOR_IMPL(0xb7)
         // 64-bit size
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            uint64_t* typed_destination = (uint64_t*)destination;
+            auto* typed_destination = (uint64_t*)destination;
             *typed_destination = *typed_source;
         }
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            uint16_t* typed_destination = (uint16_t*)destination;
+            auto* typed_destination = (uint16_t*)destination;
             *typed_destination = *typed_source;
         }
         // 32-bit size
         else
         {
-            uint64_t* typed_destination = (uint64_t*)destination;
+            auto* typed_destination = (uint64_t*)destination;
             *typed_destination = *typed_source;
         }
 
         // registers will be written back with rip
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        RETURN_ADVANCE
     }
 
     // illegal operation otherwise
@@ -3211,26 +2499,25 @@ BYTE_EMULATOR_IMPL(0xbe)
         // 64-bit
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            int64_t* typed_destination = (int64_t*)destination;
+            auto* typed_destination = (int64_t*)destination;
             *typed_destination = (uint64_t)*typed_source;
         }
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            int16_t* typed_destination = (int16_t*)destination;
+            auto* typed_destination = (int16_t*)destination;
             *typed_destination = (uint16_t)*typed_source;
         }
         // 32-bit
         else
         {
-            int32_t* typed_destination = (int32_t*)destination;
+            auto* typed_destination = (int32_t*)destination;
             *typed_destination = (uint32_t)*typed_source;
             *(typed_destination + 1) = 0x00;
         }
 
         // registers written back by default
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        RETURN_ADVANCE
     }
 
     // illegal otherwise
@@ -3246,6 +2533,21 @@ BYTE_EMULATOR_IMPL(0xbe)
 // BYTE_EMULATOR_IMPL(0xc0)
 
 
+#define XADD_EMULATE(__cast)                                                                                           \
+XADD_STRUCT(__cast)                                                                                                    \
+GET_BUFFER_RAW(destination, sizeof(temp_t))                                                                            \
+auto* typed_buffer = (temp_t*)buffer;                                                                                  \
+                                                                                                                       \
+if (!variant->variant_num)                                                                                             \
+    typed_buffer->original_source = *(__cast*)source;                                                                  \
+else                                                                                                                   \
+{                                                                                                                      \
+    if (*(__cast*)source != typed_buffer->original_source)                                                             \
+    {                                                                                                                  \
+        warnf(" > mismatching source in 0xc1 (%lu) | %llx != %llx\n", sizeof(__cast),                                  \
+                (unsigned long long)typed_buffer->original_source, (unsigned long long)*(__cast*)source);              \
+    }                                                                                                                  \
+}
 /* Valid in second round */
 BYTE_EMULATOR_IMPL(0xc1)
 {
@@ -3260,123 +2562,20 @@ BYTE_EMULATOR_IMPL(0xc1)
         // 64-bit size
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            GET_BUFFER_RAW(destination, (sizeof(uint64_t) * 2))
-            auto source_original  = (uint64_t*) buffer;
-            auto source_overwrite = ((uint64_t*) buffer) + 1;
-            uint64_t* typed_destination = (uint64_t*)destination;
-            uint64_t* typed_source = (uint64_t*)source;
-
-            if (result != REPLAY_BUFFER_RETURN_FIRST)
-            {
-                if (*typed_source != *source_original)
-                    return -1;
-                *typed_source = *source_overwrite;
-
-                REPLAY_BUFFER_ADVANCE
-                return 0;
-            }
-
-            *source_original = *typed_source;
-
-            // perform operation
-            __asm__
-            (
-                    ".intel_syntax noprefix;"
-                    "push %[flags];"
-                    "popf;"
-                    "xadd QWORD PTR [%[dst]], %[src];"
-                    "pushf;"
-                    "pop %[flags];"
-                    ".att_syntax;"
-                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination), [src] "+r" (*typed_source)
-                    : [dst] "r" (typed_destination)
-                    : "cc"
-            );
-
-            *source_overwrite = *typed_source;
+            XADD_EMULATE(uint64_t)
         }
         // 16-bit size
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            GET_BUFFER_RAW(destination, (sizeof(uint16_t) * 2))
-            auto source_original  = (uint16_t*) buffer;
-            auto source_overwrite = ((uint16_t*) buffer) + 1;
-            uint16_t* typed_destination = (uint16_t*)destination;
-            uint16_t* typed_source = (uint16_t*)source;
-
-            if (result != REPLAY_BUFFER_RETURN_FIRST)
-            {
-                if (*typed_source != *source_original)
-                    return -1;
-                *typed_source = *source_overwrite;
-
-                REPLAY_BUFFER_ADVANCE
-                return 0;
-            }
-
-            *source_original = *typed_source;
-
-            // perform operation
-            __asm__
-            (
-                    ".intel_syntax noprefix;"
-                    "push %[flags];"
-                    "popf;"
-                    "xadd WORD PTR [%[dst]], %[src];"
-                    "pushf;"
-                    "pop %[flags];"
-                    ".att_syntax;"
-                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination), [src] "+r" (*typed_source)
-                    : [dst] "r" (typed_destination)
-                    : "cc"
-            );
-
-            *source_overwrite = *typed_source;
+            XADD_EMULATE(uint16_t)
         }
         // 32-bit size
         else
         {
-            GET_BUFFER_RAW(destination, (sizeof(uint32_t) * 2))
-            auto source_original  = (uint32_t*) buffer;
-            auto source_overwrite = ((uint32_t*) buffer) + 1;
-            uint32_t* typed_destination = (uint32_t*)destination;
-            uint32_t* typed_source = (uint32_t*)source;
-
-            *(typed_source + 1) = 0;
-
-            if (result != REPLAY_BUFFER_RETURN_FIRST)
-            {
-                if (*typed_source != *source_original)
-                    return -1;
-                *typed_source = *source_overwrite;
-
-                REPLAY_BUFFER_ADVANCE
-                return 0;
-            }
-
-            *source_original = *typed_source;
-
-            // perform operation
-            __asm__
-            (
-                    ".intel_syntax noprefix;"
-                    "push %[flags];"
-                    "popf;"
-                    "xadd DWORD PTR [%[dst]], %[src];"
-                    "pushf;"
-                    "pop %[flags];"
-                    ".att_syntax;"
-                    : [flags] "+r" (regs_struct->eflags), "+m" (*typed_destination), [src] "+r" (*typed_source)
-                    : [dst] "r" (typed_destination)
-                    : "cc"
-            );
-
-            *source_overwrite = *typed_source;
+            XADD_EMULATE(uint32_t)
         }
 
-        // registers will be written back in a bit
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        RETURN_WRITE(0xc1)
     }
 
     // illegal otherwise
@@ -3412,12 +2611,11 @@ BYTE_EMULATOR_IMPL(0xc6)
 
         // perform operation
         auto* typed_source = (uint8_t*)source;
-        NORMAL_TO_SHARED(uint8_t, *typed_destination = *typed_source,
+        NORMAL_TO_SHARED_EMULATE(uint8_t,
                 WRITE_DIVERGENCE_ERROR(" > write divergence in mov m8, imm8\n"));
 
-        // no writeback needed
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        // do NOT advance buffer here
+        RETURN_WRITE(0xc6)
     }
 
     // illegal otherwise
@@ -3442,27 +2640,26 @@ BYTE_EMULATOR_IMPL(0xc7)
         {
             uint64_t source_converted = *(int32_t*)source;
             uint64_t* typed_source = &source_converted;
-            NORMAL_TO_SHARED(uint64_t, *typed_destination = *typed_source,
+            NORMAL_TO_SHARED_EMULATE(uint64_t,
                     WRITE_DIVERGENCE_ERROR(" > write divergence in mov m64, imm32\n"))
         }
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
             auto* typed_source = (uint16_t*)source;
-            NORMAL_TO_SHARED(uint16_t, *typed_destination = *typed_source,
+            NORMAL_TO_SHARED_EMULATE(uint16_t,
                     WRITE_DIVERGENCE_ERROR(" > write divergence in mov m32, imm23\n"));
         }
         // 32-bit
         else
         {
             auto* typed_source = (uint32_t*)source;
-            NORMAL_TO_SHARED(uint32_t, *typed_destination = *typed_source,
+            NORMAL_TO_SHARED_EMULATE(uint32_t,
                     WRITE_DIVERGENCE_ERROR(" > write divergence in mov m32, imm23\n"));
         }
 
-        // no register writeback needed
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        // do NOT advance buffer here
+        RETURN_WRITE(0xc7)
     }
 
     // illegal otherwise
@@ -3599,8 +2796,7 @@ BYTE_EMULATOR_IMPL(0xda)
         // we have to write the registers back
         if (interaction::write_all_fpregs(*instruction.variant_pid, regs_struct))
         {
-            REPLAY_BUFFER_ADVANCE
-            return 0;
+            RETURN_ADVANCE
         }
     }
 
@@ -3671,20 +2867,8 @@ BYTE_EMULATOR_IMPL(0xe7)
             LOAD_RM_CODE_NO_DEFINE(16)
             LOAD_REG_CODE(source, xmm_lookup)
 
-            XMM_TO_SHARED(
-                    __asm__
-                    (
-                            ".intel_syntax noprefix;"
-                            "movdqu xmm0, XMMWORD PTR [rdx];"
-                            "movntdq XMMWORD PTR [rax], xmm0;"
-                            ".att_syntax;"
-                            :
-                            : [dst] "a" (destination), [src] "d" (source)
-                            : "xmm0", "memory"
-                    ),
-                    WRITE_DIVERGENCE_XMM_EQUAL(__buffer, __source,
-                            " > write divergence in movntdq m128, xmm\n")
-            )
+            XMM_TO_SHARED_EMULATE(WRITE_DIVERGENCE_XMM_EQUAL(__buffer, __source,
+                    " > write divergence in movntdq m128, xmm\n"))
         }
         // illegal access
         else if (PREFIXES_GRP_ONE_PRESENT(instruction) && (PREFIXES_GRP_TWO(instruction) == REPZ_PREFIX_CODE ||
@@ -3698,24 +2882,12 @@ BYTE_EMULATOR_IMPL(0xe7)
             LOAD_REG_CODE(source, mm_lookup)
             auto typed_source = (uint64_t*) source;
 
-            NORMAL_TO_SHARED(uint64_t,
-                    __asm__
-                    (
-                            ".intel_syntax noprefix;"
-                            "movq  mm0, QWORD PTR [rdx];"
-                            "movntq QWORD PTR [rax], mm0;"
-                            ".att_syntax;"
-                            :
-                            : [dst] "a" (typed_destination), [src] "d" (source)
-                            : "mm0", "memory"
-                    ),
-                    WRITE_DIVERGENCE_ERROR(" > write divergence in movntq m64, mm\n")
-            )
+            NORMAL_TO_SHARED_EMULATE(uint64_t,
+                    WRITE_DIVERGENCE_ERROR(" > write divergence in movntq m64, mm\n"))
         }
 
-        // no registers need to be written back
-        REPLAY_BUFFER_ADVANCE
-        return 0;
+        // do NOT advance the buffer here
+        RETURN_WRITE(0xe7)
     }
 
     // illegal otherwise
@@ -3785,9 +2957,6 @@ BYTE_EMULATOR_IMPL(0xf6)
     {
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_B(instruction))
         {
-            warnf(" > this one needs some testing, use at own risk - 0xf6\n");
-            return -1;
-            DEFINE_REGS_STRUCT
             DEFINE_MODRM
             LOAD_RM_CODE_NO_DEFINE(1)
 
@@ -3796,14 +2965,10 @@ BYTE_EMULATOR_IMPL(0xf6)
             {
                 case 0b000u: // TEST - test r/m8, imm8
                 case 0b001u: // TEST - test r/m8, imm8
-                    {
-                        LOAD_IMM(source)
-                        uint8_t* typed_source = (uint8_t*)source;
-                        NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER(uint8_t,
-                                "test BYTE PTR [%[dst]], %[src];",
-                                WRITE_DIVERGENCE_ERROR(" > write divergence in test r/m8, imm8\n"));
-                        break;
-                    }
+                {
+                    IMM_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE;
+                    break;
+                }
                 case 0b010u: // NOT - not yet implemented
                 case 0b011u: // NEG - not yet implemented
                 case 0b100u: // MUL - not yet implemented
@@ -3814,8 +2979,7 @@ BYTE_EMULATOR_IMPL(0xf6)
                     return -1;
             }
 
-            REPLAY_BUFFER_ADVANCE
-            return 0;
+            RETURN_WRITE(0xf6)
         }
         // illegal otherwise
         return -1;
