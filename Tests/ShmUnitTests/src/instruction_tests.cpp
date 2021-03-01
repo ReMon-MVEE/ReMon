@@ -49,13 +49,21 @@ void            instruction_tests::test_memcmp                      ()
     TEST_RESULT("from shared to non-shared memory - equal",
             memcmp(buffers::shared_sink, &non_shared2, 8) == 0)
 
-    *(unsigned long long*)buffers::shared_sink = (unsigned long long)&non_shared1;
-    non_shared2                                = (unsigned long long)&non_shared1;
+    // todo - the monitor currently cannot check these for equivalence
+    // *(unsigned long long*)buffers::shared_sink = (unsigned long long)&non_shared1;
+    // non_shared2                                = (unsigned long long)&non_shared1;
+    // TEST_RESULT("from shared to non-shared memory - equal, pointer",
+    //             memcmp(buffers::shared_sink, &non_shared2, 8) == 0)
+    // non_shared2 = (unsigned long long)&non_shared2;
+    // TEST_RESULT("from shared to non-shared memory - not equal, pointer",
+    //             memcmp(buffers::shared_sink, &non_shared2, 8) < 0)
+    *(unsigned long long*)buffers::shared_sink = (unsigned long long)buffers::shared_mapping;
+    non_shared2                                = (unsigned long long)buffers::shared_mapping;
     TEST_RESULT("from shared to non-shared memory - equal, pointer",
                 memcmp(buffers::shared_sink, &non_shared2, 8) == 0)
-    non_shared2 = (unsigned long long)&non_shared2;
+    non_shared2 = (unsigned long long)buffers::shared_sink;
     TEST_RESULT("from shared to non-shared memory - not equal, pointer",
-                memcmp(buffers::shared_sink, &non_shared2, 8) < 0)
+                memcmp(buffers::shared_sink, &non_shared2, 8) != 0)
     // from shared to non-shared memory --------------------------------------------------------------------------------
 
     // from non-shared to shared memory --------------------------------------------------------------------------------
@@ -71,13 +79,22 @@ void            instruction_tests::test_memcmp                      ()
     TEST_RESULT("from non-shared to shared memory - equal",
             memcmp(&non_shared1, buffers::shared_sink, 8) == 0)
 
-    *(unsigned long long*)buffers::shared_sink = (unsigned long long)&non_shared1;
-    non_shared2                                = (unsigned long long)&non_shared1;
+
+    // todo - the monitor currently cannot check these for equivalence
+    // *(unsigned long long*)buffers::shared_sink = (unsigned long long)&non_shared1;
+    // non_shared2                                = (unsigned long long)&non_shared1;
+    // TEST_RESULT("from non-shared to shared memory - equal, pointer",
+    //             memcmp(buffers::shared_sink, &non_shared2, 8) == 0)
+    // *(unsigned long long*)buffers::shared_sink = (unsigned long long)&non_shared2;
+    // TEST_RESULT("from non-shared to shared memory - not equal, pointer",
+    //             memcmp(buffers::shared_sink, &non_shared2, 8) > 0)
+    *(unsigned long long*)buffers::shared_sink = (unsigned long long)buffers::shared_mapping;
+    non_shared2                                = (unsigned long long)buffers::shared_mapping;
     TEST_RESULT("from non-shared to shared memory - equal, pointer",
                 memcmp(buffers::shared_sink, &non_shared2, 8) == 0)
-    *(unsigned long long*)buffers::shared_sink = (unsigned long long)&non_shared2;
+    *(unsigned long long*)buffers::shared_sink = (unsigned long long)buffers::shared_sink;
     TEST_RESULT("from non-shared to shared memory - not equal, pointer",
-                memcmp(buffers::shared_sink, &non_shared2, 8) > 0)
+                memcmp(buffers::shared_sink, &non_shared2, 8) != 0)
     // from non-shared to shared memory --------------------------------------------------------------------------------
 
     // from and to shared memory ---------------------------------------------------------------------------------------
@@ -94,13 +111,22 @@ void            instruction_tests::test_memcmp                      ()
     TEST_RESULT("from and to shared memory - equal",
                 memcmp(shared2, buffers::shared_sink, 8) == 0)
 
-    *(unsigned long long*)buffers::shared_sink = (unsigned long long)&non_shared1;
-    *shared2                                   = (unsigned long long)&non_shared1;
+
+    // todo - the monitor currently cannot check these for equivalence
+    // *(unsigned long long*)buffers::shared_sink = (unsigned long long)&non_shared1;
+    // *shared2                                   = (unsigned long long)&non_shared1;
+    // TEST_RESULT("from and to shared memory - equal, pointer",
+    //             memcmp(buffers::shared_sink, shared2, 8) == 0)
+    // *shared2 = (unsigned long long)&non_shared2;
+    // TEST_RESULT("from and to shared memory - not equal, pointer",
+    //             memcmp(buffers::shared_sink, shared2, 8) < 0)
+    *(unsigned long long*)buffers::shared_sink = (unsigned long long)buffers::shared_mapping;
+    *shared2                                   = (unsigned long long)buffers::shared_mapping;
     TEST_RESULT("from and to shared memory - equal, pointer",
                 memcmp(buffers::shared_sink, shared2, 8) == 0)
-    *shared2 = (unsigned long long)&non_shared2;
+    *shared2 = (unsigned long long)buffers::shared_sink;
     TEST_RESULT("from and to shared memory - not equal, pointer",
-                memcmp(buffers::shared_sink, shared2, 8) < 0)
+                memcmp(buffers::shared_sink, shared2, 8) != 0)
     // from and to shared memory ---------------------------------------------------------------------------------------
 
     FINISH_TEST
@@ -1970,6 +1996,23 @@ void            instruction_tests::test_0x0f_0xb6                   ()
     (
             ".intel_syntax noprefix;"
             "mov r8, rdx;"
+            "movzx r8, BYTE PTR [rax];"
+            "mov rdx, r8;"
+            ".att_syntax;"
+            : [dst] "+d" (destination)
+            : [src] "a" (buffers::shared_sink)
+            : "r8"
+    );
+    TEST_RESULT("movzx r64, m8", destination == source)
+    // 32-bit ----------------------------------------------------------------------------------------------------------
+
+    // 32-bit ----------------------------------------------------------------------------------------------------------
+    destination = original;
+    *(__uint64_t*) buffers::shared_sink = source;
+    __asm
+    (
+            ".intel_syntax noprefix;"
+            "mov r8, rdx;"
             "movzx r8d, BYTE PTR [rax];"
             "mov rdx, r8;"
             ".att_syntax;"
@@ -1994,7 +2037,6 @@ void            instruction_tests::test_0x0f_0xb6                   ()
             : [src] "a" (buffers::shared_sink)
             : "r8"
     );
-    logf_buff((__uint8_t*) &destination, QWORD_SIZE);
     TEST_RESULT("movzx r16, m8", (__uint16_t) destination == source &&
             ((destination & ~WORD_MASK) == (original & ~WORD_MASK)))
     // 16-bit ----------------------------------------------------------------------------------------------------------
@@ -2099,7 +2141,6 @@ void            instruction_tests::test_0x0f_0xc1                   ()
     unsigned long long source;
     unsigned long long orig_src = 0x1122112211221122;
     unsigned long long original = 0x2211221122112211;
-    unsigned long long original_32b = 0x22112211;
     unsigned long long test     = orig_src + original;
 
     // 16-bit ----------------------------------------------------------------------------------------------------------
@@ -2133,9 +2174,9 @@ void            instruction_tests::test_0x0f_0xc1                   ()
             : "a" (buffers::shared_sink), "d" (&source)
             : "r8"
     );
-    TEST_RESULT("xadd WORD PTR [reg], regw",
+    TEST_RESULT("xadd DWORD PTR [reg], regd",
                 testing_aid::compare_buffers(buffers::shared_sink, (__uint8_t*) &test, DWORD_SIZE) == 0 &&
-                testing_aid::compare_buffers((__uint8_t*) &source, (__uint8_t*) &original_32b, QWORD_SIZE) == 0)
+                testing_aid::compare_buffers((__uint8_t*) &source, (__uint8_t*) &original, DWORD_SIZE) == 0)
     // 32-bit ----------------------------------------------------------------------------------------------------------
 
     // 64-bit ----------------------------------------------------------------------------------------------------------
@@ -2151,7 +2192,7 @@ void            instruction_tests::test_0x0f_0xc1                   ()
             : "a" (buffers::shared_sink), "d" (&source)
             : "r8"
     );
-    TEST_RESULT("xadd WORD PTR [reg], regw",
+    TEST_RESULT("xadd QWORD PTR [reg], reg",
                 testing_aid::compare_buffers(buffers::shared_sink, (__uint8_t*) &test, QWORD_SIZE) == 0 &&
                 testing_aid::compare_buffers((__uint8_t*) &source, (__uint8_t*) &original, QWORD_SIZE) == 0)
     // 64-bit ----------------------------------------------------------------------------------------------------------
