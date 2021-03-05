@@ -878,6 +878,11 @@ BYTE_WRITE_IMPL(0x80)
             case 0b101u: // SUB - not yet implemented
             case 0b110u: // XOR - not yet implemented
             case 0b111u: // CMP - CMP r/m8, imm8
+            {
+                // perform operation, note that the flags register is also changed here
+                NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_WRITE(uint8_t, "cmp BYTE PTR [%[dst]], %[src];")
+                break;
+            }
             default:
                 return -1;
         }
