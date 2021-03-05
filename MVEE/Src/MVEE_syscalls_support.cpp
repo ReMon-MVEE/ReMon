@@ -1104,8 +1104,7 @@ std::string monitor::call_serialize_io_vector(int variantnum, struct iovec* vec,
                 elem[vec_len] = 0x00;
 
                 memcpy(elem, mapping_info->variant_shadows[variantnum].monitor_base +
-                            ((unsigned long long)address
-                             - (unsigned long long)mapping_info->variant_shadows[variantnum].monitor_base),
+                        ((unsigned long long)address - (unsigned long long)mapping_info->variant_base),
                         vec_len);
             }
 		}
