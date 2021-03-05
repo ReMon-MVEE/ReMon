@@ -940,9 +940,13 @@ int             replay_buffer::wait                                 ()
             if (!(variant_states[i].state & REPLAY_STATE_WAITING))
                 continue;
             variant_states[i].state = REPLAY_STATE_RUNNING;
-            if (instruction_intent_emulation::handle_emulation(&relevant_monitor->variants[i], relevant_monitor)
-                    != WRITE_SPLIT)
+            int result;
+            if ((result = instruction_intent_emulation::handle_emulation(&relevant_monitor->variants[i],
+                    relevant_monitor)) != WRITE_SPLIT)
+            {
+                warnf(" > emulating from wait did not return WRITE_SPLIT - %d\n", result);
                 return -1;
+            }
         }
     }
 
@@ -951,14 +955,22 @@ int             replay_buffer::wait                                 ()
         return 1;
     // this indicated the state is wrong somehow
     if (waiting < 0 || !write_handler)
+    {
+        warnf(" > shared memory writing failed at wait - waiting: %d - write handler: %p\n", waiting,
+                (void*)write_handler);
         return -1;
+    }
 
     for (int i = 0; i < mvee::numvariants; i -=- 1)
     {
         variantstate* variant = &relevant_monitor->variants[i];
 
         if (write_handler(variant->instruction, *relevant_monitor, variant) < 0)
+        {
+            warnf(" > write handling for variants %d failed\n", i);
+            variant->instruction.debug_print_minimal();
             return -1;
+        }
 
         variant->regs.rip += variant->instruction.size;
         if (!interaction::write_all_regs(variant->variantpid, &variant->regs) && errno != ESRCH)
@@ -2007,8 +2019,6 @@ unsigned long encode_address_tag(unsigned long address, const variantstate* vari
 int             instruction_intent_emulation::handle_emulation      (variantstate* variant, monitor* relevant_monitor)
 {
     instruction_intent* instruction = &variant->instruction;
-    if (!variant->variant_num)
-        instruction->debug_print_minimal();
 #ifdef MVEE_LOG_NON_INSTRUMENTED_INSTRUCTION
     mvee::log_non_instrumented(variant, relevant_monitor, instruction);
 #endif
@@ -2122,6 +2132,7 @@ int             instruction_intent_emulation::handle_emulation      (variantstat
         {
             if (relevant_monitor->buffer.wait() < 0)
             {
+                instruction->debug_print();
                 warnf("A problem occurred performing write split - main\n");
                 relevant_monitor->shutdown(false);
                 return WRITE_SPLIT;
