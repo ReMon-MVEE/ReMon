@@ -640,16 +640,27 @@ if (memcmp(buffer, source, 16) != 0)                                            
     }                                                                                                                  \
 }
 
+#ifdef MMVEE_CONNECTED_MMAP_REGIONS
+#define WRITE_DIVERGENCE_PTR_CHECK(__buffer, __source, __message)                                                      \
+if (decode_address_tag(*(__source), variant) != decode_address_tag(*(__buffer), &relevant_monitor.variants[0]) &&      \
+        shm_handling::same_ptr(relevant_monitor, 0, *(__buffer), variant->variant_num, *(__source)) != 0)              \
+{                                                                                                                      \
+    warnf(" > %p != %p\n", (void*)*(__buffer), (void*)*(__source));                                                    \
+    WRITE_DIVERGENCE_ERROR(__message)                                                                                  \
+}
+#else
 #define WRITE_DIVERGENCE_PTR_CHECK(__buffer, __source, __message)                                                      \
 if (decode_address_tag(*(__source), variant) != decode_address_tag(*(__buffer), &relevant_monitor.variants[0]))        \
 {                                                                                                                      \
     warnf(" > %p != %p\n", (void*)*(__buffer), (void*)*(__source));                                                    \
     WRITE_DIVERGENCE_ERROR(__message)                                                                                  \
 }
+#endif
 
 #define WRITE_DIVERGENCE_ERROR(__message)                                                                              \
 warnf(__message);                                                                                                      \
 instruction.debug_print();                                                                                             \
+relevant_monitor.set_mmap_table->print_mmap_table(debugf);                                                             \
 return -1;
 
 #define IMM_TO_SHARED_EMULATE                                                                                          \
@@ -857,6 +868,12 @@ public:
                                                          unsigned long long offset, void** buffer,
                                                          unsigned long long &size,
                                                          unsigned long long raw_size = 0, bool try_shadow = true);
+
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
+    static int  same_ptr                                (monitor &relevant_monitor,
+                                                         int first_variant, unsigned long long first_ptr,
+                                                         int second_variant, unsigned long long second_ptr);
+#endif
 };
 
 // =====================================================================================================================

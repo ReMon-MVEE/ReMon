@@ -26,6 +26,7 @@
 #include <sys/mman.h>
 #include <sstream>
 #include <random>
+#include <utility>
 #include "MVEE.h"
 #include "MVEE_filedesc.h"
 #include "MVEE_logging.h"
@@ -47,13 +48,16 @@ mmap_region_info::mmap_region_info
     unsigned int             map_flags,
     shared_monitor_map_info* monitor_map
 )
-    : region_base_address(address),
-    region_size(size),
-    region_prot_flags(prot_flags),
-    region_backing_file_offset(backing_file_offset),
-    region_backing_file_unsynced(false),
-    region_is_so(false),
-    shadow(monitor_map)
+    : region_base_address(address)
+    , region_size(size)
+    , region_prot_flags(prot_flags)
+    , region_backing_file_offset(backing_file_offset)
+    , region_backing_file_unsynced(false)
+    , region_is_so(false)
+    , shadow(monitor_map)
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
+    , connected_regions(nullptr)
+#endif
 {
     region_map_flags = map_flags & ~(MAP_FIXED);
 
@@ -433,7 +437,8 @@ mmap_region_info* mmap_table::merge_regions(int variantnum, mmap_region_info* re
     split_region - returns the lower part of the split.
     existing_region becomes the upper part!!!
 -----------------------------------------------------------------------------*/
-mmap_region_info* mmap_table::split_region(int variantnum, mmap_region_info* existing_region, unsigned long split_address)
+mmap_region_info* mmap_table::split_region(int variantnum, mmap_region_info* existing_region,
+        unsigned long split_address)
 {
 #ifdef MVEE_MMAN_DEBUG
     existing_region->print_region_info(">>> splitting region: ");
@@ -464,6 +469,53 @@ mmap_region_info* mmap_table::split_region(int variantnum, mmap_region_info* exi
 #ifdef MVEE_MMAN_DEBUG
     lower_region->print_region_info(">>> lower split: ");
     upper_region->print_region_info(">>> upper split: ");
+#endif
+
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
+    if (existing_region->connected_regions)
+    {
+        std::shared_ptr<mmap_region_info*[]> connected_regions(new mmap_region_info*[mvee::numvariants]);
+        lower_region->connected_regions = connected_regions;
+        connected_regions[variantnum] = lower_region;
+
+        unsigned long long offset = lower_region->region_size;
+        unsigned long long local_address;
+        mmap_region_info* local_region_info;
+
+        for (int i = 0; i < mvee::numvariants; i++)
+        {
+            if (variantnum == i)
+                continue;
+            local_region_info = existing_region->connected_regions[i];
+            local_address = local_region_info->region_base_address + offset;
+
+            std::set<mmap_region_info*>::iterator connected_it = full_map[i].find(existing_region);
+            if (connected_it != full_map[i].end())
+                full_map[i].erase(connected_it);
+
+            mmap_region_info* connected_lower_region = new mmap_region_info(*local_region_info);
+            mmap_region_info* connected_upper_region = local_region_info;
+
+            // at this point, both the upper and lower regions are copies of the original region
+            // the lower region has been inserted into the map by copy_region_info
+            connected_upper_region->region_base_address = local_address;
+            connected_upper_region->region_size         =
+                    connected_lower_region->region_base_address + connected_lower_region->region_size - local_address;
+            connected_lower_region->region_size         = local_address - connected_lower_region->region_base_address;
+            if (connected_upper_region->region_backing_file_path[0] != '[')
+                connected_upper_region->region_backing_file_offset =
+                        connected_lower_region->region_backing_file_offset + connected_lower_region->region_size;
+            full_map[i].insert(connected_lower_region);
+            full_map[i].insert(connected_upper_region);
+
+            // another region is referencing this shadow
+            if (connected_upper_region->shadow)
+                split_variant_shadow_region(connected_upper_region->shadow, local_address);
+
+            connected_lower_region->connected_regions = connected_regions;
+            connected_regions[i]                      = connected_lower_region;
+        }
+    }
 #endif
 
     return lower_region;
@@ -1013,10 +1065,9 @@ bool mmap_table::munmap_range (int variantnum, unsigned long base, unsigned long
 
     Pass NULL as the region_backing_file if we're creating an anonymous region!
 -----------------------------------------------------------------------------*/
-bool mmap_table::map_range (int variantnum, unsigned long address, unsigned long size, unsigned int map_flags,
-                            unsigned int prot_flags, fd_info* region_backing_file,
-                            unsigned int region_backing_file_offset,
-                            shared_monitor_map_info* shadow)
+mmap_region_info* mmap_table::map_range (int variantnum, unsigned long address, unsigned long size,
+                                         unsigned int map_flags, unsigned int prot_flags, fd_info* region_backing_file,
+                                         unsigned int region_backing_file_offset, shared_monitor_map_info* shadow)
 {
     address = ROUND_DOWN(address, 4096);
     size    = ROUND_UP(size, 4096);
@@ -1033,9 +1084,9 @@ bool mmap_table::map_range (int variantnum, unsigned long address, unsigned long
     {
         delete new_region;
         warnf("failed to insert new region....\n");
+        return nullptr;
     }
-
-    return true;
+    return new_region;
 }
 
 /*-----------------------------------------------------------------------------

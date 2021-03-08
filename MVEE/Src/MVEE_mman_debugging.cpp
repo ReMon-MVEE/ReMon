@@ -854,7 +854,12 @@ std::string mmap_table::get_textual_prot_flags(unsigned int prot_flags)
     refresh_variant_maps - refreshes the cached_map table - this
     function is slow!
 -----------------------------------------------------------------------------*/
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
+void mmap_table::refresh_variant_maps(int variantnum, pid_t variantpid,
+                                      std::shared_ptr<mmap_region_info*[]> &stack_regions)
+#else
 void mmap_table::refresh_variant_maps(int variantnum, pid_t variantpid)
+#endif
 {
     char              str[100];
     size_t            size;
@@ -897,7 +902,7 @@ void mmap_table::refresh_variant_maps(int variantnum, pid_t variantpid)
             info.original_file_size = 0;
             region_map_flags        = 0;
 
-            if (strstr(name, "[stack:") == name)
+            if (strstr(name, "[stack") == name)
                 region_map_flags |= MAP_STACK | MAP_GROWSDOWN;
 
             if (flags[3] == 'p')
@@ -905,7 +910,18 @@ void mmap_table::refresh_variant_maps(int variantnum, pid_t variantpid)
             else
                 region_map_flags |= MAP_SHARED;
 
-            map_range(variantnum, region_start, region_end-region_start, region_map_flags, get_numerical_prot_flags(flags), &info, region_file_offset);
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
+            if (region_map_flags & MAP_STACK)
+            {
+                mmap_region_info *region_info = map_range(variantnum, region_start, region_end - region_start,
+                        region_map_flags, get_numerical_prot_flags(flags), &info, region_file_offset);
+                region_info->connected_regions = stack_regions;
+                stack_regions[variantnum] = region_info;
+            }
+            else
+#endif
+                map_range(variantnum, region_start, region_end - region_start, region_map_flags,
+                          get_numerical_prot_flags(flags), &info, region_file_offset);
         }
     }
 }

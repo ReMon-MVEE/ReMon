@@ -186,6 +186,14 @@ public:
     void*         original_base;
 
     //
+    // connection, if exists
+    //
+#ifdef MVMVEE_CONNECTED_MMAP_REGIONS
+    std::shared_ptr<mmap_region_info*[]> connected_regions;
+#endif
+
+
+    //
     // Debugging/Backtracing support
     //
     void                 print_region_info          (const char* log_prefix, void (*logfunc)(const char* format, ...)=NULL);
@@ -285,7 +293,12 @@ public:
     //
     static unsigned int get_numerical_prot_flags    (const char* textual_prot_flags);
     std::string         get_textual_prot_flags      (unsigned int prot_flags);
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
+    void                refresh_variant_maps        (int variantnum, pid_t variantpid,
+                                                     std::shared_ptr<mmap_region_info*[]> &stack_regions);
+#else
     void                refresh_variant_maps        (int variantnum, pid_t variantpid);
+#endif
 
     //
     // Region functions
@@ -319,7 +332,8 @@ public:
     bool        mprotect_range              (int variantnum, unsigned long base, unsigned long size, unsigned int new_prot_flags);
     static bool mman_munmap_range_callback  (mmap_table* table, mmap_region_info* region_info, void* callback_param);
     bool        munmap_range                (int variantnum, unsigned long base, unsigned long size);
-    bool        map_range                   (int variantnum, unsigned long address, unsigned long size,
+    mmap_region_info*
+                map_range                   (int variantnum, unsigned long address, unsigned long size,
                                              unsigned int map_flags, unsigned int prot_flags,
                                              fd_info* region_backing_file, unsigned int region_backing_file_offset,
                                              shared_monitor_map_info* shadow = nullptr);

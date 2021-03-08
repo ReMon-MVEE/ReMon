@@ -1257,8 +1257,15 @@ POSTCALL(execve)
 			variants[i].should_sync_ptr = 0;
 
 		set_mmap_table->truncate_table();
-		for (i = 0; i < mvee::numvariants; ++i)
-			set_mmap_table->refresh_variant_maps(i, variants[i].variantpid);
+
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
+        std::shared_ptr<mmap_region_info*[]> initial_stack_regions(new mmap_region_info*[mvee::numvariants]);
+        for (i = 0; i < mvee::numvariants; ++i)
+            set_mmap_table->refresh_variant_maps(i, variants[i].variantpid, initial_stack_regions);
+#else
+        for (i = 0; i < mvee::numvariants; ++i)
+            set_mmap_table->refresh_variant_maps(i, variants[i].variantpid);
+#endif
 
 		ipmon_initialized = false;
 
@@ -1285,6 +1292,9 @@ POSTCALL(execve)
             }
 
             int               tries = 0;
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
+            std::shared_ptr<mmap_region_info*[]> stack_regions(new mmap_region_info*[mvee::numvariants]);
+#endif
             for (int j = 1; j < mvee::numvariants; ++j)
             {
                 while (should_restart[j])
@@ -1296,7 +1306,11 @@ POSTCALL(execve)
                         return 0;
                     }
                     set_mmap_table->truncate_table_variant(i);
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
+                    set_mmap_table->refresh_variant_maps(j, variants[j].variantpid, stack_regions);
+#else
                     set_mmap_table->refresh_variant_maps(j, variants[j].variantpid);
+#endif
                     if ((ret = set_mmap_table->check_vdso_overlap(j)) > -1)
                     {
                         warnf("Still detected vdso overlap...\n");
@@ -7570,7 +7584,10 @@ POSTCALL(mmap)
             }
 
             for (int i = 0; i < mvee::numvariants; ++i)
+            {
                 call_postcall_set_variant_result(i, encode_address_tag(results[0], &variants[i]));
+                results[i] = results[0];
+            }
 
             shm_setup_state = SHM_SETUP_EXPECTING_SHADOW;
             shm_setup_state |= SHM_SETUP_SHOULD_COPY;
@@ -7578,15 +7595,24 @@ POSTCALL(mmap)
         }
 #endif
 
-		for (int i = 0; i < (shadow ? 1 : mvee::numvariants); ++i)
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
+        std::shared_ptr<mmap_region_info*[]> connected_regions(new mmap_region_info*[mvee::numvariants]);
+#endif
+		for (int i = 0; i < mvee::numvariants; ++i)
 		{
 			unsigned int actual_offset = ARG6(0);
 #ifdef __NR_mmap2
 			if (variants[0].prevcallnum == __NR_mmap2)
 				actual_offset *= 4096;
 #endif
-            set_mmap_table->map_range(i, results[i], ARG2(0), ARG4(0), ARG3(0), info,
-                    actual_offset, shadow);
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
+            mmap_region_info* new_region = set_mmap_table->map_range(i, results[i], ARG2(0),
+                    ARG4(0), ARG3(0), info, actual_offset, shadow);
+            connected_regions[i] = new_region;
+            new_region->connected_regions = connected_regions;
+#else
+            set_mmap_table->map_range(i, results[i], ARG2(0), ARG4(0), ARG3(0), info, actual_offset, shadow);
+#endif
             if (shadow)
                 shadow->setup_shm();
 		}
