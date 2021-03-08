@@ -1790,15 +1790,15 @@ BYTE_EMULATOR_IMPL(0x89)
         {
             auto* typed_source = (uint64_t*)source;
             NORMAL_TO_SHARED_EMULATE(uint64_t,
-                                     WRITE_DIVERGENCE_PTR_CHECK(buffer, typed_source,
-                            " > pointer check failed in mov m64, reg64\n"))
+                    WRITE_DIVERGENCE_PTR_CHECK(buffer, typed_source,
+                                               " > pointer check failed in mov m64, reg64\n"))
         }
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
             auto* typed_source = (uint16_t*)source;
             NORMAL_TO_SHARED_EMULATE(uint16_t,
-                                     WRITE_DIVERGENCE_ERROR(" > write divergence in mov m16, reg16\n"))
+                    WRITE_DIVERGENCE_ERROR(" > write divergence in mov m16, reg16\n"))
         }
         // default 32-bit
         else

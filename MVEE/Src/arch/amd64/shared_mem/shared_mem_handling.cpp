@@ -288,6 +288,27 @@ int             shm_handling::determine_source_from_shared_normal   (variantstat
     return 0;
 }
 
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
+int             shm_handling::same_ptr                                  (monitor &relevant_monitor,
+                                                                         int first_variant,
+                                                                         unsigned long long first_ptr,
+                                                                         int second_variant,
+                                                                         unsigned long long second_ptr)
+{
+    mmap_region_info* region =
+            relevant_monitor.set_mmap_table->get_region_info(first_variant, first_ptr);
+    if (!region || !region->connected_regions)
+        return -1;
+    mmap_region_info* second_region = region->connected_regions[second_variant];
+    unsigned long long offset = second_ptr - second_region->region_base_address;
+    if (offset >= region->region_size || offset >= second_region->region_size)
+        return -1;
+    if (offset != first_ptr - region->region_base_address)
+        return -1;
+    return 0;
+}
+#endif
+
 // operator overloading ================================================================================================
 int             instruction_intent::operator++                      (int second)
 {
@@ -2022,6 +2043,7 @@ int             instruction_intent_emulation::handle_emulation      (variantstat
 #ifdef MVEE_LOG_NON_INSTRUMENTED_INSTRUCTION
     mvee::log_non_instrumented(variant, relevant_monitor, instruction);
 #endif
+
     switch (instruction_intent_emulation::lookup_table[instruction->opcode()].emulator(*instruction, *relevant_monitor,
             variant))
     {
