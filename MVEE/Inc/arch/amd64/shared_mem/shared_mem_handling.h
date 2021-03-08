@@ -640,7 +640,7 @@ if (memcmp(buffer, source, 16) != 0)                                            
     }                                                                                                                  \
 }
 
-#ifdef MMVEE_CONNECTED_MMAP_REGIONS
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
 #define WRITE_DIVERGENCE_PTR_CHECK(__buffer, __source, __message)                                                      \
 if (decode_address_tag(*(__source), variant) != decode_address_tag(*(__buffer), &relevant_monitor.variants[0]) &&      \
         shm_handling::same_ptr(relevant_monitor, 0, *(__buffer), variant->variant_num, *(__source)) != 0)              \

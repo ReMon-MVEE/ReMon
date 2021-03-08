@@ -188,7 +188,7 @@ public:
     //
     // connection, if exists
     //
-#ifdef MVMVEE_CONNECTED_MMAP_REGIONS
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
     std::shared_ptr<mmap_region_info*[]> connected_regions;
 #endif
 
