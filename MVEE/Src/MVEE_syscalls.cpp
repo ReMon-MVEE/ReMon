@@ -241,6 +241,7 @@ unsigned char monitor::call_precall_get_call_type (int variantnum, long callnum)
 			case MVEE_RUNS_UNDER_MVEE_CONTROL:
 			case MVEE_ENABLE_XCHECKS:
 			case MVEE_DISABLE_XCHECKS:
+			case MVEE_GET_LEADER_SHM_TAG:
             {
                 result = MVEE_CALL_TYPE_UNSYNCED;
                 break;
@@ -574,6 +575,13 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 					variants[variantnum].fast_forwarding = true;
 				}
 				result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
+				break;
+			}
+
+			case MVEE_GET_LEADER_SHM_TAG:
+			{
+        variants[variantnum].extended_value = variants[0].shm_tag;
+        result = MVEE_CALL_DENY | MVEE_CALL_RETURN_EXTENDED_VALUE;
 				break;
 			}
 

@@ -221,6 +221,7 @@ const char* getTextualSyscall(long int syscallnum)
 			DEF_CASE(MVEE_IPMON_INVOKE);
 			DEF_CASE(MVEE_GET_VIRTUALIZED_ARGV0);
 			DEF_CASE(MVEE_ENABLE_XCHECKS);
+			DEF_CASE(MVEE_GET_LEADER_SHM_TAG);
         }
     }
 
