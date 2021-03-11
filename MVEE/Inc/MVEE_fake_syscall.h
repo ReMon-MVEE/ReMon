@@ -182,6 +182,11 @@ enum mvee_shared_buffer_types
 #define MVEE_DISABLE_XCHECKS           MVEE_FAKE_SYSCALL_BASE + 19
 
 //
+// MVEE_GET_LEADER_SHM_TAG: returns the shared-memory tag for the leader.
+//
+#define MVEE_GET_LEADER_SHM_TAG        MVEE_FAKE_SYSCALL_BASE + 20
+
+//
 // MVEE Semaphore emulation calls. One weakness of our synchronization agents is
 // that they capture synchronization operations on virtual addresses.  This does
 // not work for inter-process semaphores because one and the same semaphore can
