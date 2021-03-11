@@ -2,10 +2,10 @@
 .*.sw?
 .sw?
 *.vim
-/compile_commands.json
 tags
 #*#
-.clangd
 .vscode
 build
 /ext
+/compile_commands.json
+/.cache
