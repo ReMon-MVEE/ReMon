@@ -1124,6 +1124,33 @@ void               shared_monitor_map_info::cleanup_shm             ()
 }
 
 
+bool            mmap_table::requires_shadow                              (variantstate* variant)
+{
+    /* Get the path for the binary that requested shared memory */
+    mvee_dwarf_context context(variant->variantpid);
+    this->dwarf_step(0, variant->variantpid, &context);
+    std::string binary_path = this->get_region_info(0, IP_IN_REGS(context.regs), 0)->region_backing_file_path;
+    std::string binary_name = binary_path.substr(binary_path.rfind('/'));
+
+    /* Allowlist: no shadow memory required */
+    std::vector<std::string> allowlist{"mplayer", "fontconfig"};
+    for (const auto& s : allowlist)
+    {
+        if (binary_name.find(s) != std::string::npos)
+            return false;
+    }
+
+    /* Blocklist: shadow memory required */
+    std::vector<std::string> blocklist{"pulse", "nginx"};
+    for (const auto& s : blocklist)
+    {
+        if (binary_name.find(s) != std::string::npos)
+            return true;
+    }
+
+    /* Default: shadow memory required */
+    return true;
+}
 
 int             mmap_table::shadow_map                              (variantstate* variant, fd_info* info,
                                                                      unsigned long long variant_base,
