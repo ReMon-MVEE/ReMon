@@ -7583,6 +7583,9 @@ POSTCALL(mmap)
                 return 0;
             }
 
+            if (shadow)
+                shadow->setup_shm();
+
             for (int i = 0; i < mvee::numvariants; ++i)
             {
                 call_postcall_set_variant_result(i, encode_address_tag(results[0], &variants[i]));
@@ -7613,8 +7616,6 @@ POSTCALL(mmap)
 #else
             set_mmap_table->map_range(i, results[i], ARG2(0), ARG4(0), ARG3(0), info, actual_offset, shadow);
 #endif
-            if (shadow)
-                shadow->setup_shm();
 		}
 
 		//
