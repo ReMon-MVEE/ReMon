@@ -388,6 +388,7 @@ public:
     //
     // Shared memory
     //
+    bool               requires_shadow              (variantstate* variant);
     int                shadow_map                   (variantstate* variant, fd_info* info,
                                                      unsigned long long variant_base,
                                                      shared_monitor_map_info** shadow,

@@ -5488,6 +5488,14 @@ CALL(shmat)
     }
     else if (shm_setup_state & SHM_SETUP_EXPECTING_SHADOW)
     {
+        /* No shadow memory required. Switch back to clean state and return NULL pointer */
+        if (!(shm_setup_state & SHM_SETUP_SHOULD_ALLOCATE_SHADOW))
+        {
+            current_shadow = NULL;
+            shm_setup_state = SHM_SETUP_IDLE;
+            return MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
+        }
+
         disjoint_bases = false;
         for (int i = 0; i < mvee::numvariants; i++)
         {
@@ -5636,14 +5644,17 @@ POSTCALL(shmat)
                 shutdown(false);
                 return MVEE_POSTCALL_DONTRESUME;
             }
-            if (shadow)
+            bool allocate_shadow = set_mmap_table->requires_shadow(&variants[0]);
+            if (shadow && allocate_shadow)
                 shadow->setup_shm();
 
             for (int i = 0; i < mvee::numvariants; ++i)
                 call_postcall_set_variant_result(i, encode_address_tag(addresses[0], &variants[i]));
 
-            current_shadow = shadow;
             shm_setup_state = SHM_SETUP_EXPECTING_SHADOW;
+            if (allocate_shadow)
+                shm_setup_state |= SHM_SETUP_SHOULD_ALLOCATE_SHADOW;
+            current_shadow = shadow;
         }
 	}
 
@@ -7583,7 +7594,8 @@ POSTCALL(mmap)
                 return 0;
             }
 
-            if (shadow)
+            bool allocate_shadow = set_mmap_table->requires_shadow(&variants[0]);
+            if (shadow && allocate_shadow)
                 shadow->setup_shm();
 
             for (int i = 0; i < mvee::numvariants; ++i)
@@ -7594,6 +7606,8 @@ POSTCALL(mmap)
 
             shm_setup_state = SHM_SETUP_EXPECTING_SHADOW;
             shm_setup_state |= SHM_SETUP_SHOULD_COPY;
+            if (allocate_shadow)
+                shm_setup_state |= SHM_SETUP_SHOULD_ALLOCATE_SHADOW;
             current_shadow = shadow;
         }
 #endif

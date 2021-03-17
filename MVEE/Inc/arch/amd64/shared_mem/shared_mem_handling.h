@@ -206,6 +206,7 @@ debugf("\n%s\n", output.str().c_str());
 #define SHM_SETUP_EXPECTING_ENTRY               4
 #define SHM_SETUP_EXPECTING_SHADOW              8
 #define SHM_SETUP_SHOULD_COPY                   16
+#define SHM_SETUP_SHOULD_ALLOCATE_SHADOW        32
 // states for shared memory setup --------------------------------------------------------------------------------------
 
 
