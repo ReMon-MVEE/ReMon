@@ -270,6 +270,7 @@ public:
 #endif
     unsigned long shm_tag;                                          // Tag for shared memory pages
     unsigned long mvee_shm_buffer_location;
+    struct iovec* replaced_iovec;
     // -----------------------------------------------------------------------------------------------------------------
 
     variantstate();
