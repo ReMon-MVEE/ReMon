@@ -934,6 +934,17 @@ int             replay_buffer::advance                              (unsigned in
                     this->relevant_monitor->call_resume((int) 0);
                     break;
                 }
+                case WRITE_SPLIT:
+                {
+                    if (this->wait() < 0)
+                    {
+                        variant->instruction.debug_print();
+                        warnf("A problem occurred performing write split - leader start\n");
+                        relevant_monitor->shutdown(false);
+                        return WRITE_SPLIT;
+                    }
+                    break;
+                }
                 default:
                 {
                     warnf("leader emulation failed - %d\n", result);
@@ -1010,13 +1021,17 @@ int             replay_buffer::wait                                 ()
 
         variant->regs.rip += variant->instruction.size;
         if (!interaction::write_all_regs(variant->variantpid, &variant->regs) && errno != ESRCH)
+        {
+            warnf(" > writing regs failed while executing shared memory write handler for variant %d\n", i);
             return -1;
+        }
 
         relevant_monitor->call_resume(i);
     }
 
     waiting = 0;
     write_handler = nullptr;
+
     return 0;
 }
 
