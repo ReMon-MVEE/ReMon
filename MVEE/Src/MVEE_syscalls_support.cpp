@@ -1103,9 +1103,11 @@ std::string monitor::call_serialize_io_vector(int variantnum, struct iovec* vec,
                 elem = new(std::nothrow) char[vec_len + 1];
                 elem[vec_len] = 0x00;
 
-                memcpy(elem, mapping_info->variant_shadows[variantnum].monitor_base +
-                        ((unsigned long long)address - (unsigned long long)mapping_info->variant_base),
-                        vec_len);
+                /* Either copy from variant-specific shadow memory, or from the monitor's copy of external shared memory */
+                uint8_t* base = mapping_info->variant_shadows[variantnum].monitor_base ?
+                    mapping_info->variant_shadows[variantnum].monitor_base : mapping_info->monitor_base;
+
+                memcpy(elem, base + ((unsigned long long)address - (unsigned long long)mapping_info->variant_base), vec_len);
             }
 		}
         else

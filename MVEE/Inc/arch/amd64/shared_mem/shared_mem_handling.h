@@ -705,6 +705,7 @@ if (!variant->variant_num)                                                      
     auto* typed_destination = (__cast*) (mapping_info->monitor_base + offset);                                         \
     __operation;                                                                                                       \
 }                                                                                                                      \
+if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */      \
 {                                                                                                                      \
     auto* typed_destination = (__cast*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);   \
     __operation;                                                                                                       \
@@ -716,6 +717,7 @@ if (!variant->variant_num)                                                      
     auto* typed_destination = (__cast*) (mapping_info->monitor_base + offset);                                         \
     __operation;                                                                                                       \
 }                                                                                                                      \
+if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */      \
 {                                                                                                                      \
     auto* typed_destination = (__cast*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);   \
     __operation;                                                                                                       \
@@ -778,18 +780,21 @@ IMM_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE
 NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE(__cast, __divergence)
 
 #define NORMAL_TO_SHARED_REPLICATE_FLAGS_WRITE(__cast, __core)                                                         \
-auto* shadow_destination = (__cast*)                                                                                   \
-        (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);                                   \
-NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_WRITE(__cast, __core)                                                          \
-__asm__                                                                                                                \
-(                                                                                                                      \
-        ".intel_syntax noprefix;"                                                                                      \
-        __core                                                                                                         \
-        ".att_syntax;"                                                                                                 \
-        : "+m" (*shadow_destination)                                                                                   \
-        : [dst] "r" (shadow_destination), [src] "r" ((__cast)*typed_source)                                            \
-        : "cc"                                                                                                         \
-);
+if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */      \
+{                                                                                                                      \
+    auto* shadow_destination = (__cast*)                                                                               \
+            (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);                               \
+    NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_WRITE(__cast, __core)                                                      \
+    __asm__                                                                                                            \
+    (                                                                                                                  \
+            ".intel_syntax noprefix;"                                                                                  \
+            __core                                                                                                     \
+            ".att_syntax;"                                                                                             \
+            : "+m" (*shadow_destination)                                                                               \
+            : [dst] "r" (shadow_destination), [src] "r" ((__cast)*typed_source)                                        \
+            : "cc"                                                                                                     \
+    );                                                                                                                 \
+}
 
 #define XMM_TO_SHARED_EMULATE(__divergence)                                                                            \
 void* buffer = nullptr;                                                                                                \
@@ -823,8 +828,11 @@ if (!variant->variant_num)                                                      
     destination = (void*) (mapping_info->monitor_base + offset);                                                       \
     __operation;                                                                                                       \
 }                                                                                                                      \
-destination = (void*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);                     \
-__operation;
+if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */      \
+{                                                                                                                      \
+    destination = (void*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);                 \
+    __operation;                                                                                                       \
+}
 
 
 #define NORMAL_FROM_SHARED(__cast)                                                                                     \

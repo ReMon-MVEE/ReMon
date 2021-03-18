@@ -137,6 +137,11 @@ int             shm_handling::determine_from_shared_proxy           (variantstat
 {
     void* shared_address = mapping_info->monitor_base + offset;
     void* shadow_address = mapping_info->variant_shadows[variant->variant_num].monitor_base + offset;
+
+    /* If we want to access shadow memory, make sure it is present */
+    if (try_shadow)
+        try_shadow = mapping_info->variant_shadows[variant->variant_num].monitor_base;
+
     if (!variant->variant_num)
     {
         memcpy(proxy, shared ? shared : shared_address, size);
@@ -191,6 +196,11 @@ int             shm_handling::determine_from_shared_proxy_buffer    (variantstat
 {
     void* shared_address = mapping_info->monitor_base + offset;
     void* shadow_address = mapping_info->variant_shadows[variant->variant_num].monitor_base + offset;
+
+    /* If we want to access shadow memory, make sure it is present */
+    if (try_shadow)
+        try_shadow = mapping_info->variant_shadows[variant->variant_num].monitor_base;
+
     if (!variant->variant_num)
     {
         memcpy(proxy, shared ? shared : shared_address, size);
@@ -244,6 +254,11 @@ int             shm_handling::determine_source_from_shared_normal   (variantstat
                                                                      unsigned long long size, bool try_shadow)
 {
     void* monitor_pointer = (void*) (mapping_info->monitor_base + offset);
+
+    /* If we want to access shadow memory, make sure it is present */
+    if (try_shadow)
+        try_shadow = mapping_info->variant_shadows[variant->variant_num].monitor_base;
+
     /* leader variant case */
     if (!variant->variant_num)
     {
@@ -1322,10 +1337,10 @@ void            mmap_table::attach_shared_memory                    ()
     for (auto shared_mapping: variant_mappings)
     {
         if (shared_mapping->shmid != -1)
-            shared_mapping->monitor_base =
-                    (uint8_t*)shmat(shared_mapping->shmid, nullptr, 0);
+            shared_mapping->monitor_base = (uint8_t*)shmat(shared_mapping->shmid, nullptr, 0);
         for (auto &shared_shadow: shared_mapping->variant_shadows)
-            shared_shadow.monitor_base = (uint8_t*) shmat(shared_shadow.shmid, nullptr, 0);
+            if (shared_shadow.shmid != -1)
+                shared_shadow.monitor_base = (uint8_t*) shmat(shared_shadow.shmid, nullptr, 0);
     }
 }
 
