@@ -227,6 +227,8 @@ bool monitor::call_compare_variant_buffers(std::vector<const unsigned char*>& bu
                     !second_buf.find("[h264 @ ")) ||
                     (!first_buf.find("[matroska,webm @ ") &&
                     !second_buf.find("[matroska,webm @ ")) ||
+                    (!first_buf.find("[aac @ ") &&
+                    !second_buf.find("[aac @ ")) ||
                     (!first_buf.find("[opus @ ") &&
                     !second_buf.find("[opus @ "));
             /* little address sensitive hack for mplayer */
