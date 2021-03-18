@@ -7314,8 +7314,12 @@ PRECALL(mmap)
             close(fd);
         }
         if (shm_setup_state & SHM_SETUP_IDLE && ((protection & S_IRUSR) && (protection & S_IWUSR)))
+        {
             shm_setup_state = SHM_SETUP_EXPECTING_ENTRY;
-        return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+            return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+        }
+        else
+            return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
     }
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
@@ -7611,6 +7615,8 @@ POSTCALL(mmap)
             current_shadow = shadow;
         }
 #endif
+        if (shadow)
+            shadow->setup_shm();
 
 #ifdef MVEE_CONNECTED_MMAP_REGIONS
         std::shared_ptr<mmap_region_info*[]> connected_regions(new mmap_region_info*[mvee::numvariants]);
