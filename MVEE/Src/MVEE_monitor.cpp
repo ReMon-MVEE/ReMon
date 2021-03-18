@@ -90,6 +90,7 @@ variantstate::variantstate()
     , config (NULL)
     , instruction (&this->variantpid, &this->variant_num)
     , mvee_shm_buffer_location(0)
+    , replaced_iovec(0)
 #ifdef __NR_socketcall
     , orig_arg1 (0)
 #endif

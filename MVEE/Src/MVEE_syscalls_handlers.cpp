@@ -6439,15 +6439,18 @@ LOG_ARGS(writev)
 		   (unsigned long)ARG2(variantnum), 
 		   (unsigned long)ARG3(variantnum));
 
-	struct iovec* vec = new(std::nothrow) struct iovec[ARG3(variantnum)];
+	variants[variantnum].replaced_iovec = new(std::nothrow) struct iovec[ARG3(variantnum)];
 
-	if (!vec ||
-		!rw::read_struct(variants[variantnum].variantpid, (void*) ARG2(variantnum), sizeof(struct iovec) * ARG3(variantnum), vec))
+	if (!variants[variantnum].replaced_iovec ||
+		    !rw::read_struct(variants[variantnum].variantpid, (void*) ARG2(variantnum),
+                   sizeof(struct iovec) * ARG3(variantnum), variants[variantnum].replaced_iovec))
 		throw RwMemFailure(variantnum, "read iovec in sys_writev");
 
-	auto str = call_serialize_io_vector(variantnum, vec, ARG3(variantnum));
+	auto str = call_serialize_io_vector(variantnum, variants[variantnum].replaced_iovec, ARG3(variantnum));
 	debugf("    => \n%s\n", str.c_str());
-	SAFEDELETEARRAY(vec);
+
+	if (variantnum)
+        SAFEDELETEARRAY(variants[variantnum].replaced_iovec)
 }
 
 PRECALL(writev)
@@ -6457,13 +6460,57 @@ PRECALL(writev)
     CHECKFD(1);
     CHECKVECTOR(2, ARG3(0));
 
-	if (set_fd_table->is_fd_unsynced(ARG1(0)))
+    if (set_fd_table->is_fd_unsynced(ARG1(0)))
 	{
 		MAPFDS(1);
 		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 	}
 
+    // vector shared memory replace
+    struct iovec* new_iovec = new(std::nothrow) struct iovec[ARG3(0)];
+    bool should_replace = false;
+    for (unsigned long long i = 0; i < ARG3(0); i++)
+    {
+        new_iovec[i] = variants[0].replaced_iovec[i];
+        if (IS_TAGGED_ADDRESS(new_iovec[i].iov_base))
+        {
+            should_replace = true;
+            auto decoded_address = (unsigned long long)decode_address_tag(new_iovec[i].iov_base, &variants[0]);
+            shared_monitor_map_info* mapping_info = set_mmap_table->get_shared_info(decoded_address);
+            if (!mapping_info)
+            {
+                warnf(" > unknown shared memory region referenced in writev iovec\n");
+                shutdown(true);
+                return MVEE_PRECALL_ARGS_MISMATCH(2) | MVEE_PRECALL_CALL_DENY;
+            }
+            new_iovec[i].iov_base = (void*)(mapping_info->variant_shadows[0].variant_base +
+                    (decoded_address - mapping_info->variant_base));
+        }
+    }
+    if (new_iovec)
+    {
+        if (should_replace && !rw::write_data(variants[0].variantpid, (void*) ARG2(0),
+                sizeof(struct iovec) * ARG3(0), new_iovec))
+            throw RwMemFailure(0, "writing new iovec for writev");
+        SAFEDELETEARRAY(new_iovec)
+    }
+    if (!should_replace)
+        SAFEDELETEARRAY(variants[0].replaced_iovec)
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+}
+
+POSTCALL(writev)
+{
+    if (variants[0].replaced_iovec)
+    {
+        if (!rw::write_data(variants[0].variantpid, (void*) ARG2(0), sizeof(struct iovec) * ARG3(0),
+                variants[0].replaced_iovec))
+            throw RwMemFailure(variantnum, "writing old iovec for writev");
+        SAFEDELETEARRAY(variants[0].replaced_iovec)
+    }
+
+    return MVEE_POSTCALL_RESUME;
 }
 
 /*-----------------------------------------------------------------------------
