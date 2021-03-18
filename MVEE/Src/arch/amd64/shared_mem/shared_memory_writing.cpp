@@ -1156,15 +1156,23 @@ if (!variant->variant_num)                                                      
     __cast orig_source = *typed_source;                                                                                \
     __atomic_exchange(typed_destination, typed_source, typed_source, __ATOMIC_ACQ_REL);                                \
     *(__cast*)buffer = *typed_source;                                                                                  \
-    __atomic_exchange((__cast*)(mapping_info->variant_shadows[0].monitor_base + offset), &orig_source, &orig_source,   \
-            __ATOMIC_ACQ_REL);                                                                                         \
-    *((__cast*)buffer + 2) = orig_source;                                                                              \
+    if (mapping_info->variant_shadows[0].monitor_base)/* Only access shadow memory if it exists */                     \
+    {                                                                                                                  \
+        __atomic_exchange((__cast*)(mapping_info->variant_shadows[0].monitor_base + offset), &orig_source,             \
+                &orig_source, __ATOMIC_ACQ_REL);                                                                       \
+        *((__cast*)buffer + 2) = orig_source;                                                                          \
+    }                                                                                                                  \
 }                                                                                                                      \
 else                                                                                                                   \
 {                                                                                                                      \
-    typed_destination = (__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);          \
-    __atomic_exchange(typed_destination, typed_source, typed_source, __ATOMIC_ACQ_REL);                                \
-    if (*((__cast*)buffer + 2) != *(__cast*)buffer)                                                                    \
+    if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */  \
+    {                                                                                                                  \
+        typed_destination = (__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);      \
+        __atomic_exchange(typed_destination, typed_source, typed_source, __ATOMIC_ACQ_REL);                            \
+        if (*((__cast*)buffer + 2) != *(__cast*)buffer)                                                                \
+            *typed_source = *(__cast*)buffer;                                                                          \
+    }                                                                                                                  \
+    else                                                                                                               \
         *typed_source = *(__cast*)buffer;                                                                              \
 }
 
@@ -1391,8 +1399,8 @@ BYTE_WRITE_IMPL(0xa4)
 
         if (!variant->variant_num)
             memcpy(buffer->dst_info->monitor_base + buffer->offset, buffer->buffer, buffer->size);
-        memcpy(buffer->dst_info->variant_shadows[variant->variant_num].monitor_base + buffer->offset,
-               buffer->buffer, buffer->size);
+        if (buffer->dst_info->variant_shadows[variant->variant_num].monitor_base)/* Only access the shadow memory if it exists */
+            memcpy(buffer->dst_info->variant_shadows[variant->variant_num].monitor_base + buffer->offset, buffer->buffer, buffer->size);
 
         RETURN_ADVANCE
     }
@@ -1439,16 +1447,19 @@ if (!variant->variant_num)                                                      
             : "memory"                                                                                                 \
     );                                                                                                                 \
 }                                                                                                                      \
-__asm__                                                                                                                \
-(                                                                                                                      \
-        ".intel_syntax noprefix;"                                                                                      \
-        __core                                                                                                         \
-        ".att_syntax;"                                                                                                 \
-        :                                                                                                              \
-        : "a" (*(__cast*) source), "c" (buffer->count),                                                                \
-            "D" (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset)                            \
-        : "memory"                                                                                                     \
-);                                                                                                                     \
+if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */      \
+{                                                                                                                      \
+    __asm__                                                                                                            \
+    (                                                                                                                  \
+            ".intel_syntax noprefix;"                                                                                  \
+            __core                                                                                                     \
+            ".att_syntax;"                                                                                             \
+            :                                                                                                          \
+            : "a" (*(__cast*) source), "c" (buffer->count),                                                            \
+                "D" (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset)                        \
+            : "memory"                                                                                                 \
+    );                                                                                                                 \
+}                                                                                                                      \
                                                                                                                        \
 if (buffer->flags & (0b1u << 10u))                                                                                     \
     regs_struct->rdi -= buffer->count * sizeof(__cast);                                                                \
@@ -1554,16 +1565,22 @@ if (!variant->variant_num)                                                      
         buffer->leader_rax = buffer->original_rax;                                                                     \
     else                                                                                                               \
         buffer->leader_rax = *typed_source;                                                                            \
-    __atomic_exchange((__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset),            \
-            &buffer->leader_rax, &buffer->leader_rax, __ATOMIC_ACQ_REL);                                               \
+    if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */  \
+        __atomic_exchange((__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset),        \
+                &buffer->leader_rax, &buffer->leader_rax, __ATOMIC_ACQ_REL);                                           \
 }                                                                                                                      \
 else                                                                                                                   \
 {                                                                                                                      \
-    typed_destination = (__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);          \
-    if (buffer->replaced_rax == buffer->original_rax)                                                                  \
-        *typed_destination = *typed_source;                                                                            \
-    else if (buffer->leader_rax == buffer->replaced_rax)                                                               \
-        regs_struct->rax = *typed_destination;                                                                         \
+    if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */  \
+    {                                                                                                                  \
+        typed_destination = (__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);      \
+        if (buffer->replaced_rax == buffer->original_rax)                                                              \
+            *typed_destination = *typed_source;                                                                        \
+        else if (buffer->leader_rax == buffer->replaced_rax)                                                           \
+            regs_struct->rax = *typed_destination;                                                                     \
+        else                                                                                                           \
+            regs_struct->rax = buffer->replaced_rax;                                                                   \
+    }                                                                                                                  \
     else                                                                                                               \
         regs_struct->rax = buffer->replaced_rax;                                                                       \
     regs_struct->eflags = buffer->flags;                                                                               \
@@ -1672,9 +1689,12 @@ auto* typed_source = (__cast*)source;                                           
                                                                                                                        \
 if (!variant->variant_num)                                                                                              \
 {                                                                                                                      \
-    buffer->leader_destination = *typed_source;                                                                        \
-    __atomic_exchange((__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset),            \
-            &buffer->leader_destination, &buffer->leader_destination, __ATOMIC_ACQ_REL);                               \
+    if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */  \
+    {                                                                                                                  \
+        buffer->leader_destination = *typed_source;                                                                    \
+        __atomic_exchange((__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset),        \
+                &buffer->leader_destination, &buffer->leader_destination, __ATOMIC_ACQ_REL);                           \
+    }                                                                                                                  \
     typed_destination = (__cast*)(mapping_info->monitor_base + offset);                                                \
     __asm__                                                                                                            \
     (                                                                                                                  \
@@ -1694,11 +1714,16 @@ if (!variant->variant_num)                                                      
 }                                                                                                                      \
 else                                                                                                                   \
 {                                                                                                                      \
-    __atomic_exchange((__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset),            \
-            typed_source, typed_source, __ATOMIC_ACQ_REL);                                                             \
-    regs_struct->eflags = buffer->flags;                                                                               \
-    if (buffer->original_destination != buffer->leader_destination)                                                    \
+    if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */  \
+    {                                                                                                                  \
+        __atomic_exchange((__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset),        \
+                typed_source, typed_source, __ATOMIC_ACQ_REL);                                                         \
+        if (buffer->original_destination != buffer->leader_destination)                                                \
+            *typed_source = buffer->original_destination;                                                              \
+    }                                                                                                                  \
+    else                                                                                                               \
         *typed_source = buffer->original_destination;                                                                  \
+    regs_struct->eflags = buffer->flags;                                                                               \
 }
 /* Valid in second round */
 BYTE_WRITE_IMPL(0xc1)
