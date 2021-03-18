@@ -660,7 +660,7 @@ if (decode_address_tag(*(__source), variant) != decode_address_tag(*(__buffer), 
 #define WRITE_DIVERGENCE_ERROR(__message)                                                                              \
 warnf(__message);                                                                                                      \
 instruction.debug_print();                                                                                             \
-relevant_monitor.set_mmap_table->print_mmap_table(debugf);                                                             \
+relevant_monitor.set_mmap_table->print_mmap_table(warnf);                                                             \
 return -1;
 
 #define IMM_TO_SHARED_EMULATE                                                                                          \
