@@ -7307,6 +7307,7 @@ PRECALL(mmap)
             warnf("Trying to set up shared memory using a file descriptor the monitor doesn't know (fd %llu)\n",
                   ARG5(0));
             shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
+            shutdown(true);
         }
         call_check_regs(0);
         auto caller_info = set_mmap_table->get_caller_info(0, variants[0].variantpid, variants[0].regs.rip);
@@ -7360,6 +7361,7 @@ PRECALL(mmap)
 
             close(fd);
         }
+
         if (shm_setup_state & SHM_SETUP_IDLE && ((protection & S_IRUSR) && (protection & S_IWUSR)))
         {
             shm_setup_state = SHM_SETUP_EXPECTING_ENTRY;
@@ -7662,8 +7664,6 @@ POSTCALL(mmap)
             current_shadow = shadow;
         }
 #endif
-        if (shadow)
-            shadow->setup_shm();
 
 #ifdef MVEE_CONNECTED_MMAP_REGIONS
         std::shared_ptr<mmap_region_info*[]> connected_regions(new mmap_region_info*[mvee::numvariants]);
