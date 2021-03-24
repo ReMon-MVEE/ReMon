@@ -740,7 +740,7 @@ BYTE_EMULATOR_IMPL(0x2b)
         XMM_TO_SHARED_EMULATE(WRITE_DIVERGENCE_XMM_EQUAL(__buffer, __source,
                 " > write divergence in movntps m128, xmm\n"))
 
-        RETURN_ADVANCE
+        RETURN_WRITE(0x2b)
     }
 
     // illegal otherwise
