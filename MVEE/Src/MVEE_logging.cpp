@@ -863,7 +863,7 @@ void monitor::log_dump_queues(shm_table* shm_table)
 			}
 		}
 
-        char                       logname[100];
+        char                       logname[1000];
         sprintf(logname, "%s/Logs/%s_%d.log", mvee::os_get_orig_working_dir().c_str(),
                 getTextualBufferType(MVEE_LIBC_ATOMIC_BUFFER), monitorid);
         FILE*                      logfile = fopen(logname, "w");
@@ -937,7 +937,7 @@ void monitor::log_dump_queues(shm_table* shm_table)
         lowest     = 0xFFFFFFFF;
         info->dumpcount++;
 
-        char logname[100];
+        char logname[1000];
         sprintf(logname, "%s/Logs/%s_%d_%d.log", mvee::os_get_orig_working_dir().c_str(),
                 getTextualBufferType(it.first), info->id, info->dumpcount);
         FILE* logfile = fopen(logname, "w");
@@ -1027,7 +1027,7 @@ void monitor::log_dump_queues(shm_table* shm_table)
     }
     else
     {
-        char logname[100];
+        char logname[1000];
         sprintf(logname, "%s/Logs/%s_%d.log", mvee::os_get_orig_working_dir().c_str(),
                 getTextualBufferType(it.first), info->id);
         debugf("queue dumped to: %s\n", logname);
