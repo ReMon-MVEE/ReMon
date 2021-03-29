@@ -245,7 +245,8 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
         variants[i].syscall_pointer = parent_monitor->variants[i].syscall_pointer;
 #endif
         variants[i].shm_tag                  = parent_monitor->variants[i].shm_tag;
-        variants[i].mvee_shm_buffer_location = parent_monitor->variants[i].mvee_shm_buffer_location;
+        if (!shares_mmap_table)
+          variants[i].mvee_shm_buffer_location = parent_monitor->variants[i].mvee_shm_buffer_location;
     }
 
     // variant monitors are a different story. New variants (forks/vforks/clones) always
