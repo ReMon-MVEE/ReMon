@@ -2008,12 +2008,16 @@ void mvee::log_non_instrumented(variantstate* variant, monitor* relevant_monitor
     if (!instruction->instruction_pointer)
     {
         line << "somehow instruction at address 0x0000000000000000";
+#ifndef MVEE_LOG_ALL_SHM_INSTRUCTIONS
         if (mvee::non_instrumented_instructions.find(line.str()) == std::string::npos)
         {
             non_instrumented_instructions.append(line.str());
             non_instrumented_instructions.append("\n");
             fprintf(mvee::non_instrumented_logfile, "%s\n", line.str().c_str());
         }
+#else
+        fprintf(mvee::non_instrumented_logfile, "%s\n", line.str().c_str());
+#endif
         pthread_mutex_unlock(&mvee::non_instrumented_lock);
         return;
     }
@@ -2026,12 +2030,16 @@ void mvee::log_non_instrumented(variantstate* variant, monitor* relevant_monitor
     if (!found_region)
     {
         line << "invalid @ " << STDPTRSTR(instruction->instruction_pointer);
+#ifndef MVEE_LOG_ALL_SHM_INSTRUCTIONS
         if (mvee::non_instrumented_instructions.find(line.str()) == std::string::npos)
         {
             non_instrumented_instructions.append(line.str());
             non_instrumented_instructions.append("\n");
             fprintf(mvee::non_instrumented_logfile, "%s\n", line.str().c_str());
         }
+#else
+        fprintf(mvee::non_instrumented_logfile, "%s\n", line.str().c_str());
+#endif
         pthread_mutex_unlock(&mvee::non_instrumented_lock);
         return;
     }
@@ -2102,13 +2110,16 @@ void mvee::log_non_instrumented(variantstate* variant, monitor* relevant_monitor
                         found_region->region_base_address);
     }
 
-
+#ifndef MVEE_LOG_ALL_SHM_INSTRUCTIONS
     if (mvee::non_instrumented_instructions.find(line.str()) == std::string::npos)
     {
         non_instrumented_instructions.append(line.str());
         non_instrumented_instructions.append("\n");
         fprintf(mvee::non_instrumented_logfile, "%s\n", line.str().c_str());
     }
+#else
+    fprintf(mvee::non_instrumented_logfile, "%s\n", line.str().c_str());
+#endif
     pthread_mutex_unlock(&mvee::non_instrumented_lock);
 }
 
