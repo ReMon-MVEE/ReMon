@@ -6465,6 +6465,15 @@ PRECALL(writev)
 		MAPFDS(1);
 		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 	}
+       
+#ifdef MVEE_BENCHMARK
+	variants[0].replaced_iovec = new(std::nothrow) struct iovec[ARG3(0)];
+
+	if (!variants[0].replaced_iovec ||
+			!rw::read_struct(variants[0].variantpid, (void*) ARG2(0),
+			sizeof(struct iovec) * ARG3(0), variants[0].replaced_iovec))
+		throw RwMemFailure(0, "read iovec in sys_writev");
+#endif
 
     // vector shared memory replace
     struct iovec* new_iovec = new(std::nothrow) struct iovec[ARG3(0)];
@@ -7779,7 +7788,7 @@ POSTCALL(mmap)
 		}
 
 #ifdef MVEE_EMULATE_SHARED_MEMORY
-        if (SHM_SETUP_EXPECTING_ENTRY)
+        if (shm_setup_state == SHM_SETUP_EXPECTING_ENTRY)
         {
             warnf("unsynched MAP_SHARED mmap call\n");
             return MVEE_POSTCALL_DONTRESUME;
