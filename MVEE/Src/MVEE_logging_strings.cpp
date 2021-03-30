@@ -1987,6 +1987,29 @@ std::string getTextualShmFlags(unsigned long flags)
 }
 
 /*-----------------------------------------------------------------------------
+    getTextualShmctlFlags
+-----------------------------------------------------------------------------*/
+std::string getTextualShmctlFlags(unsigned long cmd)
+{
+    std::string result;
+
+    switch(cmd)
+    {
+        DEF_CASE(IPC_STAT)
+        DEF_CASE(IPC_SET)
+        DEF_CASE(IPC_RMID)
+        DEF_CASE(IPC_INFO)
+        DEF_CASE(SHM_INFO)
+        DEF_CASE(SHM_STAT)
+        // DEF_CASE(SHM_STAT_ANY)
+        DEF_CASE(SHM_LOCK)
+        DEF_CASE(SHM_UNLOCK)
+    }
+
+    return result;
+}
+
+/*-----------------------------------------------------------------------------
     getTextualInotifyMask
 -----------------------------------------------------------------------------*/
 std::string getTextualInotifyMask(unsigned long mask)

@@ -5676,6 +5676,22 @@ LOG_RETURN(shmat)
 }
 
 /*-----------------------------------------------------------------------------
+  sys_shmctl - (int shmid, int cmd, struct shmid_ds *buf)
+
+  Performs the control operation specified by cmd on the System V shared
+  memory segment whose identifier is given in shmid.
+-----------------------------------------------------------------------------*/
+LOG_ARGS(shmctl)
+{
+       debugf("%s - SYS_SHMCTL(%llu, %s (%llu), 0x%llx)\n",
+                       call_get_variant_pidstr(variantnum).c_str(),
+                       ARG1(variantnum),
+                       getTextualShmctlFlags(ARG2(variantnum)).c_str(),
+                       ARG2(variantnum),
+                       ARG3(variantnum));
+}
+
+/*-----------------------------------------------------------------------------
   sys_ipc - This is a demultiplexer for SysV ipc requests. ARM and i386 use
   this.  AMD64 does not use this. It calls the SysV ipc syscalls directly.
 
@@ -6465,7 +6481,7 @@ PRECALL(writev)
 		MAPFDS(1);
 		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 	}
-       
+
 #ifdef MVEE_BENCHMARK
 	variants[0].replaced_iovec = new(std::nothrow) struct iovec[ARG3(0)];
 
