@@ -91,12 +91,16 @@ endif()
 
 add_custom_target(
         debug
-        COMMAND "${CMAKE_COMMAND}" .. -DCMAKE_BUILD_TYPE=Debug
+        COMMAND "${CMAKE_COMMAND}" ..
+            -DCMAKE_BUILD_TYPE=Debug
+            -DBenchmarkMode=OFF
 )
 
 add_custom_target(
         release
-        COMMAND "${CMAKE_COMMAND}" .. -DCMAKE_BUILD_TYPE=Release
+        COMMAND "${CMAKE_COMMAND}" .. 
+            -DCMAKE_BUILD_TYPE=Release
+            -DBenchmarkMode=ON
 )
 
 add_custom_target(
@@ -261,6 +265,15 @@ else()
             -fvisibility=hidden
     )
 endif()
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+if (BenchmarkMode)
+    set(LogNonInstrumentedIns OFF)
+endif()
+# ----------------------------------------------------------------------------------------------------------------------
+
+
 # ----------------------------------------------------------------------------------------------------------------------
 option(BenchmarkMode "Run MVEE in Benchmark mode." OFF)
 option(EmulateCPUID "Emulate CPUID instruction." ON)
@@ -277,6 +290,7 @@ target_compile_definitions(mvee PRIVATE
     $<$<BOOL:${ShmInsLogging}>:MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING>
     $<$<BOOL:${ShmInsLoggingFull}>:MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL>
     $<$<BOOL:${ShmReplayLeader}>:MVEE_SHARED_MEMORY_REPLAY_LEADER>
+    #MVEE_LOG_ALL_SHM_INSTRUCTIONS
 )
 # ======================================================================================================================
 add_subdirectory(libsync)
