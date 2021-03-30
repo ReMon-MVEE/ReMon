@@ -100,6 +100,7 @@ std::string getTextualGroups            (int cnt, gid_t* gids);
 std::string getTextualSigactionFlags    (unsigned int flags);
 std::string getTextualPerfFlags         (unsigned long flags);
 std::string getTextualShmFlags          (unsigned long flags);
+std::string getTextualShmctlFlags       (unsigned long cmd)
 std::string getTextualInotifyMask       (unsigned long mask);
 std::string getTextualUnlinkFlags       (int flags);
 std::string getTextualLinkFlags         (int flags);
