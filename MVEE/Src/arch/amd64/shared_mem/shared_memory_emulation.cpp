@@ -2327,13 +2327,13 @@ else                                                                            
 {                                                                                                                      \
     if (typed_buffer->source != *(__cast*) source)                                                                     \
     {                                                                                                                  \
-        warnf(" > mismatching source for 0xb1 (%lu) | %llx != %llx", sizeof(__cast),                                   \
+        warnf(" > mismatching source for 0xb1 (%lu) | %llx != %llx\n", sizeof(__cast),                                   \
                 (unsigned long long)typed_buffer->source, (unsigned long long)*(__cast*)source);                       \
             return -1;                                                                                                 \
     }                                                                                                                  \
     if (typed_buffer->original_rax != (__cast)regs_struct->rax)                                                        \
     {                                                                                                                  \
-        warnf(" > mismatching rax for 0xb1 (%lu) | %llx != %llx", sizeof(__cast),                                      \
+        warnf(" > mismatching rax for 0xb1 (%lu) | %llx != %llx\n", sizeof(__cast),                                      \
                 (unsigned long long)typed_buffer->original_rax, (unsigned long long)(__cast)regs_struct->rax);         \
             return -1;                                                                                                 \
     }                                                                                                                  \
