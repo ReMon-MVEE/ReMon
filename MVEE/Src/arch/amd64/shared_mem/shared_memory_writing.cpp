@@ -1469,11 +1469,14 @@ else                                                                            
 /* Valid in first round */
 BYTE_WRITE_IMPL(0xaa)
 {
-    // we're in need of rax as source
-    DEFINE_REGS_STRUCT
-    void* source = shared_mem_register_access::ACCESS_GENERAL_NAME(rax)(regs_struct);
-    STOS_WRITE(uint8_t, )
-    RETURN_ADVANCE
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        // we're in need of rax as source
+        DEFINE_REGS_STRUCT
+        void* source = shared_mem_register_access::ACCESS_GENERAL_NAME(rax)(regs_struct);
+        STOS_WRITE(uint8_t, )
+        RETURN_ADVANCE
+    }
 }
 
 
