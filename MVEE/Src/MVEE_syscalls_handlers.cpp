@@ -5683,12 +5683,12 @@ LOG_RETURN(shmat)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(shmctl)
 {
-       debugf("%s - SYS_SHMCTL(%llu, %s (%llu), 0x%llx)\n",
-                       call_get_variant_pidstr(variantnum).c_str(),
-                       ARG1(variantnum),
-                       getTextualShmctlFlags(ARG2(variantnum)).c_str(),
-                       ARG2(variantnum),
-                       ARG3(variantnum));
+	debugf("%s - SYS_SHMCTL(%llu, %s (%llu), 0x%llx)\n",
+			call_get_variant_pidstr(variantnum).c_str(),
+			ARG1(variantnum),
+			getTextualShmctlFlags(ARG2(variantnum)).c_str(),
+			ARG2(variantnum),
+			ARG3(variantnum));
 }
 
 /*-----------------------------------------------------------------------------
@@ -6508,8 +6508,7 @@ PRECALL(writev)
                 shutdown(true);
                 return MVEE_PRECALL_ARGS_MISMATCH(2) | MVEE_PRECALL_CALL_DENY;
             }
-            new_iovec[i].iov_base = (void*)(mapping_info->variant_shadows[0].variant_base +
-                    (decoded_address - mapping_info->variant_base));
+            new_iovec[i].iov_base = (void*) decoded_address;
         }
     }
     if (new_iovec)
