@@ -615,6 +615,7 @@ if (memcmp(buffer, source, 16) != 0)                                            
     WRITE_DIVERGENCE_ERROR(__message)                                                                                  \
 }
 
+#ifdef MVEE_ALLOW_SHM_PTR_DIFF
 #define WRITE_DIVERGENCE_XMM_PTR_CHECK(__buffer, __source, __message)                                                  \
 {                                                                                                                      \
     if (*(void**)(__buffer) != *(void**)(__source))                                                                    \
@@ -640,8 +641,13 @@ if (memcmp(buffer, source, 16) != 0)                                            
         }                                                                                                              \
     }                                                                                                                  \
 }
+#else
+#define WRITE_DIVERGENCE_XMM_PTR_CHECK(__buffer, __source, __message) \
+WRITE_DIVERGENCE_ERROR(__message)
+#endif
 
-#ifdef MVEE_CONNECTED_MMAP_REGIONS
+#ifdef MVEE_ALLOW_SHM_PTR_DIFF
+  #ifdef MVEE_CONNECTED_MMAP_REGIONS
 #define WRITE_DIVERGENCE_PTR_CHECK(__buffer, __source, __message)                                                      \
 if (decode_address_tag(*(__source), variant) != decode_address_tag(*(__buffer), &relevant_monitor.variants[0]) &&      \
         shm_handling::same_ptr(relevant_monitor, 0, *(__buffer), variant->variant_num, *(__source)) != 0)              \
@@ -649,13 +655,17 @@ if (decode_address_tag(*(__source), variant) != decode_address_tag(*(__buffer), 
     warnf(" > %p != %p\n", (void*)*(__buffer), (void*)*(__source));                                                    \
     WRITE_DIVERGENCE_ERROR(__message)                                                                                  \
 }
-#else
+  #else
 #define WRITE_DIVERGENCE_PTR_CHECK(__buffer, __source, __message)                                                      \
 if (decode_address_tag(*(__source), variant) != decode_address_tag(*(__buffer), &relevant_monitor.variants[0]))        \
 {                                                                                                                      \
     warnf(" > %p != %p\n", (void*)*(__buffer), (void*)*(__source));                                                    \
     WRITE_DIVERGENCE_ERROR(__message)                                                                                  \
 }
+  #endif
+#else
+#define WRITE_DIVERGENCE_PTR_CHECK(__buffer, __source, __message)                                                      \
+WRITE_DIVERGENCE_ERROR(__message)
 #endif
 
 #define WRITE_DIVERGENCE_ERROR(__message)                                                                              \
