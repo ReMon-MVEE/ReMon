@@ -2251,6 +2251,9 @@ BYTE_EMULATOR_IMPL(0xaa)
         STOS_EMULATE(uint8_t)
         RETURN_WRITE(0xaa)
     }
+
+    // illegal otherwise
+    return -1;
 }
 
 

@@ -1477,6 +1477,9 @@ BYTE_WRITE_IMPL(0xaa)
         STOS_WRITE(uint8_t, )
         RETURN_ADVANCE
     }
+
+    // illegal otherwise
+    return -1;
 }
 
 
