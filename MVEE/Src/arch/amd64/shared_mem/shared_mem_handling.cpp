@@ -1144,19 +1144,29 @@ bool            mmap_table::requires_shadow                              (varian
     /* Get the path for the binary that requested shared memory */
     mvee_dwarf_context context(variant->variantpid);
     this->dwarf_step(0, variant->variantpid, &context);
+    // do this twice, first one is always in libc.so, we check before requires_shadow is even called
+    this->dwarf_step(0, variant->variantpid, &context);
     std::string binary_path = this->get_region_info(0, IP_IN_REGS(context.regs), 0)->region_backing_file_path;
     std::string binary_name = binary_path.substr(binary_path.rfind('/'));
 
-    /* Allowlist: no shadow memory required */
-    std::vector<std::string> allowlist{"mplayer", "fontconfig"};
+    /* Allowlist: no shadow memory required
+     *  - libc: sometimes mmap used in some internal glibc functions around file operations
+     *  - mplayer: for video data output
+     *  - libfontconfig.so: read only file access
+     *  - libapr: mmaps HTML files and scoreboard file
+     */
+    std::vector<std::string> allowlist{"libc", "mplayer", "libfontconfig", "libapr"};
     for (const auto& s : allowlist)
     {
         if (binary_name.find(s) != std::string::npos)
             return false;
     }
 
-    /* Blocklist: shadow memory required */
-    std::vector<std::string> blocklist{"pulse", "nginx"};
+    /* Blocklist: shadow memory required
+     *  - libpulsecommon: for communication with the audio server
+     *  - nginx: keeps state in shared memory
+     */
+    std::vector<std::string> blocklist{"libpulsecommon", "nginx"};
     for (const auto& s : blocklist)
     {
         if (binary_name.find(s) != std::string::npos)
@@ -1164,6 +1174,7 @@ bool            mmap_table::requires_shadow                              (varian
     }
 
     /* Default: shadow memory required */
+    warnf( " > returning default on %s\n", binary_name.c_str());
     return true;
 }
 
