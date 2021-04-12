@@ -70,7 +70,7 @@
 
 // MVEE_ALLOW_SHM: When defined, the variants are permitted to attach to sysv shared
 // memory segments even though it is clearly a bad idea to allow them to do so!!!!
-#define MVEE_ALLOW_SHM
+// #define MVEE_ALLOW_SHM
 
 // MVEE_DUMP_IPMON_BUFFER_ON_FLUSH: If defined, GHUMVEE will log the contents of
 // the IP-MON/UTCB buffer whenever it is being flushed 

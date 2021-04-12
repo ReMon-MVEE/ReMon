@@ -5439,8 +5439,10 @@ PRECALL(shmat)
             (ipmon_buffer && (int)ARG1(0) == ipmon_buffer->id) ||
             (shm_buffer  && (int)ARG1(0) == shm_buffer->id))
         return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+#ifdef MVEE_ALLOW_SHM
     else if (shm_setup_state & SHM_SETUP_EXPECTING_SHADOW)
         return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+#endif
     else
     {
         for (auto it = set_shm_table->table.begin(); it != set_shm_table->table.end(); ++it)
@@ -5486,6 +5488,7 @@ CALL(shmat)
         disjoint_bases = false;
     shm_sz = shm_buffer->sz;
     }
+#ifdef MVEE_ALLOW_SHM
     else if (shm_setup_state & SHM_SETUP_EXPECTING_SHADOW)
     {
         /* No shadow memory required. Switch back to clean state and return NULL pointer */
@@ -5505,6 +5508,7 @@ CALL(shmat)
         }
         shm_sz = current_shadow->size;
     }
+#endif
     else
     {
         bool found = false;
@@ -5524,6 +5528,7 @@ CALL(shmat)
         // shared memory
         if (!found)
         {
+#ifdef MVEE_ALLOW_SHM
             call_check_regs(0);
             auto caller_info = set_mmap_table->get_caller_info(0, variants[0].variantpid, variants[0].regs.rip);
             if (caller_info.find("mvee_shm_shmat") == std::string::npos)
@@ -5532,6 +5537,11 @@ CALL(shmat)
                 return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOMEM);
             }
             disjoint_bases = false;
+#else
+			warnf("The program is trying to attach to shared memory. This call has been denied.\n");
+			return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
+
+#endif
         }
     }
 
@@ -5543,14 +5553,7 @@ CALL(shmat)
         for (int i = 0; i < mvee::numvariants; ++i)
             SETARG2(i, bases[i]);
     }
-
-
-#ifndef MVEE_ALLOW_SHM
-    warnf("The program is trying to attach to shared memory. This call has been denied.\n");
-    return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
-#else
 	return MVEE_CALL_ALLOW;
-#endif
 }
 
 POSTCALL(shmat)
@@ -5595,6 +5598,7 @@ POSTCALL(shmat)
 		region_name = "[ipmon-file-map]";
 		region_size = info->sz;
 	}
+#ifdef MVEE_ALLOW_SHM
     else if (shm_setup_state & SHM_SETUP_EXPECTING_SHADOW)
     {
         for (int i = 0; i < mvee::numvariants; i++)
@@ -5613,6 +5617,7 @@ POSTCALL(shmat)
         current_shadow = nullptr;
         shm_setup_state = SHM_SETUP_IDLE;
     }
+#endif
 	else
 	{
 	    bool shared_memory = true;
@@ -5629,6 +5634,7 @@ POSTCALL(shmat)
 
         if (shared_memory)
         {
+#ifdef MVEE_ALLOW_SHM
             struct shmid_ds shm_info;
             if (shmctl(ARG1(0), IPC_STAT, &shm_info) == -1)
             {
@@ -5655,6 +5661,7 @@ POSTCALL(shmat)
             if (allocate_shadow)
                 shm_setup_state |= SHM_SETUP_SHOULD_ALLOCATE_SHADOW;
             current_shadow = shadow;
+#endif
         }
 	}
 
@@ -7321,79 +7328,12 @@ PRECALL(mmap)
 	}
 #endif
 
+#ifdef MVEE_ALLOW_SHM
     shm_setup_state = SHM_SETUP_IDLE;
     if (ARG5(0) && ((int)ARG5(0) != -1) && (ARG4(0) & MAP_SHARED) &&
             !(ARG3(0) & PROT_EXEC))
-    {
-	    fd_info* info = set_fd_table->get_fd_info(ARG5(0));
-        if (!info)
-        {
-            warnf("Trying to set up shared memory using a file descriptor the monitor doesn't know (fd %llu)\n",
-                  ARG5(0));
-            shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
-            shutdown(true);
-        }
-        call_check_regs(0);
-        auto caller_info = set_mmap_table->get_caller_info(0, variants[0].variantpid, variants[0].regs.rip);
-        if (caller_info.find("mvee_shm_mmap") == std::string::npos)
-        {
-            warnf("Trying to set up shared memory from a location other that mvee_shm_mmap\n");
-            shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
-        }
-
-        // check actual file
-        int fd;
-        unsigned long long protection;
-
-        for (unsigned long file_i = 0; file_i < (info->master_file ? 1: info->paths.size()); file_i++)
-        {
-            fd = open(info->paths[file_i].c_str(), O_RDONLY);
-            if (fd == -1)
-            {
-                std::stringstream memfd_file_path;
-                memfd_file_path << "/proc/" << variants[file_i].variantpid << "/fd/" << info->fds[file_i];
-                fd = open(memfd_file_path.str().c_str(), info->access_flags & ~(O_TRUNC | O_CREAT));
-
-                if (fd == -1)
-                {
-                    warnf("Failed shared memory check | could not open %s (%lu) - %d\n",
-                            info->paths[file_i].c_str(), file_i, errno);
-                    shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
-                    break;
-                }
-            }
-            struct stat fd_stat;
-            if (fstat(fd, &fd_stat))
-            {
-                warnf("Failed shared memory check | could not fstat %s - %d\n\n", info->paths[file_i].c_str(),
-                      errno);
-                shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
-                break;
-            }
-
-            if (!file_i)
-                protection = fd_stat.st_mode;
-            else if (fd_stat.st_mode != protection)
-            {
-                warnf("Failed shared memory check | Per variant file has different file mode: %llx != %du | %s\n",
-                      protection,
-                      fd_stat.st_mode,
-                      info->paths[file_i].c_str());
-                shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
-                break;
-            }
-
-            close(fd);
-        }
-
-        if (shm_setup_state & SHM_SETUP_IDLE && ((protection & S_IRUSR) && (protection & S_IWUSR)))
-        {
-            shm_setup_state = SHM_SETUP_EXPECTING_ENTRY;
-            return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-        }
-        else
-            return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
-    }
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+#endif
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
@@ -7404,14 +7344,6 @@ CALL(mmap)
 
     for (int i = 0; i < mvee::numvariants; ++i)
         variants[i].last_mmap_result = 0;
-
-    // Something in the precall handler went wrong, but we need to return MVEE_DISPATCH_MASTER there if it doesn't go
-    // wrong and MVEE_CALL_DENY here if it does.
-    if (shm_setup_state & SHM_SETUP_EXPECTING_ERROR)
-    {
-        shm_setup_state = SHM_SETUP_IDLE;
-        return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOMEM);
-    }
 
     // anonymous shared mapping maps /dev/zero into our address space.
     // this mapping is only shared between the calling process and its decendants
@@ -7486,7 +7418,8 @@ CALL(mmap)
 #endif
         }
 
-        if ((info->access_flags & O_RDWR) && (ARG4(0) & MAP_SHARED))
+#ifdef MVEE_ALLOW_SHM
+        if (ARG4(0) & MAP_SHARED)
         {
 			if (!info->unlinked)
 			{
@@ -7517,7 +7450,69 @@ CALL(mmap)
                     }
                 }
             }
-#ifndef MVEE_ALLOW_SHM
+			else
+			{
+				call_check_regs(0);
+				auto caller_info = set_mmap_table->get_caller_info(0, variants[0].variantpid, variants[0].regs.rip);
+				if (caller_info.find("mvee_shm_mmap") == std::string::npos)
+				{
+					warnf("Trying to set up shared memory from a location other that mvee_shm_mmap\n");
+					shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
+				}
+
+				// check actual file
+				int fd;
+				unsigned long long protection;
+
+				for (unsigned long file_i = 0; file_i < (info->master_file ? 1: info->paths.size()); file_i++)
+				{
+					fd = open(info->paths[file_i].c_str(), O_RDONLY);
+					if (fd == -1)
+					{
+						std::stringstream memfd_file_path;
+						memfd_file_path << "/proc/" << variants[file_i].variantpid << "/fd/" << info->fds[file_i];
+						fd = open(memfd_file_path.str().c_str(), info->access_flags & ~(O_TRUNC | O_CREAT));
+
+						if (fd == -1)
+						{
+							warnf("Failed shared memory check | could not open %s (%lu) - %d\n",
+									info->paths[file_i].c_str(), file_i, errno);
+							return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOMEM);
+						}
+					}
+					struct stat fd_stat;
+					if (fstat(fd, &fd_stat))
+					{
+						warnf("Failed shared memory check | could not fstat %s - %d\n\n", info->paths[file_i].c_str(),
+								errno);
+						return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOMEM);
+					}
+
+					if (!file_i)
+						protection = fd_stat.st_mode;
+					else if (fd_stat.st_mode != protection)
+					{
+						warnf("Failed shared memory check | Per variant file has different file mode: %llx != %du | %s\n",
+								protection,
+								fd_stat.st_mode,
+								info->paths[file_i].c_str());
+						return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOMEM);
+					}
+
+					close(fd);
+				}
+			}
+		}
+#else
+        if ((info->access_flags & O_RDWR) && (ARG4(0) & MAP_SHARED))
+		{
+			if (!info->unlinked)
+			{
+				debugf("variants are opening a shared memory mapping backed by an O_RDWR file!!!\n");
+				debugf("> file = %s\n",           info->get_path_string().c_str());
+				debugf("> map prot flags = %s\n", getTextualProtectionFlags(ARG3(0)).c_str());
+			}
+
             if ((ARG3(0) & PROT_WRITE) || (ARG3(0) & PROT_EXEC))
             {
                 if (!info->unlinked)
@@ -7536,7 +7531,7 @@ CALL(mmap)
 				{
 					// check if any process outside the MVEE has this region mapped into their address space
 					std::stringstream ultimate_grep_command_of_doom;
-					ultimate_grep_command_of_doom << "grep \"" << info->path << " (deleted)$\" $(find /proc/ 2>&1 | grep \"/maps\" | grep -v \"/task/\") 2>&1 | grep \"^/proc\" | cut -d'/' -f3";
+					ultimate_grep_command_of_doom << "grep \"" << info->paths[0] << " (deleted)$\" $(find /proc/ 2>&1 | grep \"/maps\" | grep -v \"/task/\") 2>&1 | grep \"^/proc\" | cut -d'/' -f3";
 					std::string output = mvee::log_read_from_proc_pipe(ultimate_grep_command_of_doom.str().c_str(), NULL);
 
 					std::stringstream lines;
@@ -7552,7 +7547,7 @@ CALL(mmap)
 						if (!mvee::is_monitored_variant(pid))
 						{
 							warnf("MAP_SHARED mapping request of unlinked file denied.");
-							warnf("> file: %s\n", info->path.c_str()); 
+							warnf("> file: %s\n", info->paths[0].c_str());
 							warnf("> reason: also mapped into the address space of non-monitored process %d\n", pid);
 							return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
 						}
@@ -7572,7 +7567,7 @@ CALL(mmap)
             {
                 if (ARG4(0) & MAP_FIXED)
                 {
-                    warnf("GHUMVEE is running with non_overlapping_mmaps enabled but the following binary is not position independent: %s\n", info->path.c_str());
+                    warnf("GHUMVEE is running with non_overlapping_mmaps enabled but the following binary is not position independent: %s\n", info->paths[0].c_str());
                     warnf("> We cannot enforce disjunct code within this address space!!!\n");
                 }
                 else
@@ -7580,11 +7575,11 @@ CALL(mmap)
                     std::vector<unsigned long> bases(mvee::numvariants);
                     set_mmap_table->calculate_disjoint_bases(ARG2(0), bases);
 
-                    debugf("GHUMVEE is overriding the base address of a new code region backed by file: %s\n",
-                               info->path.c_str());
 
                     for (int i = 0; i < mvee::numvariants; ++i)
                     {
+						debugf("GHUMVEE is overriding the base address of a new code region backed by file: %s\n",
+								info->paths[info->paths.size() > 1  ? i : 0].c_str());
                         /*
                            warnf("> variant %d => region span: 0x" PTRSTR "-0x" PTRSTR "\n",
                            i, bases[i], ROUND_UP(bases[i] + ARG2(0), 4096));
@@ -7593,8 +7588,8 @@ CALL(mmap)
                     }
                 }
             }
-#endif
         }
+#endif
     }
 
     return MVEE_CALL_ALLOW;
@@ -7660,7 +7655,7 @@ POSTCALL(mmap)
 		}
 
         shared_monitor_map_info* shadow = nullptr;
-#ifdef MVEE_EMULATE_SHARED_MEMORY
+#if defined(MVEE_EMULATE_SHARED_MEMORY) && defined(MVEE_ALLOW_SHM)
         if (shm_setup_state & SHM_SETUP_EXPECTING_ENTRY)
         {
             if (set_mmap_table->shadow_map(&variants[0], info, results[0], &shadow,
@@ -8298,9 +8293,7 @@ PRECALL(shmget)
     CHECKARG(1)
     CHECKARG(2)
     CHECKARG(3)
-#ifdef MVEE_EMULATE_SHARED_MEMORY
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
-#endif
 }
 
 CALL(shmget)
