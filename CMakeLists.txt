@@ -115,6 +115,17 @@ add_custom_target(
 )
 
 add_custom_target(
+        block-shm
+        COMMAND "${CMAKE_COMMAND}" ..
+            -DEmulateCPUID=ON
+            -DEmulateShm=OFF
+            -DLogNonInstrumentedIns=ON
+            -DShmInsLogging=OFF
+            -DShmInsLoggingFull=OFF
+            -DShmReplayLeader=ON
+)
+
+add_custom_target(
         trace-shm
         COMMAND "${CMAKE_COMMAND}" ..
             -DEmulateCPUID=ON
@@ -287,6 +298,7 @@ target_compile_definitions(mvee PRIVATE
     $<$<BOOL:${BenchmarkMode}>:MVEE_BENCHMARK>
     $<$<BOOL:${EmulateCPUID}>:MVEE_EMULATE_CPUID>
     $<$<BOOL:${EmulateShm}>:MVEE_EMULATE_SHARED_MEMORY>
+    $<$<BOOL:${EmulateShm}>:MVEE_ALLOW_SHM>
     $<$<BOOL:${LogNonInstrumentedIns}>:MVEE_LOG_NON_INSTRUMENTED_INSTRUCTION>
     $<$<BOOL:${ShmAllowPtrDiff}>:MVEE_ALLOW_SHM_PTR_DIFF>
     $<$<BOOL:${ShmInsLogging}>:MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING>
