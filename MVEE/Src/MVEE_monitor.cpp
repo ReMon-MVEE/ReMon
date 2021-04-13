@@ -90,6 +90,7 @@ variantstate::variantstate()
     , config (NULL)
     , instruction (&this->variantpid, &this->variant_num)
     , mvee_shm_buffer_location(0)
+    , mvee_atomic_queue_location(0)
     , replaced_iovec(0)
 #ifdef __NR_socketcall
     , orig_arg1 (0)
@@ -246,7 +247,10 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
 #endif
         variants[i].shm_tag                  = parent_monitor->variants[i].shm_tag;
         if (!shares_mmap_table)
+        {
           variants[i].mvee_shm_buffer_location = parent_monitor->variants[i].mvee_shm_buffer_location;
+          variants[i].mvee_atomic_queue_location = parent_monitor->variants[i].mvee_atomic_queue_location;
+        }
     }
 
     // variant monitors are a different story. New variants (forks/vforks/clones) always
@@ -1454,9 +1458,11 @@ void monitor::handle_resume_event(int index)
     // We do not actually resume until all of our variants are ready. This way we can set tids if needed
     debugf("%s - ready to resume variant\n", call_get_variant_pidstr(index).c_str());
     if (variants[index].mvee_shm_buffer_location &&
-            !interaction::write_memory_word(variants[index].variantpid,
-                (void*)variants[index].mvee_shm_buffer_location, 0))
+            !interaction::write_memory_word(variants[index].variantpid, (void*)variants[index].mvee_shm_buffer_location, 0))
         warnf("Could not clear mvee_shm_buffer for variant %d (%d) - %d\n", index, variants[index].variantpid, errno);
+    if (variants[index].mvee_atomic_queue_location &&
+            !interaction::write_memory_word(variants[index].variantpid, (void*)variants[index].mvee_atomic_queue_location, 0))
+        warnf("Could not clear mvee_thread_local_queue for variant %d (%d) - %d\n", index, variants[index].variantpid, errno);
 
     bool all_resumed = true;
     for (int i = 0; i < mvee::numvariants; ++i)

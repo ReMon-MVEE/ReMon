@@ -666,6 +666,7 @@ long monitor::call_call_dispatch ()
 						atomic_counters[i]  = (void*)ARG1(i);
 						if (buffer_type == MVEE_LIBC_ATOMIC_BUFFER)
 							atomic_queue_pos[i] = (void*)ARG4(i);
+            variants[i].mvee_atomic_queue_location = ARG6(i);
 					}
 
                     if (!atomic_buffer)
