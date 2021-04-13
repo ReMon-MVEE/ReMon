@@ -1567,13 +1567,15 @@ if (!variant->variant_num)                                                      
     buffer->replaced_rax = regs_struct->rax;                                                                           \
     buffer->flags        = regs_struct->eflags;                                                                        \
                                                                                                                        \
-    if (buffer->replaced_rax == buffer->original_rax)                                                                  \
-        buffer->leader_rax = buffer->original_rax;                                                                     \
-    else                                                                                                               \
-        buffer->leader_rax = *typed_source;                                                                            \
     if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */  \
+    {                                                                                                                  \
+        if (buffer->replaced_rax == buffer->original_rax)                                                              \
+            buffer->leader_rax = buffer->original_rax;                                                                 \
+        else                                                                                                           \
+            buffer->leader_rax = *typed_source;                                                                        \
         __atomic_exchange((__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset),        \
                 &buffer->leader_rax, &buffer->leader_rax, __ATOMIC_ACQ_REL);                                           \
+    }                                                                                                                  \
 }                                                                                                                      \
 else                                                                                                                   \
 {                                                                                                                      \
