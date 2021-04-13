@@ -1694,15 +1694,10 @@ XADD_STRUCT(__cast)                                                             
 GET_LAST_BUFFER_RAW(temp_t)                                                                                            \
 __cast* typed_destination;                                                                                             \
 auto* typed_source = (__cast*)source;                                                                                  \
+__cast added_value = *typed_source;                                                                                    \
                                                                                                                        \
-if (!variant->variant_num)                                                                                              \
+if (!variant->variant_num)                                                                                             \
 {                                                                                                                      \
-    if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */  \
-    {                                                                                                                  \
-        buffer->leader_destination = *typed_source;                                                                    \
-        __atomic_exchange((__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset),        \
-                &buffer->leader_destination, &buffer->leader_destination, __ATOMIC_ACQ_REL);                           \
-    }                                                                                                                  \
     typed_destination = (__cast*)(mapping_info->monitor_base + offset);                                                \
     __asm__                                                                                                            \
     (                                                                                                                  \
@@ -1719,15 +1714,28 @@ if (!variant->variant_num)                                                      
     );                                                                                                                 \
     buffer->flags                = regs_struct->eflags;                                                                \
     buffer->original_destination = *typed_source;                                                                      \
+    if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */  \
+    {                                                                                                                  \
+       /* Set the shadow memory to the new value (= original value in external shared memory + added value) */         \
+       /* and store the original value in the shadow memory.                                            */             \
+       buffer->leader_destination = __atomic_exchange_n((__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset), \
+                buffer->original_destination + added_value, __ATOMIC_ACQ_REL);                                         \
+    }                                                                                                                  \
 }                                                                                                                      \
 else                                                                                                                   \
 {                                                                                                                      \
     if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */  \
     {                                                                                                                  \
-        __atomic_exchange((__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset),        \
-                typed_source, typed_source, __ATOMIC_ACQ_REL);                                                         \
-        if (buffer->original_destination != buffer->leader_destination)                                                \
+        /* Check whether the original values of the external memory and the leader's shadow memory differ */           \
+        if (buffer->original_destination != buffer->leader_destination) /* Use buffer */                               \
+        {                                                                                                              \
+            __atomic_store_n((__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset),     \
+                buffer->original_destination + added_value, __ATOMIC_RELEASE);                                         \
             *typed_source = buffer->original_destination;                                                              \
+        }                                                                                                              \
+        else /* Operate directly on shadow memory, and return value fetched from there */                              \
+            *typed_source = __atomic_fetch_add((__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset), \
+                added_value, __ATOMIC_ACQ_REL);                                                                        \
     }                                                                                                                  \
     else                                                                                                               \
         *typed_source = buffer->original_destination;                                                                  \
