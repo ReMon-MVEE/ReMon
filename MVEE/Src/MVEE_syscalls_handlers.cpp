@@ -7332,7 +7332,74 @@ PRECALL(mmap)
     shm_setup_state = SHM_SETUP_IDLE;
     if (ARG5(0) && ((int)ARG5(0) != -1) && (ARG4(0) & MAP_SHARED) &&
             !(ARG3(0) & PROT_EXEC))
-		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+	{
+	    fd_info* info = set_fd_table->get_fd_info(ARG5(0));
+        if (!info)
+        {
+            warnf("Trying to set up shared memory using a file descriptor the monitor doesn't know (fd %llu)\n",
+                  ARG5(0));
+            shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
+            shutdown(true);
+        }
+		call_check_regs(0);
+		auto caller_info = set_mmap_table->get_caller_info(0, variants[0].variantpid, variants[0].regs.rip);
+		if (caller_info.find("mvee_shm_mmap") == std::string::npos)
+		{
+			warnf("Trying to set up shared memory from a location other that mvee_shm_mmap\n");
+			shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
+		}
+
+		// check actual file
+		int fd;
+		unsigned long long protection;
+
+		for (unsigned long file_i = 0; file_i < (info->master_file ? 1: info->paths.size()); file_i++)
+		{
+			fd = open(info->paths[file_i].c_str(), O_RDONLY);
+			if (fd == -1)
+			{
+				std::stringstream memfd_file_path;
+				memfd_file_path << "/proc/" << variants[file_i].variantpid << "/fd/" << info->fds[file_i];
+				fd = open(memfd_file_path.str().c_str(), info->access_flags & ~(O_TRUNC | O_CREAT));
+
+				if (fd == -1)
+				{
+					warnf("Failed shared memory check | could not open %s (%lu) - %d\n",
+							info->paths[file_i].c_str(), file_i, errno);
+					shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
+					break;
+				}
+			}
+			struct stat fd_stat;
+			if (fstat(fd, &fd_stat))
+			{
+				warnf("Failed shared memory check | could not fstat %s - %d\n\n", info->paths[file_i].c_str(),
+						errno);
+				shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
+				break;
+			}
+
+			if (!file_i)
+				protection = fd_stat.st_mode;
+			else if (fd_stat.st_mode != protection)
+			{
+				warnf("Failed shared memory check | Per variant file has different file mode: %llx != %du | %s\n",
+						protection,
+						fd_stat.st_mode,
+						info->paths[file_i].c_str());
+				shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
+				break;
+			}
+
+			close(fd);
+		}
+
+		if ((shm_setup_state & SHM_SETUP_IDLE) && (protection & (S_IRUSR | S_IWUSR)))
+		{
+			shm_setup_state = SHM_SETUP_EXPECTING_ENTRY;
+			return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
+		}
+	}
 #endif
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
@@ -7450,57 +7517,21 @@ CALL(mmap)
                     }
                 }
             }
-			else
+			else if (shm_setup_state & SHM_SETUP_EXPECTING_ENTRY)
 			{
-				call_check_regs(0);
-				auto caller_info = set_mmap_table->get_caller_info(0, variants[0].variantpid, variants[0].regs.rip);
-				if (caller_info.find("mvee_shm_mmap") == std::string::npos)
+				unsigned long base_address = set_mmap_table->calculate_data_mapping_base(ARG2(0));
+				if (!base_address)
 				{
-					warnf("Trying to set up shared memory from a location other that mvee_shm_mmap\n");
-					shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
+					warnf(" > could not get base address for MAP_SHARED mapping\n");
+					shutdown(false);
+					return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
 				}
-
-				// check actual file
-				int fd;
-				unsigned long long protection;
-
-				for (unsigned long file_i = 0; file_i < (info->master_file ? 1: info->paths.size()); file_i++)
-				{
-					fd = open(info->paths[file_i].c_str(), O_RDONLY);
-					if (fd == -1)
-					{
-						std::stringstream memfd_file_path;
-						memfd_file_path << "/proc/" << variants[file_i].variantpid << "/fd/" << info->fds[file_i];
-						fd = open(memfd_file_path.str().c_str(), info->access_flags & ~(O_TRUNC | O_CREAT));
-
-						if (fd == -1)
-						{
-							warnf("Failed shared memory check | could not open %s (%lu) - %d\n",
-									info->paths[file_i].c_str(), file_i, errno);
-							return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOMEM);
-						}
-					}
-					struct stat fd_stat;
-					if (fstat(fd, &fd_stat))
-					{
-						warnf("Failed shared memory check | could not fstat %s - %d\n\n", info->paths[file_i].c_str(),
-								errno);
-						return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOMEM);
-					}
-
-					if (!file_i)
-						protection = fd_stat.st_mode;
-					else if (fd_stat.st_mode != protection)
-					{
-						warnf("Failed shared memory check | Per variant file has different file mode: %llx != %du | %s\n",
-								protection,
-								fd_stat.st_mode,
-								info->paths[file_i].c_str());
-						return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOMEM);
-					}
-
-					close(fd);
-				}
+				for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+					SETARG1(variant_i, base_address);
+			}
+			else if (shm_setup_state & SHM_SETUP_EXPECTING_ERROR)
+			{
+                return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
 			}
 		}
 #else
@@ -7546,7 +7577,7 @@ CALL(mmap)
 
 						if (!mvee::is_monitored_variant(pid))
 						{
-							warnf("MAP_SHARED mapping request of unlinked file denied.");
+							warnf("MAP_SHARED mapping request of unlinked file denied.\n");
 							warnf("> file: %s\n", info->paths[0].c_str());
 							warnf("> reason: also mapped into the address space of non-monitored process %d\n", pid);
 							return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
