@@ -2016,6 +2016,14 @@ void mvee::log_non_instrumented(variantstate* variant, monitor* relevant_monitor
             fprintf(mvee::non_instrumented_logfile, "%s\n", line.str().c_str());
         }
 #else
+        mmap_region_info* accessed_region = relevant_monitor->set_mmap_table->get_region_info(variant->variant_num,
+                (unsigned long long) instruction->effective_address);
+        if (!accessed_region)
+            line << ";unknown;0x" << std::hex << (unsigned long long) instruction->effective_address;
+        else
+            line << ";" << accessed_region->region_backing_file_path.c_str() << ";0x" << std::hex <<
+                    (unsigned long long) instruction->effective_address - accessed_region->region_base_address;
+
         fprintf(mvee::non_instrumented_logfile, "%s\n", line.str().c_str());
 #endif
         pthread_mutex_unlock(&mvee::non_instrumented_lock);
@@ -2038,6 +2046,14 @@ void mvee::log_non_instrumented(variantstate* variant, monitor* relevant_monitor
             fprintf(mvee::non_instrumented_logfile, "%s\n", line.str().c_str());
         }
 #else
+        mmap_region_info* accessed_region = relevant_monitor->set_mmap_table->get_region_info(variant->variant_num,
+                (unsigned long long) instruction->effective_address);
+        if (!accessed_region)
+            line << ";unknown;0x" << std::hex << (unsigned long long) instruction->effective_address;
+        else
+            line << ";" << accessed_region->region_backing_file_path.c_str() << ";0x" << std::hex <<
+                    (unsigned long long) instruction->effective_address - accessed_region->region_base_address;
+
         fprintf(mvee::non_instrumented_logfile, "%s\n", line.str().c_str());
 #endif
         pthread_mutex_unlock(&mvee::non_instrumented_lock);
@@ -2118,6 +2134,14 @@ void mvee::log_non_instrumented(variantstate* variant, monitor* relevant_monitor
         fprintf(mvee::non_instrumented_logfile, "%s\n", line.str().c_str());
     }
 #else
+    mmap_region_info* accessed_region = relevant_monitor->set_mmap_table->get_region_info(variant->variant_num,
+            (unsigned long long) instruction->effective_address);
+    if (!accessed_region)
+        line << ";unknown;0x" << std::hex << (unsigned long long) instruction->effective_address;
+    else
+        line << ";" << accessed_region->region_backing_file_path.c_str() << ";0x" << std::hex <<
+                (unsigned long long) instruction->effective_address - accessed_region->region_base_address;
+
     fprintf(mvee::non_instrumented_logfile, "%s\n", line.str().c_str());
 #endif
     pthread_mutex_unlock(&mvee::non_instrumented_lock);
