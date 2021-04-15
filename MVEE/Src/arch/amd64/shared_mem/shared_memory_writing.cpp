@@ -1502,6 +1502,7 @@ BYTE_WRITE_IMPL(0xab)
             STOS_WRITE(uint64_t, "rep stosq;")
         }
         // stos m16
+        
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
             STOS_WRITE(uint16_t, "rep stosw;")
