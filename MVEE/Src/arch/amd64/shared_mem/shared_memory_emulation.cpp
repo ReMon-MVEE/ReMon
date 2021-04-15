@@ -373,8 +373,47 @@ BYTE_EMULATOR_IMPL(0x11)
 }
 
 
-/* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0x12)
+/* Valid in second round */
+BYTE_EMULATOR_IMPL(0x12)
+{
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
+    {
+        DEFINE_FPREGS_STRUCT
+        DEFINE_MODRM
+        LOAD_REG_CODE(destination, xmm_lookup)
+
+        // movlpd xmm, m64
+        if (PREFIXES_GRP_THREE_PRESENT(instruction))
+        {
+            LOAD_RM_CODE_NO_DEFINE(8)
+            NORMAL_FROM_SHARED(uint64_t)
+
+            __asm__
+            (
+                    ".intel_syntax noprefix;"
+                    "movdqu xmm0, XMMWORD PTR [%[dst]];"
+                    "movlpd xmm0, QWORD PTR[%[src]];"
+                    "movdqu XMMWORD PTR [%[dst]], xmm0;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "r" (destination), [src] "r" (typed_source)
+                    : "xmm0"
+            );
+        }
+        // illegal otherwise
+        else
+            return -1;
+
+        // writeback required
+        if (interaction::write_all_fpregs(*instruction.variant_pid, regs_struct))
+        {
+            RETURN_ADVANCE
+        }
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */
@@ -389,8 +428,47 @@ BYTE_EMULATOR_IMPL(0x11)
 // BYTE_EMULATOR_IMPL(0x15)
 
 
-/* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0x16)
+/* Valid in second round */
+BYTE_EMULATOR_IMPL(0x16)
+{
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
+    {
+        DEFINE_FPREGS_STRUCT
+        DEFINE_MODRM
+        LOAD_REG_CODE(destination, xmm_lookup)
+
+        // movhpd xmm, m64
+        if (PREFIXES_GRP_THREE_PRESENT(instruction))
+        {
+            LOAD_RM_CODE_NO_DEFINE(8)
+            NORMAL_FROM_SHARED(uint64_t)
+
+            __asm__
+            (
+                    ".intel_syntax noprefix;"
+                    "movdqu xmm0, XMMWORD PTR [%[dst]];"
+                    "movhpd xmm0, QWORD PTR[%[src]];"
+                    "movdqu XMMWORD PTR [%[dst]], xmm0;"
+                    ".att_syntax;"
+                    :
+                    : [dst] "r" (destination), [src] "r" (typed_source)
+                    : "xmm0"
+            );
+        }
+        // illegal otherwise
+        else
+            return -1;
+
+        // writeback required
+        if (interaction::write_all_fpregs(*instruction.variant_pid, regs_struct))
+        {
+            RETURN_ADVANCE
+        }
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */

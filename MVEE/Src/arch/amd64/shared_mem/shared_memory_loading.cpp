@@ -227,8 +227,19 @@ BYTE_LOADER_IMPL(0x11)
 }
 
 
-/* Not implemented - blocked */
-// BYTE_LOADER_IMPL(0x12)
+/* Valid in second round */
+BYTE_LOADER_IMPL(0x12)
+{
+    // valid
+    if (round == INSTRUCTION_DECODING_SECOND_LEVEL)
+    {
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_SECOND_LEVEL)
+        LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
+    }
+    // illegal access
+    else
+        return -1;
+}
 
 
 /* Not implemented - blocked */
@@ -243,8 +254,19 @@ BYTE_LOADER_IMPL(0x11)
 // BYTE_LOADER_IMPL(0x15)
 
 
-/* Not implemented - blocked */
-// BYTE_LOADER_IMPL(0x16)
+/* Valid in second round */
+BYTE_LOADER_IMPL(0x16)
+{
+    // valid
+    if (round == INSTRUCTION_DECODING_SECOND_LEVEL)
+    {
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_SECOND_LEVEL)
+        LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
+    }
+    // illegal access
+    else
+        return -1;
+}
 
 
 /* Not implemented - blocked */
