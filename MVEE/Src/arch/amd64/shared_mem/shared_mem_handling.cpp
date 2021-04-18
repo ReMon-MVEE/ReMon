@@ -2213,9 +2213,10 @@ int             instruction_intent_emulation::handle_emulation      (variantstat
         }
         case UNKNOWN_MEMORY_TERMINATION:
         {
-            warnf(" > pointer: %p\n", instruction->effective_address);
+            warnf(" > unknown memory pointer: %p\n", instruction->effective_address);
             relevant_monitor->set_mmap_table->debug_shared();
-            debugf("unknown memory\n");
+            relevant_monitor->log_variant_backtrace(variant->variant_num);
+            relevant_monitor->shutdown(false);
             return UNKNOWN_MEMORY_TERMINATION;
         }
         case WRITE_SPLIT:
