@@ -1096,6 +1096,7 @@ std::string monitor::call_serialize_io_vector(int variantnum, struct iovec* vec,
 		if (IS_TAGGED_ADDRESS(vec[i].iov_base))
 		{
 		    void* address = decode_address_tag(vec[i].iov_base, &variants[variantnum]);
+            set_mmap_table->grab_shared_lock();
             shared_monitor_map_info* mapping_info = set_mmap_table->get_shared_info((unsigned long long)address);
 
             if (!mapping_info)
@@ -1111,6 +1112,7 @@ std::string monitor::call_serialize_io_vector(int variantnum, struct iovec* vec,
 
                 memcpy(elem, base + ((unsigned long long)address - (unsigned long long)mapping_info->variant_base), vec_len);
             }
+            set_mmap_table->release_shared_lock();
 		}
         else
             elem = (char*)rw::read_data(variants[variantnum].variantpid,

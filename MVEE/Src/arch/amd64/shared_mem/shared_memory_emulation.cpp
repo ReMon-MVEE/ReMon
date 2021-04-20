@@ -35,7 +35,7 @@ BYTE_EMULATOR_IMPL(0x01)
     {
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE, DO_NOT_SET_SHADOW_BASE)
         LOAD_REG_CODE(source, general_purpose_lookup)
 
         // lock forced here
@@ -84,7 +84,7 @@ BYTE_EMULATOR_IMPL(0x03)
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
         LOAD_REG_CODE(destination, general_purpose_lookup)
-        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE, DO_SET_SHADOW_BASE)
 
         // 64-bit
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
@@ -200,7 +200,7 @@ BYTE_EMULATOR_IMPL(0x0b)
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
             auto* typed_destination = (uint64_t*) destination;
-            LOAD_RM_CODE_NO_DEFINE(sizeof(uint64_t))
+            LOAD_RM_CODE_NO_DEFINE(sizeof(uint64_t), DO_SET_SHADOW_BASE)
             NORMAL_FROM_SHARED(uint64_t)
 
             __asm__(
@@ -220,7 +220,7 @@ BYTE_EMULATOR_IMPL(0x0b)
         else if (PREFIXES_GRP_ONE_PRESENT(instruction))
         {
             auto* typed_destination = (uint16_t*) destination;
-            LOAD_RM_CODE_NO_DEFINE(sizeof(uint16_t))
+            LOAD_RM_CODE_NO_DEFINE(sizeof(uint16_t), DO_SET_SHADOW_BASE)
             NORMAL_FROM_SHARED(uint16_t)
 
             __asm__(
@@ -240,7 +240,7 @@ BYTE_EMULATOR_IMPL(0x0b)
         else
         {
             auto* typed_destination = (uint32_t*) destination;
-            LOAD_RM_CODE_NO_DEFINE(sizeof(uint32_t))
+            LOAD_RM_CODE_NO_DEFINE(sizeof(uint32_t), DO_SET_SHADOW_BASE)
             NORMAL_FROM_SHARED(uint32_t)
 
             __asm__(
@@ -302,7 +302,7 @@ BYTE_EMULATOR_IMPL(0x10)
             if (PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE)
                 return -1;
 
-            LOAD_RM_CODE_NO_DEFINE(8)
+            LOAD_RM_CODE_NO_DEFINE(8, DO_SET_SHADOW_BASE)
             NORMAL_FROM_SHARED(uint64_t)
 
             __asm__
@@ -319,7 +319,7 @@ BYTE_EMULATOR_IMPL(0x10)
         }
         else
         {
-            LOAD_RM_CODE_NO_DEFINE(16)
+            LOAD_RM_CODE_NO_DEFINE(16, DO_SET_SHADOW_BASE)
             XMM_FROM_SHARED
             __asm__
             (
@@ -357,7 +357,7 @@ BYTE_EMULATOR_IMPL(0x11)
         // movups xmm/m128, xmm
         DEFINE_FPREGS_STRUCT
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(16)
+        LOAD_RM_CODE_NO_DEFINE(16, DO_NOT_SET_SHADOW_BASE)
         LOAD_REG_CODE(source, xmm_lookup)
 
         // perform operation
@@ -385,7 +385,7 @@ BYTE_EMULATOR_IMPL(0x12)
         // movlpd xmm, m64
         if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            LOAD_RM_CODE_NO_DEFINE(8)
+            LOAD_RM_CODE_NO_DEFINE(8, DO_SET_SHADOW_BASE)
             NORMAL_FROM_SHARED(uint64_t)
 
             __asm__
@@ -440,7 +440,7 @@ BYTE_EMULATOR_IMPL(0x16)
         // movhpd xmm, m64
         if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            LOAD_RM_CODE_NO_DEFINE(8)
+            LOAD_RM_CODE_NO_DEFINE(8, DO_SET_SHADOW_BASE)
             NORMAL_FROM_SHARED(uint64_t)
 
             __asm__
@@ -533,7 +533,7 @@ BYTE_EMULATOR_IMPL(0x23)
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
             auto* typed_destination = (uint64_t*)destination;
-            LOAD_RM_CODE_NO_DEFINE(sizeof(uint64_t))
+            LOAD_RM_CODE_NO_DEFINE(sizeof(uint64_t), DO_SET_SHADOW_BASE)
             NORMAL_FROM_SHARED(uint64_t)
 
             asm
@@ -554,7 +554,7 @@ BYTE_EMULATOR_IMPL(0x23)
         else if (PREFIXES_GRP_ONE_PRESENT(instruction))
         {
             auto* typed_destination = (uint16_t*)destination;
-            LOAD_RM_CODE_NO_DEFINE(sizeof(uint16_t))
+            LOAD_RM_CODE_NO_DEFINE(sizeof(uint16_t), DO_SET_SHADOW_BASE)
             NORMAL_FROM_SHARED(uint16_t)
 
             asm
@@ -575,7 +575,7 @@ BYTE_EMULATOR_IMPL(0x23)
         else
         {
             auto* typed_destination = (uint32_t*)destination;
-            LOAD_RM_CODE_NO_DEFINE(sizeof(uint32_t))
+            LOAD_RM_CODE_NO_DEFINE(sizeof(uint32_t), DO_SET_SHADOW_BASE)
             NORMAL_FROM_SHARED(uint32_t)
 
             asm
@@ -630,7 +630,7 @@ BYTE_EMULATOR_IMPL(0x29)
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
         int access_size = GET_INSTRUCTION_ACCESS_SIZE;
-        LOAD_RM_CODE_NO_DEFINE(access_size)
+        LOAD_RM_CODE_NO_DEFINE(access_size, DO_NOT_SET_SHADOW_BASE)
         LOAD_REG_CODE(source, general_purpose_lookup)
 
         // 64-bit
@@ -663,7 +663,7 @@ BYTE_EMULATOR_IMPL(0x29)
         // size and register type is the same, regardless of prefix
         DEFINE_FPREGS_STRUCT
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(16)
+        LOAD_RM_CODE_NO_DEFINE(16, DO_NOT_SET_SHADOW_BASE)
         LOAD_REG_CODE(source, xmm_lookup)
 
         // movapd xmm/m128, xmm
@@ -700,7 +700,7 @@ BYTE_EMULATOR_IMPL(0x2a)
         {
             DEFINE_FPREGS_STRUCT
             DEFINE_MODRM
-            LOAD_RM_CODE_NO_DEFINE(4)
+            LOAD_RM_CODE_NO_DEFINE(4, DO_SET_SHADOW_BASE)
             LOAD_REG_CODE(destination, xmm_lookup)
 
             NORMAL_FROM_SHARED(uint32_t)
@@ -738,7 +738,7 @@ BYTE_EMULATOR_IMPL(0x2b)
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
         LOAD_REG_CODE(destination, general_purpose_lookup)
-        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE, DO_SET_SHADOW_BASE)
 
         // 64-bit
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
@@ -812,7 +812,7 @@ BYTE_EMULATOR_IMPL(0x2b)
     {
         DEFINE_FPREGS_STRUCT
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(16)
+        LOAD_RM_CODE_NO_DEFINE(16, DO_NOT_SET_SHADOW_BASE)
         LOAD_REG_CODE(source, xmm_lookup)
 
         XMM_TO_SHARED_EMULATE(WRITE_DIVERGENCE_XMM_EQUAL(__buffer, __source,
@@ -863,7 +863,7 @@ BYTE_EMULATOR_IMPL(0x33)
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
         LOAD_REG_CODE(destination, general_purpose_lookup)
-        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE, DO_SET_SHADOW_BASE)
 
         // 64-bit
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
@@ -959,7 +959,7 @@ BYTE_EMULATOR_IMPL(0x38)
     {
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(1)
+        LOAD_RM_CODE_NO_DEFINE(1, DO_NOT_SET_SHADOW_BASE)
         LOAD_REG_CODE(source, general_purpose_lookup)
         auto* typed_source = (uint8_t*) source;
         NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE(uint8_t,
@@ -987,7 +987,7 @@ BYTE_EMULATOR_IMPL(0x39)
         // 64-bit
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            LOAD_RM_CODE_NO_DEFINE(8)
+            LOAD_RM_CODE_NO_DEFINE(8, DO_NOT_SET_SHADOW_BASE)
             auto typed_source = (uint64_t*) source;
             NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE(uint64_t,
                     WRITE_DIVERGENCE_PTR_CHECK(((uint64_t*)((unsigned long long*) buffer + 1)),
@@ -997,7 +997,7 @@ BYTE_EMULATOR_IMPL(0x39)
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            LOAD_RM_CODE_NO_DEFINE(2)
+            LOAD_RM_CODE_NO_DEFINE(2, DO_NOT_SET_SHADOW_BASE)
             auto typed_source = (uint16_t*) source;
             NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE(uint16_t,
                     WRITE_DIVERGENCE_ERROR(" > write divergence in cmp m16, reg16\n"))
@@ -1005,7 +1005,7 @@ BYTE_EMULATOR_IMPL(0x39)
         // 32-bit
         else
         {
-            LOAD_RM_CODE_NO_DEFINE(4)
+            LOAD_RM_CODE_NO_DEFINE(4, DO_NOT_SET_SHADOW_BASE)
             auto typed_source = (uint32_t*) source;
             NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE(uint32_t,
                     WRITE_DIVERGENCE_ERROR(" > write divergence in cmp m32, reg32\n"))
@@ -1037,7 +1037,7 @@ BYTE_EMULATOR_IMPL(0x3b)
         // 64-bit
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            LOAD_RM_CODE_NO_DEFINE(8)
+            LOAD_RM_CODE_NO_DEFINE(8, DO_SET_SHADOW_BASE)
             auto* typed_destination = (uint64_t*)destination;
             NORMAL_FROM_SHARED(uint64_t)
 
@@ -1058,7 +1058,7 @@ BYTE_EMULATOR_IMPL(0x3b)
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            LOAD_RM_CODE_NO_DEFINE(2)
+            LOAD_RM_CODE_NO_DEFINE(2, DO_SET_SHADOW_BASE)
             auto* typed_destination = (uint16_t*)destination;
             NORMAL_FROM_SHARED(uint16_t)
 
@@ -1079,7 +1079,7 @@ BYTE_EMULATOR_IMPL(0x3b)
         // 32-bit
         else
         {
-            LOAD_RM_CODE_NO_DEFINE(4)
+            LOAD_RM_CODE_NO_DEFINE(4, DO_SET_SHADOW_BASE)
             auto* typed_destination = (uint32_t*)destination;
             NORMAL_FROM_SHARED(uint32_t)
 
@@ -1271,7 +1271,7 @@ BYTE_EMULATOR_IMPL(0x63)
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
         LOAD_REG_CODE(destination, general_purpose_lookup)
-        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE, DO_SET_SHADOW_BASE)
 
         // movsxd r64, r/m32
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
@@ -1352,7 +1352,7 @@ BYTE_EMULATOR_IMPL(0x6f)
         if (PREFIXES_GRP_ONE_PRESENT(instruction) && PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE)
         {
             LOAD_REG_CODE(destination, xmm_lookup)
-            LOAD_RM_CODE_NO_DEFINE(16)
+            LOAD_RM_CODE_NO_DEFINE(16, DO_SET_SHADOW_BASE)
             XMM_FROM_SHARED
 
             // perform operation
@@ -1371,7 +1371,7 @@ BYTE_EMULATOR_IMPL(0x6f)
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
             LOAD_REG_CODE(destination, xmm_lookup)
-            LOAD_RM_CODE_NO_DEFINE(16)
+            LOAD_RM_CODE_NO_DEFINE(16, DO_SET_SHADOW_BASE)
             XMM_FROM_SHARED
 
             // perform operation
@@ -1390,7 +1390,7 @@ BYTE_EMULATOR_IMPL(0x6f)
         else
         {
             LOAD_REG_CODE(destination, mm_lookup)
-            LOAD_RM_CODE_NO_DEFINE(8)
+            LOAD_RM_CODE_NO_DEFINE(8, DO_SET_SHADOW_BASE)
             NORMAL_FROM_SHARED(uint64_t)
 
             __asm__
@@ -1446,7 +1446,7 @@ BYTE_EMULATOR_IMPL(0x74)
         // pcmpeqb xmm, xmm/m128
         if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            LOAD_RM_CODE_NO_DEFINE(16)
+            LOAD_RM_CODE_NO_DEFINE(16, DO_SET_SHADOW_BASE)
             LOAD_REG_CODE(destination, xmm_lookup)
 
             XMM_FROM_SHARED
@@ -1467,7 +1467,7 @@ BYTE_EMULATOR_IMPL(0x74)
         // pcmpeqb mm, mm/m64
         else
         {
-            LOAD_RM_CODE_NO_DEFINE(8)
+            LOAD_RM_CODE_NO_DEFINE(8, DO_SET_SHADOW_BASE)
             LOAD_REG_CODE(destination, mm_lookup)
 
             NORMAL_FROM_SHARED(uint64_t)
@@ -1546,7 +1546,7 @@ BYTE_EMULATOR_IMPL(0x7f)
         {
             DEFINE_FPREGS_STRUCT
             DEFINE_MODRM
-            LOAD_RM_CODE_NO_DEFINE(16)
+            LOAD_RM_CODE_NO_DEFINE(16, DO_NOT_SET_SHADOW_BASE)
             LOAD_REG_CODE(source, xmm_lookup)
 
             XMM_TO_SHARED_EMULATE(WRITE_DIVERGENCE_XMM_EQUAL(__buffer, __source,
@@ -1557,7 +1557,7 @@ BYTE_EMULATOR_IMPL(0x7f)
         {
             DEFINE_FPREGS_STRUCT
             DEFINE_MODRM
-            LOAD_RM_CODE_NO_DEFINE(16)
+            LOAD_RM_CODE_NO_DEFINE(16, DO_NOT_SET_SHADOW_BASE)
             LOAD_REG_CODE(source, xmm_lookup)
 
             XMM_TO_SHARED_EMULATE(WRITE_DIVERGENCE_XMM_EQUAL(__buffer, __source,
@@ -1568,7 +1568,7 @@ BYTE_EMULATOR_IMPL(0x7f)
         {
             DEFINE_FPREGS_STRUCT
             DEFINE_MODRM
-            LOAD_RM_CODE_NO_DEFINE(8)
+            LOAD_RM_CODE_NO_DEFINE(8, DO_NOT_SET_SHADOW_BASE)
             LOAD_REG_CODE(source, mm_lookup)
             auto* typed_source = (uint64_t*) source;
 
@@ -1591,7 +1591,7 @@ BYTE_EMULATOR_IMPL(0x80)
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(1)
+        LOAD_RM_CODE_NO_DEFINE(1, DO_NOT_SET_SHADOW_BASE)
 
         // ModR/M reg field used as opcode extension
         switch (GET_REG_CODE(modrm))
@@ -1641,7 +1641,7 @@ BYTE_EMULATOR_IMPL(0x81)
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE, DO_NOT_SET_SHADOW_BASE)
 
         switch (GET_REG_CODE(modrm))
         {
@@ -1687,7 +1687,7 @@ BYTE_EMULATOR_IMPL(0x83)
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE, DO_NOT_SET_SHADOW_BASE)
 
         switch (GET_REG_CODE((unsigned ) instruction[instruction.effective_opcode_index + 1]))
         {
@@ -1745,9 +1745,9 @@ BYTE_EMULATOR_IMPL(0x83)
 
 /* Valid in first round */
 #define EXCHANGE_TO_SHARED(__cast, __divergence)                                                                       \
-LOAD_RM_CODE_NO_DEFINE(sizeof(__cast))                                                                                 \
+LOAD_RM_CODE_NO_DEFINE(sizeof(__cast), DO_SET_SHADOW_BASE)                                                             \
 auto* typed_source = (__cast*)source;                                                                                  \
-auto* typed_destination = (__cast*)((unsigned long long) mapping_info->monitor_base + offset);                         \
+auto* typed_destination = (__cast*)(monitor_base + offset);                                                            \
                                                                                                                        \
 if (!variant->variant_num)                                                                                             \
 {                                                                                                                      \
@@ -1761,10 +1761,9 @@ if (!variant->variant_num)                                                      
     __cast orig_source = *typed_source;                                                                                \
     __atomic_exchange(typed_destination, typed_source, typed_source, __ATOMIC_ACQ_REL);                                \
     *(__cast*)buffer = *typed_source;                                                                                  \
-    if (mapping_info->variant_shadows[0].monitor_base)/* Only access shadow memory if it exists */                     \
+    if (shadow_base) /* Only access shadow memory if it exists */                                                      \
     {                                                                                                                  \
-        __atomic_exchange((__cast*)(mapping_info->variant_shadows[0].monitor_base + offset), &orig_source,             \
-                &orig_source, __ATOMIC_ACQ_REL);                                                                       \
+        __atomic_exchange((__cast*)(shadow_base + offset), &orig_source, &orig_source, __ATOMIC_ACQ_REL);              \
         *((__cast*)buffer + 2) = orig_source;                                                                          \
     }                                                                                                                  \
 }                                                                                                                      \
@@ -1781,9 +1780,9 @@ else                                                                            
     {                                                                                                                  \
         __divergence                                                                                                   \
     }                                                                                                                  \
-    if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */  \
+    if (shadow_base) /* Only access shadow memory if it exists */                                                      \
     {                                                                                                                  \
-        typed_destination = (__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);      \
+        typed_destination = (__cast*)(shadow_base  + offset);                                                          \
         __atomic_exchange(typed_destination, typed_source, typed_source, __ATOMIC_ACQ_REL);                            \
         if (*((__cast*)buffer + 2) != *(__cast*)buffer)                                                                \
             *typed_source = *(__cast*)buffer;                                                                          \
@@ -1838,7 +1837,7 @@ BYTE_EMULATOR_IMPL(0x88)
     {
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(1)
+        LOAD_RM_CODE_NO_DEFINE(1, DO_NOT_SET_SHADOW_BASE)
         LOAD_REG_CODE_BYTE(source, general_purpose_lookup)
 
         // special case that uses higher order lower byte, for example ah
@@ -1868,7 +1867,7 @@ BYTE_EMULATOR_IMPL(0x89)
     {
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE, DO_NOT_SET_SHADOW_BASE)
         LOAD_REG_CODE(source, general_purpose_lookup)
 
         // 64-bit implementation
@@ -1912,7 +1911,7 @@ BYTE_EMULATOR_IMPL(0x8a)
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
         LOAD_REG_CODE_BYTE(destination, general_purpose_lookup)
-        LOAD_RM_CODE_NO_DEFINE(1)
+        LOAD_RM_CODE_NO_DEFINE(1, DO_SET_SHADOW_BASE)
 
         // use higher order byte of lowest word exception
         if (!PREFIXES_REX_PRESENT(instruction) && GET_REG_CODE((unsigned) modrm) & 0b100u)
@@ -1942,7 +1941,7 @@ BYTE_EMULATOR_IMPL(0x8b)
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
         LOAD_REG_CODE(destination, general_purpose_lookup)
-        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE, DO_SET_SHADOW_BASE)
 
         // 64-bit version
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
@@ -2143,15 +2142,19 @@ BYTE_EMULATOR_IMPL(0xa4)
         {
             // source to monitor pointer
             src = decode_address_tag(src, variant);
+            relevant_monitor.set_mmap_table->grab_shared_lock();
             OBTAIN_SHARED_MAPPING_INFO_NO_DEF(src, src_info, src_offset, size)
             src = (unsigned long long) src_info->monitor_base + src_offset;
+            relevant_monitor.set_mmap_table->release_shared_lock();
         }
         // destination is shared memory
         if (IS_TAGGED_ADDRESS(dst))
         {
             dst = decode_address_tag(dst, variant);
+            relevant_monitor.set_mmap_table->grab_shared_lock();
             OBTAIN_SHARED_MAPPING_INFO_NO_DEF(dst, dst_info, dst_offset, size)
             dst = (unsigned long long) dst_info->monitor_base + dst_offset;
+            relevant_monitor.set_mmap_table->release_shared_lock();
         }
         // we would expect one of the two to be known shared memory
         if (!dst_info && !src_info)
@@ -2168,7 +2171,6 @@ BYTE_EMULATOR_IMPL(0xa4)
         {
             typed_buffer->size     = size;
             typed_buffer->offset   = dst_offset;
-            typed_buffer->src_info = src_info;
             typed_buffer->dst_info = dst_info;
             if (dst_info && src_info)
                 typed_buffer->dst = dst;
@@ -2280,8 +2282,8 @@ BYTE_EMULATOR_IMPL(0xa4)
 
 
 #define STOS_EMULATE(__cast)                                                                                           \
-OBTAIN_SHARED_MAPPING_INFO(count)                                                                                      \
-void* destination = (void*) ((unsigned long long) mapping_info->monitor_base + offset);                                \
+OBTAIN_SHARED_MAPPING_INFO(count, DO_NOT_SET_SHADOW_BASE)                                                              \
+void* destination = (void*) ((unsigned long long) monitor_base + offset);                                              \
 void* source = shared_mem_register_access::ACCESS_GENERAL_NAME(rax)(regs_struct);                                      \
                                                                                                                        \
 STOS_STRUCT(__cast)                                                                                                    \
@@ -2425,7 +2427,7 @@ BYTE_EMULATOR_IMPL(0xb1)
         // affects flags as well
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
-        LOAD_RM_CODE(destination, GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_RM_CODE(destination, GET_INSTRUCTION_ACCESS_SIZE, DO_NOT_SET_SHADOW_BASE)
         LOAD_REG_CODE(source, general_purpose_lookup)
 
         // 64-bit
@@ -2477,7 +2479,7 @@ BYTE_EMULATOR_IMPL(0xb6)
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
         LOAD_REG_CODE(destination, general_purpose_lookup)
-        LOAD_RM_CODE_NO_DEFINE(sizeof(uint8_t))
+        LOAD_RM_CODE_NO_DEFINE(sizeof(uint8_t), DO_SET_SHADOW_BASE)
 
         NORMAL_FROM_SHARED(uint8_t)
 
@@ -2518,7 +2520,7 @@ BYTE_EMULATOR_IMPL(0xb7)
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
         LOAD_REG_CODE(destination, general_purpose_lookup)
-        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE, DO_SET_SHADOW_BASE)
 
         NORMAL_FROM_SHARED(uint16_t)
 
@@ -2583,7 +2585,7 @@ BYTE_EMULATOR_IMPL(0xbe)
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
         LOAD_REG_CODE(destination, general_purpose_lookup)
-        LOAD_RM_CODE_NO_DEFINE(sizeof(uint8_t))
+        LOAD_RM_CODE_NO_DEFINE(sizeof(uint8_t), DO_SET_SHADOW_BASE)
 
         // always byte
         NORMAL_FROM_SHARED(int8_t)
@@ -2648,7 +2650,7 @@ BYTE_EMULATOR_IMPL(0xc1)
         // xadd Ev, Gv
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
-        LOAD_RM_CODE(destination, GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_RM_CODE(destination, GET_INSTRUCTION_ACCESS_SIZE, DO_NOT_SET_SHADOW_BASE)
         LOAD_REG_CODE(source, general_purpose_lookup)
 
         // 64-bit size
@@ -2699,7 +2701,7 @@ BYTE_EMULATOR_IMPL(0xc6)
     {
         DEFINE_MODRM
         LOAD_IMM(source)
-        LOAD_RM_CODE_NO_DEFINE(1)
+        LOAD_RM_CODE_NO_DEFINE(1, DO_NOT_SET_SHADOW_BASE)
 
         // perform operation
         auto* typed_source = (uint8_t*)source;
@@ -2721,7 +2723,7 @@ BYTE_EMULATOR_IMPL(0xc7)
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE, DO_NOT_SET_SHADOW_BASE)
         // small test
         if (GET_REG_CODE((unsigned) modrm) != 0b000u)
             return -1;
@@ -2844,7 +2846,7 @@ BYTE_EMULATOR_IMPL(0xda)
         // pminub xmm, xmm/m128
         if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            LOAD_RM_CODE_NO_DEFINE(16)
+            LOAD_RM_CODE_NO_DEFINE(16, DO_SET_SHADOW_BASE)
             LOAD_REG_CODE(destination, xmm_lookup)
 
             XMM_FROM_SHARED
@@ -2866,7 +2868,7 @@ BYTE_EMULATOR_IMPL(0xda)
         // pminub mm, mm/m64
         else
         {
-            LOAD_RM_CODE_NO_DEFINE(8)
+            LOAD_RM_CODE_NO_DEFINE(8, DO_SET_SHADOW_BASE)
             LOAD_REG_CODE(destination, mm_lookup)
             NORMAL_FROM_SHARED(uint64_t)
 
@@ -2956,7 +2958,7 @@ BYTE_EMULATOR_IMPL(0xe7)
         if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
             DEFINE_FPREGS_STRUCT
-            LOAD_RM_CODE_NO_DEFINE(16)
+            LOAD_RM_CODE_NO_DEFINE(16, DO_NOT_SET_SHADOW_BASE)
             LOAD_REG_CODE(source, xmm_lookup)
 
             XMM_TO_SHARED_EMULATE(WRITE_DIVERGENCE_XMM_EQUAL(__buffer, __source,
@@ -2970,7 +2972,7 @@ BYTE_EMULATOR_IMPL(0xe7)
         else
         {
             DEFINE_FPREGS_STRUCT
-            LOAD_RM_CODE_NO_DEFINE(8)
+            LOAD_RM_CODE_NO_DEFINE(8, DO_NOT_SET_SHADOW_BASE)
             LOAD_REG_CODE(source, mm_lookup)
             auto typed_source = (uint64_t*) source;
 
@@ -3050,7 +3052,7 @@ BYTE_EMULATOR_IMPL(0xf6)
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_B(instruction))
         {
             DEFINE_MODRM
-            LOAD_RM_CODE_NO_DEFINE(1)
+            LOAD_RM_CODE_NO_DEFINE(1, DO_NOT_SET_SHADOW_BASE)
 
             // ModR/M reg field used as opcode extension
             switch (GET_REG_CODE(modrm))

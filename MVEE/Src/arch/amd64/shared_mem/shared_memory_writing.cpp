@@ -35,7 +35,7 @@ BYTE_WRITE_IMPL(0x01)
     {
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE, DO_SET_SHADOW_BASE)
         LOAD_REG_CODE(source, general_purpose_lookup)
 
         // lock forced here
@@ -140,7 +140,7 @@ BYTE_WRITE_IMPL(0x11)
         // movups xmm/m128, xmm
         DEFINE_FPREGS_STRUCT
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(16)
+        LOAD_RM_CODE_NO_DEFINE(16, DO_SET_SHADOW_BASE)
         LOAD_REG_CODE(source, xmm_lookup)
 
         // perform operation
@@ -266,7 +266,7 @@ BYTE_WRITE_IMPL(0x29)
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
         int access_size = GET_INSTRUCTION_ACCESS_SIZE;
-        LOAD_RM_CODE_NO_DEFINE(access_size)
+        LOAD_RM_CODE_NO_DEFINE(access_size, DO_SET_SHADOW_BASE)
         LOAD_REG_CODE(source, general_purpose_lookup)
 
         // 64-bit
@@ -297,7 +297,7 @@ BYTE_WRITE_IMPL(0x29)
         // size and register type is the same, regardless of prefix
         DEFINE_FPREGS_STRUCT
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(16)
+        LOAD_RM_CODE_NO_DEFINE(16, DO_SET_SHADOW_BASE)
         LOAD_REG_CODE(source, xmm_lookup)
 
         // movapd xmm/m128, xmm
@@ -352,7 +352,7 @@ BYTE_WRITE_IMPL(0x2b)
     {
         DEFINE_FPREGS_STRUCT
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(16)
+        LOAD_RM_CODE_NO_DEFINE(16, DO_SET_SHADOW_BASE)
         LOAD_REG_CODE(source, xmm_lookup)
 
         XMM_TO_SHARED_WRITE(
@@ -432,7 +432,7 @@ BYTE_WRITE_IMPL(0x38)
     {
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(1)
+        LOAD_RM_CODE_NO_DEFINE(1, DO_NOT_SET_SHADOW_BASE)
         LOAD_REG_CODE(source, general_purpose_lookup)
         auto* typed_source = (uint8_t*) source;
         NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_WRITE(uint8_t, "cmp BYTE PTR [%[dst]], %[src];")
@@ -457,21 +457,21 @@ BYTE_WRITE_IMPL(0x39)
         // 64-bit
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            LOAD_RM_CODE_NO_DEFINE(8)
+            LOAD_RM_CODE_NO_DEFINE(8, DO_NOT_SET_SHADOW_BASE)
             auto typed_source = (uint64_t*) source;
             NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_WRITE(uint64_t, "cmp QWORD PTR [%[dst]], %[src];")
         }
         // 16-bit
         else if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
-            LOAD_RM_CODE_NO_DEFINE(2)
+            LOAD_RM_CODE_NO_DEFINE(2, DO_NOT_SET_SHADOW_BASE)
             auto typed_source = (uint16_t*) source;
             NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_WRITE(uint16_t, "cmp WORD PTR [%[dst]], %[src];")
         }
         // 32-bit
         else
         {
-            LOAD_RM_CODE_NO_DEFINE(4)
+            LOAD_RM_CODE_NO_DEFINE(4, DO_NOT_SET_SHADOW_BASE)
             auto typed_source = (uint32_t*) source;
             NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_WRITE(uint32_t, "cmp DWORD PTR [%[dst]], %[src];")
         }
@@ -771,7 +771,7 @@ BYTE_WRITE_IMPL(0x7f)
         {
             DEFINE_FPREGS_STRUCT
             DEFINE_MODRM
-            LOAD_RM_CODE_NO_DEFINE(16)
+            LOAD_RM_CODE_NO_DEFINE(16, DO_SET_SHADOW_BASE)
             LOAD_REG_CODE(source, xmm_lookup)
 
             XMM_TO_SHARED_WRITE(
@@ -792,7 +792,7 @@ BYTE_WRITE_IMPL(0x7f)
         {
             DEFINE_FPREGS_STRUCT
             DEFINE_MODRM
-            LOAD_RM_CODE_NO_DEFINE(16)
+            LOAD_RM_CODE_NO_DEFINE(16, DO_SET_SHADOW_BASE)
             LOAD_REG_CODE(source, xmm_lookup)
 
             XMM_TO_SHARED_WRITE(
@@ -813,7 +813,7 @@ BYTE_WRITE_IMPL(0x7f)
         {
             DEFINE_FPREGS_STRUCT
             DEFINE_MODRM
-            LOAD_RM_CODE_NO_DEFINE(8)
+            LOAD_RM_CODE_NO_DEFINE(8, DO_SET_SHADOW_BASE)
             LOAD_REG_CODE(source, mm_lookup)
             auto* typed_source = (uint64_t*) source;
 
@@ -848,7 +848,7 @@ BYTE_WRITE_IMPL(0x80)
     {
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(1)
+        LOAD_RM_CODE_NO_DEFINE(1, DO_SET_SHADOW_BASE)
         LOAD_IMM(source)
 
         // replay no spoofing needed
@@ -904,7 +904,7 @@ BYTE_WRITE_IMPL(0x81)
     {
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE, DO_SET_SHADOW_BASE)
         LOAD_IMM(source)
 
         switch (GET_REG_CODE(modrm))
@@ -992,7 +992,7 @@ BYTE_WRITE_IMPL(0x83)
     {
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE, DO_SET_SHADOW_BASE)
         LOAD_IMM(source)
 
         switch (GET_REG_CODE((unsigned ) instruction[instruction.effective_opcode_index + 1]))
@@ -1138,7 +1138,7 @@ BYTE_WRITE_IMPL(0x83)
 
 /* Valid in first round */
 #define EXCHANGE_TO_SHARED_WRITE(__cast)                                                                               \
-LOAD_RM_CODE_NO_DEFINE(sizeof(__cast))                                                                                 \
+LOAD_RM_CODE_NO_DEFINE(sizeof(__cast), DO_SET_SHADOW_BASE)                                                             \
 auto* typed_source = (__cast*)source;                                                                                  \
 __cast* typed_destination;                                                                                             \
                                                                                                                        \
@@ -1152,22 +1152,22 @@ if (size != 3 * sizeof(__cast))                                                 
                                                                                                                        \
 if (!variant->variant_num)                                                                                             \
 {                                                                                                                      \
-    typed_destination = (__cast*)((unsigned long long) mapping_info->monitor_base + offset);                           \
+    typed_destination = (__cast*)((unsigned long long) monitor_base + offset);                                         \
     __cast orig_source = *typed_source;                                                                                \
     __atomic_exchange(typed_destination, typed_source, typed_source, __ATOMIC_ACQ_REL);                                \
     *(__cast*)buffer = *typed_source;                                                                                  \
-    if (mapping_info->variant_shadows[0].monitor_base)/* Only access shadow memory if it exists */                     \
+    if (shadow_base) /* Only access shadow memory if it exists */                                                      \
     {                                                                                                                  \
-        __atomic_exchange((__cast*)(mapping_info->variant_shadows[0].monitor_base + offset), &orig_source,             \
+        __atomic_exchange((__cast*)(shadow_base + offset), &orig_source,                                               \
                 &orig_source, __ATOMIC_ACQ_REL);                                                                       \
         *((__cast*)buffer + 2) = orig_source;                                                                          \
     }                                                                                                                  \
 }                                                                                                                      \
 else                                                                                                                   \
 {                                                                                                                      \
-    if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */  \
+    if (shadow_base) /* Only access shadow memory if it exists */                                                      \
     {                                                                                                                  \
-        typed_destination = (__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);      \
+        typed_destination = (__cast*)(shadow_base + offset);                                                           \
         __atomic_exchange(typed_destination, typed_source, typed_source, __ATOMIC_ACQ_REL);                            \
         if (*((__cast*)buffer + 2) != *(__cast*)buffer)                                                                \
             *typed_source = *(__cast*)buffer;                                                                          \
@@ -1217,7 +1217,7 @@ BYTE_WRITE_IMPL(0x88)
     {
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(1)
+        LOAD_RM_CODE_NO_DEFINE(1, DO_SET_SHADOW_BASE)
         LOAD_REG_CODE_BYTE(source, general_purpose_lookup)
 
         // special case that uses higher order lower byte, for example ah
@@ -1246,7 +1246,7 @@ BYTE_WRITE_IMPL(0x89)
     {
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE, DO_SET_SHADOW_BASE)
         LOAD_REG_CODE(source, general_purpose_lookup)
 
         // 64-bit implementation
@@ -1433,7 +1433,7 @@ BYTE_WRITE_IMPL(0xa4)
 #define STOS_WRITE(__cast, __core)                                                                                     \
 STOS_STRUCT(__cast)                                                                                                    \
 GET_LAST_BUFFER_RAW(temp_t)                                                                                            \
-OBTAIN_SHARED_MAPPING_INFO(buffer->count * sizeof(__cast))                                                             \
+OBTAIN_SHARED_MAPPING_INFO(buffer->count * sizeof(__cast), DO_SET_SHADOW_BASE)                                         \
 if (!variant->variant_num)                                                                                             \
 {                                                                                                                      \
     __asm__                                                                                                            \
@@ -1443,11 +1443,11 @@ if (!variant->variant_num)                                                      
             ".att_syntax;"                                                                                             \
             :                                                                                                          \
             : "a" (*(__cast*) source), "c" (buffer->count),                                                            \
-                "D" (mapping_info->monitor_base + offset)                                                              \
+                "D" (monitor_base + offset)                                                                            \
             : "memory"                                                                                                 \
     );                                                                                                                 \
 }                                                                                                                      \
-if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */      \
+if (shadow_base) /* Only access shadow memory if it exists */                                                          \
 {                                                                                                                      \
     __asm__                                                                                                            \
     (                                                                                                                  \
@@ -1456,7 +1456,7 @@ if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only acc
             ".att_syntax;"                                                                                             \
             :                                                                                                          \
             : "a" (*(__cast*) source), "c" (buffer->count),                                                            \
-                "D" (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset)                        \
+                "D" (shadow_base + offset)                                                                             \
             : "memory"                                                                                                 \
     );                                                                                                                 \
 }                                                                                                                      \
@@ -1542,7 +1542,7 @@ BYTE_WRITE_IMPL(0xab)
 
 
 #define CMPXCHG_WRITE(__cast, __core)                                                                                  \
-LOAD_RM_CODE_NO_DEFINE(sizeof(__cast))                                                                                 \
+LOAD_RM_CODE_NO_DEFINE(sizeof(__cast), DO_SET_SHADOW_BASE)                                                             \
 CMPXCHG_STRUCT(__cast)                                                                                                 \
 GET_LAST_BUFFER_RAW(temp_t)                                                                                            \
                                                                                                                        \
@@ -1551,7 +1551,7 @@ auto* typed_source = (__cast*)source;                                           
                                                                                                                        \
 if (!variant->variant_num)                                                                                             \
 {                                                                                                                      \
-    typed_destination = (__cast*)(mapping_info->monitor_base + offset);                                                \
+    typed_destination = (__cast*)(monitor_base + offset);                                                              \
     __asm__                                                                                                            \
     (                                                                                                                  \
             ".intel_syntax noprefix;"                                                                                  \
@@ -1568,21 +1568,20 @@ if (!variant->variant_num)                                                      
     buffer->replaced_rax = regs_struct->rax;                                                                           \
     buffer->flags        = regs_struct->eflags;                                                                        \
                                                                                                                        \
-    if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */  \
+    if (shadow_base) /* Only access shadow memory if it exists */                                                      \
     {                                                                                                                  \
         if (buffer->replaced_rax == buffer->original_rax)                                                              \
             buffer->leader_rax = buffer->original_rax;                                                                 \
         else                                                                                                           \
             buffer->leader_rax = *typed_source;                                                                        \
-        __atomic_exchange((__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset),        \
-                &buffer->leader_rax, &buffer->leader_rax, __ATOMIC_ACQ_REL);                                           \
+        __atomic_exchange((__cast*)(shadow_base + offset), &buffer->leader_rax, &buffer->leader_rax, __ATOMIC_ACQ_REL);\
     }                                                                                                                  \
 }                                                                                                                      \
 else                                                                                                                   \
 {                                                                                                                      \
-    if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */  \
+    if (shadow_base) /* Only access shadow memory if it exists */                                                      \
     {                                                                                                                  \
-        typed_destination = (__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);      \
+        typed_destination = (__cast*)(shadow_base + offset);                                                           \
         if (buffer->replaced_rax == buffer->original_rax)                                                              \
             *typed_destination = *typed_source;                                                                        \
         else if (buffer->leader_rax == buffer->replaced_rax)                                                           \
@@ -1699,7 +1698,7 @@ __cast added_value = *typed_source;                                             
                                                                                                                        \
 if (!variant->variant_num)                                                                                             \
 {                                                                                                                      \
-    typed_destination = (__cast*)(mapping_info->monitor_base + offset);                                                \
+    typed_destination = (__cast*)(monitor_base + offset);                                                              \
     __asm__                                                                                                            \
     (                                                                                                                  \
             ".intel_syntax noprefix;"                                                                                  \
@@ -1715,28 +1714,27 @@ if (!variant->variant_num)                                                      
     );                                                                                                                 \
     buffer->flags                = regs_struct->eflags;                                                                \
     buffer->original_destination = *typed_source;                                                                      \
-    if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */  \
+    if (shadow_base) /* Only access shadow memory if it exists */                                                      \
     {                                                                                                                  \
        /* Set the shadow memory to the new value (= original value in external shared memory + added value) */         \
-       /* and store the original value in the shadow memory.                                            */             \
-       buffer->leader_destination = __atomic_exchange_n((__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset), \
+       /* and store the original value in the shadow memory.                                                */         \
+       buffer->leader_destination = __atomic_exchange_n((__cast*)(shadow_base + offset),                               \
                 buffer->original_destination + added_value, __ATOMIC_ACQ_REL);                                         \
     }                                                                                                                  \
 }                                                                                                                      \
 else                                                                                                                   \
 {                                                                                                                      \
-    if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */  \
+    if (shadow_base) /* Only access shadow memory if it exists */                                                      \
     {                                                                                                                  \
         /* Check whether the original values of the external memory and the leader's shadow memory differ */           \
         if (buffer->original_destination != buffer->leader_destination) /* Use buffer */                               \
         {                                                                                                              \
-            __atomic_store_n((__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset),     \
-                buffer->original_destination + added_value, __ATOMIC_RELEASE);                                         \
+            __atomic_store_n((__cast*)(shadow_base + offset), buffer->original_destination + added_value,              \
+                    __ATOMIC_RELEASE);                                                                                 \
             *typed_source = buffer->original_destination;                                                              \
         }                                                                                                              \
         else /* Operate directly on shadow memory, and return value fetched from there */                              \
-            *typed_source = __atomic_fetch_add((__cast*)(mapping_info->variant_shadows[variant->variant_num].monitor_base + offset), \
-                added_value, __ATOMIC_ACQ_REL);                                                                        \
+            *typed_source = __atomic_fetch_add((__cast*)(shadow_base + offset), added_value, __ATOMIC_ACQ_REL);        \
     }                                                                                                                  \
     else                                                                                                               \
         *typed_source = buffer->original_destination;                                                                  \
@@ -1750,7 +1748,7 @@ BYTE_WRITE_IMPL(0xc1)
         // xadd Ev, Gv
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE, DO_SET_SHADOW_BASE)
         LOAD_REG_CODE(source, general_purpose_lookup)
 
         // 64-bit size
@@ -1802,7 +1800,7 @@ BYTE_WRITE_IMPL(0xc6)
     {
         DEFINE_MODRM
         LOAD_IMM(source)
-        LOAD_RM_CODE_NO_DEFINE(1)
+        LOAD_RM_CODE_NO_DEFINE(1, DO_SET_SHADOW_BASE)
 
         // perform operation
         auto* typed_source = (uint8_t*)source;
@@ -1823,7 +1821,7 @@ BYTE_WRITE_IMPL(0xc7)
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE)
+        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE, DO_SET_SHADOW_BASE)
         // small test
         if (GET_REG_CODE((unsigned) modrm) != 0b000u)
             return -1;
@@ -1993,7 +1991,7 @@ BYTE_WRITE_IMPL(0xe7)
         if (PREFIXES_GRP_THREE_PRESENT(instruction))
         {
             DEFINE_FPREGS_STRUCT
-            LOAD_RM_CODE_NO_DEFINE(16)
+            LOAD_RM_CODE_NO_DEFINE(16, DO_SET_SHADOW_BASE)
             LOAD_REG_CODE(source, xmm_lookup)
 
             XMM_TO_SHARED_WRITE(
@@ -2017,7 +2015,7 @@ BYTE_WRITE_IMPL(0xe7)
         else
         {
             DEFINE_FPREGS_STRUCT
-            LOAD_RM_CODE_NO_DEFINE(8)
+            LOAD_RM_CODE_NO_DEFINE(8, DO_SET_SHADOW_BASE)
             LOAD_REG_CODE(source, mm_lookup)
             auto typed_source = (uint64_t*) source;
 
@@ -2108,7 +2106,7 @@ BYTE_WRITE_IMPL(0xf6)
         {
             DEFINE_REGS_STRUCT
             DEFINE_MODRM
-            LOAD_RM_CODE_NO_DEFINE(1)
+            LOAD_RM_CODE_NO_DEFINE(1, DO_NOT_SET_SHADOW_BASE)
 
             // ModR/M reg field used as opcode extension
             switch (GET_REG_CODE(modrm))

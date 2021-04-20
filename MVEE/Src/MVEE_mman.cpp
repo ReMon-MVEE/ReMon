@@ -165,6 +165,7 @@ void mmap_table::init()
     pthread_mutexattr_init(&attr);
     pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
     pthread_mutex_init(&mmap_lock, &attr);
+    pthread_mutex_init(&shared_mmap_lock, &attr);
 }
 
 mmap_table::mmap_table()

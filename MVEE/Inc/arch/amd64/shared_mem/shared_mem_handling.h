@@ -671,13 +671,13 @@ WRITE_DIVERGENCE_ERROR(__message)
 #define WRITE_DIVERGENCE_ERROR(__message)                                                                              \
 warnf(__message);                                                                                                      \
 instruction.debug_print();                                                                                             \
-relevant_monitor.set_mmap_table->print_mmap_table(warnf);                                                             \
+relevant_monitor.set_mmap_table->print_mmap_table(warnf);                                                              \
 return -1;
 
 #define IMM_TO_SHARED_EMULATE                                                                                          \
 {                                                                                                                      \
     unsigned long long size = 0;                                                                                       \
-    int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, mapping_info->monitor_base + offset,      \
+    int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, (void*)(monitor_base + offset),           \
             instruction, nullptr, size);                                                                               \
     if (result < 0)                                                                                                    \
         return result;                                                                                                 \
@@ -687,7 +687,7 @@ return -1;
 __cast* buffer = nullptr;                                                                                              \
 {                                                                                                                      \
     unsigned long long size = sizeof(__cast);                                                                          \
-    int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, mapping_info->monitor_base + offset,      \
+    int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, (void*)(monitor_base + offset),           \
             instruction, (void**) &buffer, size);                                                                      \
     if (result < 0)                                                                                                    \
         return result;                                                                                                 \
@@ -713,24 +713,24 @@ __cast* buffer = nullptr;                                                       
                                                                                                                        \
 if (!variant->variant_num)                                                                                             \
 {                                                                                                                      \
-    auto* typed_destination = (__cast*) (mapping_info->monitor_base + offset);                                         \
+    auto* typed_destination = (__cast*) (monitor_base + offset);                                                       \
     __operation;                                                                                                       \
 }                                                                                                                      \
-if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */      \
+if (shadow_base) /* Only access shadow memory if it exists */                                                          \
 {                                                                                                                      \
-    auto* typed_destination = (__cast*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);   \
+    auto* typed_destination = (__cast*) (shadow_base + offset);                                                        \
     __operation;                                                                                                       \
 }
 
 #define IMM_TO_SHARED_WRITE(__cast, __operation)                                                                       \
 if (!variant->variant_num)                                                                                             \
 {                                                                                                                      \
-    auto* typed_destination = (__cast*) (mapping_info->monitor_base + offset);                                         \
+    auto* typed_destination = (__cast*) (monitor_base + offset);                                                       \
     __operation;                                                                                                       \
 }                                                                                                                      \
-if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */      \
+if (shadow_base) /* Only access shadow memory if it exists */                                                          \
 {                                                                                                                      \
-    auto* typed_destination = (__cast*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);   \
+    auto* typed_destination = (__cast*) (shadow_base + offset);                                                        \
     __operation;                                                                                                       \
 }
 
@@ -739,14 +739,14 @@ if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only acc
     void* __buffer;                                                                                                    \
     int __result;                                                                                                      \
     unsigned long long __raw_size = sizeof(unsigned long long);                                                        \
-    __result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, mapping_info->monitor_base + offset,        \
+    __result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, (void*) (monitor_base + offset),            \
             instruction, &__buffer, __raw_size);                                                                       \
     if (__result < 0)                                                                                                  \
         return __result;                                                                                               \
 }
 
 #define NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE(__cast, __divergence)                                          \
-auto* typed_destination = (__cast*) (mapping_info->monitor_base + offset);                                             \
+auto* typed_destination = (__cast*) (monitor_base + offset);                                                           \
 GET_BUFFER_RAW(typed_destination, sizeof(unsigned long long) + sizeof(__cast))                                         \
 if (!variant->variant_num)                                                                                             \
     *(__cast*)((unsigned long long*) buffer + 1) = *typed_source;                                                      \
@@ -756,7 +756,7 @@ else if (*(__cast*)((unsigned long long*) buffer + 1) != *typed_source)         
 }
 
 #define NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_WRITE(__cast, __core)                                                  \
-auto* typed_destination = (__cast*) (mapping_info->monitor_base + offset);                                             \
+auto* typed_destination = (__cast*) (monitor_base + offset);                                                           \
 __cast* buffer = nullptr;                                                                                              \
 {                                                                                                                      \
     unsigned long long size;                                                                                           \
@@ -791,10 +791,9 @@ IMM_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE
 NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE(__cast, __divergence)
 
 #define NORMAL_TO_SHARED_REPLICATE_FLAGS_WRITE(__cast, __core)                                                         \
-if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */      \
+if (shadow_base) /* Only access shadow memory if it exists */                                                          \
 {                                                                                                                      \
-    auto* shadow_destination = (__cast*)                                                                               \
-            (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);                               \
+    auto* shadow_destination = (__cast*) (shadow_base + offset);                                                       \
     NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_WRITE(__cast, __core)                                                      \
     __asm__                                                                                                            \
     (                                                                                                                  \
@@ -811,7 +810,7 @@ if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only acc
 void* buffer = nullptr;                                                                                                \
 {                                                                                                                      \
     unsigned long long size = 16;                                                                                      \
-    int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, mapping_info->monitor_base + offset,      \
+    int result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, (void*)(monitor_base + offset),           \
             instruction, &buffer, size);                                                                               \
     if (result < 0)                                                                                                    \
         return result;                                                                                                 \
@@ -836,12 +835,12 @@ void* buffer = nullptr;                                                         
                                                                                                                        \
 if (!variant->variant_num)                                                                                             \
 {                                                                                                                      \
-    destination = (void*) (mapping_info->monitor_base + offset);                                                       \
+    destination = (void*) (monitor_base + offset);                                                                     \
     __operation;                                                                                                       \
 }                                                                                                                      \
-if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only access shadow memory if it exists */      \
+if (shadow_base) /* Only access shadow memory if it exists */                                                          \
 {                                                                                                                      \
-    destination = (void*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);                 \
+    destination = (void*) (shadow_base + offset);                                                                      \
     __operation;                                                                                                       \
 }
 
@@ -849,7 +848,7 @@ if (mapping_info->variant_shadows[variant->variant_num].monitor_base)/* Only acc
 #define NORMAL_FROM_SHARED(__cast)                                                                                     \
 __cast* typed_source;                                                                                                  \
 int from_shared_result = shm_handling::determine_source_from_shared_normal(variant, relevant_monitor, instruction,     \
-        (void**)&typed_source, mapping_info, offset, sizeof(__cast));                                                  \
+        (void**)&typed_source, monitor_base, shadow_base, offset, sizeof(__cast));                                     \
 if (from_shared_result < 0)                                                                                            \
     return from_shared_result;
 
@@ -857,7 +856,7 @@ if (from_shared_result < 0)                                                     
 #define XMM_FROM_SHARED                                                                                                \
 void* source;                                                                                                          \
 int from_shared_result = shm_handling::determine_source_from_shared_normal(variant, relevant_monitor, instruction,     \
-        (void**)&source, mapping_info, offset, 16);                                                                    \
+        (void**)&source, monitor_base, shadow_base, offset, 16);                                                       \
 if (from_shared_result < 0)                                                                                            \
     return from_shared_result;
 
@@ -871,7 +870,8 @@ public:
                                                          unsigned long long access_size=0);
     static int  determine_source_from_shared_normal     (variantstate* variant, monitor &relevant_monitor,
                                                          instruction_intent &instruction, void** source,
-                                                         shared_monitor_map_info* mapping_info,
+                                                         unsigned long long monitor_base,
+                                                         unsigned long long shadow_base,
                                                          unsigned long long offset, unsigned long long size,
                                                          bool try_shadow = true);
     static int  determine_from_shared_proxy             (variantstate* variant, monitor &relevant_monitor,
