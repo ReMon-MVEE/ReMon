@@ -142,29 +142,44 @@ typedef int (*shm_write_handler_t) BYTE_WRITE_ARGUMENTS;
 uint8_t modrm = instruction[instruction.effective_opcode_index + 1];
 
 
-#define LOAD_RM_CODE(__src_or_dst, __size)                                                                             \
-LOAD_RM_CODE_NO_DEFINE(__size)                                                                                         \
-void* __src_or_dst = (void*) ((unsigned long long) mapping_info->monitor_base + offset);                               \
+#define LOAD_RM_CODE(__src_or_dst, __size, __shadow)                                                                   \
+LOAD_RM_CODE_NO_DEFINE(__size, __shadow)                                                                               \
+void* __src_or_dst = (void*) (monitor_base + offset);                                                                  \
 
 
-#define LOAD_RM_CODE_NO_DEFINE(__size)                                                                                 \
+#define LOAD_RM_CODE_NO_DEFINE(__size, __shared)                                                                       \
 /* register if mod bits equal 0b11 */                                                                                  \
 if (GET_MOD_CODE((unsigned) modrm) == 0b11u)                                                                           \
     /* For shared memory emulation, this shouldn't happen */                                                           \
     return -1;                                                                                                         \
 /* memory reference otherwise, so determine the monitor relevant pointer */                                            \
-OBTAIN_SHARED_MAPPING_INFO(__size)                                                                                     \
+OBTAIN_SHARED_MAPPING_INFO(__size, __shared)                                                                           \
 
 
-#define OBTAIN_SHARED_MAPPING_INFO(__size)                                                                             \
-shared_monitor_map_info* mapping_info;                                                                                 \
+#define DO_SET_SHADOW_BASE                                                                                             \
+unsigned long long shadow_base =                                                                                       \
+        (unsigned long long)__mapping_info->variant_shadows[variant->variant_num].monitor_base;
+#define DO_NOT_SET_SHADOW_BASE ;
+
+#define OBTAIN_SHARED_MAPPING_INFO(__size, __shared)                                                                   \
+shared_monitor_map_info* __mapping_info;                                                                               \
 unsigned long long offset;                                                                                             \
-if (!(mapping_info = relevant_monitor.set_mmap_table->get_shared_info(                                                 \
+relevant_monitor.set_mmap_table->grab_shared_lock();                                                                   \
+if (!(__mapping_info = relevant_monitor.set_mmap_table->get_shared_info(                                               \
         (unsigned long long) instruction.effective_address)))                                                          \
+{                                                                                                                      \
+    relevant_monitor.set_mmap_table->release_shared_lock();                                                            \
     return UNKNOWN_MEMORY_TERMINATION;                                                                                 \
-if ((offset = shm_handling::shared_memory_determine_offset(mapping_info,                                               \
+}                                                                                                                      \
+if ((offset = shm_handling::shared_memory_determine_offset(__mapping_info,                                             \
         (unsigned long long) instruction.effective_address, __size)) == (unsigned long long) -1)                       \
-    return -1;
+{                                                                                                                      \
+    relevant_monitor.set_mmap_table->release_shared_lock();                                                            \
+    return -1;                                                                                                         \
+}                                                                                                                      \
+unsigned long long monitor_base = (unsigned long long)__mapping_info->monitor_base;                                    \
+__shared                                                                                                               \
+relevant_monitor.set_mmap_table->release_shared_lock();
 
 
 #define OBTAIN_SHARED_MAPPING_INFO_NO_DEF(__variant_address, __mapping_info, __offset, __size)                         \
@@ -249,7 +264,6 @@ struct temp_t                          \
 {                                      \
     unsigned long long offset;         \
     shared_monitor_map_info* dst_info; \
-    shared_monitor_map_info* src_info; \
     unsigned long long dst;            \
     unsigned long long size;           \
     void* buffer;                      \

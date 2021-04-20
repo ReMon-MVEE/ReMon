@@ -249,21 +249,22 @@ int             shm_handling::determine_source_from_shared_normal   (variantstat
                                                                      monitor &relevant_monitor,
                                                                      instruction_intent &instruction,
                                                                      void** source,
-                                                                     shared_monitor_map_info* mapping_info,
+                                                                     unsigned long long monitor_base,
+                                                                     unsigned long long shadow_base,
                                                                      unsigned long long offset,
                                                                      unsigned long long size, bool try_shadow)
 {
-    void* monitor_pointer = (void*) (mapping_info->monitor_base + offset);
+    void* monitor_pointer = (void*) (monitor_base + offset);
 
     /* If we want to access shadow memory, make sure it is present */
     if (try_shadow)
-        try_shadow = mapping_info->variant_shadows[variant->variant_num].monitor_base;
+        try_shadow = shadow_base;
 
     /* leader variant case */
     if (!variant->variant_num)
     {
         /* area of memory is known to be written to by variants */
-        void* variant_shadow = (void*) (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);
+        void* variant_shadow = (void*) (shadow_base + offset);
         /* If area does not contain same content anymore, we detect it as bi-directional shared memory. */
         /* In this case we take the data from the shared memory segment. */
         if (try_shadow && memcmp(monitor_pointer, variant_shadow, size) == 0)
@@ -297,7 +298,7 @@ int             shm_handling::determine_source_from_shared_normal   (variantstat
 
         /* If buffer has not been filled, use local copy */
         if (!*source)
-            *source = (mapping_info->variant_shadows[variant->variant_num].monitor_base + offset);
+            *source = (void*)(shadow_base + offset);
     }
 
     return 0;
@@ -1288,10 +1289,11 @@ shared_monitor_map_info*
     unsigned long long end = variant_base + size;
     auto monitor_map = new shared_monitor_map_info(variant_base, (__uint8_t*) monitor_base, size, shmid);
 
-
+    grab_shared_lock();
     if (variant_mappings.empty() || end <= (unsigned long long) variant_mappings.front()->variant_base)
     {
         variant_mappings.insert(variant_mappings.begin(), monitor_map);
+        release_shared_lock();
         return monitor_map;
     }
 
@@ -1299,6 +1301,7 @@ shared_monitor_map_info*
         if (((*iter)->variant_base + (*iter)->size) <= monitor_map->variant_base && (*(iter + 1))->variant_base >= end)
         {
             variant_mappings.insert(iter + 1, monitor_map);
+            release_shared_lock();
             return monitor_map;
         }
     }
@@ -1306,9 +1309,11 @@ shared_monitor_map_info*
     if (monitor_map->variant_base >= variant_mappings.back()->variant_base + variant_mappings.back()->size)
     {
         variant_mappings.insert(variant_mappings.end(), monitor_map);
+        release_shared_lock();
         return monitor_map;
     }
 
+    release_shared_lock();
     return nullptr;
 }
 
@@ -1327,16 +1332,19 @@ shared_monitor_map_info*
 shared_monitor_map_info*
                 mmap_table::remove_shared_info                      (unsigned long long address)
 {
+    grab_shared_lock();
     for (auto shadow = variant_mappings.begin(); shadow != variant_mappings.end(); shadow++)
     {
         if (address >= (*shadow)->variant_base && address < ((*shadow)->variant_base + (*shadow)->size))
         {
             (*shadow)->cleanup_shm();
             variant_mappings.erase(shadow);
+            release_shared_lock();
             return (*shadow);
         }
     }
 
+    release_shared_lock();
     return nullptr;
 }
 
@@ -1387,6 +1395,7 @@ void            mmap_table::debug_shared                            ()
 
 void            mmap_table::attach_shared_memory                    ()
 {
+    grab_shared_lock();
     for (auto shared_mapping: variant_mappings)
     {
         if (shared_mapping->shmid != -1)
@@ -1395,6 +1404,17 @@ void            mmap_table::attach_shared_memory                    ()
             if (shared_shadow.shmid != -1)
                 shared_shadow.monitor_base = (uint8_t*) shmat(shared_shadow.shmid, nullptr, 0);
     }
+    release_shared_lock();
+}
+
+void            mmap_table::grab_shared_lock                        ()
+{
+    pthread_mutex_lock(&shared_mmap_lock);
+}
+
+void            mmap_table::release_shared_lock                     ()
+{
+    pthread_mutex_unlock(&shared_mmap_lock);
 }
 
 

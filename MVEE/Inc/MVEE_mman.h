@@ -384,6 +384,8 @@ public:
     void grab_lock                   ();
     void release_lock                ();
     void full_release_lock           ();
+    void grab_shared_lock            ();
+    void release_shared_lock         ();
 
     //
     // Shared memory
@@ -428,6 +430,7 @@ private:
     std::map<std::string,
              std::map<std::string, unsigned long> >
                     cached_syms;                      // maps libname -> symbol name -> symbol offset within lib
+    pthread_mutex_t shared_mmap_lock;
     std::vector<shared_monitor_map_info*>
                     variant_mappings;
 };
