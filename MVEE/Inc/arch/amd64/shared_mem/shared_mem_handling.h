@@ -620,6 +620,12 @@ if (memcmp(buffer, source, 16) != 0)                                            
 {                                                                                                                      \
     if (*(void**)(__buffer) != *(void**)(__source))                                                                    \
     {                                                                                                                  \
+        if (!shadow_base)                                                                                              \
+        {                                                                                                              \
+            warnf(" > diverging write (%p != %p) and no shadow mapping present\n",                                     \
+                    *(void**)(__buffer), *(void**)(__source));                                                         \
+            WRITE_DIVERGENCE_ERROR(__message)                                                                          \
+        }                                                                                                              \
         if (decode_address_tag(*(void**)(__source), variant) !=                                                        \
                 decode_address_tag(*(void**)(__buffer), &relevant_monitor.variants[0]))                                \
         {                                                                                                              \
@@ -631,6 +637,12 @@ if (memcmp(buffer, source, 16) != 0)                                            
     }                                                                                                                  \
     if (*((void**)(__buffer) + 1) != *((void**)(__source) + 1))                                                        \
     {                                                                                                                  \
+        if (!shadow_base)                                                                                              \
+        {                                                                                                              \
+            warnf(" > diverging write (%p != %p) and no shadow mapping present\n",                                     \
+                    *((void**)(__buffer) + 1), *((void**)(__source) + 1));                                             \
+            WRITE_DIVERGENCE_ERROR(__message)                                                                          \
+        }                                                                                                              \
         if (decode_address_tag(*((void**)(__source) + 1), variant) !=                                                  \
                 decode_address_tag(*((void**)(__buffer) + 1), &relevant_monitor.variants[0]))                          \
         {                                                                                                              \
@@ -649,6 +661,11 @@ WRITE_DIVERGENCE_ERROR(__message)
 #ifdef MVEE_ALLOW_SHM_PTR_DIFF
   #ifdef MVEE_CONNECTED_MMAP_REGIONS
 #define WRITE_DIVERGENCE_PTR_CHECK(__buffer, __source, __message)                                                      \
+if (!shadow_base)                                                                                                      \
+{                                                                                                                      \
+    warnf(" > diverging write (%p != %p) and no shadow mapping present\n", (void*)*(__buffer), (void*)*(__source));    \
+    WRITE_DIVERGENCE_ERROR(__message)                                                                                  \
+}                                                                                                                      \
 if (decode_address_tag(*(__source), variant) != decode_address_tag(*(__buffer), &relevant_monitor.variants[0]) &&      \
         shm_handling::same_ptr(relevant_monitor, 0, *(__buffer), variant->variant_num, *(__source)) != 0)              \
 {                                                                                                                      \
@@ -657,6 +674,11 @@ if (decode_address_tag(*(__source), variant) != decode_address_tag(*(__buffer), 
 }
   #else
 #define WRITE_DIVERGENCE_PTR_CHECK(__buffer, __source, __message)                                                      \
+if (!shadow_base)                                                                                                      \
+{                                                                                                                      \
+    warnf(" > diverging write (%p != %p) and no shadow mapping present\n", (void*)*(__buffer), (void*)*(__source));    \
+    WRITE_DIVERGENCE_ERROR(__message)                                                                                  \
+}                                                                                                                      \
 if (decode_address_tag(*(__source), variant) != decode_address_tag(*(__buffer), &relevant_monitor.variants[0]))        \
 {                                                                                                                      \
     warnf(" > %p != %p\n", (void*)*(__buffer), (void*)*(__source));                                                    \
@@ -671,7 +693,7 @@ WRITE_DIVERGENCE_ERROR(__message)
 #define WRITE_DIVERGENCE_ERROR(__message)                                                                              \
 warnf(__message);                                                                                                      \
 instruction.debug_print();                                                                                             \
-relevant_monitor.set_mmap_table->print_mmap_table(warnf);                                                              \
+/* relevant_monitor.set_mmap_table->print_mmap_table(warnf); */                                                        \
 return -1;
 
 #define IMM_TO_SHARED_EMULATE                                                                                          \
