@@ -357,7 +357,7 @@ BYTE_EMULATOR_IMPL(0x11)
         // movups xmm/m128, xmm
         DEFINE_FPREGS_STRUCT
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(16, DO_NOT_SET_SHADOW_BASE)
+        LOAD_RM_CODE_NO_DEFINE(16, DO_SET_SHADOW_BASE)
         LOAD_REG_CODE(source, xmm_lookup)
 
         // perform operation
@@ -987,7 +987,7 @@ BYTE_EMULATOR_IMPL(0x39)
         // 64-bit
         if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
         {
-            LOAD_RM_CODE_NO_DEFINE(8, DO_NOT_SET_SHADOW_BASE)
+            LOAD_RM_CODE_NO_DEFINE(8, DO_SET_SHADOW_BASE)
             auto typed_source = (uint64_t*) source;
             NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE(uint64_t,
                     WRITE_DIVERGENCE_PTR_CHECK(((uint64_t*)((unsigned long long*) buffer + 1)),
@@ -1867,7 +1867,7 @@ BYTE_EMULATOR_IMPL(0x89)
     {
         DEFINE_REGS_STRUCT
         DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE, DO_NOT_SET_SHADOW_BASE)
+        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE, DO_SET_SHADOW_BASE)
         LOAD_REG_CODE(source, general_purpose_lookup)
 
         // 64-bit implementation
