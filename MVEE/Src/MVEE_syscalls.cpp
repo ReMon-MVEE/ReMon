@@ -666,7 +666,6 @@ long monitor::call_call_dispatch ()
 						atomic_counters[i]  = (void*)ARG1(i);
 						if (buffer_type == MVEE_LIBC_ATOMIC_BUFFER)
 							atomic_queue_pos[i] = (void*)ARG4(i);
-            variants[i].mvee_atomic_queue_location = ARG6(i);
 					}
 
                     if (!atomic_buffer)
@@ -759,8 +758,6 @@ long monitor::call_call_dispatch ()
                       shm_buffer = new _shm_info();
                       alloc_size =  SHARED_QUEUE_SLOTS * actual_slot_size;
                     }
-                    for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
-                        variants[variant_i].mvee_shm_buffer_location = ARG6(variant_i);
 
                     info = shm_buffer;
                 }
@@ -962,6 +959,24 @@ long monitor::call_call_dispatch ()
 
 				if (!result)
 					result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
+				break;
+			}
+
+            //
+            // Syntax: 
+			//
+			// syscall(MVEE_RESET_ATFORK, address, size)
+			//
+            // With: 
+            // - address is a pointer to the variable to reset in a forked child
+            // - size is the size of the variable
+			case MVEE_RESET_ATFORK:
+			{
+				// Store the data
+				for (int i = 0; i < mvee::numvariants; ++i)
+                    variants[i].reset_atfork.emplace_back(ARG1(i), ARG2(i));
+
+                result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
 				break;
 			}
         }

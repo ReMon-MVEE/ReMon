@@ -89,8 +89,6 @@ variantstate::variantstate()
     , orig_controllen (0)
     , config (NULL)
     , instruction (&this->variantpid, &this->variant_num)
-    , mvee_shm_buffer_location(0)
-    , mvee_atomic_queue_location(0)
     , replaced_iovec(0)
 #ifdef __NR_socketcall
     , orig_arg1 (0)
@@ -246,11 +244,10 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
         variants[i].syscall_pointer = parent_monitor->variants[i].syscall_pointer;
 #endif
         variants[i].shm_tag                  = parent_monitor->variants[i].shm_tag;
+
+        // If this is a fork: Copy over the list of variables to reset
         if (!shares_mmap_table)
-        {
-          variants[i].mvee_shm_buffer_location = parent_monitor->variants[i].mvee_shm_buffer_location;
-          variants[i].mvee_atomic_queue_location = parent_monitor->variants[i].mvee_atomic_queue_location;
-        }
+            variants[i].reset_atfork = parent_monitor->variants[i].reset_atfork;
     }
 
     // variant monitors are a different story. New variants (forks/vforks/clones) always
@@ -1457,12 +1454,16 @@ void monitor::handle_resume_event(int index)
 
     // We do not actually resume until all of our variants are ready. This way we can set tids if needed
     debugf("%s - ready to resume variant\n", call_get_variant_pidstr(index).c_str());
-    if (variants[index].mvee_shm_buffer_location &&
-            !interaction::write_memory_word(variants[index].variantpid, (void*)variants[index].mvee_shm_buffer_location, 0))
-        warnf("Could not clear mvee_shm_buffer for variant %d (%d) - %d\n", index, variants[index].variantpid, errno);
-    if (variants[index].mvee_atomic_queue_location &&
-            !interaction::write_memory_word(variants[index].variantpid, (void*)variants[index].mvee_atomic_queue_location, 0))
-        warnf("Could not clear mvee_thread_local_queue for variant %d (%d) - %d\n", index, variants[index].variantpid, errno);
+
+    // Reset some variables at fork in the new child
+    for (const auto& v : variants[index].reset_atfork)
+    {
+        debugf("%s - Resetting ATFORK variable.\n", call_get_variant_pidstr(index).c_str());
+        unsigned long tmp = 0;
+        if (!interaction::write_memory(variants[index].variantpid, (void*)v.first, v.second, &tmp))
+            warnf("Could not clear MVEE_RESET_ATFORK variable for variant %d (%d) - %d\n", index, variants[index].variantpid, errno);
+    }
+    variants[index].reset_atfork.clear();
 
     bool all_resumed = true;
     for (int i = 0; i < mvee::numvariants; ++i)
