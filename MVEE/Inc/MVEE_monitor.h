@@ -269,8 +269,7 @@ public:
     void*         syscall_pointer;
 #endif
     unsigned long shm_tag;                                          // Tag for shared memory pages
-    unsigned long mvee_shm_buffer_location;
-    unsigned long mvee_atomic_queue_location;
+    std::vector<std::pair<unsigned long, size_t>> reset_atfork;     // Variables to reset in forked children
     struct iovec* replaced_iovec;
     // -----------------------------------------------------------------------------------------------------------------
 

@@ -1366,6 +1366,10 @@ POSTCALL(execve)
     set_fd_table->verify_fd_table(getpids());
 #endif
 
+    // Clear MVEE_RESET_ATFORK variables
+    for (int i = 0; i < mvee::numvariants; ++i)
+        variants[i].reset_atfork.clear();
+
     // create a new shm table...
     // man page: "Attached System V shared memory segments are detached (shmat(2))."
     call_release_syslocks(variantnum, __NR_execve, MVEE_SYSLOCK_FULL);

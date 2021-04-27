@@ -187,6 +187,11 @@ enum mvee_shared_buffer_types
 #define MVEE_GET_LEADER_SHM_TAG        MVEE_FAKE_SYSCALL_BASE + 20
 
 //
+// MVEE_RESET_ATFORK: registers a variable to be reset at fork-time (in the child)
+//
+#define MVEE_RESET_ATFORK              MVEE_FAKE_SYSCALL_BASE + 21
+
+//
 // MVEE Semaphore emulation calls. One weakness of our synchronization agents is
 // that they capture synchronization operations on virtual addresses.  This does
 // not work for inter-process semaphores because one and the same semaphore can
