@@ -309,6 +309,5 @@ target_compile_definitions(mvee PRIVATE
     #MVEE_LOG_ALL_SHM_INSTRUCTIONS
 )
 # ======================================================================================================================
-add_subdirectory(libsync)
 add_subdirectory(MVEE_LD_Loader)
 add_subdirectory(Utilities)
