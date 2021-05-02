@@ -6512,6 +6512,7 @@ PRECALL(writev)
         {
             should_replace = true;
             auto decoded_address = (unsigned long long)decode_address_tag(new_iovec[i].iov_base, &variants[0]);
+			set_mmap_table->grab_shared_lock();
             shared_monitor_map_info* mapping_info = set_mmap_table->get_shared_info(decoded_address);
             if (!mapping_info)
             {
@@ -6519,6 +6520,7 @@ PRECALL(writev)
                 shutdown(true);
                 return MVEE_PRECALL_ARGS_MISMATCH(2) | MVEE_PRECALL_CALL_DENY;
             }
+			set_mmap_table->release_shared_lock();
             new_iovec[i].iov_base = (void*) decoded_address;
         }
     }
