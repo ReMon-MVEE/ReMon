@@ -291,6 +291,7 @@ option(EmulateCPUID "Emulate CPUID instruction." ON)
 option(EmulateShm "Emulate shared memory." ON)
 option(LogNonInstrumentedIns "Log non-instrumented instructions using shared memory." ON)
 option(ShmAllowPtrDiff "Allow pointers to be written to shared memory." ON)
+option(ShmAllowShadow "Allow variants to allocate shadow memory." ON)
 option(ShmInsLogging "Log instructions using shared memory." ON)
 option(ShmInsLoggingFull "Log instructions using shared memory with more verbosity." OFF)
 option(ShmReplayLeader "Modifies replaying of shared memory instructions to follow leader-follower principle." ON)
@@ -301,6 +302,7 @@ target_compile_definitions(mvee PRIVATE
     $<$<BOOL:${EmulateShm}>:MVEE_ALLOW_SHM>
     $<$<BOOL:${LogNonInstrumentedIns}>:MVEE_LOG_NON_INSTRUMENTED_INSTRUCTION>
     $<$<BOOL:${ShmAllowPtrDiff}>:MVEE_ALLOW_SHM_PTR_DIFF>
+    $<$<BOOL:${ShmAllowShadow}>:MVEE_SHM_ALLOW_SHADOW>
     $<$<BOOL:${ShmInsLogging}>:MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING>
     $<$<BOOL:${ShmInsLoggingFull}>:MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL>
     $<$<BOOL:${ShmReplayLeader}>:MVEE_SHARED_MEMORY_REPLAY_LEADER>

@@ -1142,6 +1142,7 @@ void               shared_monitor_map_info::cleanup_shm             ()
 
 bool            mmap_table::requires_shadow                              (variantstate* variant)
 {
+#ifdef MVEE_SHM_ALLOW_SHADOW
     /* Get the path for the binary that requested shared memory */
     mvee_dwarf_context context(variant->variantpid);
     this->dwarf_step(0, variant->variantpid, &context);
@@ -1177,6 +1178,9 @@ bool            mmap_table::requires_shadow                              (varian
     /* Default: shadow memory required */
     warnf( " > returning default on %s\n", binary_name.c_str());
     return true;
+#else
+    return false;
+#endif
 }
 
 int             mmap_table::shadow_map                              (variantstate* variant, fd_info* info,
