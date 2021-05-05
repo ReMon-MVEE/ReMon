@@ -786,7 +786,24 @@ else if (*(__cast*)((unsigned long long*) buffer + 1) != *typed_source)         
 {                                                                                                                      \
     __divergence                                                                                                       \
 }                                                                                                                      \
-CMP_TO_SHARED_EMULATE_NO_CHECK(__cast, __core)
+if (!variant->variant_num)                                                                                             \
+{                                                                                                                      \
+    *(unsigned long long*) buffer = regs_struct->eflags;                                                               \
+    __asm__                                                                                                            \
+    (                                                                                                                  \
+            ".intel_syntax noprefix;"                                                                                  \
+            "push %[flags];"                                                                                           \
+            "popf;"                                                                                                    \
+            __core                                                                                                     \
+            "pushf;"                                                                                                   \
+            "pop %[flags];"                                                                                            \
+            ".att_syntax;"                                                                                             \
+            : [flags] "+r" (*(unsigned long long*) buffer), "+m" (*typed_destination)                                  \
+            : [dst] "r" (typed_destination), [src] "r" ((__cast)*typed_source)                                         \
+            : "cc"                                                                                                     \
+    );                                                                                                                 \
+}                                                                                                                      \
+regs_struct->eflags = *(unsigned long long*) buffer;
 
 #define CMP_TO_SHARED_EMULATE_NO_CHECK(__cast, __core)                                                                 \
 __asm__                                                                                                                \
