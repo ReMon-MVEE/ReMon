@@ -962,12 +962,11 @@ BYTE_EMULATOR_IMPL(0x38)
         LOAD_RM_CODE_NO_DEFINE(1, DO_NOT_SET_SHADOW_BASE)
         LOAD_REG_CODE(source, general_purpose_lookup)
         auto* typed_source = (uint8_t*) source;
-        NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE(uint8_t,
+        CMP_TO_SHARED_EMULATE(uint8_t, "cmp BYTE PTR [%[dst]], %[src];",
                 WRITE_DIVERGENCE_ERROR(" > write divergence in cmp m8, reg8\n"))
 
-
-        // do NOT advance buffer here
-        RETURN_WRITE(0x38)
+        // This technically has a memory operand as destination, but does not change it
+        RETURN_ADVANCE
     }
 
     // illegal otherwise
@@ -989,7 +988,7 @@ BYTE_EMULATOR_IMPL(0x39)
         {
             LOAD_RM_CODE_NO_DEFINE(8, DO_SET_SHADOW_BASE)
             auto typed_source = (uint64_t*) source;
-            NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE(uint64_t,
+            CMP_TO_SHARED_EMULATE(uint64_t, "cmp QWORD PTR [%[dst]], %[src];",
                     WRITE_DIVERGENCE_PTR_CHECK(((uint64_t*)((unsigned long long*) buffer + 1)),
                             typed_source,
                             " > write divergence in cmp m64, reg64\n"))
@@ -999,7 +998,7 @@ BYTE_EMULATOR_IMPL(0x39)
         {
             LOAD_RM_CODE_NO_DEFINE(2, DO_NOT_SET_SHADOW_BASE)
             auto typed_source = (uint16_t*) source;
-            NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE(uint16_t,
+            CMP_TO_SHARED_EMULATE(uint16_t, "cmp WORD PTR [%[dst]], %[src];",
                     WRITE_DIVERGENCE_ERROR(" > write divergence in cmp m16, reg16\n"))
         }
         // 32-bit
@@ -1007,12 +1006,12 @@ BYTE_EMULATOR_IMPL(0x39)
         {
             LOAD_RM_CODE_NO_DEFINE(4, DO_NOT_SET_SHADOW_BASE)
             auto typed_source = (uint32_t*) source;
-            NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE(uint32_t,
+            CMP_TO_SHARED_EMULATE(uint32_t, "cmp DWORD PTR [%[dst]], %[src];",
                     WRITE_DIVERGENCE_ERROR(" > write divergence in cmp m32, reg32\n"))
         }
 
-        // do NOT advance buffer here
-        RETURN_WRITE(0x39)
+        // This technically has a memory operand as destination, but does not change it
+        RETURN_ADVANCE
     }
 
     // illegal otherwise
@@ -1617,7 +1616,13 @@ BYTE_EMULATOR_IMPL(0x80)
             case 0b111u: // CMP - CMP r/m8, imm8
             {
                 // perform operation, note that the flags register is also changed here
+                DEFINE_REGS_STRUCT
                 IMM_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE
+                LOAD_IMM(source)
+                auto* typed_source = (uint8_t*)source;
+                auto* typed_destination = (uint8_t*)(((unsigned long long) monitor_base) + offset);
+                CMP_TO_SHARED_EMULATE_NO_CHECK(uint8_t, "cmp BYTE PTR [%[dst]], %[src];")
+                RETURN_ADVANCE
                 break;
             }
 
@@ -1660,7 +1665,32 @@ BYTE_EMULATOR_IMPL(0x81)
                 return -1;
             case 0b111u: // CMP - CMP r/m, imm
             {
+                DEFINE_REGS_STRUCT
                 IMM_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE
+                LOAD_IMM(source)
+                // cmp r/m64, imm32
+                if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
+                {
+                    uint64_t source_extended = (int64_t)*(int32_t*)source;
+                    auto* typed_source = &source_extended;
+                    auto* typed_destination = (uint64_t*)(((unsigned long long)monitor_base) + offset);
+                    CMP_TO_SHARED_EMULATE_NO_CHECK(uint64_t, "cmp QWORD PTR [%[dst]], %[src];")
+                }
+                // cmp r/m16, imm16
+                else if (PREFIXES_GRP_THREE_PRESENT(instruction))
+                {
+                    auto* typed_source = (uint16_t*)source;
+                    auto* typed_destination = (uint16_t*)(((unsigned long long)monitor_base) + offset);
+                    CMP_TO_SHARED_EMULATE_NO_CHECK(uint16_t, "cmp WORD PTR [%[dst]], %[src];")
+                }
+                // cmp r/m32, imm32
+                else
+                {
+                    auto* typed_source = (uint32_t*)source;
+                    auto* typed_destination = (uint32_t*)(((unsigned long long)monitor_base) + offset);
+                    CMP_TO_SHARED_EMULATE_NO_CHECK(uint32_t,"cmp DWORD PTR [%[dst]], %[src];")
+                }
+                RETURN_ADVANCE
                 break;
             }
 
@@ -1716,7 +1746,33 @@ BYTE_EMULATOR_IMPL(0x83)
                 return -1;
             case 0b111u: // CMP - cmp r/m(16,32,64), imm8
             {
+                DEFINE_REGS_STRUCT
                 IMM_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE
+                LOAD_IMM(source)
+                if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
+                {
+                    uint64_t source_extended = (int64_t)*(int8_t*)source;
+                    auto* typed_source = &source_extended;
+                    auto* typed_destination = (uint16_t*)(((unsigned long long)monitor_base) + offset);
+                    CMP_TO_SHARED_EMULATE_NO_CHECK(uint64_t, "cmp QWORD PTR [%[dst]], %[src];")
+                }
+                // cmp r/m16, imm8
+                else if (PREFIXES_GRP_THREE_PRESENT(instruction))
+                {
+                    uint16_t source_extended = (int16_t)*(int8_t*)source;
+                    auto* typed_source = &source_extended;
+                    auto* typed_destination = (uint16_t*)(((unsigned long long)monitor_base) + offset);
+                    CMP_TO_SHARED_EMULATE_NO_CHECK(uint16_t, "cmp WORD PTR [%[dst]], %[src];")
+                }
+                // cmp r/m32, imm8
+                else
+                {
+                    uint32_t source_extended = (int32_t)*(int8_t*)source;
+                    auto* typed_source = &source_extended;
+                    auto* typed_destination = (uint32_t*)(((unsigned long long)monitor_base) + offset);
+                    CMP_TO_SHARED_EMULATE_NO_CHECK(uint32_t, "cmp DWORD PTR [%[dst]], %[src];")
+                }
+                RETURN_ADVANCE
                 break;
             }
             default:
