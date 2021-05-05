@@ -757,12 +757,12 @@ if (shadow_base) /* Only access shadow memory if it exists */                   
 }
 
 #define IMM_TO_SHARED_REPLICATE_FLAGS_MASTER_EMULATE                                                                   \
+void* buffer;                                                                                                          \
 {                                                                                                                      \
-    void* __buffer;                                                                                                    \
     int __result;                                                                                                      \
     unsigned long long __raw_size = sizeof(unsigned long long);                                                        \
     __result = relevant_monitor.buffer.obtain_buffer(variant->variant_num, (void*) (monitor_base + offset),            \
-            instruction, &__buffer, __raw_size);                                                                       \
+            instruction, &buffer, __raw_size);                                                                         \
     if (__result < 0)                                                                                                  \
         return __result;                                                                                               \
 }
@@ -776,6 +776,32 @@ else if (*(__cast*)((unsigned long long*) buffer + 1) != *typed_source)         
 {                                                                                                                      \
     __divergence                                                                                                       \
 }
+
+#define CMP_TO_SHARED_EMULATE(__cast, __core, __divergence)                                                            \
+auto* typed_destination = (__cast*) (monitor_base + offset);                                                           \
+GET_BUFFER_RAW(typed_destination, sizeof(unsigned long long) + sizeof(__cast))                                         \
+if (!variant->variant_num)                                                                                             \
+    *(__cast*)((unsigned long long*) buffer + 1) = *typed_source;                                                      \
+else if (*(__cast*)((unsigned long long*) buffer + 1) != *typed_source)                                                \
+{                                                                                                                      \
+    __divergence                                                                                                       \
+}                                                                                                                      \
+CMP_TO_SHARED_EMULATE_NO_CHECK(__cast, __core)
+
+#define CMP_TO_SHARED_EMULATE_NO_CHECK(__cast, __core)                                                                 \
+__asm__                                                                                                                \
+(                                                                                                                      \
+        ".intel_syntax noprefix;"                                                                                      \
+        "push %[flags];"                                                                                               \
+        "popf;"                                                                                                        \
+        __core                                                                                                         \
+        "pushf;"                                                                                                       \
+        "pop %[flags];"                                                                                                \
+        ".att_syntax;"                                                                                                 \
+        : [flags] "+r" (regs_struct->eflags)                                                                           \
+        : [dst] "r" (typed_destination), "m" (*typed_destination), [src] "r" (*(__cast*)typed_source)                  \
+        : "cc"                                                                                                         \
+);
 
 #define NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_WRITE(__cast, __core)                                                  \
 auto* typed_destination = (__cast*) (monitor_base + offset);                                                           \
@@ -873,6 +899,35 @@ int from_shared_result = shm_handling::determine_source_from_shared_normal(varia
         (void**)&typed_source, monitor_base, shadow_base, offset, sizeof(__cast));                                     \
 if (from_shared_result < 0)                                                                                            \
     return from_shared_result;
+
+
+#define CMP_TO_SHARED(__cast)                                                                                          \
+__cast* typed_destination;                                                                                             \
+int from_shared_result = shm_handling::determine_source_from_shared_normal(variant, relevant_monitor, instruction,     \
+        (void**)&typed_destination, monitor_base, shadow_base, offset, sizeof(__cast));                                \
+if (from_shared_result < 0)                                                                                            \
+    return from_shared_result;
+
+
+#define NORMAL_FROM_SHARED_REPLICATE_FLAGS(__cast, __core)                                                             \
+if (!variant->variant_num)                                                                                             \
+{                                                                                                                      \
+    *(unsigned long long*) buffer = regs_struct->eflags;                                                               \
+    __asm__                                                                                                            \
+    (                                                                                                                  \
+            ".intel_syntax noprefix;"                                                                                  \
+            "push %[flags];"                                                                                           \
+            "popf;"                                                                                                    \
+            __core                                                                                                     \
+            "pushf;"                                                                                                   \
+            "pop %[flags];"                                                                                            \
+            ".att_syntax;"                                                                                             \
+            : [flags] "+r" (*(unsigned long long*) buffer), "+m" (*typed_destination)                                  \
+            : [dst] "r" (typed_destination), [src] "r" ((__cast)*typed_source)                                         \
+            : "cc"                                                                                                     \
+    );                                                                                                                 \
+}                                                                                                                      \
+regs_struct->eflags = *(unsigned long long*) buffer;
 
 
 #define XMM_FROM_SHARED                                                                                                \

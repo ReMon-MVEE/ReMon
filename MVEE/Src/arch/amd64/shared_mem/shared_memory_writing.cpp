@@ -428,19 +428,7 @@ BYTE_WRITE_IMPL(0x2b)
 BYTE_WRITE_IMPL(0x38)
 {
     // cmp Eb, Gb
-    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
-    {
-        DEFINE_REGS_STRUCT
-        DEFINE_MODRM
-        LOAD_RM_CODE_NO_DEFINE(1, DO_NOT_SET_SHADOW_BASE)
-        LOAD_REG_CODE(source, general_purpose_lookup)
-        auto* typed_source = (uint8_t*) source;
-        NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_WRITE(uint8_t, "cmp BYTE PTR [%[dst]], %[src];")
-
-        RETURN_ADVANCE
-    }
-
-    // illegal otherwise
+    // illegal, not an actual write
     return -1;
 }
 
@@ -448,39 +436,7 @@ BYTE_WRITE_IMPL(0x38)
 BYTE_WRITE_IMPL(0x39)
 {
     // cmp Ev, Gv
-    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
-    {
-        DEFINE_REGS_STRUCT
-        DEFINE_MODRM
-        LOAD_REG_CODE(source, general_purpose_lookup)
-
-        // 64-bit
-        if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
-        {
-            LOAD_RM_CODE_NO_DEFINE(8, DO_NOT_SET_SHADOW_BASE)
-            auto typed_source = (uint64_t*) source;
-            NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_WRITE(uint64_t, "cmp QWORD PTR [%[dst]], %[src];")
-        }
-        // 16-bit
-        else if (PREFIXES_GRP_THREE_PRESENT(instruction))
-        {
-            LOAD_RM_CODE_NO_DEFINE(2, DO_NOT_SET_SHADOW_BASE)
-            auto typed_source = (uint16_t*) source;
-            NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_WRITE(uint16_t, "cmp WORD PTR [%[dst]], %[src];")
-        }
-        // 32-bit
-        else
-        {
-            LOAD_RM_CODE_NO_DEFINE(4, DO_NOT_SET_SHADOW_BASE)
-            auto typed_source = (uint32_t*) source;
-            NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_WRITE(uint32_t, "cmp DWORD PTR [%[dst]], %[src];")
-        }
-
-        // registers will be written back anyway
-        RETURN_ADVANCE
-    }
-
-    // illegal otherwise
+    // illegal, not an actual write
     return -1;
 }
 
@@ -879,8 +835,8 @@ BYTE_WRITE_IMPL(0x80)
             case 0b110u: // XOR - not yet implemented
             case 0b111u: // CMP - CMP r/m8, imm8
             {
-                // perform operation, note that the flags register is also changed here
-                NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_WRITE(uint8_t, "cmp BYTE PTR [%[dst]], %[src];")
+                // illegal, not an actual write
+                return -1;
                 break;
             }
             default:
@@ -944,26 +900,8 @@ BYTE_WRITE_IMPL(0x81)
                 return -1;
             case 0b111u: // CMP - CMP r/m, imm
             {
-                // cmp r/m64, imm32
-                if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
-                {
-                    uint64_t source_extended = (int64_t)*(int32_t*)source;
-                    auto* typed_source = &source_extended;
-                    NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_WRITE(uint64_t, "cmp QWORD PTR [%[dst]], %[src];")
-                }
-                // cmp r/m16, imm16
-                else if (PREFIXES_GRP_THREE_PRESENT(instruction))
-                {
-                    auto* typed_source = (uint16_t*)source;
-                    NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_WRITE(uint16_t, "cmp WORD PTR [%[dst]], %[src];")
-                }
-                // cmp r/m32, imm32
-                else
-                {
-                    auto* typed_source = (uint32_t*)source;
-                    NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_WRITE(uint32_t,"cmp DWORD PTR [%[dst]], %[src];")
-                }
-
+                // illegal, not an actual write
+                return -1;
                 break;
             }
 
@@ -1086,29 +1024,8 @@ BYTE_WRITE_IMPL(0x83)
                 return -1;
             case 0b111u: // CMP - cmp r/m(16,32,64), imm8
             {
-                // perform operation, note that the flags register is also changed here
-                // cmp r/m64, imm8
-                if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
-                {
-                    uint64_t source_extended = (int64_t)*(int8_t*)source;
-                    auto* typed_source = &source_extended;
-                    NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_WRITE(uint64_t, "cmp QWORD PTR [%[dst]], %[src];")
-                }
-                // cmp r/m16, imm8
-                else if (PREFIXES_GRP_THREE_PRESENT(instruction))
-                {
-                    uint16_t source_extended = (int16_t)*(int8_t*)source;
-                    auto* typed_source = &source_extended;
-                    NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_WRITE(uint16_t, "cmp WORD PTR [%[dst]], %[src];")
-                }
-                // cmp r/m32, imm8
-                else
-                {
-                    uint32_t source_extended = (int32_t)*(int8_t*)source;
-                    auto* typed_source = &source_extended;
-                    NORMAL_TO_SHARED_REPLICATE_FLAGS_MASTER_WRITE(uint32_t, "cmp DWORD PTR [%[dst]], %[src];")
-                }
-
+                // illegal, not an actual write
+                return -1;
                 break;
             }
             default:
