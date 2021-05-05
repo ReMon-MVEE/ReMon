@@ -1150,6 +1150,7 @@ private:
     _shm_info*                        atomic_buffer;          // thread-local atomic buffer
     std::vector<void*>                atomic_counters;
     std::vector<void*>                atomic_queue_pos;
+    static std::vector<std::unique_ptr<_shm_info>>     atomic_variantwide_buffer;
 
     _shm_info*                        ipmon_buffer;
 	_shm_info*                        ring_buffer;
