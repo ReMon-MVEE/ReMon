@@ -5431,11 +5431,32 @@ LOG_ARGS(shmat)
 
 PRECALL(shmat)
 {
+	CHECKARG(3)
+
+    // In this very specific case, ARG1 differs
+    if (!monitor::atomic_variantwide_buffer.empty())
+    {
+        bool match = false;
+        bool difference = false;
+        for (int iii = 0; iii < mvee::numvariants; ++iii)
+        {
+            if (monitor::atomic_variantwide_buffer[iii]->id == (int)ARG1(iii))
+                match = true;
+            else
+                difference = true;
+        }
+        if (match)
+        {
+            if (difference) // Something is awry, they should all match up
+                return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
+            return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+        }
+    }
 #ifndef MVEE_ALLOW_SHM
 	CHECKARG(1);
 #endif
+
 	CHECKARG(1)
-	CHECKARG(3)
 
     if ((atomic_buffer &&
                 ((int) ARG1(0) == atomic_buffer->id || (int) ARG1(0) == atomic_buffer->eip_id)) ||
@@ -5491,6 +5512,12 @@ CALL(shmat)
         debugf("attach to shared memory buffer requested\n");
         disjoint_bases = false;
     shm_sz = shm_buffer->sz;
+    }
+    else if (!monitor::atomic_variantwide_buffer.empty() && (int)ARG1(0) == monitor::atomic_variantwide_buffer[0]->id)
+    {
+        debugf("attach to variantwide atomic buffer requested\n");
+        disjoint_bases = false;
+        shm_sz = monitor::atomic_variantwide_buffer[0]->sz;
     }
 #ifdef MVEE_ALLOW_SHM
     else if (shm_setup_state & SHM_SETUP_EXPECTING_SHADOW)
@@ -5594,6 +5621,11 @@ POSTCALL(shmat)
     {
         region_name = "[shm-buffer]";
         region_size = shm_buffer->sz;
+    }
+	else if (!monitor::atomic_variantwide_buffer.empty() && (int)ARG1(0) == monitor::atomic_variantwide_buffer[0]->id)
+    {
+        region_name = "[variantwide-atomic-buffer]";
+        region_size = monitor::atomic_variantwide_buffer[0]->sz;
     }
 	else if (set_fd_table->file_map_exists() 
 			 && (int)ARG1(0) == set_fd_table->file_map_id())

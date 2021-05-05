@@ -155,6 +155,7 @@ bool monitor::is_group_shutting_down()
     are either duplicated or attached and the new monitor is registered
     automatically.
 -----------------------------------------------------------------------------*/
+std::vector<std::unique_ptr<_shm_info>>     monitor::atomic_variantwide_buffer;
 void monitor::init()
 {
     monitor_log                    = NULL;

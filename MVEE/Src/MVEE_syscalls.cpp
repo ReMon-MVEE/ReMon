@@ -761,6 +761,31 @@ long monitor::call_call_dispatch ()
 
                     info = shm_buffer;
                 }
+                else if (buffer_type == MVEE_LIBC_VARIANTWIDE_ATOMIC_BUFFER)
+                {
+                    if (monitor::atomic_variantwide_buffer.empty())
+                    {
+                        for (int iii = 0; iii < mvee::numvariants; ++iii)
+                        {
+                            debugf("Allocating variantwide atomic buffer for variant %d\n", iii);
+                            monitor::atomic_variantwide_buffer.push_back(std::make_unique<_shm_info>());
+                            auto& info = monitor::atomic_variantwide_buffer[iii];
+                            alloc_size = ARG4(iii);
+                            if (!mvee::os_alloc_sysv_sharedmem(alloc_size, &(info->id), &(info->sz), &(info->ptr)))
+                            {
+                                result = MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(1);
+                                break;
+                            }
+                        }
+                    }
+
+                    // deny the call and return id of the buffer
+                    for (int iii = 0; iii < mvee::numvariants; ++iii)
+                        variants[iii].extended_value = monitor::atomic_variantwide_buffer[iii]->id;
+
+                    result = MVEE_CALL_DENY | MVEE_CALL_RETURN_EXTENDED_VALUE;
+                    break;
+                }
                 else if (buffer_type <= MVEE_MAX_SHM_TYPES)
                 {
                     it         = set_shm_table->table.find(buffer_type);

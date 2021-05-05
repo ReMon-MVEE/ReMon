@@ -38,7 +38,8 @@ enum mvee_shared_buffer_types
 	MVEE_IPMON_REG_FILE_MAP,       /* 21 */
 	MVEE_RING_BUFFER,              /* 22 */
 	MVEE_SHM_BUFFER,               /* 23 */
-    MVEE_MAX_SHM_TYPES             /* 24 */
+	MVEE_LIBC_VARIANTWIDE_ATOMIC_BUFFER,/* 24 */
+	MVEE_MAX_SHM_TYPES             /* 25 */
 };
 #endif
 
