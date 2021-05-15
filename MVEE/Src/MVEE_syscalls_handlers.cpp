@@ -6698,7 +6698,9 @@ CALL(mremap)
 
 			for (int i = 0; i < mvee::numvariants; ++i)
 			{
-				call_overwrite_arg_value(i, 3, address, true);
+				call_overwrite_arg_value(i, 5, address, true);
+				// TODO - check this at some point
+				warnf(" > SYS_MREMAP might require the MREMAP_FIXED flag to force it to remap to an MVEE controlled location\n");
 
 				debugf("%s - replaced call by SYS_MREMAP(OLD_ADDR=0x" PTRSTR ", OLD_LEN=%lu, NEW_LEN=%lu, FLAGS=%lu (%s), NEW_ADDR=0x" PTRSTR ")\n",
 					   call_get_variant_pidstr(variantnum).c_str(), 
