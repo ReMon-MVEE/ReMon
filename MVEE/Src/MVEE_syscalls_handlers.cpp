@@ -7744,8 +7744,7 @@ POSTCALL(mmap)
                 results[i] = results[0];
             }
 
-            shm_setup_state = SHM_SETUP_EXPECTING_SHADOW;
-            shm_setup_state |= SHM_SETUP_SHOULD_COPY;
+            shm_setup_state = SHM_SETUP_EXPECTING_SHADOW | SHM_SETUP_SHOULD_COPY;
             if (allocate_shadow)
                 shm_setup_state |= SHM_SETUP_SHOULD_ALLOCATE_SHADOW;
         }
