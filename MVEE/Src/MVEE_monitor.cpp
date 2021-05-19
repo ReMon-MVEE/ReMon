@@ -185,6 +185,7 @@ void monitor::init()
 	master_core                    = -1;
 	last_mmap_requested_size       = 0;
 	last_mmap_requested_alignment  = 0;
+	current_shadow                 = NULL;
 
 	blocked_signals.resize(mvee::numvariants);
 	old_blocked_signals.resize(mvee::numvariants);
@@ -213,7 +214,6 @@ void monitor::init()
 
 monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap_table, bool shares_sighand_table, bool shares_tgid)
         : buffer(this)
-        , current_shadow(nullptr)
 {
     init();
 
