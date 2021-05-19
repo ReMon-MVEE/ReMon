@@ -5592,7 +5592,6 @@ POSTCALL(shmat)
 	std::vector<unsigned long> addresses = call_postcall_get_result_vector();
 	std::string region_name = "[anonymous-sys V shm]";
 	unsigned long region_size = 0;
-    shared_monitor_map_info* shadow = nullptr;
     fd_info info;
 
 	if (!call_succeeded)
@@ -5681,14 +5680,14 @@ POSTCALL(shmat)
             region_size = shm_info.shm_segsz;
 
             if (set_mmap_table->shadow_shmat(&variants[0], ARG1(0), addresses[0],
-                    &shadow, region_size) != 0)
+                    &current_shadow, region_size) != 0)
             {
                 shutdown(false);
                 return MVEE_POSTCALL_DONTRESUME;
             }
             bool allocate_shadow = set_mmap_table->requires_shadow(&variants[0]);
-            if (shadow && allocate_shadow)
-                shadow->setup_shm();
+            if (current_shadow && allocate_shadow)
+                current_shadow->setup_shm();
 
             for (int i = 0; i < mvee::numvariants; ++i)
                 call_postcall_set_variant_result(i, encode_address_tag(addresses[0], &variants[i]));
@@ -5696,16 +5695,15 @@ POSTCALL(shmat)
             shm_setup_state = SHM_SETUP_EXPECTING_SHADOW;
             if (allocate_shadow)
                 shm_setup_state |= SHM_SETUP_SHOULD_ALLOCATE_SHADOW;
-            current_shadow = shadow;
 #endif
         }
 	}
 
 	std::fill(info.paths.begin(), info.paths.end(), region_name);
 
-	for (int i = 0; i < (shadow ? 1 : mvee::numvariants); ++i)
+	for (int i = 0; i < (current_shadow ? 1 : mvee::numvariants); ++i)
         set_mmap_table->map_range(i, addresses[i], region_size, MAP_SHARED | MAP_ANONYMOUS,
-                PROT_READ | PROT_WRITE, &info, 0, shadow);
+                PROT_READ | PROT_WRITE, &info, 0, current_shadow);
 
 
 	return 0;
@@ -7725,11 +7723,10 @@ POSTCALL(mmap)
 			}
 		}
 
-        shared_monitor_map_info* shadow = nullptr;
 #if defined(MVEE_EMULATE_SHARED_MEMORY) && defined(MVEE_ALLOW_SHM)
         if (shm_setup_state & SHM_SETUP_EXPECTING_ENTRY)
         {
-            if (set_mmap_table->shadow_map(&variants[0], info, results[0], &shadow,
+            if (set_mmap_table->shadow_map(&variants[0], info, results[0], &current_shadow,
                     ARG2(0), ARG3(0), ARG4(0), ARG6(0)) < 0)
             {
                 warnf("could not create shadow mapping...\n");
@@ -7738,8 +7735,8 @@ POSTCALL(mmap)
             }
 
             bool allocate_shadow = set_mmap_table->requires_shadow(&variants[0]);
-            if (shadow && allocate_shadow)
-                shadow->setup_shm();
+            if (current_shadow && allocate_shadow)
+                current_shadow->setup_shm();
 
             for (int i = 0; i < mvee::numvariants; ++i)
             {
@@ -7751,7 +7748,6 @@ POSTCALL(mmap)
             shm_setup_state |= SHM_SETUP_SHOULD_COPY;
             if (allocate_shadow)
                 shm_setup_state |= SHM_SETUP_SHOULD_ALLOCATE_SHADOW;
-            current_shadow = shadow;
         }
 #endif
 
@@ -7767,11 +7763,11 @@ POSTCALL(mmap)
 #endif
 #ifdef MVEE_CONNECTED_MMAP_REGIONS
             mmap_region_info* new_region = set_mmap_table->map_range(i, results[i], ARG2(0),
-                    ARG4(0), ARG3(0), info, actual_offset, shadow);
+                    ARG4(0), ARG3(0), info, actual_offset, current_shadow);
             connected_regions[i] = new_region;
             new_region->connected_regions = connected_regions;
 #else
-            set_mmap_table->map_range(i, results[i], ARG2(0), ARG4(0), ARG3(0), info, actual_offset, shadow);
+            set_mmap_table->map_range(i, results[i], ARG2(0), ARG4(0), ARG3(0), info, actual_offset, current_shadow);
 #endif
 		}
 
