@@ -7368,71 +7368,82 @@ PRECALL(mmap)
 
 #ifdef MVEE_ALLOW_SHM
     shm_setup_state = SHM_SETUP_IDLE;
-    if (ARG5(0) && ((int)ARG5(0) != -1) && (ARG4(0) & MAP_SHARED) &&
-            !(ARG3(0) & PROT_EXEC))
+    if ((ARG4(0) & MAP_SHARED) && !(ARG3(0) & PROT_EXEC))
 	{
-	    fd_info* info = set_fd_table->get_fd_info(ARG5(0));
-        if (!info)
+        call_check_regs(0);
+        auto caller_info = set_mmap_table->get_caller_info(0, variants[0].variantpid, variants[0].regs.rip);
+        if (caller_info.find("mvee_shm_mmap") == std::string::npos)
         {
-            warnf("Trying to set up shared memory using a file descriptor the monitor doesn't know (fd %llu)\n",
-                  ARG5(0));
+            warnf("Trying to set up shared memory from a location other that mvee_shm_mmap\n");
             shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
             shutdown(false);
         }
-		call_check_regs(0);
-		auto caller_info = set_mmap_table->get_caller_info(0, variants[0].variantpid, variants[0].regs.rip);
-		if (caller_info.find("mvee_shm_mmap") == std::string::npos)
-		{
-			warnf("Trying to set up shared memory from a location other that mvee_shm_mmap\n");
-			shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
-		}
 
-		// check actual file
-		int fd;
-		unsigned long long protection;
+        /* File-backed, check file */
+        if (ARG5(0) && ((int)ARG5(0) != -1))
+        {
+            fd_info* info = set_fd_table->get_fd_info(ARG5(0));
+            if (!info)
+            {
+                warnf("Trying to set up shared memory using a file descriptor the monitor doesn't know (fd %llu)\n",
+                        ARG5(0));
+                shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
+                shutdown(false);
+            }
 
-		for (unsigned long file_i = 0; file_i < (info->master_file ? 1: info->paths.size()); file_i++)
-		{
-			fd = open(info->paths[file_i].c_str(), O_RDONLY);
-			if (fd == -1)
-			{
-				std::stringstream memfd_file_path;
-				memfd_file_path << "/proc/" << variants[file_i].variantpid << "/fd/" << info->fds[file_i];
-				fd = open(memfd_file_path.str().c_str(), info->access_flags & ~(O_TRUNC | O_CREAT));
+            // check actual file
+            int fd;
+            unsigned long long protection;
 
-				if (fd == -1)
-				{
-					warnf("Failed shared memory check | could not open %s (%lu) - %d\n",
-							info->paths[file_i].c_str(), file_i, errno);
-					shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
-					break;
-				}
-			}
-			struct stat fd_stat;
-			if (fstat(fd, &fd_stat))
-			{
-				warnf("Failed shared memory check | could not fstat %s - %d\n\n", info->paths[file_i].c_str(),
-						errno);
-				shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
-				break;
-			}
+            for (unsigned long file_i = 0; file_i < (info->master_file ? 1: info->paths.size()); file_i++)
+            {
+                fd = open(info->paths[file_i].c_str(), O_RDONLY);
+                if (fd == -1)
+                {
+                    std::stringstream memfd_file_path;
+                    memfd_file_path << "/proc/" << variants[file_i].variantpid << "/fd/" << info->fds[file_i];
+                    fd = open(memfd_file_path.str().c_str(), info->access_flags & ~(O_TRUNC | O_CREAT));
 
-			if (!file_i)
-				protection = fd_stat.st_mode;
-			else if (fd_stat.st_mode != protection)
-			{
-				warnf("Failed shared memory check | Per variant file has different file mode: %llx != %du | %s\n",
-						protection,
-						fd_stat.st_mode,
-						info->paths[file_i].c_str());
-				shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
-				break;
-			}
+                    if (fd == -1)
+                    {
+                        warnf("Failed shared memory check | could not open %s (%lu) - %d\n",
+                                info->paths[file_i].c_str(), file_i, errno);
+                        shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
+                        break;
+                    }
+                }
+                struct stat fd_stat;
+                if (fstat(fd, &fd_stat))
+                {
+                    warnf("Failed shared memory check | could not fstat %s - %d\n\n", info->paths[file_i].c_str(),
+                            errno);
+                    shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
+                    break;
+                }
 
-			close(fd);
-		}
+                if (!file_i)
+                    protection = fd_stat.st_mode;
+                else if (fd_stat.st_mode != protection)
+                {
+                    warnf("Failed shared memory check | Per variant file has different file mode: %llx != %du | %s\n",
+                            protection,
+                            fd_stat.st_mode,
+                            info->paths[file_i].c_str());
+                    shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
+                    break;
+                }
 
-		if ((shm_setup_state & SHM_SETUP_IDLE) && (protection & (S_IRUSR | S_IWUSR)))
+                close(fd);
+
+                if (!(protection & (S_IRUSR | S_IWUSR)))
+                {
+                    shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
+                    break;
+                }
+            }
+        }
+
+		if (shm_setup_state & SHM_SETUP_IDLE)
 		{
 			shm_setup_state = SHM_SETUP_EXPECTING_ENTRY;
 			return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
@@ -7474,7 +7485,54 @@ CALL(mmap)
 					   (int)ARG5(i),
 					   (unsigned long)ARG6(i));
 			}
+            return MVEE_CALL_ALLOW;
 		}
+		else if (ARG4(0) & MAP_SHARED)
+        {
+            if (!(shm_setup_state & SHM_SETUP_EXPECTING_ENTRY))
+                return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
+
+            // Choose base address
+            unsigned long base_address = set_mmap_table->calculate_data_mapping_base(ARG2(0));
+            if (!base_address)
+            {
+                warnf(" > could not get base address for MAP_SHARED mapping\n");
+                shutdown(false);
+                return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
+            }
+            for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+                SETARG1(variant_i, base_address);
+
+            // Set up shared memory segment
+            int shmid = shmget(IPC_PRIVATE, ARG2(0), IPC_CREAT | S_IRUSR | S_IWUSR);
+            if (shmid == -1)
+            {
+                warnf("could not create shadow mapping...\n");
+                shutdown(false);
+                return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
+            }
+
+            if (set_mmap_table->shadow_shmat(&variants[0], shmid, base_address, &current_shadow,
+                        ARG2(0)) < 0)
+            {
+                warnf("could not create shadow mapping...\n");
+                shutdown(false);
+                return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
+            }
+            // Now that we have attached, flag the segment for removal when no longer in use
+            shmctl(shmid, IPC_RMID, NULL);
+
+            // Rewrite the leader's syscall to attach to the segment:
+            // shmat(shmid, base_address, 0)
+            if (!interaction::write_syscall_no(variants[0].variantpid, __NR_shmat))
+                throw RwRegsFailure(0, "inject shmat call for sys_mmap(0)");
+            call_overwrite_arg_value(0, 1, shmid, true);
+            call_overwrite_arg_value(0, 2, base_address, true);
+            call_overwrite_arg_value(0, 3, 0, true);
+
+            debugf("%s - call replaced by SYS_SHMAT(%d, 0x" PTRSTR ", 0)\n",
+                    call_get_variant_pidstr(0).c_str(), shmid, base_address);
+        }
         return MVEE_CALL_ALLOW;
 	}
 
@@ -7726,8 +7784,9 @@ POSTCALL(mmap)
 #if defined(MVEE_EMULATE_SHARED_MEMORY) && defined(MVEE_ALLOW_SHM)
         if (shm_setup_state & SHM_SETUP_EXPECTING_ENTRY)
         {
-            if (set_mmap_table->shadow_map(&variants[0], info, results[0], &current_shadow,
-                    ARG2(0), ARG3(0), ARG4(0), ARG6(0)) < 0)
+            // For anonymous memory, the monitor has already done the mapping
+            if (!(ARG4(0) & MAP_ANONYMOUS) && set_mmap_table->shadow_map(&variants[0], info,
+				results[0], &current_shadow, ARG2(0), ARG3(0), ARG4(0), ARG6(0)) < 0)
             {
                 warnf("could not create shadow mapping...\n");
                 shutdown(false);
