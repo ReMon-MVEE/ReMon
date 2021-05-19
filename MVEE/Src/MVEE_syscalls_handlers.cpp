@@ -6547,7 +6547,7 @@ PRECALL(writev)
             if (!mapping_info)
             {
                 warnf(" > unknown shared memory region referenced in writev iovec\n");
-                shutdown(true);
+                shutdown(false);
                 return MVEE_PRECALL_ARGS_MISMATCH(2) | MVEE_PRECALL_CALL_DENY;
             }
 			set_mmap_table->release_shared_lock();
@@ -7377,7 +7377,7 @@ PRECALL(mmap)
             warnf("Trying to set up shared memory using a file descriptor the monitor doesn't know (fd %llu)\n",
                   ARG5(0));
             shm_setup_state = SHM_SETUP_EXPECTING_ERROR;
-            shutdown(true);
+            shutdown(false);
         }
 		call_check_regs(0);
 		auto caller_info = set_mmap_table->get_caller_info(0, variants[0].variantpid, variants[0].regs.rip);
