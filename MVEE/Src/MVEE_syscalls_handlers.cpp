@@ -3517,6 +3517,10 @@ PRECALL(arch_prctl)
     {
       CHECKPOINTER(2);
     }
+    else if ( (ARG1(0) == ARCH_SET_FS) || (ARG1(0) == ARCH_SET_GS) )
+    {
+      CHECKPOINTER(2);
+    }
     else
     {
       CHECKARG(2);
