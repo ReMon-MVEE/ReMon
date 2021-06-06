@@ -1157,7 +1157,7 @@ bool            mmap_table::requires_shadow                              (varian
      *  - libfontconfig.so: read only file access
      *  - libapr: mmaps HTML files and scoreboard file
      */
-    std::vector<std::string> allowlist{"libc", "mplayer", "libfontconfig", "libapr"};
+    std::vector<std::string> allowlist{"libc", "mplayer", "libfontconfig", "libapr", "httpd"};
     for (const auto& s : allowlist)
     {
         if (binary_name.find(s) != std::string::npos)
@@ -1177,10 +1177,8 @@ bool            mmap_table::requires_shadow                              (varian
 
     /* Default: shadow memory required */
     warnf( " > returning default on %s\n", binary_name.c_str());
-    return true;
-#else
-    return false;
 #endif
+    return false;
 }
 
 int             mmap_table::shadow_map                              (variantstate* variant, fd_info* info,
