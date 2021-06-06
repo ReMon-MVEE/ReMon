@@ -674,12 +674,14 @@ BYTE_EMULATOR_IMPL(0x29)
             )
         }
         // movaps xmm/m128, xmm
-        else
+        else if (!PREFIXES_GRP_ONE_PRESENT(instruction))
         {
             XMM_TO_SHARED_EMULATE(WRITE_DIVERGENCE_XMM_EQUAL(__buffer, __source,
                     " > write divergence in movaps m128, xmm\n")
             )
         }
+        else
+            return -1;
 
         // do NOT advance buffer here
         RETURN_WRITE(0x29)
@@ -1385,8 +1387,9 @@ BYTE_EMULATOR_IMPL(0x6f)
                     : "xmm0"
             );
         }
-        // mova mm, m64
-        else
+        // movq mm, mm/m64
+        else if (!PREFIXES_GRP_ONE_PRESENT(instruction) && !PREFIXES_GRP_FOUR_PRESENT(instruction) && 
+                !PREFIXES_GRP_TWO_PRESENT(instruction))
         {
             LOAD_REG_CODE(destination, mm_lookup)
             LOAD_RM_CODE_NO_DEFINE(8, DO_SET_SHADOW_BASE)
@@ -1403,6 +1406,8 @@ BYTE_EMULATOR_IMPL(0x6f)
                     : "mm0"
             );
         }
+        else 
+            return -1;
 
         // write back regs, always needed here
         if (interaction::write_all_fpregs(*instruction.variant_pid, regs_struct))
@@ -1464,7 +1469,8 @@ BYTE_EMULATOR_IMPL(0x74)
             );
         }
         // pcmpeqb mm, mm/m64
-        else
+        else if (!PREFIXES_GRP_ONE_PRESENT(instruction) && !PREFIXES_GRP_TWO_PRESENT(instruction) &&
+                !PREFIXES_GRP_FOUR_PRESENT(instruction))
         {
             LOAD_RM_CODE_NO_DEFINE(8, DO_SET_SHADOW_BASE)
             LOAD_REG_CODE(destination, mm_lookup)
@@ -1483,6 +1489,8 @@ BYTE_EMULATOR_IMPL(0x74)
                     : "mm1"
             );
         }
+        else
+            return -1;
 
         // we always write to a register, so we have to write it back
         if (interaction::write_all_fpregs(*instruction.variant_pid, regs_struct))
@@ -1562,8 +1570,9 @@ BYTE_EMULATOR_IMPL(0x7f)
             XMM_TO_SHARED_EMULATE(WRITE_DIVERGENCE_XMM_EQUAL(__buffer, __source,
                     " > write divergence in movdqa m128, xmm\n"))
         }
-        // movq m64, mm
-        else
+        // movq mm/m64, mm
+        else if (!PREFIXES_GRP_ONE_PRESENT(instruction) && !PREFIXES_GRP_TWO_PRESENT(instruction) &&
+                !PREFIXES_GRP_FOUR_PRESENT(instruction))
         {
             DEFINE_FPREGS_STRUCT
             DEFINE_MODRM
@@ -1573,6 +1582,8 @@ BYTE_EMULATOR_IMPL(0x7f)
 
             NORMAL_TO_SHARED_EMULATE(uint64_t, WRITE_DIVERGENCE_ERROR(" > write divergence in movq m64, mm\n"))
         }
+        else
+            return -1;
 
         // do NOT advance the buffer here
         RETURN_WRITE(0x7f)
@@ -1772,6 +1783,10 @@ BYTE_EMULATOR_IMPL(0x83)
                     auto* typed_destination = (uint32_t*)(((unsigned long long)monitor_base) + offset);
                     CMP_TO_SHARED_EMULATE_NO_CHECK(uint32_t, "cmp DWORD PTR [%[dst]], %[src];")
                 }
+                if (!variant->variant_num)
+                    *(unsigned long long*)buffer = regs_struct->eflags;
+                else
+                    regs_struct->eflags = *(unsigned long long*)buffer;
                 RETURN_ADVANCE
                 break;
             }
@@ -2463,13 +2478,13 @@ else                                                                            
 {                                                                                                                      \
     if (typed_buffer->source != *(__cast*) source)                                                                     \
     {                                                                                                                  \
-        warnf(" > mismatching source for 0xb1 (%lu) | %llx != %llx\n", sizeof(__cast),                                   \
+        warnf(" > mismatching source for 0xb1 (%lu) | %llx != %llx\n", sizeof(__cast),                                 \
                 (unsigned long long)typed_buffer->source, (unsigned long long)*(__cast*)source);                       \
             return -1;                                                                                                 \
     }                                                                                                                  \
     if (typed_buffer->original_rax != (__cast)regs_struct->rax)                                                        \
     {                                                                                                                  \
-        warnf(" > mismatching rax for 0xb1 (%lu) | %llx != %llx\n", sizeof(__cast),                                      \
+        warnf(" > mismatching rax for 0xb1 (%lu) | %llx != %llx\n", sizeof(__cast),                                    \
                 (unsigned long long)typed_buffer->original_rax, (unsigned long long)(__cast)regs_struct->rax);         \
             return -1;                                                                                                 \
     }                                                                                                                  \
@@ -2798,14 +2813,14 @@ BYTE_EMULATOR_IMPL(0xc7)
         {
             auto* typed_source = (uint16_t*)source;
             NORMAL_TO_SHARED_EMULATE(uint16_t,
-                    WRITE_DIVERGENCE_ERROR(" > write divergence in mov m32, imm23\n"));
+                    WRITE_DIVERGENCE_ERROR(" > write divergence in mov m32, imm16\n"));
         }
         // 32-bit
         else
         {
             auto* typed_source = (uint32_t*)source;
             NORMAL_TO_SHARED_EMULATE(uint32_t,
-                    WRITE_DIVERGENCE_ERROR(" > write divergence in mov m32, imm23\n"));
+                    WRITE_DIVERGENCE_ERROR(" > write divergence in mov m32, imm32\n"));
         }
 
         // do NOT advance buffer here
@@ -2922,7 +2937,8 @@ BYTE_EMULATOR_IMPL(0xda)
             );
         }
         // pminub mm, mm/m64
-        else
+        else if (!PREFIXES_GRP_ONE_PRESENT(instruction) && !PREFIXES_GRP_TWO_PRESENT(instruction) &&
+                !PREFIXES_GRP_FOUR_PRESENT(instruction))
         {
             LOAD_RM_CODE_NO_DEFINE(8, DO_SET_SHADOW_BASE)
             LOAD_REG_CODE(destination, mm_lookup)
@@ -2941,6 +2957,8 @@ BYTE_EMULATOR_IMPL(0xda)
                     : "mm0"
             );
         }
+        else
+            return -1;
 
 
         // we have to write the registers back
@@ -3021,8 +3039,8 @@ BYTE_EMULATOR_IMPL(0xe7)
                     " > write divergence in movntdq m128, xmm\n"))
         }
         // illegal access
-        else if (PREFIXES_GRP_ONE_PRESENT(instruction) && (PREFIXES_GRP_TWO(instruction) == REPZ_PREFIX_CODE ||
-                PREFIXES_GRP_TWO(instruction) == REPNZ_PREFIX_CODE))
+        else if (PREFIXES_GRP_ONE_PRESENT(instruction) || PREFIXES_GRP_TWO_PRESENT(instruction) ||
+                PREFIXES_GRP_FOUR_PRESENT(instruction))
             return -1;
         // movntq m64, mm
         else
