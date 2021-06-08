@@ -1388,8 +1388,7 @@ BYTE_EMULATOR_IMPL(0x6f)
             );
         }
         // movq mm, mm/m64
-        else if (!PREFIXES_GRP_ONE_PRESENT(instruction) && !PREFIXES_GRP_FOUR_PRESENT(instruction) && 
-                !PREFIXES_GRP_TWO_PRESENT(instruction))
+        else if (!PREFIXES_GRP_ONE_PRESENT(instruction))
         {
             LOAD_REG_CODE(destination, mm_lookup)
             LOAD_RM_CODE_NO_DEFINE(8, DO_SET_SHADOW_BASE)
@@ -1469,8 +1468,7 @@ BYTE_EMULATOR_IMPL(0x74)
             );
         }
         // pcmpeqb mm, mm/m64
-        else if (!PREFIXES_GRP_ONE_PRESENT(instruction) && !PREFIXES_GRP_TWO_PRESENT(instruction) &&
-                !PREFIXES_GRP_FOUR_PRESENT(instruction))
+        else if (!PREFIXES_GRP_ONE_PRESENT(instruction))
         {
             LOAD_RM_CODE_NO_DEFINE(8, DO_SET_SHADOW_BASE)
             LOAD_REG_CODE(destination, mm_lookup)
@@ -1571,8 +1569,7 @@ BYTE_EMULATOR_IMPL(0x7f)
                     " > write divergence in movdqa m128, xmm\n"))
         }
         // movq mm/m64, mm
-        else if (!PREFIXES_GRP_ONE_PRESENT(instruction) && !PREFIXES_GRP_TWO_PRESENT(instruction) &&
-                !PREFIXES_GRP_FOUR_PRESENT(instruction))
+        else if (!PREFIXES_GRP_ONE_PRESENT(instruction))
         {
             DEFINE_FPREGS_STRUCT
             DEFINE_MODRM
@@ -1961,7 +1958,7 @@ BYTE_EMULATOR_IMPL(0x89)
         {
             auto* typed_source = (uint32_t*)source;
             NORMAL_TO_SHARED_EMULATE(uint32_t,
-                                     WRITE_DIVERGENCE_ERROR(" > write divergence in mov m32, reg32\n"))
+                    WRITE_DIVERGENCE_ERROR(" > write divergence in mov m32, reg32\n"))
         }
 
         // do NOT advance buffer here
@@ -2937,8 +2934,7 @@ BYTE_EMULATOR_IMPL(0xda)
             );
         }
         // pminub mm, mm/m64
-        else if (!PREFIXES_GRP_ONE_PRESENT(instruction) && !PREFIXES_GRP_TWO_PRESENT(instruction) &&
-                !PREFIXES_GRP_FOUR_PRESENT(instruction))
+        else if (!PREFIXES_GRP_ONE_PRESENT(instruction))
         {
             LOAD_RM_CODE_NO_DEFINE(8, DO_SET_SHADOW_BASE)
             LOAD_REG_CODE(destination, mm_lookup)
@@ -3039,8 +3035,7 @@ BYTE_EMULATOR_IMPL(0xe7)
                     " > write divergence in movntdq m128, xmm\n"))
         }
         // illegal access
-        else if (PREFIXES_GRP_ONE_PRESENT(instruction) || PREFIXES_GRP_TWO_PRESENT(instruction) ||
-                PREFIXES_GRP_FOUR_PRESENT(instruction))
+        else if (PREFIXES_GRP_ONE_PRESENT(instruction))
             return -1;
         // movntq m64, mm
         else
