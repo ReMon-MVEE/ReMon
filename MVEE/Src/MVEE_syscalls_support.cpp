@@ -230,7 +230,9 @@ bool monitor::call_compare_variant_buffers(std::vector<const unsigned char*>& bu
                     (!first_buf.find("[aac @ ") &&
                     !second_buf.find("[aac @ ")) ||
                     (!first_buf.find("[opus @ ") &&
-                    !second_buf.find("[opus @ "));
+                    !second_buf.find("[opus @ ")) ||
+                    (!first_buf.find("[swscaler @ ") &&
+                    !second_buf.find("[swscaler @ "));
             /* little address sensitive hack for mplayer */
             /*
             match = false;
