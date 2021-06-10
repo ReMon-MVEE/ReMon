@@ -34,8 +34,6 @@ using namespace std;
 using namespace Dyninst;
 using namespace Dyninst::PatchAPI;
 
-// make && time LD_LIBRARY_PATH=/projects/dyninst/install/lib/ DYNINSTAPI_RT_LIB=/projects/dyninst/install/lib/libdyninstAPI_RT.so ./bartTestInstrumenter ./bartTest
-
 // Create an instance of class BPatch
 BPatch bpatch;
 
@@ -53,22 +51,10 @@ BPatch_binaryEdit* startInstrumenting(const char* name) {
 }
 
 void finishInstrumenting(BPatch_addressSpace* app, const char* newName) {
-    BPatch_process* appProc = dynamic_cast<BPatch_process*>(app);
     BPatch_binaryEdit* appBin = dynamic_cast<BPatch_binaryEdit*>(app);
 
-    if (appProc) {
-        if (!appProc->continueExecution()) {
-            fprintf(stderr, "continueExecution failed\n");
-        }
-        while (!appProc->isTerminated()) {
-            bpatch.waitForStatusChange();
-			printf("Status changed!\n");
-			printf("isTerminated: %i!\n", appProc->isTerminated());
-        }
-    } else if (appBin) {
-        if (!appBin->writeFile(newName)) {
-            fprintf(stderr, "writeFile failed\n");
-        }
+    if (!appBin->writeFile(newName)) {
+        fprintf(stderr, "writeFile failed\n");
     }
 }
 
@@ -88,7 +74,6 @@ public:
     // jmp 5 (== eb 03 <- 2+3=5)
     buffer.push_back(uint8_t{0xeb});
     buffer.push_back(skip);
-    //buffer.push_back(uint8_t{0x03});
     return true;
   }
 };
@@ -257,26 +242,6 @@ uint32_t getTargetMemcpyStackOffsetForRegister(const MachRegister& tbd) {
     printf("Couldn't find offset for register %s\n", tbd.name().c_str());
     assert(false);
     return -1;
-}
-
-
-void replaceInstructionByBlock(BPatch_point* point, Address address, PatchBlock* beginNewCodeBlock, PatchBlock* endNewCodeBlock) {
-    // TODO: check if void * BPatch_point::getAddress returns Address address, and simplify if so
-
-    PatchBlock* block                = PatchAPI::convert(point->getBlock());
-    PatchBlock* instructionOnlyBlock = PatchAPI::PatchModifier::split(block, address);
-    PatchBlock* remainderBlock       = PatchAPI::PatchModifier::split(instructionOnlyBlock, address + point->getInsnAtPoint().size());
-
-    // TODO maybe also assert & check sizes & return values
-    auto targets = block->targets();
-    auto sources = remainderBlock->sources();
-
-    //PatchAPI::PatchModifier::redirect(targets[0], beginNewCodeBlock);
-    //PatchAPI::PatchModifier::redirect(endNewCodeBlock->targets()[0], remainderBlock);
-    PatchAPI::PatchModifier::redirect(targets[0], remainderBlock);
-
-    vector<PatchBlock*> toRemove {instructionOnlyBlock};
-    PatchAPI::PatchModifier::remove(toRemove);
 }
 
 // URGH Dyninst should provide this for me. Also the Visitor pattern they provide here seems not quite right.
@@ -452,52 +417,9 @@ public:
   }
 };
 
-
-/*
- typedef struct mvee_shm_op_ret {
-  unsigned long val;
-  bool cmp;
-} mvee_shm_op_ret;
-
-mvee_shm_op_ret mvee_shm_op(unsigned char id, bool atomic, void* address, unsigned long size, unsigned long value, unsigned long cmp)
-
-if (IS_TAGGED_ADDRESS(v))
-                return mvee_shm_op(0, false, 0, 0, 0, 0).val;
-=>
-  val in rax
-  48 ba 00 00 00 00 00 80 ff ff movabs $0xffff800000000000,%rdx
-  48 21 c2                      and    %rax,%rdx
-  48 b8 00 00 00 00 00 80 ff ff movabs $0xffff800000000000,%rax
-  48 39 c2                cmp    %rax,%rdx
-  75 27                   jne
-  ; IS_TAGGED = fallthrough
-  41 b9 00 00 00 00       mov    $0x0,%r9d
-  41 b8 00 00 00 00       mov    $0x0,%r8d
-  b9 00 00 00 00          mov    $0x0,%ecx
-  ba 00 00 00 00          mov    $0x0,%edx
-  be 00 00 00 00          mov    $0x0,%esi
-  bf 00 00 00 00          mov    $0x0,%edi
-  e8 00 00 00 00          callq  51
-  rax = val
-
-  1st argument goes in rdi, 2nd in rsi, 3rd in rdx, 4th in rcx, 5th in r8, 6th in r9.
-*/
-
-/* TODO: share with mvee-shm-agent.c */
-enum
-{
-  LOAD            = 0,// Instruction::LoadInst
-  STORE           = 1,// Instruction::StoreInst
-  ATOMICRMW       = 2,// Instruction::AtomicRMWInst
-  ATOMICCMPXCHG   = 3,// Instruction::AtomicCmpXchgInst
-
-  GLIBC_FUNC_BASE = 128,
-  MEMCPY          = GLIBC_FUNC_BASE,
-  MEMMOVE         = GLIBC_FUNC_BASE + 1,
-  MEMSET          = GLIBC_FUNC_BASE + 2,
-};
-
-
+/* TODO: I *could* emit mvee_shm_op for small (8 byte) stores / loads I guess */
+/* TODO: do the IS_TAGGED_ADDRESS() check in dyninst codegen rather than in the function we call, saves the overhead of the call, will also
+   allow the rewritten binary to be run outside the MVEE again */
 void skipThis(Patcher& patcher, BPatch_point* point) {
     InstructionAPI::Instruction insn = point->getInsnAtPoint();
     auto skipInstruction = SkipSingleByteInstructionSnippet::create(new SkipSingleByteInstructionSnippet(insn.size()));
@@ -580,8 +502,6 @@ void hackSingleInstruction(Patcher& patcher, BPatch_point* point, bool isMemWrit
     cerr << "Patching @ " << patchpointBefore << endl;
     patcher.add(PushBackCommand::create(patchpointBefore, storeSnippet));
 
-    //mvee_shm_op_ret mvee_shm_op(unsigned char id, bool atomic, void* address, unsigned long size, unsigned long value, unsigned long cmp)
-    
     // storeSnippet already sets these args for now... (otherwise argAddress and argValue are wrong atm, TODO check why)
 
     patcher.add(PushBackCommand::create(patchpointBefore, hack));
