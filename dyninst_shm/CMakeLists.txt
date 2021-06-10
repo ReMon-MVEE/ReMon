@@ -9,6 +9,6 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 include_directories(${DYNINST_INSTALL}/include)
 link_directories(${DYNINST_INSTALL}/lib)
 
-add_executable(bartTestInstrumenter bartTestInstrumenter.cpp)
+add_executable(bartTestInstrumenter bartTestInstrumenter.cpp dyninst-internals.cpp)
 target_link_libraries(bartTestInstrumenter patchAPI parseAPI symtabAPI dynDwarf dynElf instructionAPI common dyninstAPI boost_system)
 

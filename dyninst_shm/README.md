@@ -1,8 +1,8 @@
 # General
 
-The code in this directory contains code snippets from Dyninst, which is LGPL>=2.1
+The code in this directory contains code snippets from Dyninst (in dyninst-internals.cpp), which is LGPL>=2.1
 
-# Build instructions:
+# Build instructions
 
 ## Build Dyninst
 
@@ -30,7 +30,7 @@ Then build Dyninst as follows
     cmake .
     make
 
-## Use this plugin
+# Using this plugin
 
 Suppose you want to rewrite `/projects/blah/mplayer` and you have the `non-instrumented-mplayer.csv` file, then first prepare the latter file as follows to keep only the instructions in the specific binary (`mplayer`) that we want to rewrite:
 
