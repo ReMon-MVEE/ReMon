@@ -1492,8 +1492,17 @@ BYTE_LOADER_IMPL(0xab)
 // BYTE_LOADER_IMPL(0xae)
 
 
-/* Not implemented - blocked */
-// BYTE_LOADER_IMPL(0xaf)
+/* Valid in second round */
+BYTE_LOADER_IMPL(0xaf)
+{
+    if (round == INSTRUCTION_DECODING_SECOND_LEVEL)
+    {
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_SECOND_LEVEL)
+        LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
+    }
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */

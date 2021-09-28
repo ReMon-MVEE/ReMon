@@ -2455,7 +2455,85 @@ BYTE_EMULATOR_IMPL(0xab)
 
 
 /* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0xaf)
+BYTE_EMULATOR_IMPL(0xaf)
+{
+    // Gv, Ev
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
+    {
+        DEFINE_REGS_STRUCT
+        DEFINE_MODRM
+        LOAD_REG_CODE(destination, general_purpose_lookup)
+        LOAD_RM_CODE_NO_DEFINE(GET_INSTRUCTION_ACCESS_SIZE, DO_SET_SHADOW_BASE)
+
+        // 64-bit
+        if (PREFIXES_REX_PRESENT(instruction) && PREFIXES_REX_FIELD_W(instruction))
+        {
+            uint64_t* typed_destination = (uint64_t*)destination;
+            NORMAL_FROM_SHARED(uint64_t)
+
+            __asm__
+            (
+                    ".intel_syntax noprefix;"
+                    "push %[flags];"
+                    "popf;"
+                    "imul %[dst], %[src];"
+                    "pushf;"
+                    "pop %[flags];"
+                    ".att_syntax;"
+                    : [flags] "+r" (regs_struct->eflags)
+                    : [dst] "r" (*typed_destination), [src] "r" (*typed_source)
+                    : "cc"
+            );
+        }
+        // 16-bit
+        else if (PREFIXES_GRP_THREE_PRESENT(instruction))
+        {
+            uint16_t* typed_destination = (uint16_t*)destination;
+            NORMAL_FROM_SHARED(uint16_t)
+
+            __asm__
+            (
+                    ".intel_syntax noprefix;"
+                    "push %[flags];"
+                    "popf;"
+                    "imul %[dst], %[src];"
+                    "pushf;"
+                    "pop %[flags];"
+                    ".att_syntax;"
+                    : [flags] "+r" (regs_struct->eflags)
+                    : [dst] "r" (*typed_destination), [src] "r" (*typed_source)
+                    : "cc"
+            );
+        }
+        // 32-bit
+        else
+        {
+            uint32_t* typed_destination = (uint32_t*)destination;
+            NORMAL_FROM_SHARED(uint32_t)
+
+            __asm__
+            (
+                    ".intel_syntax noprefix;"
+                    "push %[flags];"
+                    "popf;"
+                    "imul %[dst], %[src];"
+                    "pushf;"
+                    "pop %[flags];"
+                    ".att_syntax;"
+                    : [flags] "+r" (regs_struct->eflags)
+                    : [dst] "r" (*typed_destination), [src] "r" (*typed_source)
+                    : "cc"
+            );
+            *(typed_destination + 1) = 0;
+        }
+
+        // registers will be written back anyway
+        RETURN_ADVANCE
+    }
+
+    // illegal otherwise
+    return -1;
+}
 
 
 /* Not implemented - blocked */
