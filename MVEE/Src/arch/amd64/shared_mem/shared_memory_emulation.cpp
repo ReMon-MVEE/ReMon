@@ -2454,10 +2454,10 @@ BYTE_EMULATOR_IMPL(0xab)
 // BYTE_EMULATOR_IMPL(0xae)
 
 
-/* Not implemented - blocked */
+/* valid in second round */
 BYTE_EMULATOR_IMPL(0xaf)
 {
-    // Gv, Ev
+    // imul Gv, Ev
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_SECOND_LEVEL)
     {
         DEFINE_REGS_STRUCT
@@ -2480,8 +2480,8 @@ BYTE_EMULATOR_IMPL(0xaf)
                     "pushf;"
                     "pop %[flags];"
                     ".att_syntax;"
-                    : [flags] "+r" (regs_struct->eflags)
-                    : [dst] "r" (*typed_destination), [src] "r" (*typed_source)
+                    : [flags] "+r" (regs_struct->eflags), [dst] "+r" (*typed_destination)
+                    : [src] "r" (*typed_source)
                     : "cc"
             );
         }
@@ -2500,8 +2500,8 @@ BYTE_EMULATOR_IMPL(0xaf)
                     "pushf;"
                     "pop %[flags];"
                     ".att_syntax;"
-                    : [flags] "+r" (regs_struct->eflags)
-                    : [dst] "r" (*typed_destination), [src] "r" (*typed_source)
+                    : [flags] "+r" (regs_struct->eflags), [dst] "+r" (*typed_destination)
+                    : [src] "r" (*typed_source)
                     : "cc"
             );
         }
@@ -2520,8 +2520,8 @@ BYTE_EMULATOR_IMPL(0xaf)
                     "pushf;"
                     "pop %[flags];"
                     ".att_syntax;"
-                    : [flags] "+r" (regs_struct->eflags)
-                    : [dst] "r" (*typed_destination), [src] "r" (*typed_source)
+                    : [flags] "+r" (regs_struct->eflags), [dst] "+r" (*typed_destination)
+                    : [src] "r" (*typed_source)
                     : "cc"
             );
             *(typed_destination + 1) = 0;
