@@ -1391,7 +1391,7 @@ BYTE_WRITE_IMPL(0xaa)
         // we're in need of rax as source
         DEFINE_REGS_STRUCT
         void* source = shared_mem_register_access::ACCESS_GENERAL_NAME(rax)(regs_struct);
-        STOS_WRITE(uint8_t, )
+        STOS_WRITE(uint8_t, "rep stosb;")
         RETURN_ADVANCE
     }
 
@@ -1405,10 +1405,6 @@ BYTE_WRITE_IMPL(0xab)
 {
     if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
     {
-        if (PREFIXES_GRP_ONE_PRESENT(instruction) && (PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE ||
-                PREFIXES_GRP_ONE(instruction) == REPNZ_PREFIX_CODE))
-            return -1;
-
         // we're in need of rax as source
         DEFINE_REGS_STRUCT
         void* source = shared_mem_register_access::ACCESS_GENERAL_NAME(rax)(regs_struct);
