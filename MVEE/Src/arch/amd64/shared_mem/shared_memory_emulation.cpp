@@ -2394,7 +2394,7 @@ BYTE_EMULATOR_IMPL(0xaa)
 
         unsigned long long count = 1;
         if (PREFIXES_GRP_ONE_PRESENT(instruction) && (PREFIXES_GRP_ONE(instruction) == REPZ_PREFIX_CODE ||
-                                                    PREFIXES_GRP_ONE(instruction) == REPNZ_PREFIX_CODE))
+                PREFIXES_GRP_ONE(instruction) == REPNZ_PREFIX_CODE))
             count = regs_struct->rcx;
         STOS_EMULATE(uint8_t)
         RETURN_WRITE(0xaa)
