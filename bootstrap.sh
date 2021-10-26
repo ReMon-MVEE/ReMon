@@ -49,9 +49,9 @@ fi
 # Download & Build libdwarf
 if [ ! -e deps/libdwarf ]
 then
-    #	git clone git://git.code.sf.net/p/libdwarf/code deps/libdwarf
-    git clone https://github.com/tomhughes/libdwarf.git deps/libdwarf
+    git clone git://git.code.sf.net/p/libdwarf/code deps/libdwarf
     cd deps/libdwarf
+    sh ./autogen.sh
     ./configure
     make -j `getconf _NPROCESSORS_ONLN`
     cd ../../
@@ -64,6 +64,7 @@ then
     cd deps/jsoncpp
     git checkout 6a15ca64429e1ce6d2fff915ff14ce1c2a96975c
     git reset --hard
+    patch -d ./ -p1 < ../../patches/jsoncpp.patch
     mkdir build
     cd build
     cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_STATIC_LIBS=ON -DBUILD_SHARED_LIBS=OFF -DCMAKE_CXX_COMPILER=$ORIG_PWD/deps/llvm/build-tree/bin/clang++ -DCMAKE_CXX_FLAGS=-O3 ..
