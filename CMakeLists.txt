@@ -72,7 +72,7 @@ add_custom_target(shm_table
 
 add_custom_command(
         OUTPUT  ${CMAKE_SOURCE_DIR}/MVEE/Inc/arch/${ARCH}/shared_mem/shared_memory_emulation_table.h
-        COMMAND python ${CMAKE_SOURCE_DIR}/build_scripts/generate_shm_table.py
+        COMMAND python3 ${CMAKE_SOURCE_DIR}/build_scripts/generate_shm_table.py
                 ${CMAKE_SOURCE_DIR}/MVEE/Inc/arch/${ARCH}/shared_mem/shared_memory_emulation.h
                 ${CMAKE_SOURCE_DIR}/MVEE/Inc/arch/${ARCH}/shared_mem/shared_memory_emulation_table.h
         DEPENDS ${CMAKE_SOURCE_DIR}/MVEE/Inc/arch/${ARCH}/shared_mem/shared_memory_emulation.h
@@ -169,7 +169,7 @@ if(DEPS_PRESENT_IN_SYSTEM)
 else()
         set(MVEE_INCLUDE_DIRS ${MVEE_INCLUDE_DIRS}
                 PRIVATE ${CMAKE_SOURCE_DIR}/deps/jsoncpp/include
-                PRIVATE ${CMAKE_SOURCE_DIR}/deps/libdwarf/libdwarf
+                PRIVATE ${CMAKE_SOURCE_DIR}/deps/libdwarf/src/lib/libdwarf
                 PRIVATE ${CMAKE_SOURCE_DIR}/deps/binutils/zlib)
 endif()
 
@@ -202,7 +202,7 @@ if(DEPS_PRESENT_IN_SYSTEM)
 else()
         target_link_libraries(mvee PRIVATE
                 ${CMAKE_SOURCE_DIR}/deps/jsoncpp/build/src/lib_json/libjsoncpp.a
-                ${CMAKE_SOURCE_DIR}/deps/libdwarf/libdwarf/.libs/libdwarf.a
+                ${CMAKE_SOURCE_DIR}/deps/libdwarf/src/lib/libdwarf/.libs/libdwarf.a
                 ${CMAKE_SOURCE_DIR}/deps/libelf/lib/libelf.a
                 ${CMAKE_SOURCE_DIR}/deps/binutils/build-tree/zlib/libz.a
         )
