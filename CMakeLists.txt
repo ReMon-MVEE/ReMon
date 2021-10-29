@@ -169,7 +169,7 @@ if(DEPS_PRESENT_IN_SYSTEM)
 else()
         set(MVEE_INCLUDE_DIRS ${MVEE_INCLUDE_DIRS}
                 PRIVATE ${CMAKE_SOURCE_DIR}/deps/jsoncpp/include
-                PRIVATE ${CMAKE_SOURCE_DIR}/deps/libdwarf/src/lib/libdwarf
+                PRIVATE ${CMAKE_SOURCE_DIR}/deps/libdwarf/libdwarf
                 PRIVATE ${CMAKE_SOURCE_DIR}/deps/binutils/zlib)
 endif()
 
@@ -202,7 +202,7 @@ if(DEPS_PRESENT_IN_SYSTEM)
 else()
         target_link_libraries(mvee PRIVATE
                 ${CMAKE_SOURCE_DIR}/deps/jsoncpp/build/src/lib_json/libjsoncpp.a
-                ${CMAKE_SOURCE_DIR}/deps/libdwarf/src/lib/libdwarf/.libs/libdwarf.a
+                ${CMAKE_SOURCE_DIR}/deps/libdwarf/libdwarf/.libs/libdwarf.a
                 ${CMAKE_SOURCE_DIR}/deps/libelf/lib/libelf.a
                 ${CMAKE_SOURCE_DIR}/deps/binutils/build-tree/zlib/libz.a
         )
