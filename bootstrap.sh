@@ -51,7 +51,7 @@ if [ ! -e deps/libdwarf ]
 then
     git clone git://git.code.sf.net/p/libdwarf/code deps/libdwarf
     cd deps/libdwarf
-    sh ./autogen.sh
+    git checkout fdfe0897c559b32048904712f2937154c155e21b
     ./configure
     make -j `getconf _NPROCESSORS_ONLN`
     cd ../../
