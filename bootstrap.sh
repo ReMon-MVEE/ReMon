@@ -60,7 +60,7 @@ fi
 # Download & Build libjson
 if [ ! -e deps/jsoncpp ]
 then
-    git clone https://github.com/open-source-parsers/jsoncpp.git deps/jsoncpp
+    git clone git@github.com:open-source-parsers/jsoncpp.git deps/jsoncpp
     cd deps/jsoncpp
     git checkout 6a15ca64429e1ce6d2fff915ff14ce1c2a96975c
     git reset --hard
