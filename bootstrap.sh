@@ -6,7 +6,7 @@ ORIG_PWD=$(pwd)
 # Install the necessary ubuntu packages
 if [ -e /usr/bin/apt ]
 then
-    sudo apt install ruby gcc g++ libselinux-dev musl-tools libelf-dev libdwarf-dev libgmp-dev libmpfr-dev libmpc-dev libconfig-dev libcap-dev cmake bison flex git texinfo texi2html zlib1g-dev libunwind8 libunwind8-dev liblzma5 liblzma-dev automake
+    sudo apt install ruby gcc g++ libselinux-dev musl-tools libelf-dev libdwarf-dev libgmp-dev libmpfr-dev libmpc-dev libconfig-dev libcap-dev cmake bison flex git texinfo texi2html zlib1g-dev libunwind8 libunwind8-dev liblzma5 liblzma-dev automake autoconf
 fi
 
 # Download submodules
@@ -53,6 +53,7 @@ then
     cd deps/libdwarf
     git checkout fdfe0897c559b32048904712f2937154c155e21b
     ./configure
+    autoreconf
     make -j `getconf _NPROCESSORS_ONLN`
     cd ../../
 fi
