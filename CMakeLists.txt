@@ -292,7 +292,7 @@ option(EmulateShm "Emulate shared memory." ON)
 option(LogNonInstrumentedIns "Log non-instrumented instructions using shared memory." ON)
 option(ShmAllowPtrDiff "Allow pointers to be written to shared memory." ON)
 option(ShmAllowShadow "Allow variants to allocate shadow memory." ON)
-option(ShmInsLogging "Log instructions using shared memory." ON)
+option(ShmInsLogging "Log instructions using shared memory." OFF)
 option(ShmInsLoggingFull "Log instructions using shared memory with more verbosity." OFF)
 option(ShmReplayLeader "Modifies replaying of shared memory instructions to follow leader-follower principle." ON)
 target_compile_definitions(mvee PRIVATE
