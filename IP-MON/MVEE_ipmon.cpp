@@ -57,6 +57,8 @@
 #include "MVEE_ipmon.h"
 #include "MVEE_ipmon_memory.h"
 #include "../MVEE/Inc/MVEE_fake_syscall.h"
+#include "../MVEE/Inc/MVEE_build_pku_config.h"
+#include "../MVEE/Inc/MVEE_erim.h"
 
 /*-----------------------------------------------------------------------------
     Global Variables
@@ -3623,14 +3625,33 @@ extern "C" long ipmon_enclave
 	args.arg6 = arg6;
 	args.entry = NULL;
 
+	// TODO this should be moved inside the kernel (sys_ipmon_invoke)
+	// otherwise we open the following attack window:
+	//     1) attacker jumps before the domain switch
+	//     2) changes the domain and possibly corrupts the memory protected by MPK
+	//     Note that 2) can happen even without the use of system calls by using
+	//     a bug inside IP-MON.
+#ifdef MVEE_IP_PKU_ENABLED
+	erim_switch_to_trusted;
+
+	// Remove this comment to check that MPK protection works
+	// This is here only for testing purposes
+	// erim_switch_to_untrusted;
+#endif
+
 	// check if we need to reinitialize
 	// The kernel resets the RB pointer after every fork/clone
 	if (!RB)
 		RB = (ipmon_buffer*)ipmon_register_thread();
 
 	// In signal handler
-	if (RB->have_pending_signals & 2)
-		return ipmon_checked_syscall(syscall_no, arg1, arg2, arg3, arg4, arg5, arg6);
+	if (RB->have_pending_signals & 2) {
+		long ret = ipmon_checked_syscall(syscall_no, arg1, arg2, arg3, arg4, arg5, arg6);
+#ifdef MVEE_IP_PKU_ENABLED
+		erim_switch_to_untrusted;
+#endif
+		return ret;
+	}
 
 	// If the syscall is not registered as a possibly unchecked syscall,
 	// then we can skip the policy checks and replication logic altogether.
@@ -3638,14 +3659,24 @@ extern "C" long ipmon_enclave
 	// Do note that even if we did decide to let the call through,
 	// the kernel would refuse to dispatch it as an unchecked call anyway!
 	if (!ipmon_is_unchecked_syscall(mask, syscall_no)
-		|| ipmon_syscall_maybe_checked(args, syscall_no))
-		return ipmon_checked_syscall(syscall_no, arg1, arg2, arg3, arg4, arg5, arg6);
+		|| ipmon_syscall_maybe_checked(args, syscall_no)) {
+		long ret = ipmon_checked_syscall(syscall_no, arg1, arg2, arg3, arg4, arg5, arg6);
+#ifdef MVEE_IP_PKU_ENABLED
+		erim_switch_to_untrusted;
+#endif
+		return ret;
+	}
 
 	// Certain syscalls are always harmless and should bypass both the ptracer
 	// and the IP-MON's replication logic. Examples of such calls are
 	// sys_sched_yield and sys_madvise
-	if (ipmon_syscall_is_unsynced(args, syscall_no))
-		return ipmon_unchecked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
+	if (ipmon_syscall_is_unsynced(args, syscall_no)) {
+		long ret = ipmon_unchecked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
+#ifdef MVEE_IP_PKU_ENABLED
+		erim_switch_to_untrusted;
+#endif
+		return ret;
+	}
 
 	// OK. At this point we know that the syscall could possibly bypass
 	// the ptracer and that it does have to go through the policy and
@@ -3670,6 +3701,9 @@ extern "C" long ipmon_enclave
 				if (ipmon_should_restart_call(result))
 					continue;
 
+#ifdef MVEE_IP_PKU_ENABLED
+				erim_switch_to_untrusted;
+#endif
 				return ret;
 			}
 			// Skip execution but do try replicating in the slaves
@@ -3680,6 +3714,9 @@ extern "C" long ipmon_enclave
 				if (ipmon_should_restart_call(ret))
 					continue;
 
+#ifdef MVEE_IP_PKU_ENABLED
+				erim_switch_to_untrusted;
+#endif
 				return ret;
 			}
 		}
@@ -3693,6 +3730,9 @@ extern "C" long ipmon_enclave
 			if (ipmon_should_restart_call(result))
 				continue;
 
+#ifdef MVEE_IP_PKU_ENABLED
+			erim_switch_to_untrusted;
+#endif
 			return ret;
 		}
 		else if (syscall_type & IPMON_EXEC_NOEXEC)
@@ -3702,7 +3742,10 @@ extern "C" long ipmon_enclave
 		
 			if (ipmon_should_restart_call(ret))
 				continue;
-		
+
+#ifdef MVEE_IP_PKU_ENABLED
+			erim_switch_to_untrusted;
+#endif
 			return ret;
 		}
 		else if (syscall_type & IPMON_WAIT_FOR_SIGNAL_CALL)
@@ -3713,8 +3756,11 @@ extern "C" long ipmon_enclave
 			continue;
 		}
 		else
-		{
-			return ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
+		{	long ret = ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
+#ifdef MVEE_IP_PKU_ENABLED
+			erim_switch_to_untrusted;
+#endif
+			return ret;
 		}
 	}
 }
@@ -3735,8 +3781,9 @@ void ipmon_rb_probe()
 -----------------------------------------------------------------------------*/
 extern "C" void* ipmon_register_thread()
 {
-	void* RB = (void*)ipmon_checked_syscall(__NR_shmat, 
-											ipmon_checked_syscall(MVEE_GET_SHARED_BUFFER, 0, MVEE_IPMON_BUFFER, NULL, NULL, NULL, NULL), 
+	int rb_size;
+	void* RB = (void*)ipmon_checked_syscall(__NR_shmat,
+											ipmon_checked_syscall(MVEE_GET_SHARED_BUFFER, 0, MVEE_IPMON_BUFFER, &rb_size, NULL, NULL, 0 /*rb_already_initialized*/),
 											NULL, 0);
 
 	if (!RB)
@@ -3746,7 +3793,7 @@ extern "C" void* ipmon_register_thread()
 		return NULL;
 	}
 
-//	printf("Replication buffer mapped @ 0x%016lx\n", ipmon_replication_buffer);
+	// printf("Replication buffer mapped @ 0x%016lx\n", RB);
 
 	// Attach to the regfile map. This one is process-wide but might still be mapped after forking! 
 	long mvee_regfile_id = ipmon_checked_syscall(MVEE_GET_SHARED_BUFFER, 0, MVEE_IPMON_REG_FILE_MAP, NULL, NULL, NULL, NULL);
@@ -3788,6 +3835,54 @@ extern "C" void* ipmon_register_thread()
 //		exit(-1);
 		return NULL;
 	}
+
+#ifdef MVEE_IP_PKU_ENABLED
+	// TODO this should be moved inside the kernel (sys_prctl with PR_REGISTER_IPMON as argument)
+	// otherwise we open the following attack window:
+	//     1) attacker jumps before the domain switch
+	//     2) changes the domain and possibly corrupts the memory protected by MPK
+	//     Note that 2) can happen even without the use of system calls by using
+	//     a bug inside IP-MON.
+	erim_switch_to_trusted;
+
+	int status;
+	int pkey;
+
+	int flags = ERIM_FLAG_ISOLATE_TRUSTED;
+
+	/*
+	* Allocate a protection key:
+	*/
+	pkey = pkey_alloc(0, 0);
+	if (pkey == -1)
+		printf("ERROR: IP-MON registration failed. sys_pkey_alloc returned -1.");
+
+	// this check is important when the buffer has already been initialized
+	// this can happen after a fork in a child since the child inherits parent's
+	// permissions, mappings and the allocated keys. If we have an execve exactly
+	// after the fork we do not experience this behavior since variant's state is cleared
+	if (pkey == 2) {
+		pkey_free(2);
+	}
+
+	/*
+	* Set the protection key on ipmon_reg_file_map.
+	* Note that it is still read/write as far as mprotect() is
+	* concerned and the previous pkey_set() overrides it. !!! We changed that though !!!
+	*/
+	status = pkey_mprotect(ipmon_reg_file_map, 4096/* TODO this number may change at some point */, PROT_READ | PROT_WRITE, ERIM_TRUSTED_DOMAIN_ID(flags));
+	if (status == -1)
+		printf("ERROR: IP-MON File-Map registration failed. pkey_mprotect returned -1.");
+
+	/*
+	* Set the protection key on RB.
+	* Note that it is still read/write as far as mprotect() is
+	* concerned and the previous pkey_set() overrides it. !!! We changed that though !!!
+	*/
+	status = pkey_mprotect(RB, rb_size, PROT_READ | PROT_WRITE, ERIM_TRUSTED_DOMAIN_ID(flags));
+	if (status == -1)
+		printf("ERROR: IP-MON RB registration failed. pkey_mprotect returned -1.");
+#endif
 
 	return RB;
 }
@@ -3990,4 +4085,7 @@ void __attribute__((constructor)) init()
 #endif
 
 	ipmon_register_thread();
+#ifdef MVEE_IP_PKU_ENABLED
+	erim_switch_to_untrusted;
+#endif
 }

@@ -5992,7 +5992,17 @@ PRECALL(mprotect)
     CHECKARG(2);
     CHECKARG(3);
     CHECKREGION(1, ARG2(0));
-    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
+	// Hax0r to deal with Ubuntu 20.04 using the enhanced version of mprotect
+	// to make a XOM page. This uses a key and "destroys" our gates that are based
+	// on the assumption that pkey_alloc will return 1.
+	if (ARG3(0) == PROT_EXEC) {
+		for (int i = 0; i < mvee::numvariants; ++i) {
+			call_overwrite_arg_value(i, 3, ARG3(0) | PROT_READ, true);
+		}
+	}
+
+	return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
 LOG_RETURN(mprotect)
@@ -11375,6 +11385,33 @@ PRECALL(mincore)
 }
 
 /*-----------------------------------------------------------------------------
+  sys_pkey_mprotect -  (void *addr, size_t len, int prot, int pkey)
+-----------------------------------------------------------------------------*/
+LOG_ARGS(pkey_mprotect)
+{
+	debugf("%s - SYS_PKEY_MPROTECT(0x" PTRSTR ", %zd, " PTRSTR " = %s, %u)\n",
+		   call_get_variant_pidstr(variantnum).c_str(),
+		   (unsigned long)ARG1(variantnum),
+		   (size_t)ARG2(variantnum),
+		   (unsigned long)ARG3(variantnum),
+		   getTextualProtectionFlags(ARG3(variantnum)).c_str(),
+		   (unsigned int)ARG4(variantnum));
+}
+
+PRECALL(pkey_mprotect)
+{
+	return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+}
+
+/*-----------------------------------------------------------------------------
+  sys_pkey_alloc - (unsigned int flags, unsigned int access_rights)
+-----------------------------------------------------------------------------*/
+PRECALL(pkey_alloc)
+{
+	return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+}
+
+/*-----------------------------------------------------------------------------
   sys_memfd_create - (const char *name, unsigned int flags)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(memfd_create)
@@ -11525,6 +11562,7 @@ void mvee::init_syslocks()
 	DONTNEED PRECALL(rt_sigtimedwait)
     DONTNEED PRECALL(mlock)
     DONTNEED PRECALL(clock_nanosleep)
+    DONTNEED PRECALL(pkey_free)
     ALIAS mmap mmap2
     ALIAS fcntl fcntl64
     ALIAS rt_sigaction sigaction

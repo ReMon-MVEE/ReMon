@@ -687,25 +687,40 @@ long monitor::call_call_dispatch ()
 				else if (buffer_type == MVEE_IPMON_BUFFER)
 				{
 					debugf("Requested IP-MON Replication Buffer\n");
-					if (ipmon_buffer) 
+
+					bool have_many_threads =
+							!(*mvee::config_variant_global)["have_many_threads"].isNull() &&
+							(*mvee::config_variant_global)["have_many_threads"].asBool();
+					int ipmon_buffer_size = (MVEE_IPMON_BUFFER_SIZE /(have_many_threads ? 64 : 1));
+
+					// warnf("IPMON buffer size is %d\n", ipmon_buffer_size);
+
+					// return size of the buffer
+					for (i = 0; i < mvee::numvariants; ++i)
+						if (ARG3(i) && !rw::write_primitive<unsigned int>(variants[i].variantpid, (void*) ARG3(i), (unsigned int) ipmon_buffer_size))
+							throw RwMemFailure(i, "write shared buffer size");
+
+					// this happens when a variant makes a subsequent sys_execve
+					// in this case we do not re-create the shared memory segment (we do not need to ... the monitor has already created it)
+					// for example if we run ./MVEE -- ls, ReMon (normally) launches a /bin/bash -c /bin/ls, and bash subsequently calls sys_execve of /bin/ls
+					// !!! Note that bash has its own implementations for some of the simpler (than ls) unix utilities such as pwd and echo!!!!
+					if (ipmon_buffer)
 					{
 						debugf("MVEE_IPMON_BUFFER already initialized\n");
-						for (i = 0; i < mvee::numvariants; ++i)
-							variants[i].extended_value = (long)ipmon_buffer->id;
+						for (i = 0; i < mvee::numvariants; ++i) {
+							// the following two commented lines are not needed
+							// if (ARG6(i) && !rw::write_primitive<char>(variants[i].variantpid, (void*) ARG6(i), (char) 1))
+							//     throw RwMemFailure(i, "write already initialized MVEE_IPMON_BUFFER ");
+							variants[i].extended_value = (long) ipmon_buffer->id;
+						}
 						result = MVEE_CALL_DENY | MVEE_CALL_RETURN_EXTENDED_VALUE;
 						break;
 					}
 
-					bool have_many_threads =
-						!(*mvee::config_variant_global)["have_many_threads"].isNull() &&
-						(*mvee::config_variant_global)["have_many_threads"].asBool();
-
 					ipmon_buffer = new _shm_info();
-
-					if (!mvee::os_alloc_sysv_sharedmem(MVEE_IPMON_BUFFER_SIZE / 
-													   (have_many_threads ? 64 : 1),
-													   &(ipmon_buffer->id), 
-													   &(ipmon_buffer->sz), 
+					if (!mvee::os_alloc_sysv_sharedmem(ipmon_buffer_size ,
+													   &(ipmon_buffer->id),
+													   &(ipmon_buffer->sz),
 													   &(ipmon_buffer->ptr)))
 					{
 						result = MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(1);
@@ -713,11 +728,11 @@ long monitor::call_call_dispatch ()
 					}
 
 					// deny the call and return id of the buffer
-                    for (i = 0; i < mvee::numvariants; ++i)
-                        variants[i].extended_value = (long)ipmon_buffer->id;
+					for (i = 0; i < mvee::numvariants; ++i)
+						variants[i].extended_value = (long)ipmon_buffer->id;
 
-                    result = MVEE_CALL_DENY | MVEE_CALL_RETURN_EXTENDED_VALUE;
-                    break;
+					result = MVEE_CALL_DENY | MVEE_CALL_RETURN_EXTENDED_VALUE;
+					break;
 				}
 				else if (buffer_type == MVEE_IPMON_REG_FILE_MAP)
 				{
