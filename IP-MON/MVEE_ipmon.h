@@ -116,6 +116,23 @@ typedef unsigned long rb_pointer;
 #define STATIC
 #define INLINE
 
+#define MVEE_FAKE_SYSCALL_BASE 0x6FFFFFFF // needed for fake syscalls
+
+/*
+ * PKU Syscalls
+ */
+#ifndef SYS_mprotect_key
+#define SYS_mprotect_key 329//__NR_pkey_mprotect
+#define SYS_pkey_alloc   330//__NR_pkey_alloc
+#define SYS_pkey_free    331//__NR_pkey_free
+#endif
+
+#define pkey_mprotect(ptr, size, flags, pkey)   \
+  syscall(SYS_mprotect_key, ptr, size, flags, pkey)
+
+#define pkey_free(pkey)                         \
+  syscall(SYS_pkey_free, pkey)
+
 /*-----------------------------------------------------------------------------
     System Call Handler Macros
 -----------------------------------------------------------------------------*/
