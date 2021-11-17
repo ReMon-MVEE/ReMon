@@ -116,6 +116,7 @@ typedef unsigned long rb_pointer;
 #define STATIC
 #define INLINE
 
+// hardcoded TODO fix for other architectures
 #define MVEE_FAKE_SYSCALL_BASE 0x6FFFFFFF // needed for fake syscalls
 
 /*
