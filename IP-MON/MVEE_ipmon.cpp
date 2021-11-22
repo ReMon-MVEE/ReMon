@@ -3625,17 +3625,17 @@ extern "C" long ipmon_enclave
 	args.arg6 = arg6;
 	args.entry = NULL;
 
-	// TODO this should be moved inside the kernel (sys_ipmon_invoke)
+#ifdef MVEE_IP_PKU_ENABLED
+	// erim_switch_to_trusted is moved inside the kernel (sys_ipmon_invoke)
 	// otherwise we open the following attack window:
 	//     1) attacker jumps before the domain switch
 	//     2) changes the domain and possibly corrupts the memory protected by MPK
 	//     Note that 2) can happen even without the use of system calls by using
 	//     a bug inside IP-MON.
-#ifdef MVEE_IP_PKU_ENABLED
-	erim_switch_to_trusted;
+	// erim_switch_to_trusted;
 
 	// Remove this comment to check that MPK protection works
-	// This is here only for testing purposes
+	// !!! For testing purposes only !!!
 	// erim_switch_to_untrusted;
 #endif
 
@@ -3837,13 +3837,13 @@ extern "C" void* ipmon_register_thread()
 	}
 
 #ifdef MVEE_IP_PKU_ENABLED
-	// TODO this should be moved inside the kernel (sys_prctl with PR_REGISTER_IPMON as argument)
+	// erim_switch_to_trusted is moved inside the kernel (sys_prctl with PR_REGISTER_IPMON as argument)
 	// otherwise we open the following attack window:
 	//     1) attacker jumps before the domain switch
 	//     2) changes the domain and possibly corrupts the memory protected by MPK
 	//     Note that 2) can happen even without the use of system calls by using
 	//     a bug inside IP-MON.
-	erim_switch_to_trusted;
+	// erim_switch_to_trusted;
 
 	int status;
 	int pkey;
