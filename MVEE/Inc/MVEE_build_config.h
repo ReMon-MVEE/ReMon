@@ -8,6 +8,8 @@
 #ifndef MVEE_BUILD_CONFIG_H_
 #define MVEE_BUILD_CONFIG_H_
 
+#include "MVEE_build_pku_config.h"
+
 /*-----------------------------------------------------------------------------
   Monitor Definitions
 -----------------------------------------------------------------------------*/

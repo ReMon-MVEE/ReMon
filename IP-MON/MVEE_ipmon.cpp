@@ -3640,9 +3640,19 @@ extern "C" long ipmon_enclave
 #endif
 
 	// check if we need to reinitialize
-	// The kernel resets the RB pointer after every fork/clone
-	if (!RB)
-		RB = (ipmon_buffer*)ipmon_register_thread();
+	// The kernel sets the highest bit of the RB pointer after every fork/clone
+	// Check if the highest bit is set
+	if ((unsigned long)RB & (1UL<<(sizeof(unsigned long)*8 - 1))) {
+		// The way the variants attach to RB/regfile map has a big drawback and we need to do some work
+		// After fork the child has also mapped the parent's shared memory segments in its memory
+		//     1) these segments are protected with PKU (if it exists)
+		//     2) If we call execve (which happens really often after fork) everything is cleared and we are fine
+		// We need to unset to highest bit of the address to take the actual address of parent's RB (see the kernel patch for more details)
+		ipmon_checked_syscall(__NR_shmdt, (void*)((unsigned long)RB & ~(1UL << (sizeof(unsigned long)*8 - 1)))); // detach from parent's RB
+		ipmon_checked_syscall(__NR_shmdt, ipmon_reg_file_map); // detach from parent's file map
+
+		RB = (ipmon_buffer *) ipmon_register_thread();
+	}
 
 	// In signal handler
 	if (RB->have_pending_signals & 2) {
