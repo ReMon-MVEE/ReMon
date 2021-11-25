@@ -1,6 +1,6 @@
 diff --color -ruN linux-source-5.4.0/arch/x86/entry/syscalls/syscall_64.tbl custom-linux-source-5.4.0/arch/x86/entry/syscalls/syscall_64.tbl
 --- linux-source-5.4.0/arch/x86/entry/syscalls/syscall_64.tbl	2019-11-25 01:32:01.000000000 +0100
-+++ custom-linux-source-5.4.0/arch/x86/entry/syscalls/syscall_64.tbl	2021-11-22 11:32:42.123142528 +0100
++++ custom-linux-source-5.4.0/arch/x86/entry/syscalls/syscall_64.tbl	2021-11-25 10:57:08.256194000 +0100
 @@ -364,6 +364,7 @@
  # on-the-fly for compat_sys_*() compatibility system calls if X86_X32
  # is defined.
@@ -11,19 +11,20 @@ diff --color -ruN linux-source-5.4.0/arch/x86/entry/syscalls/syscall_64.tbl cust
  514	x32	ioctl			__x32_compat_sys_ioctl
 diff --color -ruN linux-source-5.4.0/fs/exec.c custom-linux-source-5.4.0/fs/exec.c
 --- linux-source-5.4.0/fs/exec.c	2021-10-15 22:00:30.000000000 +0200
-+++ custom-linux-source-5.4.0/fs/exec.c	2021-11-22 11:32:42.123142528 +0100
-@@ -1876,6 +1876,7 @@
++++ custom-linux-source-5.4.0/fs/exec.c	2021-11-25 11:14:01.778272083 +0100
+@@ -1876,6 +1876,8 @@
  		putname(filename);
  	if (displaced)
  		put_files_struct(displaced);
 +	current->ipmon_info.ipmon_enabled = 0;
++	current->ipmon_info.ipmon_parent_rb = NULL;
  	return retval;
  
  out:
 diff --color -ruN linux-source-5.4.0/include/linux/sched.h custom-linux-source-5.4.0/include/linux/sched.h
 --- linux-source-5.4.0/include/linux/sched.h	2021-10-15 22:00:30.000000000 +0200
-+++ custom-linux-source-5.4.0/include/linux/sched.h	2021-11-22 11:32:42.127142583 +0100
-@@ -621,6 +621,53 @@
++++ custom-linux-source-5.4.0/include/linux/sched.h	2021-11-25 11:06:58.024854190 +0100
+@@ -621,6 +621,58 @@
  	struct wake_q_node *next;
  };
  
@@ -61,23 +62,28 @@ diff --color -ruN linux-source-5.4.0/include/linux/sched.h custom-linux-source-5
 +	 modified in any way.  The kernel will however unmap the area when the
 +	 associated mm_struct is freed.
 +  */
-+  struct vm_area_struct * ipmon_exec;
++  struct vm_area_struct *ipmon_exec;
 +
 +  /* This is a pointer to the vm_area_struct of the IP-MON Replication Buffer
 +     (RB). The sys_ipmon_rbcontrol syscall changes the protection flags on this
 +     region. 
 +  */
-+  struct vm_area_struct * ipmon_rb;	
++  struct vm_area_struct *ipmon_rb;	
++
++  /* We need this to detach from the parent's RB in the children
++     after a fork/clone.
++  */
++  struct vm_area_struct *ipmon_parent_rb;
 +
 +  /* pointer to the ipmon syscall enclave entrypoint */
-+  void __user* ipmon_enclave_entrypoint;
++  void __user *ipmon_enclave_entrypoint;
 +};
 +
 +
  struct task_struct {
  #ifdef CONFIG_THREAD_INFO_IN_TASK
  	/*
-@@ -726,6 +773,7 @@
+@@ -726,6 +778,7 @@
  
  	struct mm_struct		*mm;
  	struct mm_struct		*active_mm;
@@ -85,7 +91,7 @@ diff --color -ruN linux-source-5.4.0/include/linux/sched.h custom-linux-source-5
  
  	/* Per-thread vma caching: */
  	struct vmacache			vmacache;
-@@ -747,6 +795,7 @@
+@@ -747,6 +800,7 @@
  	/* Scheduler bits, serialized by scheduler locks: */
  	unsigned			sched_reset_on_fork:1;
  	unsigned			sched_contributes_to_load:1;
@@ -93,19 +99,19 @@ diff --color -ruN linux-source-5.4.0/include/linux/sched.h custom-linux-source-5
  	unsigned			sched_migrated:1;
  	unsigned			sched_remote_wakeup:1;
  #ifdef CONFIG_PSI
-@@ -1285,6 +1334,9 @@
+@@ -1285,6 +1339,9 @@
  	 */
  };
  
 +/* Defined in kernel/sys.c */
-+unsigned char ipmon_handle_bypass(struct pt_regs* regs);
++unsigned char ipmon_handle_bypass(struct pt_regs *regs);
 +
  static inline struct pid *task_pid(struct task_struct *task)
  {
  	return task->thread_pid;
 diff --color -ruN linux-source-5.4.0/include/linux/tracehook.h custom-linux-source-5.4.0/include/linux/tracehook.h
 --- linux-source-5.4.0/include/linux/tracehook.h	2019-11-25 01:32:01.000000000 +0100
-+++ custom-linux-source-5.4.0/include/linux/tracehook.h	2021-11-22 11:32:42.127142583 +0100
++++ custom-linux-source-5.4.0/include/linux/tracehook.h	2021-11-25 10:57:08.260194000 +0100
 @@ -101,6 +101,11 @@
  static inline __must_check int tracehook_report_syscall_entry(
  	struct pt_regs *regs)
@@ -137,7 +143,7 @@ diff --color -ruN linux-source-5.4.0/include/linux/tracehook.h custom-linux-sour
  /**
 diff --color -ruN linux-source-5.4.0/include/uapi/asm-generic/errno.h custom-linux-source-5.4.0/include/uapi/asm-generic/errno.h
 --- linux-source-5.4.0/include/uapi/asm-generic/errno.h	2019-11-25 01:32:01.000000000 +0100
-+++ custom-linux-source-5.4.0/include/uapi/asm-generic/errno.h	2021-11-22 11:32:42.127142583 +0100
++++ custom-linux-source-5.4.0/include/uapi/asm-generic/errno.h	2021-11-25 10:57:08.260194000 +0100
 @@ -120,4 +120,6 @@
  
  #define EHWPOISON	133	/* Memory page has hardware error */
@@ -147,7 +153,7 @@ diff --color -ruN linux-source-5.4.0/include/uapi/asm-generic/errno.h custom-lin
  #endif
 diff --color -ruN linux-source-5.4.0/include/uapi/linux/prctl.h custom-linux-source-5.4.0/include/uapi/linux/prctl.h
 --- linux-source-5.4.0/include/uapi/linux/prctl.h	2019-11-25 01:32:01.000000000 +0100
-+++ custom-linux-source-5.4.0/include/uapi/linux/prctl.h	2021-11-22 11:32:42.127142583 +0100
++++ custom-linux-source-5.4.0/include/uapi/linux/prctl.h	2021-11-25 10:57:08.260194000 +0100
 @@ -234,4 +234,6 @@
  #define PR_GET_TAGGED_ADDR_CTRL		56
  # define PR_TAGGED_ADDR_ENABLE		(1UL << 0)
@@ -157,20 +163,22 @@ diff --color -ruN linux-source-5.4.0/include/uapi/linux/prctl.h custom-linux-sou
  #endif /* _LINUX_PRCTL_H */
 diff --color -ruN linux-source-5.4.0/kernel/fork.c custom-linux-source-5.4.0/kernel/fork.c
 --- linux-source-5.4.0/kernel/fork.c	2021-10-15 22:00:30.000000000 +0200
-+++ custom-linux-source-5.4.0/kernel/fork.c	2021-11-22 11:32:42.131142640 +0100
-@@ -1879,6 +1879,9 @@
++++ custom-linux-source-5.4.0/kernel/fork.c	2021-11-25 11:16:57.736435435 +0100
+@@ -1879,6 +1879,11 @@
  	if (!p)
  		goto fork_out;
  
-+	/* Invalidate IP-MON RB in new tasks but leave IP-MON enabled. */
-+	p->ipmon_info.ipmon_rb = NULL;
++	// Invalidate IP-MON RB in new tasks but leave IP-MON enabled.
++	// Also update parent's rb since we need to detach from that.
++	p->ipmon_info.ipmon_parent_rb = p->ipmon_info.ipmon_rb;
++	p->ipmon_info.ipmon_rb        = NULL;
 +
  	/*
  	 * This _must_ happen before we call free_task(), i.e. before we jump
  	 * to any of the bad_fork_* labels. This is to avoid freeing
 diff --color -ruN linux-source-5.4.0/kernel/sys.c custom-linux-source-5.4.0/kernel/sys.c
 --- linux-source-5.4.0/kernel/sys.c	2021-10-15 22:00:30.000000000 +0200
-+++ custom-linux-source-5.4.0/kernel/sys.c	2021-11-22 11:42:08.026973562 +0100
++++ custom-linux-source-5.4.0/kernel/sys.c	2021-11-25 11:23:06.684884612 +0100
 @@ -61,6 +61,8 @@
  #include <linux/uidgid.h>
  #include <linux/cred.h>
@@ -180,7 +188,7 @@ diff --color -ruN linux-source-5.4.0/kernel/sys.c custom-linux-source-5.4.0/kern
  #include <linux/nospec.h>
  
  #include <linux/kmsg_dump.h>
-@@ -2235,6 +2237,266 @@
+@@ -2235,6 +2237,272 @@
  	return error;
  }
  
@@ -200,7 +208,7 @@ diff --color -ruN linux-source-5.4.0/kernel/sys.c custom-linux-source-5.4.0/kern
 +		__wrpkru(ERIM_TRUSTED_PKRU);	\
 +	} while(0)
 +
-+static inline unsigned char ipmon_is_unchecked_syscall(unsigned char* mask, unsigned long syscall_no)
++static inline unsigned char ipmon_is_unchecked_syscall(unsigned char *mask, unsigned long syscall_no)
 +{
 +  unsigned long no_to_byte, bit_in_byte;
 +
@@ -216,7 +224,7 @@ diff --color -ruN linux-source-5.4.0/kernel/sys.c custom-linux-source-5.4.0/kern
 +  return 0;
 +}
 +
-+static inline void ipmon_set_unchecked_syscall(unsigned char* mask, unsigned long syscall_no, unsigned char unchecked)
++static inline void ipmon_set_unchecked_syscall(unsigned char *mask, unsigned long syscall_no, unsigned char unchecked)
 +{
 +  unsigned long no_to_byte, bit_in_byte;
 +
@@ -262,9 +270,15 @@ diff --color -ruN linux-source-5.4.0/kernel/sys.c custom-linux-source-5.4.0/kern
 +
 +	// return the replication buffer pointer in register r11
 +	if (current->ipmon_info.ipmon_rb)
++	{
 +		task_pt_regs(current)->r11 = current->ipmon_info.ipmon_rb->vm_start;
++	}
 +	else
-+		task_pt_regs(current)->r11 = 0;
++	{
++		// set the highest bit to inform IP-MON that it needs to dettach from the parent's RB and attach to a new RB
++		// Note: the highest bit of user space addresses is always 0
++		task_pt_regs(current)->r11 = current->ipmon_info.ipmon_parent_rb->vm_start | (1UL << (sizeof(unsigned long)*8 - 1));
++	}
 +
 +	// return the magic key in register rcx
 +	task_pt_regs(current)->cx = current->ipmon_info.ipmon_key;
@@ -279,7 +293,7 @@ diff --color -ruN linux-source-5.4.0/kernel/sys.c custom-linux-source-5.4.0/kern
 +
 +// This gets called at each syscall entry site from include/linux/tracehook.h.
 +// If we return 1, the syscall will not be reported to the ptracer.
-+unsigned char ipmon_handle_bypass(struct pt_regs * regs)
++unsigned char ipmon_handle_bypass(struct pt_regs *regs)
 +{
 +	unsigned char result = 0;
 +	unsigned long syscall_no = regs->orig_ax;
@@ -339,13 +353,13 @@ diff --color -ruN linux-source-5.4.0/kernel/sys.c custom-linux-source-5.4.0/kern
 +   * replication_buffer_base is in a valid region
 +   * enclave_entrypoint is within the executable code region that registered IP-MON
 +*/
-+static int prctl_register_ipmon(unsigned char __user* syscall_mask, 
++static int prctl_register_ipmon(unsigned char __user *syscall_mask, 
 +								unsigned long syscall_mask_size,
-+								void __user* replication_buffer_base,
-+								void __user* enclave_entrypoint)
++								void __user *replication_buffer_base,
++								void __user *enclave_entrypoint)
 +{
 +	int error = 0;
-+	struct vm_area_struct* ipmon_vma = NULL, * ipmon_rb_vma = NULL;
++	struct vm_area_struct *ipmon_vma = NULL, *ipmon_rb_vma = NULL;
 +	unsigned long kernel_syscall_mask_size = ROUND_UP(__NR_syscalls, 8) / 8;
 +	unsigned char syscall_mask_copy[kernel_syscall_mask_size];
 +	unsigned char syscall_mask_check[kernel_syscall_mask_size];
@@ -447,7 +461,7 @@ diff --color -ruN linux-source-5.4.0/kernel/sys.c custom-linux-source-5.4.0/kern
  #ifdef CONFIG_CHECKPOINT_RESTORE
  static int prctl_get_tid_address(struct task_struct *me, int __user **tid_addr)
  {
-@@ -2503,6 +2765,9 @@
+@@ -2503,6 +2771,9 @@
  			return -EINVAL;
  		error = GET_TAGGED_ADDR_CTRL();
  		break;
