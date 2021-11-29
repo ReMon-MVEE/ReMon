@@ -481,7 +481,7 @@ diff --color -ruN linux-source-5.4.0/kernel/sys.c custom-linux-source-5.4.0/kern
 +	case PR_REGISTER_IPMON:
 +		error = prctl_register_ipmon((unsigned char __user*)arg2, arg3, (void __user*)arg4, (void __user*)arg5);
 +		break;
-+	case PR_IPMON_ENABLE:
++	case PR_IPMON_PKU_ENABLE:
 +		current->ipmon_info.ipmon_pku_enabled = 1;
 +		break;
  	default:
