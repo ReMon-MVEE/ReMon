@@ -3824,8 +3824,21 @@ extern "C" void* ipmon_register_thread()
 	// optonally also set the variant number
 	ipmon_checked_syscall(MVEE_GET_THREAD_NUM, &ipmon_variant_num);
 
+	long ret;
+
+#ifdef MVEE_IP_PKU_ENABLED
+	// Enable IP-MON PKU protection
+	ret = ipmon_checked_syscall(__NR_prctl, PR_IPMON_PKU_ENABLE);
+	if (ret < 0 && ret > -4096)
+	{
+		printf("ERROR: IP-MON PKU protection enable failed. sys_prctl(PR_IPMON_PKU_ENABLE) returned: %ld (%s)\n", ret, strerror(-ret));
+//		exit(-1);
+		return NULL;
+	}
+#endif
+
 	// Register IP-MON
-	long ret = ipmon_checked_syscall(__NR_prctl, 
+	ret = ipmon_checked_syscall(__NR_prctl,
 									 PR_REGISTER_IPMON, 
 									 kernelmask, 
 									 ROUND_UP(__NR_syscalls, 8) / 8, 
