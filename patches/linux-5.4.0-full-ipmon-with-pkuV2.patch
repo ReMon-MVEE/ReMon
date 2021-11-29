@@ -460,8 +460,8 @@ diff --color -ruN linux-source-5.4.0/kernel/sys.c custom-linux-source-5.4.0/kern
 +	printk("process %s (%d) registered an IP-MON at: %lx-%lx\n", current->comm, current->pid, 
 +		   ipmon_vma->vm_start, ipmon_vma->vm_end);
 +
-+        // change to trusted only if pku protection is enabled
-+        if (current->ipmon_info.ipmon_pku_enabled)
++	// change to trusted only if pku protection is enabled
++	if (current->ipmon_info.ipmon_pku_enabled)
 +	{
 +		erim_switch_to_trusted;
 +	}
