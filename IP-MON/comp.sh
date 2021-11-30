@@ -4,11 +4,11 @@ asm() {
 }
 
 preprocess() {
-	gcc -ffixed-r12 -O3  -m64 -fPIC -E -o ${1}.p ${1}.cpp
+	gcc -z noexecstack -ffixed-r12 -O3  -m64 -fPIC -E -o ${1}.p ${1}.cpp
 }
 
 compile() {
-	gcc -ffixed-r12 -O3  -m64 -fPIC -c -o ${1}.o ${1}.cpp
+	gcc -z noexecstack -ffixed-r12 -O3  -m64 -fPIC -c -o ${1}.o ${1}.cpp
 }
 
 asm MVEE_ipmon_syscall
@@ -17,4 +17,4 @@ asm MVEE_ipmon_syscall
 preprocess MVEE_ipmon
 compile MVEE_ipmon
 
-gcc -s -shared -O3 -fPIC -lc -ldl -o libipmon.so MVEE_ipmon.o MVEE_ipmon_syscall.o
+gcc -z noexecstack -s -shared -O3 -fPIC -lc -ldl -o libipmon.so MVEE_ipmon.o MVEE_ipmon_syscall.o
