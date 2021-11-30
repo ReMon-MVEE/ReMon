@@ -1180,10 +1180,8 @@ private:
 
 	int master_core;
 
-#ifdef MVEE_IP_PKU_ENABLED
 	// needed for "special" shmdt calls that deattach from parent's RB/regfile
 	int special_shmdt_count;
-#endif
 
 	std::stringstream mismatch_info;                          // cached mismatch info
 
