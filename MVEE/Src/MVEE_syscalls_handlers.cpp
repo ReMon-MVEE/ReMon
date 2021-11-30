@@ -2910,14 +2910,10 @@ PRECALL(shmdt)
     if (caller_info.find("mvee_shm_shmdt") == std::string::npos &&
             caller_info.find("mvee_shm_munmap") == std::string::npos)
     {
-#ifdef MVEE_IP_PKU_ENABLED
         if (special_shmdt_count == 0)
-#endif
             return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOMEM);
-#ifdef MVEE_IP_PKU_ENABLED
         else
             special_shmdt_count--;
-#endif
     }
 
     // either all variants shmdt a tagged pointer, or non of them do

@@ -187,9 +187,7 @@ void monitor::init()
 	last_mmap_requested_alignment  = 0;
 	current_shadow                 = NULL;
 
-#ifdef MVEE_IP_PKU_ENABLED
 	special_shmdt_count            = 0;
-#endif
 
 	blocked_signals.resize(mvee::numvariants);
 	old_blocked_signals.resize(mvee::numvariants);
@@ -1381,9 +1379,7 @@ void monitor::handle_detach_event(pid_t variantpid)
     new_variant->parent_has_detached = 1;
     monitor*       new_mon = new_variant->new_monitor;
 
-#ifdef MVEE_IP_PKU_ENABLED
     new_mon->special_shmdt_count = 2;
-#endif
 
     mvee::add_detached_variant(new_variant);
 
