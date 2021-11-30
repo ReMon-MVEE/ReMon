@@ -363,8 +363,8 @@ diff --color -ruN linux-source-5.4.0/kernel/sys.c custom-linux-source-5.4.0/kern
 +			if (!ipmon_wants_bypass)
 +				goto out;
 +
-+			// if pku protection is enabled, check pkru's value to ensure
-+			// that IP-MON issued the syscall
++			// if pku protection is enabled, we check pkru's value to ensure that IP-MON issued the syscall
++			// (stopping an attacker that jumps in IP-MON and tries to issue syscalls)
 +			if (current->ipmon_info.ipmon_pku_enabled) 
 +			{
 +				if (__rdpkru() != ERIM_TRUSTED_PKRU)
