@@ -3647,7 +3647,7 @@ extern "C" long ipmon_enclave
 		// After fork the child has also mapped the parent's shared memory segments in its memory
 		//     1) these segments are protected with PKU (if it exists)
 		//     2) If we call execve (which happens really often after fork) everything is cleared and we are fine
-		// We need to unset to highest bit of the address to take the actual address of parent's RB (see the kernel patch for more details)
+		// We need to unset the highest bit of the address to take the actual address of parent's RB (see the kernel patch for more details)
 		ipmon_checked_syscall(__NR_shmdt, (void*)((unsigned long)RB & ~(1UL << (sizeof(unsigned long)*8 - 1)))); // detach from parent's RB
 		ipmon_checked_syscall(__NR_shmdt, ipmon_reg_file_map); // detach from parent's file map
 
@@ -3891,7 +3891,7 @@ extern "C" void* ipmon_register_thread()
 	/*
 	* Set the protection key on ipmon_reg_file_map.
 	* Note that it is still read/write as far as mprotect() is
-	* concerned and the previous pkey_set() overrides it. !!! We changed that though !!!
+	* concerned and the previous pkey_set() overrides it.
 	*/
 	status = pkey_mprotect(ipmon_reg_file_map, 4096/* TODO this number may change at some point */, PROT_READ | PROT_WRITE, ERIM_TRUSTED_DOMAIN_ID(flags));
 	if (status == -1)
@@ -3900,7 +3900,7 @@ extern "C" void* ipmon_register_thread()
 	/*
 	* Set the protection key on RB.
 	* Note that it is still read/write as far as mprotect() is
-	* concerned and the previous pkey_set() overrides it. !!! We changed that though !!!
+	* concerned and the previous pkey_set() overrides it.
 	*/
 	status = pkey_mprotect(RB, rb_size, PROT_READ | PROT_WRITE, ERIM_TRUSTED_DOMAIN_ID(flags));
 	if (status == -1)
