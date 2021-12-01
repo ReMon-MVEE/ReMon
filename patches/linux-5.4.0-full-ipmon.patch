@@ -1,6 +1,6 @@
 diff --color -ruN linux-source-5.4.0/arch/x86/entry/syscalls/syscall_64.tbl custom-linux-source-5.4.0/arch/x86/entry/syscalls/syscall_64.tbl
 --- linux-source-5.4.0/arch/x86/entry/syscalls/syscall_64.tbl	2019-11-25 01:32:01.000000000 +0100
-+++ custom-linux-source-5.4.0/arch/x86/entry/syscalls/syscall_64.tbl	2021-11-30 15:08:21.157090330 +0100
++++ custom-linux-source-5.4.0/arch/x86/entry/syscalls/syscall_64.tbl	2021-12-01 17:28:35.094346688 +0100
 @@ -364,6 +364,7 @@
  # on-the-fly for compat_sys_*() compatibility system calls if X86_X32
  # is defined.
@@ -10,8 +10,8 @@ diff --color -ruN linux-source-5.4.0/arch/x86/entry/syscalls/syscall_64.tbl cust
  513	x32	rt_sigreturn		sys32_x32_rt_sigreturn
  514	x32	ioctl			__x32_compat_sys_ioctl
 diff --color -ruN linux-source-5.4.0/fs/exec.c custom-linux-source-5.4.0/fs/exec.c
---- linux-source-5.4.0/fs/exec.c	2021-10-15 22:00:30.000000000 +0200
-+++ custom-linux-source-5.4.0/fs/exec.c	2021-11-30 15:08:21.157090330 +0100
+--- linux-source-5.4.0/fs/exec.c	2021-11-05 17:30:43.000000000 +0100
++++ custom-linux-source-5.4.0/fs/exec.c	2021-12-01 17:28:35.094346688 +0100
 @@ -1876,6 +1876,9 @@
  		putname(filename);
  	if (displaced)
@@ -23,8 +23,8 @@ diff --color -ruN linux-source-5.4.0/fs/exec.c custom-linux-source-5.4.0/fs/exec
  
  out:
 diff --color -ruN linux-source-5.4.0/include/linux/sched.h custom-linux-source-5.4.0/include/linux/sched.h
---- linux-source-5.4.0/include/linux/sched.h	2021-10-15 22:00:30.000000000 +0200
-+++ custom-linux-source-5.4.0/include/linux/sched.h	2021-11-30 15:08:21.157090330 +0100
+--- linux-source-5.4.0/include/linux/sched.h	2021-11-05 17:30:43.000000000 +0100
++++ custom-linux-source-5.4.0/include/linux/sched.h	2021-12-01 17:28:35.094346688 +0100
 @@ -621,6 +621,61 @@
  	struct wake_q_node *next;
  };
@@ -115,7 +115,7 @@ diff --color -ruN linux-source-5.4.0/include/linux/sched.h custom-linux-source-5
  	return task->thread_pid;
 diff --color -ruN linux-source-5.4.0/include/linux/tracehook.h custom-linux-source-5.4.0/include/linux/tracehook.h
 --- linux-source-5.4.0/include/linux/tracehook.h	2019-11-25 01:32:01.000000000 +0100
-+++ custom-linux-source-5.4.0/include/linux/tracehook.h	2021-11-30 15:08:21.157090330 +0100
++++ custom-linux-source-5.4.0/include/linux/tracehook.h	2021-12-01 17:28:35.094346688 +0100
 @@ -101,6 +101,11 @@
  static inline __must_check int tracehook_report_syscall_entry(
  	struct pt_regs *regs)
@@ -147,7 +147,7 @@ diff --color -ruN linux-source-5.4.0/include/linux/tracehook.h custom-linux-sour
  /**
 diff --color -ruN linux-source-5.4.0/include/uapi/asm-generic/errno.h custom-linux-source-5.4.0/include/uapi/asm-generic/errno.h
 --- linux-source-5.4.0/include/uapi/asm-generic/errno.h	2019-11-25 01:32:01.000000000 +0100
-+++ custom-linux-source-5.4.0/include/uapi/asm-generic/errno.h	2021-11-30 15:08:21.157090330 +0100
++++ custom-linux-source-5.4.0/include/uapi/asm-generic/errno.h	2021-12-01 17:28:35.094346688 +0100
 @@ -120,4 +120,6 @@
  
  #define EHWPOISON	133	/* Memory page has hardware error */
@@ -157,7 +157,7 @@ diff --color -ruN linux-source-5.4.0/include/uapi/asm-generic/errno.h custom-lin
  #endif
 diff --color -ruN linux-source-5.4.0/include/uapi/linux/prctl.h custom-linux-source-5.4.0/include/uapi/linux/prctl.h
 --- linux-source-5.4.0/include/uapi/linux/prctl.h	2019-11-25 01:32:01.000000000 +0100
-+++ custom-linux-source-5.4.0/include/uapi/linux/prctl.h	2021-11-30 15:08:21.161090383 +0100
++++ custom-linux-source-5.4.0/include/uapi/linux/prctl.h	2021-12-01 17:28:35.094346688 +0100
 @@ -234,4 +234,8 @@
  #define PR_GET_TAGGED_ADDR_CTRL		56
  # define PR_TAGGED_ADDR_ENABLE		(1UL << 0)
@@ -168,8 +168,8 @@ diff --color -ruN linux-source-5.4.0/include/uapi/linux/prctl.h custom-linux-sou
 +
  #endif /* _LINUX_PRCTL_H */
 diff --color -ruN linux-source-5.4.0/kernel/fork.c custom-linux-source-5.4.0/kernel/fork.c
---- linux-source-5.4.0/kernel/fork.c	2021-10-15 22:00:30.000000000 +0200
-+++ custom-linux-source-5.4.0/kernel/fork.c	2021-11-30 15:08:21.161090383 +0100
+--- linux-source-5.4.0/kernel/fork.c	2021-11-05 17:30:43.000000000 +0100
++++ custom-linux-source-5.4.0/kernel/fork.c	2021-12-01 17:28:35.094346688 +0100
 @@ -1879,6 +1879,11 @@
  	if (!p)
  		goto fork_out;
@@ -183,8 +183,8 @@ diff --color -ruN linux-source-5.4.0/kernel/fork.c custom-linux-source-5.4.0/ker
  	 * This _must_ happen before we call free_task(), i.e. before we jump
  	 * to any of the bad_fork_* labels. This is to avoid freeing
 diff --color -ruN linux-source-5.4.0/kernel/sys.c custom-linux-source-5.4.0/kernel/sys.c
---- linux-source-5.4.0/kernel/sys.c	2021-10-15 22:00:30.000000000 +0200
-+++ custom-linux-source-5.4.0/kernel/sys.c	2021-11-30 16:17:19.637465536 +0100
+--- linux-source-5.4.0/kernel/sys.c	2021-11-05 17:30:43.000000000 +0100
++++ custom-linux-source-5.4.0/kernel/sys.c	2021-12-01 17:28:35.098346735 +0100
 @@ -61,6 +61,8 @@
  #include <linux/uidgid.h>
  #include <linux/cred.h>
@@ -194,7 +194,7 @@ diff --color -ruN linux-source-5.4.0/kernel/sys.c custom-linux-source-5.4.0/kern
  #include <linux/nospec.h>
  
  #include <linux/kmsg_dump.h>
-@@ -2235,6 +2237,304 @@
+@@ -2228,6 +2230,304 @@
  	return error;
  }
  
@@ -499,7 +499,7 @@ diff --color -ruN linux-source-5.4.0/kernel/sys.c custom-linux-source-5.4.0/kern
  #ifdef CONFIG_CHECKPOINT_RESTORE
  static int prctl_get_tid_address(struct task_struct *me, int __user **tid_addr)
  {
-@@ -2503,6 +2803,12 @@
+@@ -2496,6 +2796,12 @@
  			return -EINVAL;
  		error = GET_TAGGED_ADDR_CTRL();
  		break;
