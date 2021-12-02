@@ -290,6 +290,7 @@ class monitor
     friend class instruction_intent;
     friend class replay_buffer;
     friend class acquire_shm_protected_memory_for_access;
+	friend class fd_table;
 
 #ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
     friend class instruction_tracing;

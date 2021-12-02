@@ -22,6 +22,7 @@
 #include "MVEE_private_arch.h"
 #include "MVEE_logging.h"
 #include "MVEE_memory.h"
+#include "MVEE_monitor.h"
 
 /*-----------------------------------------------------------------------------
     fd_info class
@@ -916,7 +917,7 @@ std::string fd_table::get_full_path (int variantnum, pid_t variantpid, unsigned 
     if (tmp_path.length() > 0 &&
 		tmp_path.find("/proc/self/") == 0)
     {
-        ss << "/proc/" << variantpid << "/" << tmp_path.substr(strlen("/proc/self/"));
+        ss << "/proc/" << mvee::active_monitor->variants[variantnum].varianttgid << "/" << tmp_path.substr(strlen("/proc/self/"));
     }
     else if (tmp_path.length() > 0 &&
 			 tmp_path[0] == '/')
@@ -935,7 +936,7 @@ std::string fd_table::get_full_path (int variantnum, pid_t variantpid, unsigned 
 				char cwd_path[2048];
 
 				memset(cwd_path, 0, 2048);
-				sprintf(proc_path, "/proc/%d/cwd", variantpid);
+				sprintf(proc_path, "/proc/%d/cwd", mvee::active_monitor->variants[variantnum].varianttgid);
 				if (readlink(proc_path, cwd_path, 2048) != -1)
 				{
 					ss << cwd_path;
