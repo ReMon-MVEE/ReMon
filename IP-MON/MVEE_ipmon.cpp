@@ -3647,7 +3647,7 @@ extern "C" long ipmon_enclave
 		// After fork the child has also mapped the parent's shared memory segments in its memory
 		//     1) these segments are protected with PKU (if it exists)
 		//     2) If we call execve (which happens really often after fork) everything is cleared and we are fine
-		// We need to unset the highest bit of the address to take the actual address of parent's RB (see the kernel patch for more details)
+		// We need to unset to highest bit of the address to take the actual address of parent's RB (see the kernel patch for more details)
 		ipmon_checked_syscall(__NR_shmdt, (void*)((unsigned long)RB & ~(1UL << (sizeof(unsigned long)*8 - 1)))); // detach from parent's RB
 		ipmon_checked_syscall(__NR_shmdt, ipmon_reg_file_map); // detach from parent's file map
 
@@ -3824,21 +3824,8 @@ extern "C" void* ipmon_register_thread()
 	// optonally also set the variant number
 	ipmon_checked_syscall(MVEE_GET_THREAD_NUM, &ipmon_variant_num);
 
-	long ret;
-
-#ifdef MVEE_IP_PKU_ENABLED
-	// Enable IP-MON PKU protection
-	ret = ipmon_checked_syscall(__NR_prctl, PR_IPMON_PKU_ENABLE);
-	if (ret < 0 && ret > -4096)
-	{
-		printf("ERROR: IP-MON PKU protection enable failed. sys_prctl(PR_IPMON_PKU_ENABLE) returned: %ld (%s)\n", ret, strerror(-ret));
-//		exit(-1);
-		return NULL;
-	}
-#endif
-
 	// Register IP-MON
-	ret = ipmon_checked_syscall(__NR_prctl,
+	long ret = ipmon_checked_syscall(__NR_prctl, 
 									 PR_REGISTER_IPMON, 
 									 kernelmask, 
 									 ROUND_UP(__NR_syscalls, 8) / 8, 
@@ -3876,7 +3863,7 @@ extern "C" void* ipmon_register_thread()
 	/*
 	* Allocate a protection key:
 	*/
-	pkey = pkey_alloc(0, 0);
+	pkey = ipmon_checked_syscall(__NR_pkey_alloc, 0, 0);
 	if (pkey == -1)
 		printf("ERROR: IP-MON registration failed. sys_pkey_alloc returned -1.");
 
@@ -3885,24 +3872,24 @@ extern "C" void* ipmon_register_thread()
 	// permissions, mappings and the allocated keys. If we have an execve exactly
 	// after the fork we do not experience this behavior since variant's state is cleared
 	if (pkey == 2) {
-		pkey_free(2);
+		ipmon_checked_syscall(__NR_pkey_free, 2);
 	}
 
 	/*
 	* Set the protection key on ipmon_reg_file_map.
 	* Note that it is still read/write as far as mprotect() is
-	* concerned and the previous pkey_set() overrides it.
+	* concerned and the previous pkey_set() overrides it. !!! We changed that though !!!
 	*/
-	status = pkey_mprotect(ipmon_reg_file_map, 4096/* TODO this number may change at some point */, PROT_READ | PROT_WRITE, ERIM_TRUSTED_DOMAIN_ID(flags));
+	status = ipmon_checked_syscall(__NR_pkey_mprotect, ipmon_reg_file_map, 4096/* TODO this number may change at some point */, PROT_READ | PROT_WRITE, ERIM_TRUSTED_DOMAIN_ID(flags));
 	if (status == -1)
 		printf("ERROR: IP-MON File-Map registration failed. pkey_mprotect returned -1.");
 
 	/*
 	* Set the protection key on RB.
 	* Note that it is still read/write as far as mprotect() is
-	* concerned and the previous pkey_set() overrides it.
+	* concerned and the previous pkey_set() overrides it. !!! We changed that though !!!
 	*/
-	status = pkey_mprotect(RB, rb_size, PROT_READ | PROT_WRITE, ERIM_TRUSTED_DOMAIN_ID(flags));
+	status = ipmon_checked_syscall(__NR_pkey_mprotect, RB, rb_size, PROT_READ | PROT_WRITE, ERIM_TRUSTED_DOMAIN_ID(flags));
 	if (status == -1)
 		printf("ERROR: IP-MON RB registration failed. pkey_mprotect returned -1.");
 #endif
