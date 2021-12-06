@@ -92,7 +92,6 @@ extern "C" {
 #define MVEE_FUTEX_WAIT_TID                30
 #define MAX_FDS  4096
 #define PR_REGISTER_IPMON 		0xb00b135
-#define PR_IPMON_PKU_ENABLE		0xb00b500
 #define ENOIPMON 256
 ///#define RB ipmon_replication_buffer
 #define IPMON_STATUS_FLUSHING 1

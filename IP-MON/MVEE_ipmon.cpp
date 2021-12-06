@@ -3923,16 +3923,6 @@ void __attribute__((constructor)) init()
 	if (ipmon_initialized && 
 		is_ipmon_kernel_compatible())
 	{
-#ifdef MVEE_IP_PKU_ENABLED
-		// Enable IP-MON PKU protection
-		long ret = ipmon_checked_syscall(__NR_prctl, PR_IPMON_PKU_ENABLE);
-		if (ret < 0 && ret > -4096)
-		{
-			printf("ERROR: IP-MON PKU protection enable failed. sys_prctl(PR_IPMON_PKU_ENABLE) returned: %ld (%s)\n", ret, strerror(-ret));
-	//		exit(-1);
-			return;
-		}
-#endif
 		ipmon_register_thread();
 		return;
 	}
@@ -3946,17 +3936,6 @@ void __attribute__((constructor)) init()
 		printf("WARNING: IP-MON compatible kernel.\n");
 		return;
 	}
-
-#ifdef MVEE_IP_PKU_ENABLED
-	// Enable IP-MON PKU protection
-	long ret = ipmon_checked_syscall(__NR_prctl, PR_IPMON_PKU_ENABLE);
-	if (ret < 0 && ret > -4096)
-	{
-		printf("ERROR: IP-MON PKU protection enable failed. sys_prctl(PR_IPMON_PKU_ENABLE) returned: %ld (%s)\n", ret, strerror(-ret));
-//		exit(-1);
-		return;
-	}
-#endif
 
 	ipmon_initialized = true;
 	syscall_ordering_mutex.hack = 0;
