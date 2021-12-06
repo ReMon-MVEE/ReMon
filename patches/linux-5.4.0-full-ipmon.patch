@@ -259,7 +259,7 @@ diff --color -ruN linux-source-5.4.0/kernel/sys.c custom-linux-source-5.4.0/kern
 +	}
 +	else
 +	{
-+		// set the highest bit to inform IP-MON that it needs to dettach from the parent's RB and attach to a new RB
++		// set the highest bit to inform IP-MON that it needs to detach from the parent's RB and attach to a new RB
 +		// Note: the highest bit of user space addresses is always 0
 +		task_pt_regs(current)->r11 = current->ipmon_info.ipmon_parent_rb->vm_start | (1UL << (sizeof(unsigned long)*8 - 1));
 +	}
