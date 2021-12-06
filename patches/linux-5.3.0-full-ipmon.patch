@@ -1,6 +1,6 @@
-diff --color -r --unified linux-source-5.3.0/arch/x86/entry/syscalls/syscall_64.tbl linux-source-5.3.0-custom/arch/x86/entry/syscalls/syscall_64.tbl
+diff --color -ruN linux-source-5.3.0/arch/x86/entry/syscalls/syscall_64.tbl linux-source-5.3.0-custom/arch/x86/entry/syscalls/syscall_64.tbl
 --- linux-source-5.3.0/arch/x86/entry/syscalls/syscall_64.tbl	2020-04-13 17:00:36.000000000 +0200
-+++ linux-source-5.3.0-custom/arch/x86/entry/syscalls/syscall_64.tbl	2020-10-19 16:24:22.263240009 +0200
++++ linux-source-5.3.0-custom/arch/x86/entry/syscalls/syscall_64.tbl	2021-11-30 20:54:42.445919297 +0100
 @@ -364,6 +364,7 @@
  # on-the-fly for compat_sys_*() compatibility system calls if X86_X32
  # is defined.
@@ -9,21 +9,23 @@ diff --color -r --unified linux-source-5.3.0/arch/x86/entry/syscalls/syscall_64.
  512	x32	rt_sigaction		__x32_compat_sys_rt_sigaction
  513	x32	rt_sigreturn		sys32_x32_rt_sigreturn
  514	x32	ioctl			__x32_compat_sys_ioctl
-diff --color --color -r --unified '--exclude=.*' linux-source-5.3.0/fs/exec.c linux-source-5.3.0-custom/fs/exec.c
---- linux-source-5.3.0/fs/exec.c	2020-09-05 01:07:20.000000000 +0200
-+++ linux-source-5.3.0-custom/fs/exec.c	2020-11-17 10:10:43.733020332 +0100
-@@ -1847,6 +1847,7 @@
+diff --color -ruN linux-source-5.3.0/fs/exec.c linux-source-5.3.0-custom/fs/exec.c
+--- linux-source-5.3.0/fs/exec.c	2020-04-13 17:00:36.000000000 +0200
++++ linux-source-5.3.0-custom/fs/exec.c	2021-11-30 20:54:42.445919297 +0100
+@@ -1847,6 +1847,9 @@
  		putname(filename);
  	if (displaced)
  		put_files_struct(displaced);
 +	current->ipmon_info.ipmon_enabled = 0;
++	current->ipmon_info.ipmon_parent_rb = NULL;
++	current->ipmon_info.ipmon_pku_enabled = 0;
  	return retval;
-
+ 
  out:
-diff --color -r --unified linux-source-5.3.0/include/linux/sched.h linux-source-5.3.0-custom/include/linux/sched.h
+diff --color -ruN linux-source-5.3.0/include/linux/sched.h linux-source-5.3.0-custom/include/linux/sched.h
 --- linux-source-5.3.0/include/linux/sched.h	2020-04-13 17:00:36.000000000 +0200
-+++ linux-source-5.3.0-custom/include/linux/sched.h	2020-10-19 16:35:07.818491501 +0200
-@@ -634,6 +634,53 @@
++++ linux-source-5.3.0-custom/include/linux/sched.h	2021-11-30 20:54:42.449919357 +0100
+@@ -634,6 +634,61 @@
  	struct wake_q_node *next;
  };
  
@@ -50,6 +52,9 @@ diff --color -r --unified linux-source-5.3.0/include/linux/sched.h linux-source-
 +  /* Is IP-MON enabled within this thread */
 +  unsigned char ipmon_enabled;
 +
++  /* Is IP-MON protected with PKU */
++  unsigned char ipmon_pku_enabled;
++
 +  /* latest IP-MON key */
 +  unsigned int  ipmon_key;
 +
@@ -61,23 +66,28 @@ diff --color -r --unified linux-source-5.3.0/include/linux/sched.h linux-source-
 +	 modified in any way.  The kernel will however unmap the area when the
 +	 associated mm_struct is freed.
 +  */
-+  struct vm_area_struct * ipmon_exec;
++  struct vm_area_struct *ipmon_exec;
 +
 +  /* This is a pointer to the vm_area_struct of the IP-MON Replication Buffer
 +     (RB). The sys_ipmon_rbcontrol syscall changes the protection flags on this
 +     region. 
 +  */
-+  struct vm_area_struct * ipmon_rb;	
++  struct vm_area_struct *ipmon_rb;	
++
++  /* We need this to detach from the parent's RB in the children
++     after a fork/clone.
++  */
++  struct vm_area_struct *ipmon_parent_rb;
 +
 +  /* pointer to the ipmon syscall enclave entrypoint */
-+  void __user* ipmon_enclave_entrypoint;
++  void __user *ipmon_enclave_entrypoint;
 +};
 +
 +
  struct task_struct {
  #ifdef CONFIG_THREAD_INFO_IN_TASK
  	/*
-@@ -739,6 +786,7 @@
+@@ -739,6 +794,7 @@
  
  	struct mm_struct		*mm;
  	struct mm_struct		*active_mm;
@@ -85,7 +95,7 @@ diff --color -r --unified linux-source-5.3.0/include/linux/sched.h linux-source-
  
  	/* Per-thread vma caching: */
  	struct vmacache			vmacache;
-@@ -760,6 +808,7 @@
+@@ -760,6 +816,7 @@
  	/* Scheduler bits, serialized by scheduler locks: */
  	unsigned			sched_reset_on_fork:1;
  	unsigned			sched_contributes_to_load:1;
@@ -93,19 +103,19 @@ diff --color -r --unified linux-source-5.3.0/include/linux/sched.h linux-source-
  	unsigned			sched_migrated:1;
  	unsigned			sched_remote_wakeup:1;
  #ifdef CONFIG_PSI
-@@ -1291,6 +1340,9 @@
+@@ -1291,6 +1348,9 @@
  	 */
  };
  
 +/* Defined in kernel/sys.c */
-+unsigned char ipmon_handle_bypass(struct pt_regs* regs);
++unsigned char ipmon_handle_bypass(struct pt_regs *regs);
 +
  static inline struct pid *task_pid(struct task_struct *task)
  {
  	return task->thread_pid;
-diff --color -r --unified linux-source-5.3.0/include/linux/tracehook.h linux-source-5.3.0-custom/include/linux/tracehook.h
+diff --color -ruN linux-source-5.3.0/include/linux/tracehook.h linux-source-5.3.0-custom/include/linux/tracehook.h
 --- linux-source-5.3.0/include/linux/tracehook.h	2020-04-13 17:00:36.000000000 +0200
-+++ linux-source-5.3.0-custom/include/linux/tracehook.h	2020-10-19 16:43:02.664571888 +0200
++++ linux-source-5.3.0-custom/include/linux/tracehook.h	2021-11-30 20:54:42.449919357 +0100
 @@ -101,6 +101,11 @@
  static inline __must_check int tracehook_report_syscall_entry(
  	struct pt_regs *regs)
@@ -135,9 +145,9 @@ diff --color -r --unified linux-source-5.3.0/include/linux/tracehook.h linux-sou
  }
  
  /**
-diff --color -r --unified linux-source-5.3.0/include/uapi/asm-generic/errno.h linux-source-5.3.0-custom/include/uapi/asm-generic/errno.h
+diff --color -ruN linux-source-5.3.0/include/uapi/asm-generic/errno.h linux-source-5.3.0-custom/include/uapi/asm-generic/errno.h
 --- linux-source-5.3.0/include/uapi/asm-generic/errno.h	2020-04-13 17:00:36.000000000 +0200
-+++ linux-source-5.3.0-custom/include/uapi/asm-generic/errno.h	2020-10-19 16:46:18.454255109 +0200
++++ linux-source-5.3.0-custom/include/uapi/asm-generic/errno.h	2021-11-30 20:54:42.449919357 +0100
 @@ -120,4 +120,6 @@
  
  #define EHWPOISON	133	/* Memory page has hardware error */
@@ -145,32 +155,36 @@ diff --color -r --unified linux-source-5.3.0/include/uapi/asm-generic/errno.h li
 +#define ENOIPMON    256 /* MVEE IP-MON patch */
 +
  #endif
-diff --color -r --unified linux-source-5.3.0/include/uapi/linux/prctl.h linux-source-5.3.0-custom/include/uapi/linux/prctl.h
+diff --color -ruN linux-source-5.3.0/include/uapi/linux/prctl.h linux-source-5.3.0-custom/include/uapi/linux/prctl.h
 --- linux-source-5.3.0/include/uapi/linux/prctl.h	2020-04-13 17:00:36.000000000 +0200
-+++ linux-source-5.3.0-custom/include/uapi/linux/prctl.h	2020-10-19 16:47:37.104526210 +0200
-@@ -229,4 +229,6 @@
++++ linux-source-5.3.0-custom/include/uapi/linux/prctl.h	2021-11-30 20:54:42.453919417 +0100
+@@ -229,4 +229,8 @@
  # define PR_PAC_APDBKEY			(1UL << 3)
  # define PR_PAC_APGAKEY			(1UL << 4)
  
-+#define PR_REGISTER_IPMON 0xb00b135 /* MVEE IP-MON patch */
++/* MVEE IP-MON patch */
++#define PR_REGISTER_IPMON   0xb00b135
++#define PR_IPMON_PKU_ENABLE 0xb00b500
 +
  #endif /* _LINUX_PRCTL_H */
-diff --color -r --unified linux-source-5.3.0/kernel/fork.c linux-source-5.3.0-custom/kernel/fork.c
+diff --color -ruN linux-source-5.3.0/kernel/fork.c linux-source-5.3.0-custom/kernel/fork.c
 --- linux-source-5.3.0/kernel/fork.c	2020-04-13 17:00:36.000000000 +0200
-+++ linux-source-5.3.0-custom/kernel/fork.c	2020-10-19 16:51:45.403664217 +0200
-@@ -1867,6 +1867,9 @@
++++ linux-source-5.3.0-custom/kernel/fork.c	2021-11-30 20:54:42.453919417 +0100
+@@ -1867,6 +1867,11 @@
  	if (!p)
  		goto fork_out;
  
-+	/* Invalidate IP-MON RB in new tasks but leave IP-MON enabled. */
-+	p->ipmon_info.ipmon_rb = NULL;
++	// Invalidate IP-MON RB in new tasks but leave IP-MON (and PKU protection) enabled.
++	// Also update parent's rb since we need to detach from that.
++	p->ipmon_info.ipmon_parent_rb = p->ipmon_info.ipmon_rb;
++	p->ipmon_info.ipmon_rb        = NULL;
 +
  	/*
  	 * This _must_ happen before we call free_task(), i.e. before we jump
  	 * to any of the bad_fork_* labels. This is to avoid freeing
-diff --color -r --unified linux-source-5.3.0/kernel/sys.c linux-source-5.3.0-custom/kernel/sys.c
+diff --color -ruN linux-source-5.3.0/kernel/sys.c linux-source-5.3.0-custom/kernel/sys.c
 --- linux-source-5.3.0/kernel/sys.c	2020-04-13 17:00:36.000000000 +0200
-+++ linux-source-5.3.0-custom/kernel/sys.c	2020-10-19 16:59:03.208175578 +0200
++++ linux-source-5.3.0-custom/kernel/sys.c	2021-11-30 20:54:42.453919417 +0100
 @@ -61,6 +61,8 @@
  #include <linux/uidgid.h>
  #include <linux/cred.h>
@@ -180,11 +194,44 @@ diff --color -r --unified linux-source-5.3.0/kernel/sys.c linux-source-5.3.0-cus
  #include <linux/nospec.h>
  
  #include <linux/kmsg_dump.h>
-@@ -2243,6 +2245,246 @@
+@@ -2243,6 +2245,304 @@
  	return error;
  }
  
-+static inline unsigned char ipmon_is_unchecked_syscall(unsigned char* mask, unsigned long syscall_no)
++
++/*
++ * pkru intrinsics
++ */
++
++#define __rdpkru()                              \
++  ({                                            \
++    unsigned int eax, edx;                      \
++    unsigned int ecx = 0;                       \
++    unsigned int pkru;                          \
++    asm volatile(".byte 0x0f,0x01,0xee\n\t"     \
++                 : "=a" (eax), "=d" (edx)       \
++                 : "c" (ecx));                  \
++    pkru = eax;                                 \
++    pkru;                                       \
++  })
++
++#define __wrpkru(PKRU_ARG)				\
++	do {								\
++		asm volatile ("xor %%ecx, %%ecx\n\txor %%edx, %%edx\n\tmov %0,%%eax\n\t.byte 0x0f,0x01,0xef\n\t"	\
++			: : "n" (PKRU_ARG)			\
++			:"eax", "ecx", "edx");		\
++	} while (0)
++
++// PKRU when running trusted (access to both domain 0 and 1)
++#define ERIM_TRUSTED_PKRU (0x55555550)
++
++// Switching between isolated and application
++#define erim_switch_to_trusted			\
++	do {								\
++		__wrpkru(ERIM_TRUSTED_PKRU);	\
++	} while(0)
++
++static inline unsigned char ipmon_is_unchecked_syscall(unsigned char *mask, unsigned long syscall_no)
 +{
 +  unsigned long no_to_byte, bit_in_byte;
 +
@@ -200,7 +247,7 @@ diff --color -r --unified linux-source-5.3.0/kernel/sys.c linux-source-5.3.0-cus
 +  return 0;
 +}
 +
-+static inline void ipmon_set_unchecked_syscall(unsigned char* mask, unsigned long syscall_no, unsigned char unchecked)
++static inline void ipmon_set_unchecked_syscall(unsigned char *mask, unsigned long syscall_no, unsigned char unchecked)
 +{
 +  unsigned long no_to_byte, bit_in_byte;
 +
@@ -246,9 +293,15 @@ diff --color -r --unified linux-source-5.3.0/kernel/sys.c linux-source-5.3.0-cus
 +
 +	// return the replication buffer pointer in register r11
 +	if (current->ipmon_info.ipmon_rb)
++	{
 +		task_pt_regs(current)->r11 = current->ipmon_info.ipmon_rb->vm_start;
++	}
 +	else
-+		task_pt_regs(current)->r11 = 0;
++	{
++		// set the highest bit to inform IP-MON that it needs to detach from the parent's RB and attach to a new RB
++		// Note: the highest bit of user space addresses is always 0
++		task_pt_regs(current)->r11 = current->ipmon_info.ipmon_parent_rb->vm_start | (1UL << (sizeof(unsigned long)*8 - 1));
++	}
 +
 +	// return the magic key in register rcx
 +	task_pt_regs(current)->cx = current->ipmon_info.ipmon_key;
@@ -256,12 +309,18 @@ diff --color -r --unified linux-source-5.3.0/kernel/sys.c linux-source-5.3.0-cus
 +	// adjust the instruction pointer to jump to the enclave
 +	task_pt_regs(current)->ip = (unsigned long)current->ipmon_info.ipmon_enclave_entrypoint;
 +	
++	// change to trusted only if pku protection is enabled
++	if (current->ipmon_info.ipmon_pku_enabled)
++	{
++		erim_switch_to_trusted;
++	}
++
 +	return current->ipmon_info.ipmon_orig_syscall;
 +}
 +
 +// This gets called at each syscall entry site from include/linux/tracehook.h.
 +// If we return 1, the syscall will not be reported to the ptracer.
-+unsigned char ipmon_handle_bypass(struct pt_regs * regs)
++unsigned char ipmon_handle_bypass(struct pt_regs *regs)
 +{
 +	unsigned char result = 0;
 +	unsigned long syscall_no = regs->orig_ax;
@@ -304,6 +363,14 @@ diff --color -r --unified linux-source-5.3.0/kernel/sys.c linux-source-5.3.0-cus
 +			if (!ipmon_wants_bypass)
 +				goto out;
 +
++			// if pku protection is enabled, we check pkru's value to ensure that IP-MON issued the syscall
++			// (stopping an attacker that jumps in IP-MON and tries to issue syscalls)
++			if (current->ipmon_info.ipmon_pku_enabled) 
++			{
++				if (__rdpkru() != ERIM_TRUSTED_PKRU)
++					goto out;
++			}
++
 +			// OK. Bypass approved. We can now revoke IP-MON's right to execute
 +			// any syscalls other than sched_yield and futex
 +			current->ipmon_info.ipmon_orig_syscall = (unsigned long)-1;
@@ -321,13 +388,13 @@ diff --color -r --unified linux-source-5.3.0/kernel/sys.c linux-source-5.3.0-cus
 +   * replication_buffer_base is in a valid region
 +   * enclave_entrypoint is within the executable code region that registered IP-MON
 +*/
-+static int prctl_register_ipmon(unsigned char __user* syscall_mask, 
++static int prctl_register_ipmon(unsigned char __user *syscall_mask, 
 +								unsigned long syscall_mask_size,
-+								void __user* replication_buffer_base,
-+								void __user* enclave_entrypoint)
++								void __user *replication_buffer_base,
++								void __user *enclave_entrypoint)
 +{
 +	int error = 0;
-+	struct vm_area_struct* ipmon_vma = NULL, * ipmon_rb_vma = NULL;
++	struct vm_area_struct *ipmon_vma = NULL, *ipmon_rb_vma = NULL;
 +	unsigned long kernel_syscall_mask_size = ROUND_UP(__NR_syscalls, 8) / 8;
 +	unsigned char syscall_mask_copy[kernel_syscall_mask_size];
 +	unsigned char syscall_mask_check[kernel_syscall_mask_size];
@@ -418,6 +485,11 @@ diff --color -r --unified linux-source-5.3.0/kernel/sys.c linux-source-5.3.0-cus
 +	printk("process %s (%d) registered an IP-MON at: %lx-%lx\n", current->comm, current->pid, 
 +		   ipmon_vma->vm_start, ipmon_vma->vm_end);
 +
++	// change to trusted only if pku protection is enabled
++	if (current->ipmon_info.ipmon_pku_enabled)
++	{
++		erim_switch_to_trusted;
++	}
 +out:
 +	up_read(&current->mm->mmap_sem);
 +	return 0;
@@ -427,12 +499,15 @@ diff --color -r --unified linux-source-5.3.0/kernel/sys.c linux-source-5.3.0-cus
  #ifdef CONFIG_CHECKPOINT_RESTORE
  static int prctl_get_tid_address(struct task_struct *me, int __user **tid_addr)
  {
-@@ -2507,6 +2749,9 @@
+@@ -2507,6 +2807,12 @@
  			return -EINVAL;
  		error = PAC_RESET_KEYS(me, arg2);
  		break;
 +	case PR_REGISTER_IPMON:
 +		error = prctl_register_ipmon((unsigned char __user*)arg2, arg3, (void __user*)arg4, (void __user*)arg5);
++		break;
++	case PR_IPMON_PKU_ENABLE:
++		current->ipmon_info.ipmon_pku_enabled = 1;
 +		break;
  	default:
  		error = -EINVAL;
