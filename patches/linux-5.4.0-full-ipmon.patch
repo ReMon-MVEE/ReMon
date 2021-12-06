@@ -178,7 +178,7 @@ diff --color -ruN linux-source-5.4.0/kernel/fork.c custom-linux-source-5.4.0/ker
  	 * to any of the bad_fork_* labels. This is to avoid freeing
 diff --color -ruN linux-source-5.4.0/kernel/sys.c custom-linux-source-5.4.0/kernel/sys.c
 --- linux-source-5.4.0/kernel/sys.c	2021-11-05 17:30:43.000000000 +0100
-+++ custom-linux-source-5.4.0/kernel/sys.c	2021-12-06 11:03:28.848120498 +0100
++++ custom-linux-source-5.4.0/kernel/sys.c	2021-12-06 11:06:40.666128312 +0100
 @@ -61,6 +61,8 @@
  #include <linux/uidgid.h>
  #include <linux/cred.h>
@@ -188,26 +188,10 @@ diff --color -ruN linux-source-5.4.0/kernel/sys.c custom-linux-source-5.4.0/kern
  #include <linux/nospec.h>
  
  #include <linux/kmsg_dump.h>
-@@ -2228,6 +2230,272 @@
+@@ -2228,6 +2230,252 @@
  	return error;
  }
  
-+#define __wrpkru(PKRU_ARG)				\
-+	do {								\
-+		asm volatile ("xor %%ecx, %%ecx\n\txor %%edx, %%edx\n\tmov %0,%%eax\n\t.byte 0x0f,0x01,0xef\n\t"	\
-+			: : "n" (PKRU_ARG)			\
-+			:"eax", "ecx", "edx");		\
-+	} while (0)
-+
-+// PKRU when running trusted (access to both domain 0 and 1)
-+#define ERIM_TRUSTED_PKRU (0x55555550)
-+
-+// Switching between isolated and application
-+#define erim_switch_to_trusted			\
-+	do {								\
-+		__wrpkru(ERIM_TRUSTED_PKRU);	\
-+	} while(0)
-+
 +static inline unsigned char ipmon_is_unchecked_syscall(unsigned char *mask, unsigned long syscall_no)
 +{
 +  unsigned long no_to_byte, bit_in_byte;
@@ -286,7 +270,6 @@ diff --color -ruN linux-source-5.4.0/kernel/sys.c custom-linux-source-5.4.0/kern
 +	// adjust the instruction pointer to jump to the enclave
 +	task_pt_regs(current)->ip = (unsigned long)current->ipmon_info.ipmon_enclave_entrypoint;
 +	
-+	erim_switch_to_trusted;
 +
 +	return current->ipmon_info.ipmon_orig_syscall;
 +}
@@ -449,9 +432,6 @@ diff --color -ruN linux-source-5.4.0/kernel/sys.c custom-linux-source-5.4.0/kern
 +
 +	printk("process %s (%d) registered an IP-MON at: %lx-%lx\n", current->comm, current->pid, 
 +		   ipmon_vma->vm_start, ipmon_vma->vm_end);
-+
-+	erim_switch_to_trusted;
-+
 +out:
 +	up_read(&current->mm->mmap_sem);
 +	return 0;
@@ -461,7 +441,7 @@ diff --color -ruN linux-source-5.4.0/kernel/sys.c custom-linux-source-5.4.0/kern
  #ifdef CONFIG_CHECKPOINT_RESTORE
  static int prctl_get_tid_address(struct task_struct *me, int __user **tid_addr)
  {
-@@ -2496,6 +2764,9 @@
+@@ -2496,6 +2744,9 @@
  			return -EINVAL;
  		error = GET_TAGGED_ADDR_CTRL();
  		break;
