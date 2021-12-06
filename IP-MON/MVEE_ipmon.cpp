@@ -3930,7 +3930,7 @@ void __attribute__((constructor)) init()
 		{
 			printf("ERROR: IP-MON PKU protection enable failed. sys_prctl(PR_IPMON_PKU_ENABLE) returned: %ld (%s)\n", ret, strerror(-ret));
 	//		exit(-1);
-			return NULL;
+			return;
 		}
 #endif
 		ipmon_register_thread();
@@ -3954,7 +3954,7 @@ void __attribute__((constructor)) init()
 	{
 		printf("ERROR: IP-MON PKU protection enable failed. sys_prctl(PR_IPMON_PKU_ENABLE) returned: %ld (%s)\n", ret, strerror(-ret));
 //		exit(-1);
-		return NULL;
+		return;
 	}
 #endif
 
