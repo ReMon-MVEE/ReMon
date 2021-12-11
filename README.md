@@ -11,7 +11,7 @@ The current version of **IP-MON** takes quite a lot of manual effort to set up. 
 
 ## ReMon Prerequisites
 You will need:
-- A GNU/Linux distribution based on Debian. I **_strongly_** recommend Ubuntu 18.04 x64.
+- A GNU/Linux distribution based on Debian. I **_strongly_** recommend Ubuntu 18.04 x64 or 20.04 x86.
 - Ruby
 - CMake (>= 3.4.3)
 - The ReMon toolchain, which can be installed using the `bootstrap.sh` script.
@@ -20,13 +20,14 @@ You will need:
 
 ### Building GHUMVEE
 
-Building GHUMVEE is really easy. Just navigate to ReMon's root folder and type `make -f makefile.release`.
+Building GHUMVEE is really easy. The `bootstrap.sh` script used to install the toolchain sets up the build/ directory using CMake, where GHUMVEE can be built by simply running `make`.
 This will build an optimized and statically linked version of the GHUMVEE binary.
 
-Alternatively, you can also use these build configurations:
-- `Release-syms`: link-time optimized version of GHUMVEE (with symbol tables intact). Suitable for people who want to debug the Release build for some obscure reason. Build using `make -f makefile.release-with-syms`.
-- `Debug`: unoptimized version of GHUMVEE. This builds really fast and is suitable for people who want to debug GHUMVEE. Build using `make -f makefile.debug`.
-- `Debug-sanitize`: unoptimized version of GHUMVEE with address-sanitizer enabled. Might be useful to debug memory corruption bugs. Build using `make -f make.debug-sanitize`
+To more easily switch between build types and configurations, our CMakeLists.txt defines additional custom targets aimed at reconfiguring the build configuration. These can be executed by executing `make <desired configuration>` in the build/ directory. These targets are not all mutually exclusive. The targets are:
+- release: Configures the Release build of GHUMVEE. This version is optimized and ideal for looking at performance.
+- debug: Configures the debug build of GHUMVEE. This version is unoptimized and builds really fast. It is suitable for people who want to debug GHUMVEE.
+- block-shm: Configures GHUMVEE to use the old strategy of denying the variants access to shared memory resources
+- enable-shm: Configures GHUMVEE with the new strategy of handling shared memory using the hybrid in- and cross-process handling. This requires the 2.31 libc libraries to be used.
 
 You will find the compiled GHUMVEE binary in the MVEE/bin/<your configuration>/ folder.
  
@@ -89,15 +90,17 @@ To build IP-MON itself, navigate to /path/to/ReMon/IP-MON and type `./comp.sh`.
 
 ```
 cd /wherever/you/want/to/download/the/kernel
-git clone -b linux-4.4.y git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git
-cd linux-<insert version number here>
-patch -p1 < /path/to/ReMon/patches/linux-4.4.0-full-ipmon.patch
+sudo apt-get update
+sudo apt-get install linux-source-5.3.0
+tar jxf /usr/src/linux-source-5.3.0/linux-source-5.3.0.tar.bz2
+cd linux-source-5.3.0
+patch -p1 < /path/to/ReMon/patches/linux-5.3.0-full-ipmon.patch
 make menuconfig 
 # while you're in the config menu, you might want to bump the kernel tick rate up to 1000Hz
 # you can do so by navigating to "Processor type and features" > "Timer Frequency"
-make -j 8
-sudo make modules_install
-sudo make install
+# scripts/config --disable CONFIG_SYSTEM_TRUSTED_KEYS
+make -j$(nproc) deb-pkg LOCALVERSION=-ipmon
+sudo dpkg -i ../linux-headers*.deb ../linux-image*.deb ../linux-libc-dev*.deb
 ``` 
 
 ### Configuring the IP-MON policy
@@ -115,6 +118,16 @@ You cannot run **IP-MON** directly. GHUMVEE will automatically load and run **IP
 ### Older IP-MON version
 
 Although we no longer support the version of IP-MON we presented at USENIX ATC, you can still find its source code in this repository in the IP-MON-atc folder.
+
+### Using MPK
+
+**Do not this on a machine that does not support MPK!!**
+
+ReMon can, optionally, be configred to use MPK to protect IP-MON's ringbuffer and file map. This configuration uses PKU-based sandboxing techniques to place IP-MON in a trusted domain, while all application code executes in an untrusted domain. To enable simply uncomment `MVEE_IP_PKU_ENABLED` in MVEE_build_pku_config.h and recompile GHUMVEE and IP-MON.
+
+Additionally, this step requires some extra kernel modifications. **The resulting kernel should NEVER be ran on a machine that does not suport MPK!!** Use linux-5.4.0-full-ipmon-pku-assisted.patch instead of linux-5.3.0-full-ipmon.patch in the _Building the IP-MON kernel_ step to create and run a correct kernel.
+
+Seriously, **do NOT install this kernel on a machine that does not support MPK**.
 
 ## Further Tinkering
 
