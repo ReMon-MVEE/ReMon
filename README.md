@@ -121,9 +121,9 @@ Although we no longer support the version of IP-MON we presented at USENIX ATC, 
 
 ### Using MPK
 
-**Do not this on a machine that does not support MPK!!**
+**Do not do this on a machine that does not support MPK!!**
 
-ReMon can, optionally, be configred to use MPK to protect IP-MON's ringbuffer and file map. This configuration uses PKU-based sandboxing techniques to place IP-MON in a trusted domain, while all application code executes in an untrusted domain. To enable simply uncomment `MVEE_IP_PKU_ENABLED` in MVEE_build_pku_config.h and recompile GHUMVEE and IP-MON.
+ReMon can, optionally, be configred to use MPK to protect IP-MON's ringbuffer and file map. This configuration uses PKU to place IP-MON in a trusted domain, while all application code executes in an untrusted domain. To enable simply uncomment `MVEE_IP_PKU_ENABLED` in MVEE_build_pku_config.h and recompile GHUMVEE and IP-MON.
 
 Additionally, this step requires some extra kernel modifications. **The resulting kernel should NEVER be ran on a machine that does not suport MPK!!** Use linux-5.4.0-full-ipmon-pku-assisted.patch instead of linux-5.3.0-full-ipmon.patch in the _Building the IP-MON kernel_ step to create and run a correct kernel.
 
