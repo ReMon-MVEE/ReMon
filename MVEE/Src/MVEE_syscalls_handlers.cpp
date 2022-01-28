@@ -4650,8 +4650,11 @@ LOG_ARGS(sendto)
 {
 	GETTEXTADDRDIRECT(variantnum, text_addr, 5, ARG6(variantnum));
 
-    LOGGING_SHARED_POINTER_REDIRECTION(variantnum, 2, unsigned char*)
-	auto buf_str = call_serialize_io_buffer(variantnum, arg2_pointer, ARG3(variantnum));
+	std::string buf;
+	if (IS_TAGGED_ADDRESS(ARG2(variantnum)))
+		buf = "shared memory";
+	else
+		buf = call_serialize_io_buffer(variantnum, (unsigned char*) ARG2(variantnum), ARG3(variantnum));
 
 	debugf("%s - SYS_SENDTO(%d, " PTRSTR " (%s), %zd, %u = %s, 0x" PTRSTR " (%s), %d)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
@@ -4665,15 +4668,18 @@ LOG_ARGS(sendto)
  
 PRECALL(sendto)
 {
-    REPLACE_SHARED_POINTER_ARG(0, 2);
     CHECKPOINTER(2);
     CHECKPOINTER(5);
     CHECKARG(6);
     CHECKARG(4);
     CHECKARG(3);
     CHECKBUFFER(5, ARG6(0));
-    CHECKBUFFER(2, ARG3(0));
+    if (!IS_TAGGED_ADDRESS(ARG2(0)))
+	{
+		CHECKBUFFER(2, ARG3(0));
+	}
     CHECKFD(1);
+    REPLACE_SHARED_POINTER_ARG(0, 2);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
