@@ -4659,7 +4659,7 @@ LOG_ARGS(sendto)
 	debugf("%s - SYS_SENDTO(%d, " PTRSTR " (%s), %zd, %u = %s, 0x" PTRSTR " (%s), %d)\n",
 		   call_get_variant_pidstr(variantnum).c_str(),
 		   (int)ARG1(variantnum), 
-		   (unsigned long)ARG2(variantnum), buf_str.c_str(),
+		   (unsigned long)ARG2(variantnum), buf.c_str(),
 		   (size_t)ARG3(variantnum),
 		   (unsigned int)ARG4(variantnum), getTextualSocketMsgFlags(ARG4(variantnum)).c_str(),
 		   (unsigned long)ARG5(variantnum), text_addr.c_str(),
