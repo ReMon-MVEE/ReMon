@@ -10,7 +10,7 @@ __home_dir="$(readlink -f $(dirname ${BASH_SOURCE}))"
 
 
 __docker_image="shmvee:ae"
-__volumes="-v $__home_dir:/home/eval/artifact/"
+__volumes="-v $__home_dir/../:/home/eval/artifact/"
 __ports="-p 8080:8080"
 
 
@@ -28,9 +28,9 @@ build_docker() {
 
 
 bootstrap_docker() {
-    docker run                                               \
-        $__volumes --workdir="/home/eval/artifact/"          \
-        --env BUILDALL=0 --name artifact -it $__docker_image \
+    docker run                                                           \
+        $__volumes --workdir="/home/eval/artifact/eurosys2022-artifact/" \
+        --env BUILDALL=0 --name artifact -it $__docker_image             \
         ./bootstrap.sh
     docker commit artifact $__docker_image
     docker rm artifact
@@ -38,9 +38,9 @@ bootstrap_docker() {
 
 
 build_all_docker() {
-    docker run                                      \
-        $__volumes --workdir="/home/eval/artifact/" \
-        -it $__docker_image                         \
+    docker run                                                           \
+        $__volumes --workdir="/home/eval/artifact/eurosys2022-artifact/" \
+        -it $__docker_image                                              \
         ./benchmarks/scripts/build_all.sh
 }
 
