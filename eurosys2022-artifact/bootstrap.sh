@@ -3,6 +3,10 @@
 __home_dir="$(readlink -f $(dirname ${BASH_SOURCE}))"
 cd "$__home_dir"
 
+sudo apt install -y libpulse-dev libxv-dev libxext-dev libx11-dev libx11-xcb-dev libxtst-dev libfreetype6-dev    \
+        libfontconfig-dev gperf libpcre3-dev libexpat1-dev autopoint libtool libtool-bin libsndfile1-dev gettext \
+        libssl-dev python libice-dev libsm-dev uuid-dev gcc binutils
+
 ## ReMon Setup #########################################################################################################
 cd ../
 ./bootstrap.sh
@@ -32,6 +36,8 @@ patch -p 2 -d ./ < ../eurosys2022-artifact/benchmarks/patches/ipmon-mplayer.patc
 ./comp.sh
 mv ./libipmon.so ./libipmon-mplayer.so
 patch -R -p 2 -d ./ < ../eurosys2022-artifact/benchmarks/patches/ipmon-mplayer.patch
+
+ln -fs ./libipmon-default.so ./libipmon.so
 ## ReMon Setup #########################################################################################################
 
 
@@ -85,10 +91,6 @@ fi
 ## Benchmark Setup #####################################################################################################
 cd "$__home_dir/benchmarks/"
 
-sudo apt install -y libpulse-dev libxv-dev libxext-dev libx11-dev libx11-xcb-dev libxtst-dev libfreetype6-dev    \
-        libfontconfig-dev gperf libpcre3-dev libexpat1-dev autopoint libtool libtool-bin libsndfile1-dev gettext \
-        libssl-dev python libice-dev libsm-dev uuid-dev gcc
-
 if [ ! -d "./pulseaudio/" ]
 then
     git clone --depth 1 -b v14.2 git://anongit.freedesktop.org/pulseaudio/pulseaudio pulseaudio
@@ -111,7 +113,8 @@ then
     tar -xf nginx-1.18.0.tar.gz
     mv nginx-1.18.0 nginx
     patch -d ./nginx/ -p 2 < ./patches/nginx.patch
-    ln -fs "$__home_dir/benchmarks/conf/nginx.conf" "$__home_dir/benchmarks/nginx/conf/nginx.conf"
+    cp "$__home_dir/benchmarks/conf/nginx.conf" "$__home_dir/benchmarks/nginx/conf/"
+    cp "$__home_dir/benchmarks/input/index.html" "$__home_dir/benchmarks/nginx/html/"
 fi
 
 if [ ! -d "./apache/" ]
@@ -125,10 +128,11 @@ then
     tar -xf ./apr-util-1.6.1.tar.gz
     mv ./apr-util-1.6.1/ apr-util/
     cd ../
+    cp "$__home_dir/benchmarks/conf/httpd.conf.in" "$__home_dir/benchmarks/apache/docs/conf/"
+    cp "$__home_dir/benchmarks/input/index.html" "$__home_dir/benchmarks/apache/docs/docroot/"
     ./buildconf
     cd ../
     patch -p 2 -d ./apache/ < ./patches/apache.patch
-    ln -fs "$__home_dir/benchmarks/conf/httpd.conf.in" "$__home_dir/benchmarks/apache/doc/conf/httpd.conf.in"
 fi
 
 if [ ! -d "./mplayer/" ]

@@ -11,8 +11,6 @@
 
 #define MAX_DATA_SIZE     4096*16
 #define SHM_TEST_COUNT    100000
-#define PIPE_TEST_COUNT   100000
-#define SOCKET_TEST_COUNT 100000
 static unsigned long long SIZES_ARRAY[] = 
 {
     1,

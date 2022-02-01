@@ -34,18 +34,26 @@ do
       ;;
     --wrapped-pulseaudio)
       ln -fs "$__home_dir/benchmarks/out/pulseaudio/wrapped/"* "$__home_dir/../patched_binaries/gnomelibs/amd64/"
+      __ld_preload="$__ld_preload:$__home_dir/benchmarks/out/pulseaudio/wrapped/libpulse.so.0"
+      __ld_preload="$__ld_preload:$__home_dir/benchmarks/out/pulseaudio/wrapped/libpulsecommon-14.2.so"
       shift
       ;;
     --default-pulseaudio)
       ln -fs "$__home_dir/benchmarks/out/pulseaudio/default/"* "$__home_dir/../patched_binaries/gnomelibs/amd64/"
+      __ld_preload="$__ld_preload:$__home_dir/benchmarks/out/pulseaudio/default/libpulse.so.0"
+      __ld_preload="$__ld_preload:$__home_dir/benchmarks/out/pulseaudio/default/libpulsecommon-14.2.so"
       shift
       ;;
     --wrapped-fontconfig)
-      ln -fs "$__home_dir/benchmarks/out/fontconfig/wrapped/libfontconfig.so.1" "$__home_dir/../patched_binaries/gnomelibs/amd64/"
+      ln -fs "$__home_dir/benchmarks/out/fontconfig/wrapped/libfontconfig.so.1" \
+        "$__home_dir/../patched_binaries/gnomelibs/amd64/"
+      __ld_preload="$__ld_preload:$__home_dir/benchmarks/out/fontconfig/wrapped/libfontconfig.so.1"
       shift
       ;;
     --default-fontconfig)
-      ln -fs "$__home_dir/benchmarks/out/fontconfig/default/libfontconfig.so.1" "$__home_dir/../patched_binaries/gnomelibs/amd64/"
+      ln -fs "$__home_dir/benchmarks/out/fontconfig/default/libfontconfig.so.1" \
+        "$__home_dir/../patched_binaries/gnomelibs/amd64/"
+      __ld_preload="$__ld_preload:$__home_dir/benchmarks/out/fontconfig/default/libfontconfig.so.1"
       shift
       ;;
     --unwrapped-bursts)
@@ -159,7 +167,7 @@ else
   then
     echo " > enabling ipmon for this run"
     ln -fs "$__home_dir/benchmarks/conf/MVEE-ipmon.ini" "$__home_dir/../MVEE/bin/$__build/MVEE.ini"
-    # ln -fs "$__home_dir/../IP-MON/libipmon-$__benchmark.so" "$__home_dir/../IP-MON/libipmon.so"
+    ln -fs "$__home_dir/../IP-MON/libipmon-$__benchmark.so" "$__home_dir/../IP-MON/libipmon.so"
   else
     echo " > disabling ipmon for this run"
     ln -fs "$__home_dir/benchmarks/conf/MVEE.ini" "$__home_dir/../MVEE/bin/$__build/MVEE.ini"
@@ -168,7 +176,7 @@ else
   cd "$__home_dir/../MVEE/bin/$__build/"
   echo " > executing command: ./mvee -N $__variants -- $__run"
   ./mvee -N "$__variants" -- "$__run"
-  # ln -fs "$__home_dir/../IP-MON/libipmon-default.so" "$__home_dir/../IP-MON/libipmon.so"
+  ln -fs "$__home_dir/../IP-MON/libipmon-default.so" "$__home_dir/../IP-MON/libipmon.so"
 
 fi
 
