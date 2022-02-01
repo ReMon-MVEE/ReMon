@@ -1,0 +1,69 @@
+diff --git a/IP-MON/MVEE_ipmon.cpp b/IP-MON/MVEE_ipmon.cpp
+index d11cd91..3219141 100644
+--- a/IP-MON/MVEE_ipmon.cpp
++++ b/IP-MON/MVEE_ipmon.cpp
+@@ -3992,7 +3992,7 @@ void __attribute__((constructor)) init()
+ 	IPMON_MASK_SET(mask, __NR_preadv);
+ 	IPMON_MASK_SET(mask, __NR_select);
+ 	IPMON_MASK_SET(mask, __NR_poll); 
+-	IPMON_MASK_SET(mask, __NR_ioctl);
++	// IPMON_MASK_SET(mask, __NR_ioctl);
+ # if defined(IPMON_SUPPORT_FUTEX) || defined(IPMON_USE_FUTEXES_FOR_BLOCKING_CALLS)
+ 	IPMON_MASK_SET(mask, __NR_futex);
+ # endif
+@@ -4006,7 +4006,7 @@ void __attribute__((constructor)) init()
+ 	IPMON_MASK_SET(mask, __NR_syncfs);
+ 
+ 	// conditionally allow
+-	IPMON_MASK_SET(mask, __NR_write);
++	// IPMON_MASK_SET(mask, __NR_write);
+ 	IPMON_MASK_SET(mask, __NR_writev);
+ 	IPMON_MASK_SET(mask, __NR_pwrite64); 
+ 	IPMON_MASK_SET(mask, __NR_pwritev); 
+@@ -4017,7 +4017,7 @@ void __attribute__((constructor)) init()
+ 	IPMON_MASK_SET(mask, __NR_epoll_wait);
+ #    endif
+ 	IPMON_MASK_SET(mask, __NR_recvfrom);
+-	IPMON_MASK_SET(mask, __NR_recvmsg);
++	// IPMON_MASK_SET(mask, __NR_recvmsg);
+ 	IPMON_MASK_SET(mask, __NR_recvmmsg);
+ 	IPMON_MASK_SET(mask, __NR_getsockname);
+ 	IPMON_MASK_SET(mask, __NR_getpeername);
+@@ -4038,22 +4038,22 @@ void __attribute__((constructor)) init()
+ #     if CURRENT_POLICY >= FULL_SYSCALLS
+ 
+ 	// Memory Management
+-	IPMON_MASK_SET(mask, __NR_mmap);
+-	IPMON_MASK_SET(mask, __NR_munmap);
++	// IPMON_MASK_SET(mask, __NR_mmap);
++	// IPMON_MASK_SET(mask, __NR_munmap);
+ 	IPMON_MASK_SET(mask, __NR_mremap);
+ 	IPMON_MASK_SET(mask, __NR_mprotect);
+ 	IPMON_MASK_SET(mask, __NR_brk);
+ 
+ 	// File Management
+-	IPMON_MASK_SET(mask, __NR_open);
+-	IPMON_MASK_SET(mask, __NR_openat);
+-	IPMON_MASK_SET(mask, __NR_close);
++	// IPMON_MASK_SET(mask, __NR_open);
++	// IPMON_MASK_SET(mask, __NR_openat);
++	// IPMON_MASK_SET(mask, __NR_close);
+ 	IPMON_MASK_SET(mask, __NR_fcntl);
+ 	IPMON_MASK_SET(mask, __NR_dup);
+ 	IPMON_MASK_SET(mask, __NR_dup2);
+ 	IPMON_MASK_SET(mask, __NR_dup3);
+ 	IPMON_MASK_SET(mask, __NR_pipe);
+-	IPMON_MASK_SET(mask, __NR_pipe2);
++	// IPMON_MASK_SET(mask, __NR_pipe2);
+ 	IPMON_MASK_SET(mask, __NR_inotify_init);
+ 	IPMON_MASK_SET(mask, __NR_inotify_init1);
+ 
+@@ -4063,7 +4063,7 @@ void __attribute__((constructor)) init()
+ 	IPMON_MASK_SET(mask, __NR_mkdir);
+ 
+ 	// Socket Management
+-	IPMON_MASK_SET(mask, __NR_socket);
++	// IPMON_MASK_SET(mask, __NR_socket);
+ 	IPMON_MASK_SET(mask, __NR_socketpair);
+ 	IPMON_MASK_SET(mask, __NR_bind);
+ 	IPMON_MASK_SET(mask, __NR_connect);

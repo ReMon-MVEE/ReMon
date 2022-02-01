@@ -1,0 +1,66 @@
+diff --git a/nginx/src/core/ngx_cycle.c b/nginx/src/core/ngx_cycle.c
+index 95f4bdf..86d77b7 100644
+--- a/nginx/src/core/ngx_cycle.c
++++ b/nginx/src/core/ngx_cycle.c
+@@ -18,7 +18,7 @@ static void ngx_clean_old_cycles(ngx_event_t *ev);
+ static void ngx_shutdown_timer_handler(ngx_event_t *ev);
+ 
+ 
+-volatile ngx_cycle_t  *ngx_cycle;
++__attribute__((nonsync)) volatile ngx_cycle_t  *ngx_cycle;
+ ngx_array_t            ngx_old_cycles;
+ 
+ static ngx_pool_t     *ngx_temp_pool;
+diff --git a/nginx/src/core/ngx_cycle.h b/nginx/src/core/ngx_cycle.h
+index 54fa2e6..a2330cd 100644
+--- a/nginx/src/core/ngx_cycle.h
++++ b/nginx/src/core/ngx_cycle.h
+@@ -136,7 +136,7 @@ ngx_shm_zone_t *ngx_shared_memory_add(ngx_conf_t *cf, ngx_str_t *name,
+ void ngx_set_shutdown_timer(ngx_cycle_t *cycle);
+ 
+ 
+-extern volatile ngx_cycle_t  *ngx_cycle;
++__attribute__((nonsync)) extern volatile ngx_cycle_t  *ngx_cycle;
+ extern ngx_array_t            ngx_old_cycles;
+ extern ngx_module_t           ngx_core_module;
+ extern ngx_uint_t             ngx_test_config;
+diff --git a/nginx/src/core/ngx_times.c b/nginx/src/core/ngx_times.c
+index 7964b00..7b5aded 100644
+--- a/nginx/src/core/ngx_times.c
++++ b/nginx/src/core/ngx_times.c
+@@ -27,7 +27,7 @@ static ngx_uint_t        slot;
+ static ngx_atomic_t      ngx_time_lock;
+ 
+ volatile ngx_msec_t      ngx_current_msec;
+-volatile ngx_time_t     *ngx_cached_time;
++__attribute__((nonsync)) volatile ngx_time_t     *ngx_cached_time;
+ volatile ngx_str_t       ngx_cached_err_log_time;
+ volatile ngx_str_t       ngx_cached_http_time;
+ volatile ngx_str_t       ngx_cached_http_log_time;
+diff --git a/nginx/src/core/ngx_times.h b/nginx/src/core/ngx_times.h
+index 49e0a8c..0fab57f 100644
+--- a/nginx/src/core/ngx_times.h
++++ b/nginx/src/core/ngx_times.h
+@@ -31,7 +31,7 @@ time_t ngx_next_time(time_t when);
+ #define ngx_next_time_n      "mktime()"
+ 
+ 
+-extern volatile ngx_time_t  *ngx_cached_time;
++__attribute__((nonsync)) extern volatile ngx_time_t  *ngx_cached_time;
+ 
+ #define ngx_time()           ngx_cached_time->sec
+ #define ngx_timeofday()      (ngx_time_t *) ngx_cached_time
+
+diff --git a/nginx/auto/cc/conf b/nginx/auto/cc/conf
+index afbca62..fe24345 100644
+--- a/nginx/auto/cc/conf
++++ b/nginx/auto/cc/conf
+@@ -187,7 +187,7 @@ if [ "$NGX_PLATFORM" != win32 ]; then
+         ngx_feature_incs=
+         ngx_feature_path=
+         ngx_feature_libs=
+-        ngx_feature_test="long  n = 0;
++        ngx_feature_test="volatile long  n = 0;
+                           if (!__sync_bool_compare_and_swap(&n, 0, 1))
+                               return 1;
+                           if (__sync_fetch_and_add(&n, 1) != 1)
