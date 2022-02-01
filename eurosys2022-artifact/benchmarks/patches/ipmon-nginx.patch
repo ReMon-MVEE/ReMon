@@ -1,0 +1,42 @@
+diff --git a/IP-MON/MVEE_ipmon.cpp b/IP-MON/MVEE_ipmon.cpp
+index d11cd91..dda754c 100644
+--- a/IP-MON/MVEE_ipmon.cpp
++++ b/IP-MON/MVEE_ipmon.cpp
+@@ -3994,7 +3994,7 @@ void __attribute__((constructor)) init()
+ 	IPMON_MASK_SET(mask, __NR_poll); 
+ 	IPMON_MASK_SET(mask, __NR_ioctl);
+ # if defined(IPMON_SUPPORT_FUTEX) || defined(IPMON_USE_FUTEXES_FOR_BLOCKING_CALLS)
+-	IPMON_MASK_SET(mask, __NR_futex);
++	// IPMON_MASK_SET(mask, __NR_futex);
+ # endif
+ 
+ #  if CURRENT_POLICY >= NONSOCKET_RW_POLICY
+@@ -4017,7 +4017,7 @@ void __attribute__((constructor)) init()
+ 	IPMON_MASK_SET(mask, __NR_epoll_wait);
+ #    endif
+ 	IPMON_MASK_SET(mask, __NR_recvfrom);
+-	IPMON_MASK_SET(mask, __NR_recvmsg);
++	// IPMON_MASK_SET(mask, __NR_recvmsg);
+ 	IPMON_MASK_SET(mask, __NR_recvmmsg);
+ 	IPMON_MASK_SET(mask, __NR_getsockname);
+ 	IPMON_MASK_SET(mask, __NR_getpeername);
+@@ -4026,7 +4026,7 @@ void __attribute__((constructor)) init()
+ #    if CURRENT_POLICY >= SOCKET_RW_POLICY
+ 	// unconditionally allow
+ 	IPMON_MASK_SET(mask, __NR_sendto);
+-	IPMON_MASK_SET(mask, __NR_sendmsg);
++	// IPMON_MASK_SET(mask, __NR_sendmsg);
+ 	IPMON_MASK_SET(mask, __NR_sendmmsg);
+ 	IPMON_MASK_SET(mask, __NR_sendfile);
+ 	IPMON_MASK_SET(mask, __NR_shutdown);
+@@ -4038,8 +4038,8 @@ void __attribute__((constructor)) init()
+ #     if CURRENT_POLICY >= FULL_SYSCALLS
+ 
+ 	// Memory Management
+-	IPMON_MASK_SET(mask, __NR_mmap);
+-	IPMON_MASK_SET(mask, __NR_munmap);
++	// IPMON_MASK_SET(mask, __NR_mmap);
++	// IPMON_MASK_SET(mask, __NR_munmap);
+ 	IPMON_MASK_SET(mask, __NR_mremap);
+ 	IPMON_MASK_SET(mask, __NR_mprotect);
+ 	IPMON_MASK_SET(mask, __NR_brk);

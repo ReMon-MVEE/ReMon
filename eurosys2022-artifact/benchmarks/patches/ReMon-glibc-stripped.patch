@@ -1,0 +1,838 @@
+diff --git a/csu/libc-start.c b/csu/libc-start.c
+index 32d891f3e1..092f5c5a30 100644
+--- a/csu/libc-start.c
++++ b/csu/libc-start.c
+@@ -296,6 +296,7 @@ LIBC_START_MAIN (int (*main) (int, char **, char ** MAIN_AUXVEC_DECL),
+   (void) syscall(MVEE_RUNS_UNDER_MVEE_CONTROL, &mvee_sync_enabled, &mvee_infinite_loop, 
+ 				 &mvee_num_variants, NULL, &mvee_master_variant, &mvee_shm_tag);
+ 
++#undef EXPOSE_MEMCPY_TO_DYNINST
+ #ifdef EXPOSE_MEMCPY_TO_DYNINST
+   extern uint64_t mvee_shm_memcpy_ptr_for_gs_segment;
+   extern void *mvee_shm_memcpy_dyninst (void *__restrict dest, const void *__restrict src, size_t n);
+diff --git a/csu/mvee-shm-agent.c b/csu/mvee-shm-agent.c
+index 5c6e2fedd6..69651d5225 100644
+--- a/csu/mvee-shm-agent.c
++++ b/csu/mvee-shm-agent.c
+@@ -16,17 +16,6 @@
+ #include <stdint.h>
+ #include <string.h>
+ 
+-// ========================================================================================================================
+-// Forward declarations for the original (ifunc) implementations of mem* functions
+-// ========================================================================================================================
+-extern __typeof (memcpy)  orig_memcpy;
+-extern __typeof (memmove) orig_memmove;
+-extern __typeof (memset)  orig_memset;
+-extern __typeof (memchr)  orig_memchr;
+-extern __typeof (memcmp)  orig_memcmp;
+-extern __typeof (strlen)  orig_strlen;
+-extern __typeof (strcmp)  orig_strcmp;
+-
+ // ========================================================================================================================
+ // Types of SHM operations
+ // ========================================================================================================================
+@@ -139,7 +128,7 @@ else if (size == 8)
+       data_in_buffer = true;                                                                                       \
+     /* Put the original value in the buffer */                                                                     \
+     if (data_in_buffer)                                                                                            \
+-      orig_memcpy(&entry->data, &__shm_val, sizeof(utype));                                                        \
++      memcpy(&entry->data, &__shm_val, sizeof(utype));                                                        \
+   } while(0)
+ 
+ #define ATOMICRMW_LEADER_BY_SIZE(operation, size)                                                                  \
+@@ -158,7 +147,7 @@ else if (size == 8)
+     {                                                                                                              \
+       /* If the original value differed in the leader, update it before doing the operation */                     \
+       if (data_in_buffer)                                                                                          \
+-        orig_memcpy(SHARED_TO_SHADOW_POINTER(out, out_address), &entry->data, sizeof(utype));                      \
++        memcpy(SHARED_TO_SHADOW_POINTER(out, out_address), &entry->data, sizeof(utype));                      \
+       ret.val = operation((utype*)SHARED_TO_SHADOW_POINTER(out, out_address), value, __ATOMIC_SEQ_CST);            \
+     }                                                                                                              \
+     else                                                                                                           \
+@@ -231,7 +220,7 @@ static inline void mvee_assert_same_size(size_t a, size_t b)
+ static void mvee_assert_same_store(const void* a, const void* b, const unsigned long size, bool might_contain_pointers)
+ {
+   /* Check if the buffers are the same. If they are, no issue! */
+-  if (!orig_memcmp(a, b, size))
++  if (!memcmp(a, b, size))
+     return;
+ 
+   /* Check if the buffers are equivalent. We implemented this check based on three assumptions:
+@@ -484,7 +473,7 @@ static mvee_shm_op_entry* mvee_shm_get_entry(size_t size)
+ // cmp          : a comparison value
+ static inline mvee_shm_op_ret mvee_shm_buffered_op(const unsigned char type, const void* in_address, const mvee_shm_table_entry* in, void* out_address, const mvee_shm_table_entry* out, const size_t size, const uint64_t value, const uint64_t cmp)
+ {
+-  mvee_shm_op_ret ret = { 0 };
++  mvee_shm_op_ret ret = { 0, 0 };
+   // If the memory operation has no size, don't do it, don't make an entry, and don't even check
+   if (unlikely(!size))
+     return ret;
+@@ -514,7 +503,7 @@ static inline mvee_shm_op_ret mvee_shm_buffered_op(const unsigned char type, con
+ 
+     /* The input comes from a non-SHM page, fill in the buffer */
+     if (unlikely(!in && ((type == MEMCPY) || (type == MEMMOVE))))
+-      orig_memcpy(&entry->data, in_address, size);
++      memcpy(&entry->data, in_address, size);
+ 
+     // Signal to followers that entry is available
+     orig_atomic_store_release(&entry->nr_of_variants_checked, 1);
+@@ -545,14 +534,14 @@ static inline mvee_shm_op_ret mvee_shm_buffered_op(const unsigned char type, con
+             LOAD_BY_SIZE(&local_ret, SHARED_TO_SHADOW_POINTER(in, in_address), size);
+ 
+             /* If these two loads differ, put the load from the SHM page in the buffer */
+-            data_in_buffer = orig_memcmp(out_address, &local_ret, size);
++            data_in_buffer = memcmp(out_address, &local_ret, size);
+           }
+           /* If no shadow memory, always use buffer */
+           else
+             data_in_buffer = true;
+ 
+           if (data_in_buffer)
+-            orig_memcpy(&entry->data, out_address, size);
++            memcpy(&entry->data, out_address, size);
+ 
+           break;
+         }
+@@ -581,63 +570,63 @@ static inline mvee_shm_op_ret mvee_shm_buffered_op(const unsigned char type, con
+                * If it **does** differ, we copy the modified data on the SHM page to the buffer, and use that copy as input.
+                */
+               if (in->shadow)
+-                data_in_buffer = orig_memcmp(SHARED_TO_SHADOW_POINTER(in, in_address), in_address, size);
++                data_in_buffer = memcmp(SHARED_TO_SHADOW_POINTER(in, in_address), in_address, size);
+               /* If no shadow memory, always use buffer */
+               else
+                 data_in_buffer = true;
+ 
+               if (data_in_buffer)
+-                orig_memcpy(&entry->data, in_address, size);
++                memcpy(&entry->data, in_address, size);
+               const void* buf_or_shadow = data_in_buffer ? &entry->data : SHARED_TO_SHADOW_POINTER(in, in_address);
+ 
+               if (out)
+               {
+                 /* We're reading/writing to and from a SHM page. */
+                 /* Write to actual SHM page, from (non-overlapping) buffer or local shadow copy */
+-                orig_memcpy(out_address, buf_or_shadow, size);
++                memcpy(out_address, buf_or_shadow, size);
+ 
+                 /* Write local shadow copy, from buffer (can memcpy!) or local shadow copy (memmove, if requested) */
+                 if (out->shadow)
+                 {
+                   if (type == MEMMOVE && !data_in_buffer)
+-                    orig_memmove(SHARED_TO_SHADOW_POINTER(out, out_address), buf_or_shadow, size);
++                    memmove(SHARED_TO_SHADOW_POINTER(out, out_address), buf_or_shadow, size);
+                   else
+-                    orig_memcpy(SHARED_TO_SHADOW_POINTER(out, out_address), buf_or_shadow, size);
++                    memcpy(SHARED_TO_SHADOW_POINTER(out, out_address), buf_or_shadow, size);
+                 }
+               }
+               else
+               {
+                 /* The input comes from a SHM page, the output goes to a non-SHM page. */
+                 /* Write to non-SHM page, from (non-overlapping) buffer or local shadow copy */
+-                orig_memcpy(out_address, buf_or_shadow, size);
++                memcpy(out_address, buf_or_shadow, size);
+               }
+             }
+             else
+             {
+               /* The input comes from a non-SHM page */
+               /* Write to actual SHM page, from (non-overlapping) non-SHM page */
+-              orig_memcpy(out_address, in_address, size);
++              memcpy(out_address, in_address, size);
+ 
+               /* Write local shadow copy, from (non-overlapping) non-SHM page */
+               if (out->shadow)
+-                orig_memcpy(SHARED_TO_SHADOW_POINTER(out, out_address), in_address, size);
++                memcpy(SHARED_TO_SHADOW_POINTER(out, out_address), in_address, size);
+             }
+             break;
+           }
+       case MEMSET:
+         {
+           /* Write to actual SHM page */
+-          orig_memset(out_address, value, size);
++          memset(out_address, value, size);
+ 
+           /* Write local shadow copy */
+           if (out->shadow)
+-            orig_memset(SHARED_TO_SHADOW_POINTER(out, out_address), value, size);
++            memset(SHARED_TO_SHADOW_POINTER(out, out_address), value, size);
+           break;
+         }
+       case MEMCHR:
+         {
+           /* Search on actual SHM page */
+-          void* shm_ret = orig_memchr(in_address, value, size);
++          void* shm_ret = memchr(in_address, value, size);
+ 
+           /* Use offset as return value */
+           ret.val = shm_ret - in_address;
+@@ -646,7 +635,7 @@ static inline mvee_shm_op_ret mvee_shm_buffered_op(const unsigned char type, con
+           if (in->shadow)
+           {
+             /* Search on local shadow copy */
+-            void* local_ret = orig_memchr(SHARED_TO_SHADOW_POINTER(in, in_address), value, size);
++            void* local_ret = memchr(SHARED_TO_SHADOW_POINTER(in, in_address), value, size);
+ 
+             /* In case these differ, we have to return.. A different pointer in the followers? We'll encode the pointer offset in the buffer, reusing the second_address field */
+             data_in_buffer = (shm_ret != local_ret);
+@@ -673,14 +662,14 @@ static inline mvee_shm_op_ret mvee_shm_buffered_op(const unsigned char type, con
+             ATOMICLOAD_BY_SIZE(&local_ret, SHARED_TO_SHADOW_POINTER(in, in_address), size);
+ 
+             /* If these two loads differ, put the load from the SHM page in the buffer */
+-            data_in_buffer = orig_memcmp(out_address, &local_ret, size);
++            data_in_buffer = memcmp(out_address, &local_ret, size);
+           }
+           /* If no shadow memory, always use buffer */
+           else
+             data_in_buffer = true;
+ 
+           if (data_in_buffer)
+-            orig_memcpy(&entry->data, out_address, size);
++            memcpy(&entry->data, out_address, size);
+ 
+           break;
+         }
+@@ -701,7 +690,7 @@ static inline mvee_shm_op_ret mvee_shm_buffered_op(const unsigned char type, con
+           /* Comparison failed, cmp := *out_address */
+           if (!ret.cmp)
+           {
+-            orig_memcpy(&entry->data[1], &cmp, size);
++            memcpy(&entry->data[1], &cmp, size);
+             ret.val = cmp;
+           }
+           /* Comparison succeeded, *out_address := value . Adjust shadow memory accordingly. */
+@@ -826,7 +815,7 @@ static inline mvee_shm_op_ret mvee_shm_buffered_op(const unsigned char type, con
+         {
+           /* If data present, copy from the buffer. Otherwise, load from local shadow copy */
+           if (data_in_buffer)
+-            orig_memcpy(out_address, &entry->data, size);
++            memcpy(out_address, &entry->data, size);
+           else
+             LOAD_BY_SIZE(out_address, SHARED_TO_SHADOW_POINTER(in, in_address), size);
+           break;
+@@ -852,16 +841,16 @@ static inline mvee_shm_op_ret mvee_shm_buffered_op(const unsigned char type, con
+                * on whether we can relax any requested MEMMOVEs (if we **know** source and destination won't overlap).
+                */
+               if (type == MEMMOVE && !data_in_buffer)
+-                orig_memmove(SHARED_TO_SHADOW_POINTER(out, out_address), buf_or_shadow, size);
++                memmove(SHARED_TO_SHADOW_POINTER(out, out_address), buf_or_shadow, size);
+               else
+-                orig_memcpy(SHARED_TO_SHADOW_POINTER(out, out_address), buf_or_shadow, size);
++                memcpy(SHARED_TO_SHADOW_POINTER(out, out_address), buf_or_shadow, size);
+             }
+             else
+             {
+               /* The input comes from a SHM page, the output goes to a non-SHM page. As we know **for a fact** that destination buffer does
+                * not overlap with the input buffer (either in the SHM buffer, or the local shadow page), we use a memcpy, even for MEMMOVE.
+                */
+-              orig_memcpy(out_address, buf_or_shadow, size);
++              memcpy(out_address, buf_or_shadow, size);
+             }
+           }
+           else
+@@ -869,7 +858,7 @@ static inline mvee_shm_op_ret mvee_shm_buffered_op(const unsigned char type, con
+             /* The input comes from a non-SHM page */
+             /* Write local shadow copy */
+             if (out->shadow)
+-              orig_memcpy(SHARED_TO_SHADOW_POINTER(out, out_address), in_address, size);
++              memcpy(SHARED_TO_SHADOW_POINTER(out, out_address), in_address, size);
+           }
+           break;
+         }
+@@ -877,7 +866,7 @@ static inline mvee_shm_op_ret mvee_shm_buffered_op(const unsigned char type, con
+         {
+           /* Write local shadow copy */
+           if (out->shadow)
+-            orig_memset(SHARED_TO_SHADOW_POINTER(out, out_address), value, size);
++            memset(SHARED_TO_SHADOW_POINTER(out, out_address), value, size);
+           break;
+         }
+       case MEMCHR:
+@@ -888,7 +877,7 @@ static inline mvee_shm_op_ret mvee_shm_buffered_op(const unsigned char type, con
+           else
+           {
+             /* Search on local shadow copy */
+-            void* local_ret = orig_memchr(SHARED_TO_SHADOW_POINTER(in, in_address), value, size);
++            void* local_ret = memchr(SHARED_TO_SHADOW_POINTER(in, in_address), value, size);
+ 
+             /* Use offset as return value */
+             ret.val = local_ret - in_address;
+@@ -900,7 +889,7 @@ static inline mvee_shm_op_ret mvee_shm_buffered_op(const unsigned char type, con
+         {
+           /* If data present, copy from the buffer. Otherwise, load from local shadow copy */
+           if (data_in_buffer)
+-            orig_memcpy(out_address, &entry->data, size);
++            memcpy(out_address, &entry->data, size);
+           else
+             ATOMICLOAD_BY_SIZE(out_address, SHARED_TO_SHADOW_POINTER(in, in_address), size);
+           break;
+@@ -919,7 +908,7 @@ static inline mvee_shm_op_ret mvee_shm_buffered_op(const unsigned char type, con
+           /* Comparison failed, cmp := *out_address */
+           if (!ret.cmp)
+           {
+-            orig_memcpy(&ret.val, &entry->data[1], size);
++            memcpy(&ret.val, &entry->data[1], size);
+           }
+           /* Comparison succeeded, *out_address := value . Adjust shadow memory accordingly. */
+           else if (out->shadow)
+@@ -974,7 +963,7 @@ static inline mvee_shm_op_ret mvee_shm_buffered_op(const unsigned char type, con
+ // ========================================================================================================================
+ mvee_shm_op_ret mvee_shm_op(unsigned char id, void* address, unsigned long size, unsigned long value, unsigned long cmp)
+ {
+-  mvee_shm_op_ret ret = { 0 };
++  mvee_shm_op_ret ret = { 0, 0 };
+ 
+   // Use SHM buffer
+   address = mvee_shm_decode_address(address);
+@@ -1018,273 +1007,6 @@ mvee_shm_op_ret mvee_shm_op(unsigned char id, void* address, unsigned long size,
+   return ret;
+ }
+ 
+-// ========================================================================================================================
+-// The MVEE SHM-specific implementations for the mem* functions.
+-// These functions decode tagged addresses, and use the SHM buffer.
+-// ========================================================================================================================
+-void *
+-mvee_shm_memcpy (void *__restrict dest, const void *__restrict src, size_t n)
+-{
+-  /* Decode addresses */
+-  void* shm_dest = mvee_shm_decode_address(dest);
+-  void* shm_src = mvee_shm_decode_address(src);
+-
+-  mvee_shm_table_entry* dest_entry = mvee_shm_table_get_entry(shm_dest);
+-  mvee_shm_table_entry* src_entry = mvee_shm_table_get_entry(shm_src);
+-
+-  if (unlikely(!dest_entry && !src_entry))
+-    mvee_error_shm_entry_not_present(dest);
+-
+-  mvee_shm_buffered_op(MEMCPY, src_entry ? shm_src : src, src_entry, dest_entry ? shm_dest : dest, dest_entry, n, 0, 0);
+-
+-  return dest;
+-}
+-
+-void *
+-mvee_shm_memcpy_dyninst(void *__restrict dest, const void *__restrict src, size_t n)
+-{
+-    if (   !((unsigned long long) src & 0x8000000000000000ull)
+-        && !((unsigned long long) dest & 0x8000000000000000ull) ) {
+-        return orig_memcpy(dest, src, n);
+-    } else {
+-        return mvee_shm_memcpy(dest, src, n);
+-    }
+-}
+-
+-uint64_t mvee_shm_memcpy_ptr_for_gs_segment;
+-
+-void *
+-mvee_shm_memmove (void *dest, const void * src, size_t n)
+-{
+-  /* Decode addresses */
+-  void* shm_dest = mvee_shm_decode_address(dest);
+-  void* shm_src = mvee_shm_decode_address(src);
+-  mvee_shm_table_entry* dest_entry = mvee_shm_table_get_entry(shm_dest);
+-  mvee_shm_table_entry* src_entry = mvee_shm_table_get_entry(shm_src);
+-  if (unlikely(!dest_entry && !src_entry))
+-    mvee_error_shm_entry_not_present(dest);
+-
+-  mvee_shm_buffered_op(MEMMOVE, src_entry ? shm_src : src, src_entry, dest_entry ? shm_dest : dest, dest_entry, n, 0, 0);
+-
+-  return dest;
+-}
+-
+-void *
+-mvee_shm_memset (void *dest, int ch, size_t len)
+-{
+-  /* Decode addresses */
+-  void* shm_dest = mvee_shm_decode_address(dest);
+-  mvee_shm_table_entry* entry = mvee_shm_table_get_entry(shm_dest);
+-  if (unlikely(!entry))
+-    mvee_error_shm_entry_not_present(dest);
+-
+-  mvee_shm_buffered_op(MEMSET, NULL, NULL, shm_dest, entry, len, ch, 0);
+-  return dest;
+-}
+-
+-void *
+-mvee_shm_memchr (void const *src, int c_in, size_t n)
+-{
+-  /* Decode addresses */
+-  void* shm_src = mvee_shm_decode_address(src);
+-  mvee_shm_table_entry* entry = mvee_shm_table_get_entry(shm_src);
+-  if (unlikely(!entry))
+-    mvee_error_shm_entry_not_present(src);
+-
+-  mvee_shm_op_ret ret = mvee_shm_buffered_op(MEMCHR, shm_src, entry, NULL, NULL, n, c_in, 0);
+-  return (void*)src + ret.val;
+-}
+-
+-int
+-mvee_shm_memcmp (const void *s1, const void *s2, size_t len)
+-{
+-  /* Decode addresses */
+-  const void* shm_s1 = mvee_shm_decode_address(s1);
+-  const void* shm_s2 = mvee_shm_decode_address(s2);
+-  mvee_shm_table_entry* s1_entry = mvee_shm_table_get_entry(shm_s1);
+-  mvee_shm_table_entry* s2_entry = mvee_shm_table_get_entry(shm_s2);
+-  if (unlikely(!s1_entry && !s2_entry))
+-    mvee_error_shm_entry_not_present(s1_entry);
+-
+-  // Get an entry in the replication buffer.
+-  // If both addresses are shared memory pointer, we will need a buffer of double length.
+-  mvee_shm_op_entry* entry = mvee_shm_get_entry((s1_entry && s2_entry) ? (len * 2) : len);
+-  if (likely(mvee_master_variant))
+-  {
+-      // Fill in the entry.
+-    entry->address = s1_entry ? shm_s1 : shm_s2;
+-    entry->second_address = (s1_entry && s2_entry) ? shm_s2 : NULL;
+-    entry->size = len;
+-    entry->type = MEMCMP;
+-
+-    // When the first pointer is a shared memory pointer, check if the shared memory contents are still the
+-    // same as in the shadow mapping, update the replication entry accordingly.
+-    unsigned char replication_type = 4;
+-    if (s1_entry)
+-    {
+-      // Copy the shared memory contents to the buffer and replace the pointer we'll be using from now on.
+-      // This ensures that our view of shared memory does not change over the course of this function.
+-      void* temp = entry->data;
+-      orig_memcpy(temp, shm_s1, len);
+-
+-      // Update entry if the contents of shared memory differ with the shadow
+-      if (s1_entry->shadow)
+-      {
+-        if (orig_memcmp(temp, SHARED_TO_SHADOW_POINTER(s1_entry, shm_s1), len))
+-          replication_type |= 1;
+-      }
+-      /* If no shadow memory, always use buffer */
+-      else
+-        replication_type |= 1;
+-      shm_s1 = temp;
+-    }
+-    else
+-      shm_s1 = s1;
+-    // same as for first pointer
+-    if (s2_entry)
+-    {
+-      // Copy the shared memory contents to the buffer and replace the pointer we'll be using from now on.
+-      // This ensures that our view of shared memory does not change over the course of this function.
+-      void* temp = entry->data + ((s1_entry && s2_entry) ? len : 0);
+-      orig_memcpy(temp, shm_s2, len);
+-
+-      // Update entry if the contents of shared memory differ with the shadow
+-      if (s2_entry->shadow)
+-      {
+-        if (orig_memcmp(temp, SHARED_TO_SHADOW_POINTER(s2_entry, shm_s2), len))
+-          replication_type |= 2;
+-      }
+-      /* If no shadow memory, always use buffer */
+-      else
+-        replication_type |= 2;
+-      shm_s2 = temp;
+-    }
+-    else
+-      shm_s2 = s2;
+-
+-    // save the return value for the memcmp.
+-    entry->value = orig_memcmp(shm_s1, shm_s2, len);
+-    orig_atomic_store_release(&entry->nr_of_variants_checked, 1);
+-    orig_atomic_store_release(&entry->replication_type, replication_type);
+-  }
+-  else
+-  {
+-    // Wait until entry is ready
+-    while (!orig_atomic_load_acquire(&entry->replication_type))
+-        arch_cpu_relax();
+-
+-    // Check entry
+-    mvee_assert_same_address(entry->address, (s1_entry ? shm_s1 : shm_s2));
+-    mvee_assert_same_address(entry->second_address, ((s1_entry && s2_entry) ? shm_s2 : NULL));
+-    mvee_assert_same_size(entry->size, len);
+-    mvee_assert_same_type(entry->type, MEMCMP);
+-
+-    if (s1_entry)
+-    {
+-      if (entry->replication_type & 1)
+-        shm_s1 = entry->data;
+-      else
+-        shm_s1 = SHARED_TO_SHADOW_POINTER(s1_entry, shm_s1);
+-    }
+-    else
+-      shm_s1 = s1;
+-    if (s2_entry)
+-    {
+-      if (entry->replication_type & 2)
+-        shm_s2 = entry->data + (s1_entry ? len : 0);
+-      else
+-        shm_s2 = SHARED_TO_SHADOW_POINTER(s2_entry, shm_s2);
+-    }
+-    else
+-      shm_s2 = s2;
+-
+-    // perform the memcmp
+-    int return_value = orig_memcmp(shm_s1, shm_s2, len);
+-
+-    // the return value for memcmp should be the same
+-    mvee_assert_same_value1(entry->value, return_value);
+-  }
+-
+-  return entry->value;
+-}
+-
+-int
+-mvee_shm_strcmp (const char *str1, const char *str2)
+-{
+-  /* Decode addresses */
+-  void* shm_str1 = mvee_shm_decode_address(str1);
+-  void* shm_str2 = mvee_shm_decode_address(str2);
+-  mvee_shm_table_entry* str1_entry = mvee_shm_table_get_entry(shm_str1);
+-  mvee_shm_table_entry* str2_entry = mvee_shm_table_get_entry(shm_str2);
+-  if (unlikely(!str1_entry && !str2_entry))
+-    mvee_error_shm_entry_not_present(str1_entry);
+-
+-  // Get an entry in the replication buffer.
+-  mvee_shm_op_entry* entry = mvee_shm_get_entry(sizeof(int));
+-  if (likely(mvee_master_variant))
+-  {
+-      // Fill in the entry.
+-    entry->address = str1_entry ? shm_str1 : shm_str2;
+-    entry->second_address = (str1_entry && str2_entry) ? shm_str2 : NULL;
+-    entry->type = STRCMP;
+-
+-    // save the return value
+-    *(int*)entry->data = orig_strcmp(str1_entry ? shm_str1 : str1, str2_entry ? shm_str2 : str2);
+-    orig_atomic_store_release(&entry->nr_of_variants_checked, 1);
+-    orig_atomic_store_release(&entry->replication_type, 2);
+-  }
+-  else
+-  {
+-    // Wait until entry is ready
+-    while (!orig_atomic_load_acquire(&entry->replication_type))
+-        arch_cpu_relax();
+-
+-    // Check entry
+-    mvee_assert_same_address(entry->address, (str1_entry ? shm_str1 : shm_str2));
+-    mvee_assert_same_address(entry->second_address, ((str1_entry && str2_entry) ? shm_str2 : NULL));
+-    mvee_assert_same_type(entry->type, STRCMP);
+-  }
+-
+-  return entry->value;
+-}
+-
+-size_t
+-mvee_shm_strlen (const char *str)
+-{
+-  const char *shm_str = mvee_shm_decode_address(str);
+-  mvee_shm_table_entry* shm_entry = mvee_shm_table_get_entry(shm_str);
+-  if (unlikely(!shm_entry))
+-    mvee_error_shm_entry_not_present(str);
+-
+-  // We're allocating sizeof(size_t) data since entry->value is only uint32_t.
+-  mvee_shm_op_entry* entry = mvee_shm_get_entry(sizeof(size_t));
+-  if (likely(mvee_master_variant))
+-  {
+-    entry->address = shm_str;
+-    entry->type    = STRLEN;
+-
+-    // There isn't much point to any complicated shadow mapping stuff here.
+-    // If the result for the shared and shadow mapping is the same, we could use either one. If it's different, we'd
+-    // have to use the result from the shared mapping... So, we might as well just use the result from the shared
+-    // mapping from the start. Maybe we could force the shadow results in both variants to be the same?
+-    *(size_t*)entry->data = orig_strlen(shm_str);
+-    orig_atomic_store_release(&entry->nr_of_variants_checked, 1);
+-    orig_atomic_store_release(&entry->replication_type, 2);
+-  }
+-  else
+-  {
+-    // Wait until entry is ready
+-    while (!orig_atomic_load_acquire(&entry->replication_type))
+-        arch_cpu_relax();
+-
+-    // Check entry
+-    mvee_assert_same_type(entry->type, STRLEN);
+-    mvee_assert_same_address(entry->address, shm_str);
+-  }
+-
+-  return *(size_t*)entry->data;
+-}
+-
+ // ========================================================================================================================
+ // Hooks for mmap and related functions
+ // ========================================================================================================================
+diff --git a/sysdeps/x86_64/multiarch/ifunc-memmove.h b/sysdeps/x86_64/multiarch/ifunc-memmove.h
+index 81673d2019..d684ab5a64 100644
+--- a/sysdeps/x86_64/multiarch/ifunc-memmove.h
++++ b/sysdeps/x86_64/multiarch/ifunc-memmove.h
+@@ -41,41 +41,17 @@ IFUNC_SELECTOR (void)
+ {
+   const struct cpu_features* cpu_features = __get_cpu_features ();
+ 
+-  if (CPU_FEATURES_ARCH_P (cpu_features, Prefer_ERMS)
+-      || CPU_FEATURES_ARCH_P (cpu_features, Prefer_FSRM))
+-    return OPTIMIZE (erms);
+-
+-  if (CPU_FEATURES_ARCH_P (cpu_features, AVX512F_Usable)
+-      && !CPU_FEATURES_ARCH_P (cpu_features, Prefer_No_AVX512))
+-    {
+-      if (CPU_FEATURES_ARCH_P (cpu_features, Prefer_No_VZEROUPPER))
+-	return OPTIMIZE (avx512_no_vzeroupper);
+-
+-      if (CPU_FEATURES_CPU_P (cpu_features, ERMS))
+-	return OPTIMIZE (avx512_unaligned_erms);
+-
+-      return OPTIMIZE (avx512_unaligned);
+-    }
+-
+-  if (CPU_FEATURES_ARCH_P (cpu_features, AVX_Fast_Unaligned_Load))
+-    {
+-      if (CPU_FEATURES_CPU_P (cpu_features, ERMS))
+-	return OPTIMIZE (avx_unaligned_erms);
+-
+-      return OPTIMIZE (avx_unaligned);
+-    }
+-
+-  if (!CPU_FEATURES_CPU_P (cpu_features, SSSE3)
+-      || CPU_FEATURES_ARCH_P (cpu_features, Fast_Unaligned_Copy))
+-    {
++  //if (!CPU_FEATURES_CPU_P (cpu_features, SSSE3)
++  //    || CPU_FEATURES_ARCH_P (cpu_features, Fast_Unaligned_Copy))
++  //  {
+       if (CPU_FEATURES_CPU_P (cpu_features, ERMS))
+ 	return OPTIMIZE (sse2_unaligned_erms);
+ 
+       return OPTIMIZE (sse2_unaligned);
+-    }
++  //  }
+ 
+-  if (CPU_FEATURES_ARCH_P (cpu_features, Fast_Copy_Backward))
+-    return OPTIMIZE (ssse3_back);
++  //if (CPU_FEATURES_ARCH_P (cpu_features, Fast_Copy_Backward))
++  //  return OPTIMIZE (ssse3_back);
+ 
+-  return OPTIMIZE (ssse3);
++  //return OPTIMIZE (ssse3);
+ }
+diff --git a/sysdeps/x86_64/multiarch/memchr.c b/sysdeps/x86_64/multiarch/memchr.c
+index 345a751628..bf6b2b3765 100644
+--- a/sysdeps/x86_64/multiarch/memchr.c
++++ b/sysdeps/x86_64/multiarch/memchr.c
+@@ -26,22 +26,10 @@
+ # define SYMBOL_NAME memchr
+ # include "ifunc-avx2.h"
+ 
+-libc_ifunc_redirected (__redirect_memchr, orig_memchr, IFUNC_SELECTOR ());
+-
+-extern __typeof (orig_memchr) mvee_shm_memchr;
+-
+-void *
+-mvee_memchr (void const *s, int c_in, size_t n)
+-{
+-  if ((unsigned long)s & 0x8000000000000000ull)
+-    return mvee_shm_memchr(s, c_in, n);
+-
+-  return orig_memchr(s, c_in, n);
+-}
+-
++libc_ifunc_redirected (__redirect_memchr, memchr, IFUNC_SELECTOR ());
++strong_alias (memchr, __memchr)
+ # ifdef SHARED
+-__hidden_ver1 (mvee_memchr, __GI_memchr, __redirect_memchr)
+-  __attribute__((visibility ("hidden"))) __attribute_copy__ (orig_memchr);
++__hidden_ver1 (memchr, __GI_memchr, __redirect_memchr)
++  __attribute__((visibility ("hidden"))) __attribute_copy__ (memchr);
+ # endif
+-strong_alias(mvee_memchr, memchr)
+ #endif
+diff --git a/sysdeps/x86_64/multiarch/memcmp.c b/sysdeps/x86_64/multiarch/memcmp.c
+index d83cb6708b..2605d3aa10 100644
+--- a/sysdeps/x86_64/multiarch/memcmp.c
++++ b/sysdeps/x86_64/multiarch/memcmp.c
+@@ -26,24 +26,12 @@
+ # define SYMBOL_NAME memcmp
+ # include "ifunc-memcmp.h"
+ 
+-libc_ifunc_redirected (__redirect_memcmp, orig_memcmp, IFUNC_SELECTOR ());
+-
+-extern __typeof (orig_memcmp) mvee_shm_memcmp;
+-
+-int
+-mvee_memcmp (const void *s1, const void *s2, size_t len)
+-{
+-  if ((unsigned long)s1 & 0x8000000000000000ull || (unsigned long)s2 & 0x8000000000000000ull)
+-    return mvee_shm_memcmp(s1, s2, len);
+-  return orig_memcmp(s1, s2, len);
+-}
+-
++libc_ifunc_redirected (__redirect_memcmp, memcmp, IFUNC_SELECTOR ());
+ # undef bcmp
+-weak_alias (mvee_memcmp, bcmp)
++weak_alias (memcmp, bcmp)
+ 
+ # ifdef SHARED
+-__hidden_ver1 (mvee_memcmp, __GI_memcmp, __redirect_memcmp)
+-  __attribute__ ((visibility ("hidden"))) __attribute_copy__ (mvee_memcmp);
++__hidden_ver1 (memcmp, __GI_memcmp, __redirect_memcmp)
++  __attribute__ ((visibility ("hidden"))) __attribute_copy__ (memcmp);
+ # endif
+-strong_alias(mvee_memcmp, memcmp)
+ #endif
+diff --git a/sysdeps/x86_64/multiarch/memcpy.c b/sysdeps/x86_64/multiarch/memcpy.c
+index 20239e6d74..9eb2ad44ec 100644
+--- a/sysdeps/x86_64/multiarch/memcpy.c
++++ b/sysdeps/x86_64/multiarch/memcpy.c
+@@ -26,27 +26,14 @@
+ # define SYMBOL_NAME memcpy
+ # include "ifunc-memmove.h"
+ 
+-libc_ifunc_redirected (__redirect_memcpy, orig_memcpy,
++libc_ifunc_redirected (__redirect_memcpy, __new_memcpy,
+ 		       IFUNC_SELECTOR ());
+ 
+-extern __typeof (orig_memcpy) mvee_shm_memcpy;
+-
+-void *
+-mvee_memcpy (void *__restrict dest, const void *__restrict src, size_t n)
+-{
+-  if ((unsigned long)dest & 0x8000000000000000ull)
+-    return mvee_shm_memcpy(dest, src, n);
+-  if ((unsigned long)src & 0x8000000000000000ull)
+-    return mvee_shm_memcpy(dest, src, n);
+-
+-  return orig_memcpy(dest, src, n);
+-}
+-
+ # ifdef SHARED
+-__hidden_ver1 (mvee_memcpy, __GI_memcpy, __redirect_memcpy)
++__hidden_ver1 (__new_memcpy, __GI_memcpy, __redirect_memcpy)
+   __attribute__ ((visibility ("hidden")));
+ # endif
+ 
+ # include <shlib-compat.h>
+-versioned_symbol (libc, mvee_memcpy, memcpy, GLIBC_2_14);
++versioned_symbol (libc, __new_memcpy, memcpy, GLIBC_2_14);
+ #endif
+diff --git a/sysdeps/x86_64/multiarch/memmove.c b/sysdeps/x86_64/multiarch/memmove.c
+index 7ed2424735..cd94f33ff1 100644
+--- a/sysdeps/x86_64/multiarch/memmove.c
++++ b/sysdeps/x86_64/multiarch/memmove.c
+@@ -26,27 +26,12 @@
+ # define SYMBOL_NAME memmove
+ # include "ifunc-memmove.h"
+ 
+-libc_ifunc_redirected (__redirect_memmove, orig_memmove,
++libc_ifunc_redirected (__redirect_memmove, __libc_memmove,
+ 		       IFUNC_SELECTOR ());
+ 
+-extern __typeof (orig_memmove) mvee_shm_memmove;
+-
+-void *
+-mvee_memmove (void *dest, const void * src, size_t n)
+-{
+-  if ((unsigned long)dest & 0x8000000000000000ull)
+-    return mvee_shm_memmove(dest, src, n);
+-  if ((unsigned long)src & 0x8000000000000000ull)
+-    return mvee_shm_memmove(dest, src, n);
+-
+-  return orig_memmove(dest, src, n);
+-}
+-
+-strong_alias (mvee_memmove, __libc_memmove);
+-
++strong_alias (__libc_memmove, memmove);
+ # ifdef SHARED
+-__hidden_ver1 (mvee_memmove, __GI_memmove, __redirect_memmove)
++__hidden_ver1 (__libc_memmove, __GI_memmove, __redirect_memmove)
+   __attribute__ ((visibility ("hidden")));
+ # endif
+-strong_alias(mvee_memmove, memmove)
+ #endif
+diff --git a/sysdeps/x86_64/multiarch/memset.c b/sysdeps/x86_64/multiarch/memset.c
+index a2c4676374..7f6adcdf42 100644
+--- a/sysdeps/x86_64/multiarch/memset.c
++++ b/sysdeps/x86_64/multiarch/memset.c
+@@ -26,22 +26,10 @@
+ # define SYMBOL_NAME memset
+ # include "ifunc-memset.h"
+ 
+-libc_ifunc_redirected (__redirect_memset, orig_memset, IFUNC_SELECTOR ());
+-
+-extern __typeof (orig_memset) mvee_shm_memset;
+-
+-void *
+-mvee_memset (void *dest, int ch, size_t len)
+-{
+-  if ((unsigned long)dest & 0x8000000000000000ull)
+-    return mvee_shm_memset(dest, ch, len);
+-
+-  return orig_memset(dest, ch, len);
+-}
++libc_ifunc_redirected (__redirect_memset, memset, IFUNC_SELECTOR ());
+ 
+ # ifdef SHARED
+-__hidden_ver1 (mvee_memset, __GI_memset, __redirect_memset)
+-  __attribute__ ((visibility ("hidden"))) __attribute_copy__ (orig_memset);
++__hidden_ver1 (memset, __GI_memset, __redirect_memset)
++  __attribute__ ((visibility ("hidden"))) __attribute_copy__ (memset);
+ # endif
+-strong_alias(mvee_memset, memset)
+ #endif
+diff --git a/sysdeps/x86_64/multiarch/strcmp.c b/sysdeps/x86_64/multiarch/strcmp.c
+index 80ce1eac62..4db7332ac1 100644
+--- a/sysdeps/x86_64/multiarch/strcmp.c
++++ b/sysdeps/x86_64/multiarch/strcmp.c
+@@ -50,21 +50,10 @@ IFUNC_SELECTOR (void)
+   return OPTIMIZE (sse2);
+ }
+ 
+-libc_ifunc_redirected (__redirect_strcmp, orig_strcmp, IFUNC_SELECTOR ());
+-
+-extern __typeof (orig_strcmp) mvee_shm_strcmp;
+-
+-int
+-mvee_strcmp(const char *str1, const char *str2)
+-{
+-  if (((unsigned long)str1 & 0x8000000000000000ull) || ((unsigned long)str2 & 0x8000000000000000ull))
+-    return mvee_shm_strcmp(str1, str2);
+-  return orig_strcmp(str1, str2);
+-}
++libc_ifunc_redirected (__redirect_strcmp, strcmp, IFUNC_SELECTOR ());
+ 
+ # ifdef SHARED
+-__hidden_ver1 (mvee_strcmp, __GI_strcmp, __redirect_strcmp)
+-  __attribute__ ((visibility ("hidden"))) __attribute_copy__ (mvee_strcmp);
++__hidden_ver1 (strcmp, __GI_strcmp, __redirect_strcmp)
++  __attribute__ ((visibility ("hidden"))) __attribute_copy__ (strcmp);
+ # endif
+-strong_alias(mvee_strcmp, strcmp)
+ #endif
+diff --git a/sysdeps/x86_64/multiarch/strlen.c b/sysdeps/x86_64/multiarch/strlen.c
+index 58b9f5f2a4..ad7b200a4a 100644
+--- a/sysdeps/x86_64/multiarch/strlen.c
++++ b/sysdeps/x86_64/multiarch/strlen.c
+@@ -26,21 +26,9 @@
+ # define SYMBOL_NAME strlen
+ # include "ifunc-avx2.h"
+ 
+-libc_ifunc_redirected (__redirect_strlen, orig_strlen, IFUNC_SELECTOR ());
+-
+-extern __typeof (orig_strlen) mvee_shm_strlen;
+-
+-size_t
+-mvee_strlen (const char *str)
+-{
+-  if ((unsigned long)str & 0x8000000000000000ull)
+-    return mvee_shm_strlen(str);
+-  return orig_strlen(str);
+-}
+-
++libc_ifunc_redirected (__redirect_strlen, strlen, IFUNC_SELECTOR ());
+ # ifdef SHARED
+-__hidden_ver1 (mvee_strlen, __GI_strlen, __redirect_strlen)
+-  __attribute__((visibility ("hidden"))) __attribute_copy__ (mvee_strlen);
++__hidden_ver1 (strlen, __GI_strlen, __redirect_strlen)
++  __attribute__((visibility ("hidden"))) __attribute_copy__ (strlen);
+ # endif
+-strong_alias(mvee_strlen, strlen)
+ #endif

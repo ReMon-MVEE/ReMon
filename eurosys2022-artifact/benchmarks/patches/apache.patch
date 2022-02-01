@@ -1,0 +1,98 @@
+diff --git a/apache/server/mpm_fdqueue.c b/apache/server/mpm_fdqueue.c
+index c812450..75a4ac6 100644
+--- a/apache/server/mpm_fdqueue.c
++++ b/apache/server/mpm_fdqueue.c
+@@ -63,7 +63,7 @@ static apr_status_t queue_info_cleanup(void *data_)
+         if (first_pool == NULL) {
+             break;
+         }
+-        if (apr_atomic_casptr((void *)&qi->recycled_pools, first_pool->next,
++        if (apr_atomic_casptr(&qi->recycled_pools, first_pool->next,
+                               first_pool) == first_pool) {
+             apr_pool_destroy(first_pool->pool);
+         }
+@@ -244,7 +244,7 @@ void ap_queue_info_push_pool(fd_queue_info_t *queue_info,
+          */
+         struct recycled_pool *next = queue_info->recycled_pools;
+         new_recycle->next = next;
+-        if (apr_atomic_casptr((void *)&queue_info->recycled_pools,
++        if (apr_atomic_casptr(&queue_info->recycled_pools,
+                               new_recycle, next) == next)
+             break;
+     }
+@@ -271,7 +271,7 @@ void ap_queue_info_pop_pool(fd_queue_info_t *queue_info,
+         if (first_pool == NULL) {
+             break;
+         }
+-        if (apr_atomic_casptr((void *)&queue_info->recycled_pools,
++        if (apr_atomic_casptr(&queue_info->recycled_pools,
+                               first_pool->next, first_pool) == first_pool) {
+             *recycled_pool = first_pool->pool;
+             if (queue_info->max_recycled_pools >= 0)
+diff --git a/apache/srclib/apr/atomic/unix/builtins.c b/apache/srclib/apr/atomic/unix/builtins.c
+index 745acf1..6fbc11a 100644
+--- a/apache/srclib/apr/atomic/unix/builtins.c
++++ b/apache/srclib/apr/atomic/unix/builtins.c
+@@ -66,12 +66,12 @@ APR_DECLARE(apr_uint32_t) apr_atomic_xchg32(volatile apr_uint32_t *mem, apr_uint
+     return __sync_lock_test_and_set(mem, val);
+ }
+ 
+-APR_DECLARE(void*) apr_atomic_casptr(volatile void **mem, void *with, const void *cmp)
++APR_DECLARE(void*) apr_atomic_casptr(void * volatile *mem, void *with, const void *cmp)
+ {
+     return (void*) __sync_val_compare_and_swap(mem, cmp, with);
+ }
+ 
+-APR_DECLARE(void*) apr_atomic_xchgptr(volatile void **mem, void *with)
++APR_DECLARE(void*) apr_atomic_xchgptr(void * volatile *mem, void *with)
+ {
+     __sync_synchronize();
+ 
+diff --git a/apache/srclib/apr/configure b/apache/srclib/apr/configure
+index 724af6b..0efd286 100755
+--- a/apache/srclib/apr/configure
++++ b/apache/srclib/apr/configure
+@@ -18945,7 +18945,7 @@ else
+ 
+ int main()
+ {
+-    unsigned long val = 1010, tmp, *mem = &val;
++    unsigned volatile long val = 1010, tmp, *volatile mem = &val;
+ 
+     if (__sync_fetch_and_add(&val, 1010) != 1010 || val != 2020)
+         return 1;
+diff --git a/apache/srclib/apr/include/apr_atomic.h b/apache/srclib/apr/include/apr_atomic.h
+index 3d203ed..83570de 100644
+--- a/apache/srclib/apr/include/apr_atomic.h
++++ b/apache/srclib/apr/include/apr_atomic.h
+@@ -188,7 +188,7 @@ APR_DECLARE(apr_uint64_t) apr_atomic_xchg64(volatile apr_uint64_t *mem, apr_uint
+  * @param cmp the value to compare it to
+  * @return the old value of the pointer
+  */
+-APR_DECLARE(void*) apr_atomic_casptr(volatile void **mem, void *with, const void *cmp);
++APR_DECLARE(void*) apr_atomic_casptr(void * volatile *mem, void *with, const void *cmp);
+ 
+ /**
+  * exchange a pair of pointer values
+@@ -196,7 +196,7 @@ APR_DECLARE(void*) apr_atomic_casptr(volatile void **mem, void *with, const void
+  * @param with what to swap it with
+  * @return the old value of the pointer
+  */
+-APR_DECLARE(void*) apr_atomic_xchgptr(volatile void **mem, void *with);
++APR_DECLARE(void*) apr_atomic_xchgptr(void * volatile *mem, void *with);
+ 
+ /** @} */
+ 
+diff --git a/apache/srclib/apr/include/apr_ring.h b/apache/srclib/apr/include/apr_ring.h
+index eec735f..fd9ae39 100644
+--- a/apache/srclib/apr/include/apr_ring.h
++++ b/apache/srclib/apr/include/apr_ring.h
+@@ -157,7 +157,7 @@
+  * @param link The name of the APR_RING_ENTRY in the element struct
+  */
+ #define APR_RING_SENTINEL(hp, elem, link)				\
+-    (struct elem *)((char *)(&(hp)->next) - APR_OFFSETOF(struct elem, link))
++    (volatile struct elem *)((volatile char *)(&(hp)->next) - APR_OFFSETOF(struct elem, link))
+ 
+ /**
+  * The first element of the ring

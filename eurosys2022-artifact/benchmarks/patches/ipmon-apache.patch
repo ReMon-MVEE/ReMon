@@ -1,0 +1,44 @@
+diff --git a/IP-MON/MVEE_ipmon.cpp b/IP-MON/MVEE_ipmon.cpp
+index d11cd91..2836cc6 100644
+--- a/IP-MON/MVEE_ipmon.cpp
++++ b/IP-MON/MVEE_ipmon.cpp
+@@ -3994,7 +3994,7 @@ void __attribute__((constructor)) init()
+ 	IPMON_MASK_SET(mask, __NR_poll); 
+ 	IPMON_MASK_SET(mask, __NR_ioctl);
+ # if defined(IPMON_SUPPORT_FUTEX) || defined(IPMON_USE_FUTEXES_FOR_BLOCKING_CALLS)
+-	IPMON_MASK_SET(mask, __NR_futex);
++	// IPMON_MASK_SET(mask, __NR_futex);
+ # endif
+ 
+ #  if CURRENT_POLICY >= NONSOCKET_RW_POLICY
+@@ -4007,7 +4007,7 @@ void __attribute__((constructor)) init()
+ 
+ 	// conditionally allow
+ 	IPMON_MASK_SET(mask, __NR_write);
+-	IPMON_MASK_SET(mask, __NR_writev);
++	// IPMON_MASK_SET(mask, __NR_writev);
+ 	IPMON_MASK_SET(mask, __NR_pwrite64); 
+ 	IPMON_MASK_SET(mask, __NR_pwritev); 
+ 
+@@ -4038,16 +4038,16 @@ void __attribute__((constructor)) init()
+ #     if CURRENT_POLICY >= FULL_SYSCALLS
+ 
+ 	// Memory Management
+-	IPMON_MASK_SET(mask, __NR_mmap);
+-	IPMON_MASK_SET(mask, __NR_munmap);
++	// IPMON_MASK_SET(mask, __NR_mmap);
++	// IPMON_MASK_SET(mask, __NR_munmap);
+ 	IPMON_MASK_SET(mask, __NR_mremap);
+-	IPMON_MASK_SET(mask, __NR_mprotect);
++	// IPMON_MASK_SET(mask, __NR_mprotect);
+ 	IPMON_MASK_SET(mask, __NR_brk);
+ 
+ 	// File Management
+ 	IPMON_MASK_SET(mask, __NR_open);
+-	IPMON_MASK_SET(mask, __NR_openat);
+-	IPMON_MASK_SET(mask, __NR_close);
++	// IPMON_MASK_SET(mask, __NR_openat);
++	// IPMON_MASK_SET(mask, __NR_close);
+ 	IPMON_MASK_SET(mask, __NR_fcntl);
+ 	IPMON_MASK_SET(mask, __NR_dup);
+ 	IPMON_MASK_SET(mask, __NR_dup2);
