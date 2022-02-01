@@ -714,11 +714,6 @@ private:
     bool handle_rdtsc_event                  (int index);
 #endif
 
-	//
-	// Handle C2Rust-specific signals;
-	//
-	bool handle_c2rust_event                 (int index);
-
 	// 
 	// Generic SIGTRAP handling. 
 	//
