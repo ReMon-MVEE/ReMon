@@ -2209,14 +2209,6 @@ POSTCALL(times)
   OR
   >>> sys_munmap(<address>, <end of current heap - address>) if address < end of current heap  
 -----------------------------------------------------------------------------*/
-GET_CALL_TYPE(brk)
-{
-	if ((*mvee::config_variant_global)["unsynced_brk"].asBool())
-		return MVEE_CALL_TYPE_UNSYNCED;
-
-	return MVEE_CALL_TYPE_NORMAL;
-}
-
 LOG_ARGS(brk)
 {
 	debugf("%s - SYS_BRK(0x" PTRSTR ")\n", 
@@ -6415,7 +6407,7 @@ PRECALL(poll)
     CHECKPOINTER(1);
     CHECKARG(2);
     CHECKARG(3);
-	CHECKPOLLFD(1, ARG2(0));
+    CHECKBUFFER(1, sizeof(struct pollfd) * ARG2(0));
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 
@@ -9866,7 +9858,7 @@ PRECALL(ppoll)
     CHECKARG(2);
     CHECKPOINTER(3);
 	CHECKPOINTER(4);
-	CHECKPOLLFD(1, ARG2(0));
+    CHECKBUFFER(1, sizeof(struct pollfd) * ARG2(0));
 	CHECKBUFFER(3, sizeof(struct timespec));
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
@@ -10591,9 +10583,6 @@ PRECALL(getrandom)
 
 POSTCALL(getrandom)
 {
-	if IS_UNSYNCED_CALL
-		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
-
 	REPLICATEBUFFER(1);
 	return 0;
 }
