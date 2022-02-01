@@ -51,7 +51,6 @@ void mvee::init_config_set_defaults()
 
 	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["xchecks_initially_enabled"], true);
 	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["relaxed_mman_xchecks"], false);
-	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["unsynced_brk"], false);
 	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["disable_syscall_checks"], false); // also used in RAVEN
 	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["use_ipmon"], false);
 	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["hide_vdso"], true);
