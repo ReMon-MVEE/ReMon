@@ -12,6 +12,8 @@ cd ../
 ./bootstrap.sh
 cd ./build/
 make -j$(nproc)
+make debug
+make -j$(nproc)
 
 sudo apt install -y clang
 cd ../IP-MON
