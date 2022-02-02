@@ -122,10 +122,10 @@ do
       export DYNINSTAPI_RT_LIB="${DYNINST_INSTALL}/lib/libdyninstAPI_RT.so"
       export LD_LIBRARY_PATH="${DYNINST_INSTALL}/lib/:$LD_LIBRARY_PATH"
 
-      cd "$__current_dir/../../../dyninst/"
+      cd "$__current_dir/../../../dyninst_shm/"
       ./bartTestInstrumenter "$__current_dir/../out/mplayer/default_no_fast_memcpy/bin/mplayer" \
         "$__current_dir/../instrumenting/mplayer_no_fast_memcpy.dyninst"
-      mv ./InterestingProgram-rewritten "$__prefix"
+      mv ./InterestingProgram-rewritten "$__prefix/mplayer"
 
       shift
       ;;
