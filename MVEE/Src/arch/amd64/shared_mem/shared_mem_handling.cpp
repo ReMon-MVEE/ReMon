@@ -1148,7 +1148,14 @@ bool            mmap_table::requires_shadow                              (varian
     this->dwarf_step(0, variant->variantpid, &context);
     // do this twice, first one is always in libc.so, we check before requires_shadow is even called
     this->dwarf_step(0, variant->variantpid, &context);
-    std::string binary_path = this->get_region_info(0, IP_IN_REGS(context.regs), 0)->region_backing_file_path;
+    mmap_region_info* info = this->get_region_info(0, IP_IN_REGS(context.regs), 0);
+    if (!info)
+    {
+        // warnf(" > no info found for %p\n", (void*)IP_IN_REGS(context.regs));
+        // print_mmap_table();
+        return false;
+    }
+    std::string binary_path = info->region_backing_file_path;
     std::string binary_name = binary_path.substr(binary_path.rfind('/'));
 
     /* Allowlist: no shadow memory required
