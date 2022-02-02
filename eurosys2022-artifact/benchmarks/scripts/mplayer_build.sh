@@ -94,6 +94,42 @@ do
       shift
       ;;
 
+   --dyninst-no-fast-memcpy)
+      __prefix="$__current_dir/../out/mplayer/dyninst_no_fast_memcpy/bin"
+      mkdir -p "$__prefix"
+
+      if [[ ! -e "$__current_dir/../out/mplayer/default_no_fast_memcpy/bin/mplayer" ]]
+      then
+        echo " > no default build for mplayer found to base --dyninst-no-fast-memcpy on."
+        exit 1
+      fi
+
+      if [[ ! -e "$__current_dir/../instrumenting/mplayer_no_fast_memcpy.dyninst" ]]
+      then
+        echo " > dyninst input file $__current_dir/../instrumenting/mplayer_no_fast_memcpy.dyninst not found"
+        echo " > we will start mplayer now, please allow a few frames of subtitles to render before closing with ctrl+C"
+
+        $__current_dir/../scripts/run.sh --video "$__current_dir/../input/video/1080p30.webm" \
+          --subs "$__current_dir/../input/subs.srt --wrapped-pulseaudio --wrapped-fontconfig --debug -- \
+          mplayer default_no_fast_memcpy"
+        
+        grep mplayer "$__current_dir/../MVEE/bin/Debug/Logs/non-instrumented.csv" | cut '-d;' -f4 > \
+          "$__current_dir/../instrumenting/mplayer_no_fast_memcpy.dyninst"
+      fi
+
+      
+      export DYNINST_INSTALL="$__current_dir/../../../deps/dyninst/build/../install"
+      export DYNINSTAPI_RT_LIB="${DYNINST_INSTALL}/lib/libdyninstAPI_RT.so"
+      export LD_LIBRARY_PATH="${DYNINST_INSTALL}/lib/:$LD_LIBRARY_PATH"
+
+      cd "$__current_dir/../../../dyninst/"
+      ./bartTestInstrumenter "$__current_dir/../out/mplayer/default_no_fast_memcpy/bin/mplayer" \
+        "$__current_dir/../instrumenting/mplayer_no_fast_memcpy.dyninst"
+      mv ./InterestingProgram-rewritten "$__prefix"
+
+      shift
+      ;;
+
    --default-osd-fixed)
       __prefix="$__current_dir/../out/mplayer/default_osd_fixed"
       __disable=""

@@ -5,7 +5,7 @@ cd "$__home_dir"
 
 sudo apt install -y libpulse-dev libxv-dev libxext-dev libx11-dev libx11-xcb-dev libxtst-dev libfreetype6-dev    \
         libfontconfig-dev gperf libpcre3-dev libexpat1-dev autopoint libtool libtool-bin libsndfile1-dev gettext \
-        libssl-dev python libice-dev libsm-dev uuid-dev gcc binutils
+        libssl-dev python libice-dev libsm-dev uuid-dev gcc binutils libiberty-dev
 
 ## ReMon Setup #########################################################################################################
 cd ../
@@ -86,6 +86,31 @@ then
 		"$__home_dir/../patched_binaries/libc/amd64"
 fi
 ## glibc Setup #########################################################################################################
+
+
+## dyninst Setup #######################################################################################################
+cd "$__home_dir/../deps/"
+
+if [ ! -d "./dyninst/" ]
+then
+    git clone https://github.com/dyninst/dyninst dyninst
+    cd ./dyninst/
+    git checkout 7e8b26128506496344fd44fc13dd77c1fa1ec334
+
+    mkdir ./build/
+    mkdir ./install/
+    cd ./build/
+    cmake .. -DCMAKE_INSTALL_PREFIX="$__home_dir/../deps/dyninst/build/../install"
+    make -j$(nproc) # This downloads external stuff, including boost!
+    make install
+
+    export DYNINST_INSTALL="$__home_dir/../deps/dyninst/build/../install"
+
+    cd "$__home_dir/../dyninst_shm"
+    cmake .
+    make -j$(nproc)
+fi
+## dyninst Setup #######################################################################################################
 
 
 ## Benchmark Setup #####################################################################################################

@@ -117,7 +117,8 @@ select what kernel to use at boot time via the _Advanced Options For Ubuntu_ opt
 Ubuntu kernel source, running it in other distros is not guaranteed to work. However, installing the kernel as mentioned
 below will have little to no impact on your experience.
 
-To show the grub boot menu go to /etc/default/grub and add/change: GRUB_TIMEOUT_STYLE=menu and GRUB_TIMEOUT=10. After saving the changes execute `sudo update-grub`.
+To show the grub boot menu go to /etc/default/grub and add/change: GRUB_TIMEOUT_STYLE=menu and GRUB_TIMEOUT=10. After
+saving the changes execute `sudo update-grub`.
 
 ```bash
 cd /wherever/you/want/to/download/the/kernel
@@ -150,6 +151,8 @@ in eurosys2022-artifact/benchmarks/scripts and all follow the form `<benchmark>_
 should be built can be chosen by passing the required arguments. Additionally, you can pass several configuration
 arguments at once and the script will configure and build them sequentially. The final output is written to
 eurosys2022-artifact/benchmarks/out/ in their relevant directory.
+
+Note that the mplayer dyninst rewritten version does not build automatically. 
 
 ### Nginx
 
@@ -204,6 +207,7 @@ Version 1.4 downloaded from http://www.mplayerhq.hu/MPlayer/releases/MPlayer-1.4
 | --wrapped-no-fast-memcpy | build with ReMon-supplied LLVM, after configuring the build to use glibc's memcpy instead |
 |                          |of its own assembly implementation and wrapping instructions that might access shared      |
 |                          | memory with our compiler pass.                                                            |
+| --dyninst-no-fast-memcpy | Will rewrite the --default-no-fast-memcpy binary using dyninst.                           |
 | --default-osd-fixed      | build with ReMon-supplied LLVM, after patching the code to use a C-coded for rendering    |
 |                          | its on-screen display instead of the assembly implementation.                             |
 | --wrapped-osd-fixed      | build with ReMon-supplied LLVM, after patching the code to use a C-coded for rendering    |
@@ -214,6 +218,12 @@ Version 1.4 downloaded from http://www.mplayerhq.hu/MPlayer/releases/MPlayer-1.4
 | --wrapped-full           | build with ReMon-supplied LLVM, after applying both the no-fast-memcpy and osd-fixed      |
 |                          | changes, and wrapping instructions that might access shared memory with our compiler      |
 |                          | pass.                                                                                     |
+
+You will need to run `eurosys2022-artifact/benchmarks/scripts/mplayer_build.sh --dyninst-no-fast-memcpy` manually. Since
+this requires some dynamic analysis, an mplayer instance will pop up. Allow a few frames with subtitles to render and
+then close the window, it might take a few seconds for the window to close. After this, the benchmark version will be
+automatically rewritten to eurosys2022-artifact/benchmarks/out/mplayer_dyninst_no_fast_memcpy/bin/mplayer.
+dyninst_shm/README.md provides more information on this process.
 
 ### Pulseaudio
 
@@ -334,5 +344,11 @@ Options to add to the mplayer command:
 | -sub </path/to/subs.srt> | Shows subtitle on screen that is rendered for 10 seconds.                                 |
 
 ### Microbenchmark
+
+**TODO: add this**
+
+---
+
+## DIY
 
 **TODO: add this**
