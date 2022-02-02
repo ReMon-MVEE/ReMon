@@ -154,6 +154,15 @@ case "$__benchmark" in
 esac
 
 
+if [[ "$__version" == *"dyninst"* ]]
+then
+  echo " > hello there"
+  export DYNINST_INSTALL=$__home_dir/../deps/dyninst/build/../install 
+  export DYNINSTAPI_RT_LIB=${DYNINST_INSTALL}/lib/libdyninstAPI_RT.so
+  export LD_LIBRARY_PATH=${DYNINST_INSTALL}/lib/:$LD_LIBRARY_PATH
+fi
+
+
 if [[ "$__native" == 1 ]]
 then
   echo " > using native execution"

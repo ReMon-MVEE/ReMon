@@ -259,6 +259,20 @@ accordingly with changes to `SIZES_ARRAY`!
 
 ## Running Benchmarks
 
+If results at any point seem rather low, make sure you are configured correctly.
+
+- If you're using IP-MON, check MVEE.ini that IP-MON is enabled. 
+- Check patched_binaries/libc/amd46 that the normal/ .so files are symlinked, not the stripped/ ones (unless intended)
+
+Note that any dyninst rewritten binary run requires the following environment variables to be defined. Although `run.sh`
+will set this up for you.
+
+```bash
+export DYNINST_INSTALL=/wherever/you/cloned/remon/dyninst/build/../install 
+export DYNINSTAPI_RT_LIB=${DYNINST_INSTALL}/lib/libdyninstAPI_RT.so
+export LD_LIBRARY_PATH=${DYNINST_INSTALL}/lib/:$LD_LIBRARY_PATH
+```
+
 ### Script Aided
 
 All benchmarks can be run using `eurosys2022-artifact/benchmarks/scripts/run.sh <options> -- <benchmark> <version>`. 
@@ -274,7 +288,7 @@ replaced with '_'.
 | :------------------------ | :--------------------------------------------------------------------------------------- |
 | --native                  | Runs selected benchmark natively, instead of running it under ReMon.                     |
 | --ipmon                   | Run ReMon with IP-MON enabled                                                            |
-| --debug                   | Run Debug version of ReMon. **Warning:** needs to be compiled.                           |
+| --debug                   | Run Debug version of ReMon.                                                              |
 | --variants <N>            | Configures ReMon to use N variants.                                                      |
 | --wrapped-pulseaudio      | Configure ReMon to load the wrapped versions of pulseaudio. Note: the same binary will   |
 |                           | also be loaded by the native execution by making use of LD_PRELOAD.                      |
@@ -345,7 +359,10 @@ Options to add to the mplayer command:
 
 ### Microbenchmark
 
-**TODO: add this**
+Optionally: start with starting the docker container.
+
+1. `cd /wherever/you/cloned/remon/GHUMVEE/bin/Release/`.
+2. `./mvee -N <numvariant> -- /wherever/you/cloned/remon/eurosys2022-artifact/benchmarks/microbenchmark/memcpy`.
 
 ---
 
