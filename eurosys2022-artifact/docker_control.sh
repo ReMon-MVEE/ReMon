@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 if ! command -v docker &> /dev/null; then
     echo "Docker is required to run this script"

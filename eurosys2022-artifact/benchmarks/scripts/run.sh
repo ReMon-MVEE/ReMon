@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 __home_dir=$(readlink -f $(dirname ${BASH_SOURCE})/../../)
 
@@ -110,7 +111,7 @@ then
   echo " > somehow no benchmark given"
   exit 2
 fi
-if [[ ! -e "$__home_dir/benchmarks/out/$__benchmark/" ]]
+if [[ ! -e "$__home_dir/benchmarks/out/$__benchmark/" ]] && [[ "$__benchmark" != "microbenchmark" ]]
 then
   echo " > benchmark $__benchmark not currently available, did you build it?"
   exit 2

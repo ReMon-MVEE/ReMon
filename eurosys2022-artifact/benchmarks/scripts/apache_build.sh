@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 cd "$(readlink -f $(dirname ${BASH_SOURCE})/../apache/)"
 

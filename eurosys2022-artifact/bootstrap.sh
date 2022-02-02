@@ -1,11 +1,12 @@
 #!/bin/bash
+set -e
 
 __home_dir="$(readlink -f $(dirname ${BASH_SOURCE}))"
 cd "$__home_dir"
 
 sudo apt install -y libpulse-dev libxv-dev libxext-dev libx11-dev libx11-xcb-dev libxtst-dev libfreetype6-dev    \
         libfontconfig-dev gperf libpcre3-dev libexpat1-dev autopoint libtool libtool-bin libsndfile1-dev gettext \
-        libssl-dev python libice-dev libsm-dev uuid-dev gcc binutils libiberty-dev
+        libssl-dev python libice-dev libsm-dev uuid-dev gcc binutils libiberty-dev unzip
 
 ## ReMon Setup #########################################################################################################
 cd ../
@@ -167,6 +168,14 @@ then
     wget http://www.mplayerhq.hu/MPlayer/releases/MPlayer-1.4.tar.xz
     tar -xf ./MPlayer-1.4.tar.xz
     mv ./MPlayer-1.4/ ./mplayer/
+fi
+
+if [[ ! -e "$__home_dir/benchmarks/input/video/" ]]
+then
+    mkdir "$__home_dir/benchmarks/input/video/"
+    cd "$__home_dir/benchmarks/input/video/"
+    wget https://bartcoppens.be/misc/eurosys2020-artifact-inputs.zip && \
+        unzip eurosys2020-artifact-inputs.zip
 fi
 
 cd ./microbenchmark

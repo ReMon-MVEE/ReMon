@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 __home_dir="$(readlink -f $(dirname ${BASH_SOURCE})/../../)"
 cd "$__home_dir/../patched_binaries/libc/amd64/"

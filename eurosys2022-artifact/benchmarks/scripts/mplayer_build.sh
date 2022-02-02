@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 
 cd "$(readlink -f $(dirname ${BASH_SOURCE})/../mplayer/)"
@@ -94,13 +95,13 @@ do
       shift
       ;;
 
-   --dyninst-no-fast-memcpy)
-      __prefix="$__current_dir/../out/mplayer/dyninst_no_fast_memcpy/bin"
+   --dyninst)
+      __prefix="$__current_dir/../out/mplayer/dyninst/bin"
       mkdir -p "$__prefix"
 
       if [[ ! -e "$__current_dir/../out/mplayer/default_no_fast_memcpy/bin/mplayer" ]]
       then
-        echo " > no default build for mplayer found to base --dyninst-no-fast-memcpy on."
+        echo " > no default build for mplayer found to base --dyninst on."
         exit 1
       fi
 

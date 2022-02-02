@@ -39,7 +39,7 @@ ReMon and all benchmarks we provide can be set up by simply running the `bootstr
 
 Item 5 is only performed when the environment variable `BUILDALL` is set to 1.
 
-**Note that bootstrapping requires some minimal user interaction to continue a few times.**
+This script requires only a little interaction at the start, but runs fully autonomously otherwise.
 
 ---
 

@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 # This script processes non-instrumented.csv so that -fshm_support can actually use it to wrap shared memory
 # instructions.

@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 __current_directory=$(pwd)
 __out="$__current_directory/$1"
