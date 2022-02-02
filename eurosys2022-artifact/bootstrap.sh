@@ -47,7 +47,7 @@ ln -fs ./libipmon-default.so ./libipmon.so
 cd "$__home_dir/../deps/"
 if [ ! -d "./ReMon-glibc/" ]
 then
-    git clone git@github.com:ku-leuven-msec/ReMon-glibc.git
+    git clone https://github.com/ReMon-MVEE/ReMon-glibc.git
     cd "./ReMon-glibc/"
     mkdir "./build/"
     cd "./build/"
