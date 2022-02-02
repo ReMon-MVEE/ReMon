@@ -141,7 +141,7 @@ Some people might want to build their own GHUMVEE-ready versions of glibc and li
 
 ```
 # get the source code for GHUMVEE's glibc
-git clone https://github.com/stijn-volckaert/ReMon-glibc.git
+git clone git@github.com:ReMon-MVEE/ReMon-glibc.git
 
 # build
 cd ReMon-glibc

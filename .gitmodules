@@ -1,6 +1,6 @@
 [submodule "deps/llvm"]
 	path = deps/llvm
-	url = git@github.com:csl-ugent/ReMon-llvm-project.git
+	url = git@github.com:ReMon-MVEE/ReMon-llvm.git
 	branch = ReMon
 [submodule "deps/binutils"]
 	path = deps/binutils
