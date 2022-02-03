@@ -32,8 +32,6 @@ do
       make -j"$(nproc)"
       make install
 
-      ln -fs "$__current_dir/docs/conf/httpd.conf" "$__prefix/conf/"
-
       shift
       ;;
 
@@ -47,8 +45,6 @@ do
       ./configure --prefix=${__prefix} --with-included-apr --with-mpm=worker
       make -j"$(nproc)"
       make install
-
-      ln -fs "$__current_dir/docs/conf/httpd.conf" "$__prefix/conf/"
 
       shift
       ;;
@@ -70,8 +66,6 @@ do
       ./configure --prefix=${__prefix} --with-included-apr --with-mpm=worker
       make -j"$(nproc)"
       make install
-
-      ln -fs "$__current_dir/docs/conf/httpd.conf" "$__prefix/conf/"
       
       shift
       ;;

@@ -1,5 +1,10 @@
 # Sharing is Caring: Secure and Efficient Shared Memory Support for MVEEs
 
+
+**Artifact Appendix correction:** you cannot change the apache configuration by changing only one file. You need to
+change the conf in /wherever/you/cloned/remon/eurosys2022-artifact/benchmarks/out/apache/<version>/conf/httpd.conf for
+each version separately.
+
 ## System
 
 All benchmarks were originally run on a system running Ubuntu 18.04 LTS, equipped with a 6-core AMD Ryzen 5 5600x CPU,
