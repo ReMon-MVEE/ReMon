@@ -418,5 +418,5 @@ SSLRandomSeed connect builtin
 
 ScoreBoardFile "/dev/shm/apache_scoreboard_no_one_should_have_this_name"
 
-ServerLimit       1
+ServerLimit       2
 ThreadsPerChild   1

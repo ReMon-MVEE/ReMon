@@ -138,7 +138,9 @@ case "$__benchmark" in
     ;;
   apache)
     echo " > running apache"
-    __run="$__home_dir/benchmarks/out/apache/$__version/bin/httpd start"
+    __run="$__home_dir/benchmarks/out/apache/$__version/bin/apachectl start"
+    echo " > !!Warning!! Apache worker configuration can no longer be changed from eurosys2022-artifact/benchmarks/apache/docs/conf/httpd.conf!"
+    sleep 5
     ;;
   mplayer)
     echo " > running apache"
