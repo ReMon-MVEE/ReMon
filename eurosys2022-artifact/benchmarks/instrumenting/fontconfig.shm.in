@@ -129,3 +129,6 @@
 ./src/fcstr.c:446:10
 ./src/fcstr.c:446:20
 ./src/fcstr.c:948:9
+./src/fclist.c:235:11
+./src/fclist.c:137:41
+./src/fcstr.c:609:6

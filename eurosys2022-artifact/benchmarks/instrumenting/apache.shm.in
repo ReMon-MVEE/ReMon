@@ -42,3 +42,8 @@
 ./srclib/apr/strings/apr_snprintf.c:1330:21
 ./srclib/apr/strings/apr_snprintf.c:1381:23
 ./srclib/apr/strings/apr_snprintf.c:731:13
+./server/mpm/worker/worker.c:1352:48
+./server/mpm/worker/worker.c:0:9
+./server/mpm/worker/worker.c:1421:26
+./server/scoreboard.c:651:43
+./server/mpm/worker/worker.c:0:0

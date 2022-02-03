@@ -46,3 +46,7 @@
 ./src/pulsecore/memblock.c:650:28
 ./src/pulsecore/memblock.c:661:37
 ./src/pulsecore/memblock.c:1420:31
+./src/pulsecore/memblock.c:0:5
+./src/pulsecore/memblock.c:0:5
+./src/pulsecore/memblock.c:0:5
+./src/pulsecore/memblock.c:0:5
