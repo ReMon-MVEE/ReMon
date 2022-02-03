@@ -18,8 +18,8 @@ __current_dir=$(pwd)
 
 do_make () 
 {
-  make clean
-  make distclean
+  make clean || :
+  make distclean || :
   ./configure --prefix="$__prefix" --with-http_ssl_module
   make -j"$(nproc)" install
   ln -fs "$__current_dir/conf/nginx.conf" "$__prefix/conf/"

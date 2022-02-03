@@ -26,8 +26,8 @@ export LDLAGS="-g -O3"
 do_make ()
 {
   mkdir -p "$__prefix"
-  make clean
-  make distclean
+  make clean || :
+  make distclean || :
   ./configure --enable-x11 --disable-hal-compat                             \
     --prefix="$__prefix"                                                    \
     --libdir=${__prefix}/lib/${DEB_HOST_MULTIARCH}                          \
@@ -49,8 +49,8 @@ do
       export CC="$__llvm_bin_dir/clang"
       export CXX="$__llvm_bin_dir/clang++"
 
-      make clean
-      make distclean
+      make clean || :
+      make distclean || :
       ./configure --enable-x11 --disable-hal-compat                             \
         --disable-esound                                                        \
         --enable-gsettings                                                      \

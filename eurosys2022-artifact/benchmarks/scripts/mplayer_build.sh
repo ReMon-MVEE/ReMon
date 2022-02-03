@@ -20,8 +20,8 @@ __current_dir=$(pwd)
 
 do_make ()
 {
-  make clean
-  make distclean
+  make clean || :
+  make distclean || :
   ./configure --prefix=$__prefix --enable-debug $__disable --enable-xv --enable-pulse --yasm=''
   make -j"$(nproc)" install
 }

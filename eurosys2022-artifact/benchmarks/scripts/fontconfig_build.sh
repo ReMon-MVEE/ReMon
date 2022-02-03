@@ -23,8 +23,8 @@ do
       export CC="$__llvm_bin_dir/clang -g -O3"
       export CXX="$__llvm_bin_dir/clang++ -g -O3"
 
-      make clean
-      make distclean
+      make clean || :
+      make distclean || :
       ./configure
       sudo make -j"$(nproc)" install
       sudo ldconfig
@@ -38,8 +38,8 @@ do
       export CC="$__llvm_bin_dir/clang -g -O3"
       export CXX="$__llvm_bin_dir/clang++ -g -O3"
 
-      make clean
-      make distclean
+      make clean || :
+      make distclean || :
       ./configure --prefix="$__prefix"
       make -j"$(nproc)"
       mkdir -p "$__prefix/etc/"
@@ -62,8 +62,8 @@ do
       export CC="$__llvm_bin_dir/clang -g -O3 -fshm_support=$__current_dir/non-instrumented.shm"
       export CXX="$__llvm_bin_dir/clang++ -g -O3 -fshm_support=$__current_dir/non-instrumented.shm"
 
-      make clean
-      make distclean
+      make clean || :
+      make distclean || :
       ./configure --prefix="$__prefix"
       make -j"$(nproc)"
       mkdir -p "$__prefix/etc/"

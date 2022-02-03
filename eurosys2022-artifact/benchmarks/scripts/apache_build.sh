@@ -27,7 +27,7 @@ do
       export CXX="$__llvm_bin_dir/clang++ -g -O3"
       export CFLAGS="-g -O3"
 
-      make distclean
+      make distclean || :
       ./configure --prefix=${__prefix} --with-included-apr --with-mpm=worker
       make -j"$(nproc)"
       make install
@@ -43,7 +43,7 @@ do
       export CC="$__llvm_bin_dir/clang $CFLAGS"
       export CXX="$__llvm_bin_dir/clang++ $CFLAGS"
 
-      make distclean
+      make distclean || :
       ./configure --prefix=${__prefix} --with-included-apr --with-mpm=worker
       make -j"$(nproc)"
       make install
@@ -66,7 +66,7 @@ do
       export CC="$__llvm_bin_dir/clang $CFLAGS -fshm_support=$__current_dir/non-instrumented.shm"
       export CXX="$__llvm_bin_dir/clang++ $CFLAGS -fshm_support=$__current_dir/non-instrumented.shm"
 
-      make distclean
+      make distclean || :
       ./configure --prefix=${__prefix} --with-included-apr --with-mpm=worker
       make -j"$(nproc)"
       make install
