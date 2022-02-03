@@ -60,8 +60,8 @@ do
     --wrapped)
       if [ ! -e "$__current_dir/non-instrumented.shm" ]
       then
-        ../scripts/generate_non_instrumented.sh            \
-            "$__current_dir/../instrumenting/nginx.shm.in" \
+        "$__current_dir/../scripts/generate_non_instrumented.sh" \
+            "$__current_dir/../instrumenting/nginx.shm.in"       \
             "non-instrumented.shm"
       fi
 
@@ -103,11 +103,11 @@ do
       ;;
 
     --wrapped-anon)
-      if [ ! -e "$__current_dir/non-instrumented.shm" ]
+      if [ ! -e "$__current_dir/non-instrumented-anon.shm" ]
       then
-        ../scripts/generate_non_instrumented.sh                 \
-            "$__current_dir/../instrumenting/nginx-anon.shm.in" \
-            "non-instrumented.shm"
+        "$__current_dir/../scripts/generate_non_instrumented.sh" \
+            "$__current_dir/../instrumenting/nginx-anon.shm.in"  \
+            "non-instrumented-anon.shm"
       fi
 
       __prefix="$__current_dir/../out/nginx/wrapped_anon"
