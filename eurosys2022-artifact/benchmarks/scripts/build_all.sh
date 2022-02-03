@@ -5,8 +5,10 @@ __home_dir=$(readlink -f $(dirname ${BASH_SOURCE}))
 
 
 $__home_dir/nginx_build.sh \
+        --base             \
         --default          \
         --wrapped          \
+        --base-anon        \
         --default-anon     \
         --wrapped-anon
 
@@ -34,5 +36,6 @@ $__home_dir/fontconfig_build.sh \
 
 
 $__home_dir/apache_build.sh \
+        --base              \
         --default           \
         --wrapped
