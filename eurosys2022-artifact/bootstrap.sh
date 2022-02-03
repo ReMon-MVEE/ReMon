@@ -4,9 +4,10 @@ set -e
 __home_dir="$(readlink -f $(dirname ${BASH_SOURCE}))"
 cd "$__home_dir"
 
+sudo apt update
 sudo apt install -y libpulse-dev libxv-dev libxext-dev libx11-dev libx11-xcb-dev libxtst-dev libfreetype6-dev    \
         libfontconfig-dev gperf libpcre3-dev libexpat1-dev autopoint libtool libtool-bin libsndfile1-dev gettext \
-        libssl-dev python libice-dev libsm-dev uuid-dev gcc binutils libiberty-dev unzip
+        libssl-dev python libice-dev libsm-dev uuid-dev gcc binutils libiberty-dev unzip gawk
 
 ## ReMon Setup #########################################################################################################
 cd ../
@@ -119,24 +120,27 @@ fi
 ## Benchmark Setup #####################################################################################################
 cd "$__home_dir/benchmarks/"
 
-if [ ! -d "./pulseaudio/" ]
+if [ ! -d "$__home_dir/benchmarks/pulseaudio/" ]
 then
+    cd "$__home_dir/benchmarks/"
     git clone --depth 1 -b v14.2 git://anongit.freedesktop.org/pulseaudio/pulseaudio pulseaudio
     cd ./pulseaudio/
     NOCONFIGURE=1 ./bootstrap.sh
     cd ../
 fi
 
-if [ ! -d "./fontconfig/" ]
+if [ ! -d "$__home_dir/benchmarks/fontconfig/" ]
 then
+    cd "$__home_dir/benchmarks/"
     git clone --depth 1 -b 2.13.1 https://gitlab.freedesktop.org/fontconfig/fontconfig.git fontconfig
     cd ./fontconfig/
     NOCONFIGURE=1 ./autogen.sh
     cd ../
 fi
 
-if [ ! -d "./nginx/" ]
+if [ ! -d "$__home_dir/benchmarks/nginx/" ]
 then
+    cd "$__home_dir/benchmarks/"
     wget http://nginx.org/download/nginx-1.18.0.tar.gz
     tar -xf nginx-1.18.0.tar.gz
     mv nginx-1.18.0 nginx
@@ -145,8 +149,9 @@ then
     cp "$__home_dir/benchmarks/input/index.html" "$__home_dir/benchmarks/nginx/html/"
 fi
 
-if [ ! -d "./apache/" ]
+if [ ! -d "$__home_dir/benchmarks/apache/" ]
 then
+    cd "$__home_dir/benchmarks/"
     git clone --depth 1 -b 2.4.46 https://github.com/apache/httpd.git apache
     cd ./apache/srclib/
     wget https://dlcdn.apache.org//apr/apr-1.7.0.tar.gz
@@ -163,8 +168,9 @@ then
     patch -p 2 -d ./apache/ < ./patches/apache.patch
 fi
 
-if [ ! -d "./mplayer/" ]
+if [ ! -d "$__home_dir/benchmarks/mplayer/" ]
 then
+    cd "$__home_dir/benchmarks/"
     wget http://www.mplayerhq.hu/MPlayer/releases/MPlayer-1.4.tar.xz
     tar -xf ./MPlayer-1.4.tar.xz
     mv ./MPlayer-1.4/ ./mplayer/
@@ -172,21 +178,21 @@ fi
 
 if [[ ! -e "$__home_dir/benchmarks/input/video/" ]]
 then
+    cd "$__home_dir/benchmarks/"
     mkdir "$__home_dir/benchmarks/input/video/"
     cd "$__home_dir/benchmarks/input/video/"
     wget https://bartcoppens.be/misc/eurosys2020-artifact-inputs.zip && \
         unzip eurosys2020-artifact-inputs.zip
 fi
 
-cd ./microbenchmark
+cd "$__home_dir/benchmarks/microbenchmark/"
 make
 cd ../
 
-echo "__llvm_dir=\"$__home_dir/../deps/llvm/build-tree/\"" > ./config.sh
+echo "__llvm_dir=\"$__home_dir/../deps/llvm/build-tree/\"" > "$__home_dir/benchmarks/"/config.sh
 if [[ "$BUILDALL" == 1 ]]
 then
-    ./scripts/build_all.sh
+    "$__home_dir/benchmarks/scripts/build_all.sh"
 fi
 
-# TODD check without yasm
 ## Benchmark Setup #####################################################################################################

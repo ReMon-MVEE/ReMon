@@ -33,9 +33,10 @@ ReMon and all benchmarks we provide can be set up by simply running the `bootstr
 2. Set up the different IP-MON builds to be used with different benchmarks
 3. Download ReMon's custom glibc that we also extended
 4. Build glibc
-5. Download all benchmarks
-6. Bootstrap all benchmarks (applying patches where necessary)
-7. Optionally build all varieties of all benchmarks
+5. Set up dyninst
+6. Download all benchmarks
+7. Bootstrap all benchmarks (applying patches where necessary)
+8. Optionally build all varieties of all benchmarks
 
 Item 5 is only performed when the environment variable `BUILDALL` is set to 1.
 
@@ -47,6 +48,10 @@ This script requires only a little interaction at the start, but runs fully auto
 
 Docker can be set up either by using the `docker_control.sh` script or fully manually. We advice the former, but provide
 instructions for both.
+
+Not that we copy your git config and default ssh keys (id_rsa) into the docker container. This is simply to enable you
+to use .git as would normally do. It is also needed to ensure GitHub's ssh cloning works. Should this be an issue,
+contact us.
 
 ### Script Aided Setup
 
@@ -61,7 +66,16 @@ cd /wherever/you/cloned/remon/eurosys2022-artifact/
 
 ```bash
 cd /wherever/you/cloned/remon/eurosys2022-artifact/
+
+cp ~/.ssh/id_rsa      id_rsa           # || touch ./id_rsa"
+cp ~/.ssh/id_rsa.pub  id_rsa.pub       # || touch ./id_rsa.pub"
+cp ~/.git-credentials .git-credentials # || touch ./.git-credentials"
+
 docker build . -t shmvee:ae
+
+rm ./id_rsa
+rm ./id_rsa.pub
+rm ./.git-credentials
 
 # Replace BUILDALL=0 with BUILDALL=1 to build all benchmarks immediately
 docker run                                                                                   \

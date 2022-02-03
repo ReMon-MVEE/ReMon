@@ -16,15 +16,15 @@ __ports="-p 8080:8080"
 
 
 build_docker() {
-    cp ~/.ssh/id_rsa id_rsa         || touch id_rsa 
-    cp ~/.ssh/id_rsa.pub id_rsa.pub || touch id_rsa.pub 
-    cp ~/.git-credentials .git-credentials || touch .git-credentials 
+    cp ~/.ssh/id_rsa      "$__home_dir/id_rsa"           || touch "$__home_dir/id_rsa"
+    cp ~/.ssh/id_rsa.pub  "$__home_dir/id_rsa.pub"       || touch "$__home_dir/id_rsa.pub"
+    cp ~/.git-credentials "$__home_dir/.git-credentials" || touch "$__home_dir/.git-credentials"
 
-    docker build . -t $__docker_image
+    docker build $__home_dir -t $__docker_image
     
-    rm id_rsa
-    rm id_rsa.pub
-    rm .git-credentials
+    rm "$__home_dir/id_rsa"
+    rm "$__home_dir/id_rsa.pub"
+    rm "$__home_dir/.git-credentials"
 }
 
 
