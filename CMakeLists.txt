@@ -100,6 +100,13 @@ add_custom_target(
         release
         COMMAND "${CMAKE_COMMAND}" .. 
             -DCMAKE_BUILD_TYPE=Release
+            -DBenchmarkMode=OFF
+)
+
+add_custom_target(
+        benchmark
+        COMMAND "${CMAKE_COMMAND}" .. 
+            -DCMAKE_BUILD_TYPE=Release
             -DBenchmarkMode=ON
 )
 

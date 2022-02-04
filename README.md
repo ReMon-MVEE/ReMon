@@ -24,7 +24,8 @@ Building GHUMVEE is really easy. The `bootstrap.sh` script used to install the t
 This will build an optimized and statically linked version of the GHUMVEE binary.
 
 To more easily switch between build types and configurations, our CMakeLists.txt defines additional custom targets aimed at reconfiguring the build configuration. These can be executed by executing `make <desired configuration>` in the build/ directory. These targets are not all mutually exclusive. The targets are:
-- release: Configures the Release build of GHUMVEE. This version is optimized and ideal for looking at performance.
+- benchmark: Configures the Release build of GHUMVEE. This version is optimized and ideal for looking at performance. **Note**: this is essentially also a release build, thus will be built to the MVEE/bin/Release folder.
+- release: Configures the Release build of GHUMVEE. This version is optimized, but will leave some optional features enabled that make it less ideal for looking at performance, for example logging of system calls.
 - debug: Configures the debug build of GHUMVEE. This version is unoptimized and builds really fast. It is suitable for people who want to debug GHUMVEE.
 - block-shm: Configures GHUMVEE to use the old strategy of denying the variants access to shared memory resources
 - enable-shm: Configures GHUMVEE with the new strategy of handling shared memory using the hybrid in- and cross-process handling. This requires the 2.31 libc libraries to be used.
