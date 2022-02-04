@@ -13,8 +13,12 @@ sudo apt install -y libpulse-dev libxv-dev libxext-dev libx11-dev libx11-xcb-dev
 cd ../
 ./bootstrap.sh
 cd ./build/
+
+make releases
+make emulate-shm
 make -j$(nproc)
 make debug
+make emulate-shm
 make -j$(nproc)
 
 sudo apt install -y clang
