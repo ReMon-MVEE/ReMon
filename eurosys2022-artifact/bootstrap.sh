@@ -12,7 +12,7 @@ cd ../
 ./bootstrap.sh
 cd ./build/
 
-make releases
+make benchmark
 make emulate-shm
 make -j$(nproc)
 make debug
