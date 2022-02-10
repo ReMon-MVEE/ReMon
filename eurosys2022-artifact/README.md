@@ -51,8 +51,10 @@ instructions for both.
 ### Script Aided Setup
 
 ```bash
-cd /wherever/you/cloned/remon/eurosys2022-artifact/
+git clone git@github.com:ReMon-MVEE/ReMon.git
+cd ReMon/eurosys2022-artifact/
 ./docker_control.sh build
+# Will prompt eval user password when starting and once more later, this password is artifactdocker
 ./docker_control.sh bootstrap
 ./docker_control.sh build-all
 ```
@@ -60,14 +62,19 @@ cd /wherever/you/cloned/remon/eurosys2022-artifact/
 ### Manual Docker Setup
 
 ```bash
-cd /wherever/you/cloned/remon/eurosys2022-artifact/
+git clone git@github.com:ReMon-MVEE/ReMon.git
+cd ReMon/
+export REMON_HOME=$PWD
+
+cd eurosys2022-artifact/
 docker build . -t shmvee:ae
 
-# Replace BUILDALL=0 with BUILDALL=1 to build all benchmarks immediately
+# Will prompt eval user password when starting and once more later, this password is artifactdocker
+# Replace BUILDALL=1 with BUILDALL=0 to not build all benchmarks immediately
 docker run                                                                                   \
-    -v "/wherever/you/cloned/remon/":"/home/eval/artifact/" --workdir="/home/eval/artifact/" \
-    --env BUILDALL=0 --name artifact -it shmvee:ae                                           \
-    ./eurosys2022-artifact/bootstrap.sh
+    -v "$REMON_HOME":"/home/eval/artifact/" --workdir="/home/eval/artifact/" \
+    --env BUILDALL=1 --name artifact -it shmvee:ae                                           \
+    ./bootstrap.sh
 docker commit artifact shmvee:ae
 docker rm artifact
 ```
@@ -243,7 +250,7 @@ Version 2.13.1 downloaded from https://gitlab.freedesktop.org/fontconfig/fontcon
 
 | Configure Option         | Meaning                                                                                   |
 | :----------------------- | :---------------------------------------------------------------------------------------- |
-| --default                | Vanilla build with ReMon-supplied LLVM, **TODO: install on system**.                      |
+| --default                | Vanilla build with ReMon-supplied LLVM,                                                   |
 | --wrapped                | build with ReMon-supplied LLVM, after wrapping instructions that might access shared      |
 |                          | memory using our compiler pass.                                                           |
 | --install                | Install the vanilla build on the system, for more accurate comparison. Note that this     |
@@ -365,7 +372,3 @@ Optionally: start with starting the docker container.
 2. `./mvee -N <numvariant> -- /wherever/you/cloned/remon/eurosys2022-artifact/benchmarks/microbenchmark/memcpy`.
 
 ---
-
-## DIY
-
-**TODO: add this**
