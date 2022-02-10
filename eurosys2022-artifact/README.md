@@ -54,15 +54,17 @@ This script requires only a little interaction at the start, but runs fully auto
 Docker can be set up either by using the `docker_control.sh` script or fully manually. We advice the former, but provide
 instructions for both.
 
-Not that we copy your git config and default ssh keys (id_rsa) into the docker container. This is simply to enable you
+Note that we copy your git config and default ssh keys (id_rsa) into the docker container. This is simply to enable you
 to use .git as would normally do. It is also needed to ensure GitHub's ssh cloning works. Should this be an issue,
 contact us.
 
 ### Script Aided Setup
 
 ```bash
-cd /wherever/you/cloned/remon/eurosys2022-artifact/
+git clone git@github.com:ReMon-MVEE/ReMon.git
+cd ReMon/eurosys2022-artifact/
 ./docker_control.sh build
+# Will prompt eval user password when starting and once more later, this password is artifactdocker
 ./docker_control.sh bootstrap
 ./docker_control.sh build-all
 ```
@@ -70,7 +72,11 @@ cd /wherever/you/cloned/remon/eurosys2022-artifact/
 ### Manual Docker Setup
 
 ```bash
-cd /wherever/you/cloned/remon/eurosys2022-artifact/
+git clone git@github.com:ReMon-MVEE/ReMon.git
+cd ReMon/
+export REMON_HOME=$PWD
+
+cd eurosys2022-artifact/
 
 cp ~/.ssh/id_rsa      id_rsa           # || touch ./id_rsa"
 cp ~/.ssh/id_rsa.pub  id_rsa.pub       # || touch ./id_rsa.pub"
@@ -82,11 +88,12 @@ rm ./id_rsa
 rm ./id_rsa.pub
 rm ./.git-credentials
 
-# Replace BUILDALL=0 with BUILDALL=1 to build all benchmarks immediately
+# Will prompt eval user password when starting and once more later, this password is artifactdocker
+# Replace BUILDALL=1 with BUILDALL=0 to not build all benchmarks immediately
 docker run                                                                                   \
-    -v "/wherever/you/cloned/remon/":"/home/eval/artifact/" --workdir="/home/eval/artifact/" \
-    --env BUILDALL=0 --name artifact -it shmvee:ae                                           \
-    ./eurosys2022-artifact/bootstrap.sh
+    -v "$REMON_HOME":"/home/eval/artifact/" --workdir="/home/eval/artifact/" \
+    --env BUILDALL=1 --name artifact -it shmvee:ae                                           \
+    ./bootstrap.sh
 docker commit artifact shmvee:ae
 docker rm artifact
 ```
@@ -262,7 +269,7 @@ Version 2.13.1 downloaded from https://gitlab.freedesktop.org/fontconfig/fontcon
 
 | Configure Option         | Meaning                                                                                   |
 | :----------------------- | :---------------------------------------------------------------------------------------- |
-| --default                | Vanilla build with ReMon-supplied LLVM, **TODO: install on system**.                      |
+| --default                | Vanilla build with ReMon-supplied LLVM,                                                   |
 | --wrapped                | build with ReMon-supplied LLVM, after wrapping instructions that might access shared      |
 |                          | memory using our compiler pass.                                                           |
 | --install                | Install the vanilla build on the system, for more accurate comparison. Note that this     |
@@ -384,7 +391,3 @@ Optionally: start with starting the docker container.
 2. `./mvee -N <numvariant> -- /wherever/you/cloned/remon/eurosys2022-artifact/benchmarks/microbenchmark/memcpy`.
 
 ---
-
-## DIY
-
-**TODO: add this**
