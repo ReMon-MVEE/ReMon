@@ -118,6 +118,7 @@ normal docker:
 
 ```bash
 docker run -v "/wherever/you/cloned/remon/":"/home/eval/artifact/" \
+    --security-opt seccomp=unconfined                              \
     --workdir="/home/eval/artifact/" -p 8080:8080 -it              \
     shmvee:ae bash
 ```

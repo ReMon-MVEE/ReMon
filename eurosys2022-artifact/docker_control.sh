@@ -48,6 +48,7 @@ build_all_docker() {
 
 run_docker() {
     docker run                                               \
+        --security-opt seccomp=unconfined                    \
         $__volumes $__ports --workdir="/home/eval/artifact/" \
         -it $__docker_image bash
 }
