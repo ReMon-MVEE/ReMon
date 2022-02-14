@@ -19,10 +19,6 @@ RUN echo "${__user}:${__password}" | chpasswd
 USER ${__user}
 WORKDIR /home/${__user}
 
-RUN mkdir -p /home/eval/.ssh/
 RUN git config --global credential.helper store
-COPY --chown=eval:root id_rsa /home/eval/.ssh/id_rsa
-COPY --chown=eval:root id_rsa.pub /home/eval/.ssh/id_rsa.pub
-COPY --chown=eval:root .git-credentials /home/eval/.git-credentials
 
 RUN chmod 400 /home/eval/.ssh/id_rsa*

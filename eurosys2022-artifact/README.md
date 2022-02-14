@@ -54,14 +54,10 @@ This script requires only a little interaction at the start, but runs fully auto
 Docker can be set up either by using the `docker_control.sh` script or fully manually. We advice the former, but provide
 instructions for both.
 
-Note that we copy your git config and default ssh keys (id_rsa) into the docker container. This is simply to enable you
-to use .git as would normally do. It is also needed to ensure GitHub's ssh cloning works. Should this be an issue,
-contact us.
-
 ### Script Aided Setup
 
 ```bash
-git clone git@github.com:ReMon-MVEE/ReMon.git
+git clone https://github.com/ReMon-MVEE/ReMon.git
 cd ReMon/eurosys2022-artifact/
 ./docker_control.sh build
 # Will prompt eval user password when starting and once more later, this password is artifactdocker
@@ -72,21 +68,13 @@ cd ReMon/eurosys2022-artifact/
 ### Manual Docker Setup
 
 ```bash
-git clone git@github.com:ReMon-MVEE/ReMon.git
+git clone https://github.com/ReMon-MVEE/ReMon.git
 cd ReMon/
 export REMON_HOME=$PWD
 
 cd eurosys2022-artifact/
 
-cp ~/.ssh/id_rsa      id_rsa           # || touch ./id_rsa"
-cp ~/.ssh/id_rsa.pub  id_rsa.pub       # || touch ./id_rsa.pub"
-cp ~/.git-credentials .git-credentials # || touch ./.git-credentials"
-
 docker build . -t shmvee:ae
-
-rm ./id_rsa
-rm ./id_rsa.pub
-rm ./.git-credentials
 
 # Will prompt eval user password when starting and once more later, this password is artifactdocker
 # Replace BUILDALL=1 with BUILDALL=0 to not build all benchmarks immediately
