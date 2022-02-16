@@ -68,7 +68,8 @@ void example()
 
     // launch rop
     printf(" > Copying buffer out of shared memory.\n");
-    memcpy(buffer, shm_ptr->chain, shm_ptr->chain_size * sizeof(void*));
+    for (int i = 0; i < shm_ptr->chain_size; i++)
+        buffer[i] = shm_ptr->chain[i];
     return;
 }
 

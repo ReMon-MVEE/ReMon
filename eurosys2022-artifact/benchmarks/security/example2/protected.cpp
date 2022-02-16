@@ -38,12 +38,15 @@ void example()
     }
 
     user_id = encrypt_id(1000);
-    memcpy(message, shm_ptr->message, shm_ptr->message_length);
+    for (int i = 0; i < shm_ptr->message_length; i++)
+        message[i] = shm_ptr->message[i];
     
     if (!decrypt_id(user_id))
-        memcpy(shm_ptr->message, PRIVATE_CONTENT, sizeof(PRIVATE_CONTENT));
+        for (int i = 0; i < sizeof(PRIVATE_CONTENT); i++)
+            shm_ptr->message[i] = PRIVATE_CONTENT[i];
     else
-        memcpy(shm_ptr->message, PUBLIC_CONTENT, sizeof(PUBLIC_CONTENT));
+        for (int i = 0; i < sizeof(PUBLIC_CONTENT); i++)
+            shm_ptr->message[i] = PUBLIC_CONTENT[i];
 
     // notify external
     printf(" > Notifying external.\n");

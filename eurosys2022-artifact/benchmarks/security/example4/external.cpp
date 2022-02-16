@@ -10,7 +10,7 @@
 
 
 struct shm_t* shm_ptr = nullptr;
-unsigned long long ROP_CHAIN[] = { 0, 0, 0, 0, 0, 0, 0, 5, 23, 33, 37, 41, 49 };
+unsigned long long ROP_CHAIN[] = { 0, 0, 0, 0, 0, 0, 0, 5, 20, 30, 34, 38, 46 };
 
 
 void example()
