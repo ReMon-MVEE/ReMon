@@ -9,7 +9,7 @@
 #include <sys/shm.h>
 
 
-#define MAX_DATA_SIZE     4096*16
+#define MAX_DATA_SIZE     4096*64
 #define SHM_TEST_COUNT    100000
 static unsigned long long SIZES_ARRAY[] = 
 {
@@ -30,6 +30,10 @@ static unsigned long long SIZES_ARRAY[] =
     4096*4,
     4096*8,
     4096*16,
+    4096*24,
+    4096*32,
+    4096*48,
+    4096*64,
 };
 static int SIZES_ARRAY_SIZE = sizeof(SIZES_ARRAY) / sizeof(unsigned long long);
 

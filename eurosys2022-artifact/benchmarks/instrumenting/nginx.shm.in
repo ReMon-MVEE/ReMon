@@ -158,3 +158,10 @@
 ./src/core/ngx_slab.c:289:21
 ./src/core/ngx_slab.c:291:39
 ./src/core/ngx_rbtree.c:165:22
+./src/http/modules/ngx_http_limit_req_module.c:643:13
+./src/http/modules/ngx_http_limit_req_module.c:655:40
+./src/http/modules/ngx_http_limit_req_module.c:662:26
+./src/http/modules/ngx_http_limit_req_module.c:669:9
+./src/core/ngx_slab.c:593:26
+./src/core/ngx_slab.c:595:28
+./src/core/ngx_slab.c:605:24

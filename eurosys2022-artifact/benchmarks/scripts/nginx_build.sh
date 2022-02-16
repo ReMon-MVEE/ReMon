@@ -77,7 +77,7 @@ do
       ;;
 
     --base-anon)
-      __prefix="$__current_dir/../out/nginx/base"
+      __prefix="$__current_dir/../out/nginx/base_anon"
 
       export CC="$__llvm_bin_dir/clang -g -O3"
       export CXX="$__llvm_bin_dir/clang++ -g -O3"
