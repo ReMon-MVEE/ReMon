@@ -85,6 +85,9 @@ variantstate::variantstate()
     , pendingpid (0)
     , infinite_loop_ptr (0)
     , should_sync_ptr (0)
+#ifdef MVEE_USE_BPF
+    , ipmon_active (false)
+#endif
     , callnumbackup (0)
     , orig_controllen (0)
     , config (NULL)
@@ -167,6 +170,8 @@ void monitor::init()
     monitor_registered             = false;
     monitor_terminating            = false;
     ipmon_initialized              = false;
+    ipmon_mapped                   = false;
+    ipmon_mapped_first_time_in_ld  = false;
 	ipmon_mmap_handling            = false;
 	ipmon_fd_handling              = false;
 	aliased_open                   = false;
@@ -188,6 +193,8 @@ void monitor::init()
 	current_shadow                 = NULL;
 
 	special_shmdt_count            = 0;
+
+    ipmon_bases.resize(mvee::numvariants);
 
 	blocked_signals.resize(mvee::numvariants);
 	old_blocked_signals.resize(mvee::numvariants);
@@ -251,6 +258,18 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
         // If this is a fork: Copy over the list of variables to reset
         if (!shares_mmap_table)
             variants[i].reset_atfork = parent_monitor->variants[i].reset_atfork;
+        
+#ifdef MVEE_USE_BPF
+        // seccomp-BPF filters will be preserved across forks/clones
+        // so we need to take over the ipmon_active state of the parent
+        variants[i].ipmon_active = parent_monitor->variants[i].ipmon_active;
+        if (variants[i].ipmon_active)
+        {
+            ipmon_mapped = parent_monitor->ipmon_mapped;
+            ipmon_mapped_first_time_in_ld = false;//parent_monitor->ipmon_mapped_first_time_in_ld;
+            ipmon_bases = parent_monitor->ipmon_bases;
+        }
+#endif
     }
 
     // variant monitors are a different story. New variants (forks/vforks/clones) always
@@ -1128,6 +1147,13 @@ void monitor::handle_event (interaction::mvee_wait_status& status)
         handle_exit_event(index);
         return;
     }
+#ifdef MVEE_USE_BPF
+    else if (variants[index].ipmon_active && status.reason == STOP_SECCOMP)
+	{
+		handle_seccomp_event(index);
+		return;
+	}
+#endif
     else if (status.reason == STOP_SYSCALL)
 	{
 		handle_syscall_event(index);
@@ -1224,10 +1250,22 @@ bool monitor::handle_rdtsc_event(int variantnum)
 				{
 					throw RwRegsFailure(variantnum, "writing RDTSC result");
 				}
-				
+
+#ifdef MVEE_USE_BPF
+				if (variants[variantnum].ipmon_active)
+				{
+					if (!interaction::resume(variants[variantnum].variantpid))
+						throw ResumeFailure(variantnum, "RDTSC resume");
+				}
+				else
+				{
+					if (!interaction::resume_until_syscall(variants[variantnum].variantpid))
+						throw ResumeFailure(variantnum, "RDTSC resume");
+				}
+#else
 				if (!interaction::resume_until_syscall(variants[variantnum].variantpid))
 					throw ResumeFailure(variantnum, "RDTSC resume");
-
+#endif
 				return true;
 			}
 
@@ -1280,9 +1318,21 @@ bool monitor::handle_rdtsc_event(int variantnum)
 						throw RwRegsFailure(i, "writing RDTSC result");
 					}
 
+#ifdef MVEE_USE_BPF
+					if (variants[i].ipmon_active)
+					{
+						if (!interaction::resume(variants[i].variantpid))
+							throw ResumeFailure(i, "RDTSC resume");
+					}
+					else
+					{
+						if (!interaction::resume_until_syscall(variants[i].variantpid))
+							throw ResumeFailure(i, "RDTSC resume");
+					}
+#else
 					if (!interaction::resume_until_syscall(variants[i].variantpid))
 						throw ResumeFailure(i, "RDTSC resume");
-
+#endif
                     variants[i].callnum = NO_CALL;
                 }
 
@@ -1495,7 +1545,18 @@ void monitor::handle_resume_event(int index)
 
             // And finally it's safe to resume the variant
             debugf("%s - resumed variant\n", call_get_variant_pidstr(i).c_str());
-			call_resume(i);
+#ifdef MVEE_USE_BPF
+            if (variants[i].ipmon_active)
+            {
+			    call_resume_seccomp(i);
+            }
+            else
+            {
+                call_resume(i);
+            }
+#else
+            call_resume(i);
+#endif
         }
 
         state = STATE_NORMAL;
@@ -1663,7 +1724,9 @@ void monitor::handle_fork_event(int index, interaction::mvee_wait_status& status
             }
         }
 
-		call_resume_all();
+        // TODO: Add call_resume_seccomp_all();
+        call_resume_all();
+
         state = STATE_IN_SYSCALL;
     }
 }
@@ -1719,7 +1782,18 @@ void monitor::handle_trap_event(int index)
 #endif
 	}
 
+#ifdef MVEE_USE_BPF
+	if (variants[index].ipmon_active)
+	{
+		call_resume_seccomp(index);
+	}
+	else
+	{
+		call_resume(index);
+	}
+#else
 	call_resume(index);
+#endif
 }
 
 /*-----------------------------------------------------------------------------
@@ -1918,7 +1992,18 @@ void monitor::handle_syscall_exit_event(int index)
 				   call_get_variant_pidstr(index).c_str());		   
             variants[index].callnum = NO_CALL;
             state                 = STATE_NORMAL;
-			call_resume(index);
+#ifdef MVEE_USE_BPF
+            if (variants[index].ipmon_active)
+            {
+			    call_resume_seccomp(index);
+            }
+            else
+            {
+                call_resume(index);
+            }
+#else
+            call_resume(index);
+#endif
             return;
         }
 
@@ -1950,7 +2035,19 @@ void monitor::handle_syscall_exit_event(int index)
 		if (variants[index].have_overwritten_args)
 			call_restore_args(index);
 
+#ifdef MVEE_USE_BPF
+		if (variants[index].ipmon_active)
+		{
+			call_resume_seccomp(index);
+		}
+		else
+		{
+			call_resume(index);
+		}
+#else
 		call_resume(index);
+#endif
+
         variants[index].call_type       = MVEE_CALL_TYPE_UNKNOWN;
         variants[index].call_dispatched = false;
         return;
@@ -1999,7 +2096,17 @@ void monitor::handle_syscall_exit_event(int index)
 				if (variants[i].have_overwritten_args)
 					call_restore_args(i);
 
+#ifdef MVEE_USE_BPF
+            for (i = 0; i < mvee::numvariants; ++i)
+            {
+                if (variants[i].ipmon_active)
+			        call_resume_seccomp(i);
+                else
+                    call_resume(i);
+            }
+#else
             call_resume_all();
+#endif
             return;
         }
 
@@ -2032,7 +2139,17 @@ void monitor::handle_syscall_exit_event(int index)
 				if (variants[i].have_overwritten_args)
 					call_restore_args(i);
 
+#ifdef MVEE_USE_BPF
+            for (i = 0; i < mvee::numvariants; ++i)
+            {
+                if (variants[i].ipmon_active)
+			        call_resume_seccomp(i);
+                else
+                    call_resume(i);
+            }
+#else
             call_resume_all();
+#endif
 		}
         else
             debugf("WARNING: postcall handler handled resume. not resuming...\n");
@@ -2042,6 +2159,91 @@ void monitor::handle_syscall_exit_event(int index)
     {
         sig_restart_partially_interrupted_syscall();
     }
+}
+
+/*-----------------------------------------------------------------------------
+    handle_seccomp_event
+-----------------------------------------------------------------------------*/
+void monitor::handle_seccomp_event(int index)
+{
+    // ERESTARTSYS handler
+    if (variants[index].restarting_syscall
+        && !variants[index].restarted_syscall)
+    {
+        bool all_restarted = true;
+        bool all_synced    = true;
+
+        debugf("%s - restarted syscall is back at syscall entry\n",
+			   call_get_variant_pidstr(index).c_str());
+
+        if (variants[index].call_type != MVEE_CALL_TYPE_UNSYNCED
+            && state != STATE_IN_FORKCALL)
+        {
+            variants[index].restarted_syscall = true;
+
+            // This is retarded. Some variants can return normally from the
+            // syscall, while others can see a -ERESTART* error
+            for (int i = 0; i < mvee::numvariants; ++i)
+            {
+                if (!variants[i].restarting_syscall || !variants[i].restarted_syscall)
+                {
+                    all_restarted = false;
+
+                    // call is still in progress
+                    if (variants[i].callnum != NO_CALL)
+                    {
+                        all_synced = false;
+                    }
+                }
+            }
+
+            // Do not blindly resume the variants here! If it's either a master call
+            // OR a normal call that was restarted in _all_ variants, we still have
+            // to check if we can maybe deliver that pending signal.
+            if (all_restarted)
+            {
+                debugf("All variants were restarted and are now back at the syscall entry\n");
+                if (sig_prepare_delivery())
+                {
+//					debugf("Signal delivery in progress!\n");
+                    for (int i = 0; i < mvee::numvariants; ++i)
+                        variants[i].restarting_syscall = false;
+                    return;
+                }
+                else
+                {
+                    // no signal to be delivered. Was this a spurious wakeup?!
+                    // can also happen if a signal was delivered during a master call!!!
+                    debugf("no signal to be delivered...\n");
+                    for (int i = 0; i < mvee::numvariants; ++i)
+                    {
+                        debugf("%s - all restarted - resuming variant from restarted syscall entry\n", 
+							   call_get_variant_pidstr(i).c_str());
+                        variants[i].restarting_syscall = variants[i].restarted_syscall = false;
+						call_resume(i);
+                    }
+                    return;
+                }
+
+            }
+            else if (state != STATE_IN_MASTERCALL && all_synced)
+            {
+                sig_restart_partially_interrupted_syscall();
+            }
+            return;
+        }
+        else
+        {
+            debugf("%s - unsynced or forkcall - resuming variant from restarted syscall entry\n", 
+				   call_get_variant_pidstr(index).c_str());
+            variants[index].restarting_syscall = variants[index].restarted_syscall = false;
+			call_resume(index);
+        }
+
+        return;
+    }
+
+    handle_syscall_entrance_event(index);
 }
 
 /*-----------------------------------------------------------------------------
@@ -2126,10 +2328,27 @@ void monitor::handle_syscall_event(int index)
         return;
     }
 
+#ifdef MVEE_USE_BPF
+    if (variants[index].ipmon_active)
+    {
+        if (variants[index].callnum == NO_CALL)
+            handle_syscall_entrance_event(index);
+        else
+            handle_syscall_exit_event(index);
+    }
+    else
+    {
+        if (variants[index].callnum == NO_CALL)
+            handle_syscall_entrance_event(index);
+        else
+            handle_syscall_exit_event(index);
+    }
+#else
     if (variants[index].callnum == NO_CALL)
         handle_syscall_entrance_event(index);
     else
         handle_syscall_exit_event(index);
+#endif
 }
 
 /*-----------------------------------------------------------------------------
@@ -2268,7 +2487,19 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
                 variant->regs.rip += instruction.size;
                 if (!interaction::write_all_regs(variant->variantpid, &variant->regs))
                     warnf("\n\n\nerror\n\n\n");
+
+#ifdef MVEE_USE_BPF
+                if (variants[variantnum].ipmon_active)
+                {
+                    call_resume_seccomp(variantnum);
+                }
+                else
+                {
+                    call_resume(variantnum);
+                }
+#else
                 call_resume(variantnum);
+#endif
                 return;
             }
 #endif
@@ -2516,7 +2747,18 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
             // Continue normal execution for now.
             // When a signal is ignored, the variant that was about to execute the sighandler
             // will execute a sys_restart_syscall call.
+#ifdef MVEE_USE_BPF
+            if (variants[variantnum].ipmon_active)
+            {
+                call_resume_seccomp(variantnum);
+            }
+            else
+            {
+                call_resume(variantnum);
+            }
+#else
 			call_resume(variantnum);
+#endif
         }
     }
 }
@@ -2996,7 +3238,18 @@ void monitor::sig_return_from_sighandler ()
 			if (!interaction::write_all_regs(variants[i].variantpid, &variants[i].regsbackup))
 				throw RwRegsFailure(i, "post-signal context restore");
 
+#ifdef MVEE_USE_BPF
+            if (variants[i].ipmon_active)
+            {
+                call_resume_seccomp(i);
+            }
+            else
+            {
+                call_resume(i);
+            }
+#else
 			call_resume(i);
+#endif
         }
 
 		if (!restore_context && !current_signal)

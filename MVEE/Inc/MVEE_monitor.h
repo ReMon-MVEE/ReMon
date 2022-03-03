@@ -247,6 +247,9 @@ public:
     pid_t         pendingpid;                                       // Process ID of the newly created process/thread
     unsigned long infinite_loop_ptr;                                // pointer to the sys_pause loop
     unsigned long should_sync_ptr;                                  // pointer to the should_sync flag
+#ifdef MVEE_USE_BPF
+    bool ipmon_active;
+#endif
     long          callnumbackup;                                    // Backup of the syscall num. Made when the monitor is delivering a signal
     PTRACE_REGS   regsbackup;                                       // Backup of the registers. Made when the monitor is delivering a signal
     unsigned long hw_bps[4];                                        // currently set hardware breakpoints
@@ -617,6 +620,16 @@ private:
 	//
     void          call_resume_all                     ();
 
+	//
+	// Resume a single variant
+	// 
+	void          call_resume_seccomp                         (int variantnum);
+
+	// 
+	// Resume all variants
+	//
+    void          call_resume_seccomp_all                     ();
+
 	// 
 	// Replace the syscall number for a single variant with __NR_getpid and then
 	// resume it. This forces the variant to execute sys_getpid instead of
@@ -796,6 +809,13 @@ private:
 	// syscall handler functions in MVEE_syscalls.cpp to handle the specifics.
 	//
     void handle_syscall_exit_event           (int index);
+
+	//
+	// Processes a SIGSYSTRAP signal. This function figures out if the signal
+	// was caused by a syscall entrance and delegates to one of the
+	// above functions accordingly
+	//
+    void handle_seccomp_event                (int index);
 
 	//
 	// Processes a SIGSYSTRAP signal. This function figures out if the signal
@@ -1139,6 +1159,9 @@ private:
     bool                              monitor_registered;
     bool                              monitor_terminating;
     bool                              ipmon_initialized;
+	std::vector<unsigned long> 		  ipmon_bases;
+	bool                              ipmon_mapped;
+	bool							  ipmon_mapped_first_time_in_ld;
 	bool                              ipmon_mmap_handling;
 	bool                              ipmon_fd_handling;
     bool                              aliased_open;           // 

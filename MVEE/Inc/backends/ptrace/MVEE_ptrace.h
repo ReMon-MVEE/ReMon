@@ -49,6 +49,7 @@
 enum StopReason
 {
     STOP_NOTSTOPPED,
+	STOP_SECCOMP,
 	STOP_SYSCALL,
 	STOP_SIGNAL,
 	STOP_EXECVE,
@@ -177,6 +178,9 @@ namespace interaction
 		if (ptrace(PTRACE_SETOPTIONS, variantpid, 0, 
 				   (void*)(PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK |
 						   PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXEC |
+#ifdef MVEE_USE_BPF
+						   PTRACE_O_TRACESECCOMP |
+#endif
 						   PTRACE_O_TRACESYSGOOD | PTRACE_O_EXITKILL)) == 0)
 			return true;
 		return false;
@@ -270,7 +274,11 @@ namespace interaction
 					case SIGTRAP:
 					{
 						int event = ((ret & 0x000F0000) >> 16);
-						if (event == PTRACE_EVENT_FORK || 
+						if (event == PTRACE_EVENT_SECCOMP)
+						{
+							status.reason = STOP_SECCOMP;
+						}
+						else if (event == PTRACE_EVENT_FORK || 
 							event == PTRACE_EVENT_VFORK ||
 							event == PTRACE_EVENT_CLONE)
 						{

@@ -361,6 +361,7 @@ public:
     // Disjoint Code Layouting support
     //
     void calculate_disjoint_bases                  (unsigned long size, std::vector<unsigned long>& bases);
+    void calculate_disjoint_bases_16_bits_ipmon    (unsigned long size, std::vector<unsigned long>& bases);
     int  check_vdso_overlap                        (int variantnum);
 
 	//

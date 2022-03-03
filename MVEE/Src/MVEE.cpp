@@ -1734,6 +1734,12 @@ void mvee::start_monitored()
         if (!interaction::accept_tracing())
 			fprintf(stderr, "Couldn't accept tracing\n");
 
+#ifdef MVEE_USE_BPF
+        // Avoid the need for CAP_SYS_ADMIN
+        if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == -1)
+            warnf("Couldn't avoid the need for CAP_SYS_ADMIN\n");
+#endif
+
         // Stop the variant so we can detach the main monitor thread.
         kill(getpid(), SIGSTOP);
 

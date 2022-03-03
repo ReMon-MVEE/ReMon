@@ -114,6 +114,7 @@ typedef unsigned long rb_pointer;
 
 // hardcoded TODO fix for other architectures
 #define MVEE_FAKE_SYSCALL_BASE 0x6FFFFFFF // needed for fake syscalls
+#define MVEE_REGISTER_IPMON		MVEE_FAKE_SYSCALL_BASE + 22 	// Fake syscall to register ipmon
 
 /*-----------------------------------------------------------------------------
     System Call Handler Macros

@@ -47,6 +47,8 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <linux/filter.h>
+#include <linux/seccomp.h>
 #include <linux/socket.h>
 #include <arpa/inet.h>
 #include <sys/un.h>
@@ -66,8 +68,12 @@
 // Retard check - is the loaded kernel compatible with IP-MON or not?
 //
 extern "C" unsigned char ipmon_initialized; // MVEE_ipmon_syscall.S
+bool                   seccomp_bpf_filter_is_set = false;
 unsigned char            ipmon_kernel_compatible = 0;
 unsigned char            ipmon_variant_num       = 0;
+#ifdef IPMON_USE_BPF
+thread_local struct ipmon_buffer* ipmon_RB       = 0;
+#endif
 
 //
 // Mask of syscalls that may be handled by IP-MON and bypass the ptracer
@@ -3709,6 +3715,9 @@ extern "C" long ipmon_enclave
 	unsigned long arg6
 )
 {
+#ifdef IPMON_USE_BPF
+	ipmon_buffer* RB = ipmon_RB;
+#endif
 	struct ipmon_syscall_args args;
 	args.arg1 = arg1;
 	args.arg2 = arg2;
@@ -3732,6 +3741,7 @@ extern "C" long ipmon_enclave
 	// erim_switch_to_untrusted;
 #endif
 
+#ifndef IPMON_USE_BPF
 	// check if we need to reinitialize
 	// The kernel sets the highest bit of the RB pointer after every fork/clone
 	// Check if the highest bit is set
@@ -3746,6 +3756,7 @@ extern "C" long ipmon_enclave
 
 		RB = ipmon_register_thread();
 	}
+#endif
 
 	long ret = ipmon_handle_syscall(RB, syscall_no, args);
 
@@ -3765,6 +3776,13 @@ void ipmon_rb_probe()
 	RB->padding[0] = 0;
 }
 */
+
+/*-----------------------------------------------------------------------------
+    ipmon_unchecked_syscall_ptr - defined in MVEE_ipmon_syscall.S. This is where
+	IP-MON will call the syscall instruction of a syscall on the IP-MON whitelist
+-----------------------------------------------------------------------------*/
+extern "C" void ipmon_unchecked_syscall_instr();
+extern "C" void ipmon_checked_syscall_instr();
 
 /*-----------------------------------------------------------------------------
     ipmon_register_thread - IP-MON registration is thread-local now!
@@ -3804,12 +3822,9 @@ extern "C" struct ipmon_buffer* ipmon_register_thread()
 	// optonally also set the variant number
 	ipmon_checked_syscall(MVEE_GET_THREAD_NUM, &ipmon_variant_num);
 
-	// Register IP-MON
-	long ret = ipmon_checked_syscall(__NR_prctl, 
-									 PR_REGISTER_IPMON, 
+	long ret = ipmon_checked_syscall(MVEE_REGISTER_IPMON, 
 									 kernelmask, 
 									 ROUND_UP(__NR_syscalls, 8) / 8, 
-									 RB, 
 #ifdef IPMON_PASS_RB_POINTER_EXPLICITLY
 									 ipmon_enclave_entrypoint_alternative
 #else
@@ -3821,7 +3836,7 @@ extern "C" struct ipmon_buffer* ipmon_register_thread()
 
 	if (ret < 0 && ret > -4096)
 	{
-		printf("ERROR: IP-MON registration failed. sys_prctl(PR_REGISTER_IPMON) returned: %ld (%s)\n", ret, strerror(-ret));
+		printf("ERROR: IP-MON registration failed. syscall(PR_REGISTER_IPMON) returned: %ld (%s)\n", ret, strerror(-ret));
 //		exit(-1);
 		return NULL;
 	}
@@ -3874,7 +3889,73 @@ extern "C" struct ipmon_buffer* ipmon_register_thread()
 		printf("ERROR: IP-MON RB registration failed. pkey_mprotect returned -1.");
 #endif
 
+#ifdef IPMON_USE_BPF
+	ipmon_RB = (ipmon_buffer*)RB;
+#endif
 	return RB;
+}
+
+/*-----------------------------------------------------------------------------
+    set_seccomp_bpf_filter - Set the seccomp-BPF filter for this variant
+-----------------------------------------------------------------------------*/
+static void set_seccomp_bpf_filter()
+{
+#ifdef IPMON_USE_BPF
+	int is_seccomp_bpf_filter_installed = ipmon_checked_syscall(MVEE_IS_SECCOMP_BPF_FILTER_INSTALLED);
+
+	if (is_seccomp_bpf_filter_installed == 0)
+	{
+		// Get the address of the ipmon enlcave entrypoint
+		unsigned long long ipmon_enclave_entrypoint_ptr = (unsigned long long)ipmon_enclave_entrypoint;
+		//printf("INFO: ipmon_enclave_entrypoint_ptr = %llx\n", ipmon_enclave_entrypoint_ptr);
+
+		// We add the entrypoint to a mask and shift it back to align on bit 0
+		unsigned long long ipmon_enclave_entrypoint_ptr_bits_0_11  = ((unsigned long long)ipmon_enclave_entrypoint_ptr) & 0x0000000000000FFF;
+		unsigned long long ipmon_enclave_entrypoint_ptr_bits_12_23 = ((unsigned long long)ipmon_enclave_entrypoint_ptr) & 0x0000000000FFF000;
+		ipmon_enclave_entrypoint_ptr_bits_12_23 >>= 12;
+		unsigned long long ipmon_enclave_entrypoint_ptr_bits_24_35 = ((unsigned long long)ipmon_enclave_entrypoint_ptr) & 0x0000000FFF000000;
+		ipmon_enclave_entrypoint_ptr_bits_24_35 >>= 24;
+		unsigned long long ipmon_enclave_entrypoint_ptr_bits_36_47 = ((unsigned long long)ipmon_enclave_entrypoint_ptr) & 0x0000FFF000000000;
+		ipmon_enclave_entrypoint_ptr_bits_36_47 >>= 36;
+		unsigned long long ipmon_enclave_entrypoint_ptr_bits_48_59 = ((unsigned long long)ipmon_enclave_entrypoint_ptr) & 0x0FFF000000000000;
+		ipmon_enclave_entrypoint_ptr_bits_48_59 >>= 48;
+		unsigned long long ipmon_enclave_entrypoint_ptr_bits_60_63 = ((unsigned long long)ipmon_enclave_entrypoint_ptr) & 0xF000000000000000;
+		ipmon_enclave_entrypoint_ptr_bits_60_63 >>= 60;
+
+		/*printf("INFO: ipmon_enclave_entrypoint_ptr_bits_0_11 = %llx\n", ipmon_enclave_entrypoint_ptr_bits_0_11);
+		printf("INFO: ipmon_enclave_entrypoint_ptr_bits_12_23 = %llx\n", ipmon_enclave_entrypoint_ptr_bits_12_23);
+		printf("INFO: ipmon_enclave_entrypoint_ptr_bits_24_35 = %llx\n", ipmon_enclave_entrypoint_ptr_bits_24_35);
+		printf("INFO: ipmon_enclave_entrypoint_ptr_bits_36_47 = %llx\n", ipmon_enclave_entrypoint_ptr_bits_36_47);
+		printf("INFO: ipmon_enclave_entrypoint_ptr_bits_48_59 = %llx\n", ipmon_enclave_entrypoint_ptr_bits_48_59);
+		printf("INFO: ipmon_enclave_entrypoint_ptr_bits_60_63 = %llx\n", ipmon_enclave_entrypoint_ptr_bits_60_63);*/
+
+		uintptr_t ipmon_unchecked_syscall_instr_ptr = (uintptr_t)ipmon_unchecked_syscall_instr;
+		ipmon_unchecked_syscall_instr_ptr += 0x02; // align address with seccomp bpf instruction pointer on x86_64
+
+		uintptr_t ipmon_checked_syscall_instr_ptr = (uintptr_t)ipmon_checked_syscall_instr;
+		ipmon_checked_syscall_instr_ptr += 0x02; // align address with seccomp bpf instruction pointer on x86_64
+
+		// Define BPF-filter
+#include "MVEE_ipmon_seccomp_bpf_policy.h"
+
+		// Set BPF-filter
+		struct sock_fprog prog = {
+			(unsigned short)(sizeof(filter) / sizeof(filter[0])),
+			filter,
+		};
+
+		// Enable seccomp BPF-filtering
+		if (ipmon_checked_syscall(__NR_seccomp, SECCOMP_SET_MODE_FILTER, 0, &prog) == -1)
+		{
+			perror("Couldn't enable seccomp-bpf filtering");
+		}
+		else
+		{
+			int seccomp_bpf_filter_installed = ipmon_checked_syscall(MVEE_SECCOMP_BPF_FILTER_INSTALLED);
+			seccomp_bpf_filter_is_set = true;
+		}
+	}
+#endif
 }
 
 /*-----------------------------------------------------------------------------
@@ -3883,6 +3964,9 @@ extern "C" struct ipmon_buffer* ipmon_register_thread()
 -----------------------------------------------------------------------------*/
 static unsigned char is_ipmon_kernel_compatible()
 {
+#ifdef IPMON_USE_BPF
+	return true;
+#else
 	if (!ipmon_initialized)
 	{
 		// this call returns -EFAULT if called from outside the 
@@ -3891,6 +3975,7 @@ static unsigned char is_ipmon_kernel_compatible()
 			ipmon_kernel_compatible = 1;
 	}
 	return ipmon_kernel_compatible;
+#endif
 }
 
 /*-----------------------------------------------------------------------------
@@ -3904,6 +3989,10 @@ void __attribute__((constructor)) init()
 		is_ipmon_kernel_compatible())
 	{
 		ipmon_register_thread();
+		if (!seccomp_bpf_filter_is_set)
+		{
+			set_seccomp_bpf_filter();
+		}
 		return;
 	}
 
@@ -4075,6 +4164,11 @@ void __attribute__((constructor)) init()
 #endif
 
 	ipmon_register_thread();
+	if (!seccomp_bpf_filter_is_set)
+	{
+		set_seccomp_bpf_filter();
+	}
+
 #ifdef IPMON_USE_MPK
 	erim_switch_to_untrusted;
 #endif

@@ -1,6 +1,7 @@
 cmake_minimum_required (VERSION 3.13)
 include(CMakeDependentOption)
 project(remon)
+include(CMakeDependentOption)
 
 if (NOT CMAKE_BUILD_TYPE)
         message(STATUS "CMAKE_BUILD_TYPE not defined. Defaulting to Release.")
@@ -307,6 +308,7 @@ option(ShmInsLogging "Log instructions using shared memory." OFF)
 option(ShmInsLoggingFull "Log instructions using shared memory with more verbosity." OFF)
 option(ShmReplayLeader "Modifies replaying of shared memory instructions to follow leader-follower principle." ON)
 option(UseSystemLd "Use the system-provided ld.so, or opposed to our own patched version." OFF)
+cmake_dependent_option(UseBPF "Use seccomp-bpf filters to intercept syscalls and forward either to IP-MON or the MVEE." ON "BuildIpmon" OFF)
 cmake_dependent_option(UseMPK "Use MPK to enhance user-space protections in IP-MON." ON "BuildIpmon" OFF)
 target_compile_definitions(mvee PRIVATE
     $<$<BOOL:${BenchmarkMode}>:MVEE_BENCHMARK>
@@ -319,6 +321,7 @@ target_compile_definitions(mvee PRIVATE
     $<$<BOOL:${ShmInsLogging}>:MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING>
     $<$<BOOL:${ShmInsLoggingFull}>:MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL>
     $<$<BOOL:${ShmReplayLeader}>:MVEE_SHARED_MEMORY_REPLAY_LEADER>
+    $<$<BOOL:${UseBPF}>:MVEE_USE_BPF>
     $<$<BOOL:${UseMPK}>:MVEE_USE_MPK>
     $<$<BOOL:${DisableMonitorOutput}>:MVEE_NO_MONITOR_OUTPUT>
     #MVEE_LOG_ALL_SHM_INSTRUCTIONS

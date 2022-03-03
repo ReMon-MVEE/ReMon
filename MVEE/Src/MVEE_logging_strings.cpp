@@ -224,6 +224,9 @@ const char* getTextualSyscall(long int syscallnum)
 			DEF_CASE(MVEE_ENABLE_XCHECKS);
 			DEF_CASE(MVEE_GET_LEADER_SHM_TAG);
 			DEF_CASE(MVEE_RESET_ATFORK);
+            DEF_CASE(MVEE_REGISTER_IPMON);
+            DEF_CASE(MVEE_SECCOMP_BPF_FILTER_INSTALLED);
+            DEF_CASE(MVEE_IS_SECCOMP_BPF_FILTER_INSTALLED);
         }
     }
 
@@ -2110,6 +2113,9 @@ std::string getTextualMVEEWaitStatus (interaction::mvee_wait_status& status)
 	{
 		case STOP_NOTSTOPPED: 
 			ss << "STOP_NOTSTOPPED";
+			break;
+		case STOP_SECCOMP:
+			ss << "STOP_SECCOMP";
 			break;
 		case STOP_SYSCALL:
 			ss << "STOP_SYSCALL";

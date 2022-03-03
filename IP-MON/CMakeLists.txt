@@ -1,5 +1,6 @@
 enable_language(ASM)
-option(PassRbPointerExplicitly "Pass the pointer to the replication buffer explicitly to the IP-MON enclave." ON)
+
+cmake_dependent_option(PassRbPointerExplicitly "Pass the pointer to the replication buffer explicitly to the IP-MON enclave." ON "NOT UseBPF" OFF)
 
 set(generated_headers_list
   ${CMAKE_CURRENT_SOURCE_DIR}/MVEE_ipmon_maybe_checked.h
@@ -17,8 +18,18 @@ add_custom_command(
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
+add_custom_command(
+  OUTPUT  ${CMAKE_CURRENT_SOURCE_DIR}/MVEE_ipmon_seccomp_bpf_policy.h
+  COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/generate_seccomp_bpf_policy.pl
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/generate_seccomp_bpf_policy.pl
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/seccomp_bpf_policy.json
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+
 add_custom_target(generated_headers
   DEPENDS ${generated_headers_list}
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/MVEE_ipmon_seccomp_bpf_policy.h
 )
 
 add_library(ipmon SHARED
@@ -32,6 +43,7 @@ add_dependencies(ipmon
 
 target_compile_definitions(ipmon PRIVATE
     $<$<BOOL:${PassRbPointerExplicitly}>:IPMON_PASS_RB_POINTER_EXPLICITLY>
+    $<$<BOOL:${UseBPF}>:IPMON_USE_BPF>
     $<$<BOOL:${UseMPK}>:IPMON_USE_MPK>
 )
 

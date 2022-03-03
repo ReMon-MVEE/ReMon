@@ -193,6 +193,23 @@ enum mvee_shared_buffer_types
 #define MVEE_RESET_ATFORK              MVEE_FAKE_SYSCALL_BASE + 21
 
 //
+// MVEE_REGISTER_IPMON: Adds addresses and needed state to the variant to use ipmon
+//
+#define MVEE_REGISTER_IPMON            MVEE_FAKE_SYSCALL_BASE + 22
+
+//
+// MVEE_SECCOMP_BPF_FILTER_INSTALLED: Sets a flag that indicates that our seccomp-BPF
+// filter is installed in IP-MON.
+//
+#define MVEE_SECCOMP_BPF_FILTER_INSTALLED            MVEE_FAKE_SYSCALL_BASE + 23
+
+//
+// MVEE_IS_SECCOMP_BPF_FILTER_INSTALLED: Checks if our seccomp-BPF filter is
+// installed in IP-MON.
+//
+#define MVEE_IS_SECCOMP_BPF_FILTER_INSTALLED         MVEE_FAKE_SYSCALL_BASE + 24
+
+//
 // MVEE Semaphore emulation calls. One weakness of our synchronization agents is
 // that they capture synchronization operations on virtual addresses.  This does
 // not work for inter-process semaphores because one and the same semaphore can

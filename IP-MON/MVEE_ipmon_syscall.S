@@ -42,13 +42,41 @@ ipmon_initialized:
 
 
 /*-----------------------------------------------------------------------------
-	ipmon_unchecked_syscall - The IP-MON key now always "lives" in register r12.
-	We prevent the compiler from moving it/overwriting it by passing -ffixed-r12
-	on the command line.
+	ipmon_unchecked_syscall_instr - Syscall instruction that is executed when 
+	ipmon_unchecked_syscall is executed.
+
+TODO:	 This function should be inlined in the C code!!
+-----------------------------------------------------------------------------*/
+FUNCTION_START(ipmon_unchecked_syscall_instr)
+		syscall
+		ret
+FUNCTION_END(ipmon_unchecked_syscall_instr)
+
+/*-----------------------------------------------------------------------------
+	ipmon_checked_syscall_instr - Syscall instruction that is executed when 
+	ipmon_checked_syscall is executed.
+
+TODO:	 This function should be inlined in the C code!!
+-----------------------------------------------------------------------------*/
+FUNCTION_START(ipmon_checked_syscall_instr)
+		syscall
+		ret
+FUNCTION_END(ipmon_checked_syscall_instr)
+
+/*-----------------------------------------------------------------------------
+	ipmon_unchecked_syscall - Perform a syscall without oversight, will not pass
+	by the tracer.
+
+	Without BPF: The IP-MON key now always "lives" in register r12. We prevent
+	the compiler from moving it/overwriting it by passing -ffixed-r12 on the
+	command line.
 
 	Therefore, we don't have to do anything special to request an unchecked
-	syscall. This is now the default. Do note, however, that the IP-MON key
-	can now be used only once.
+	syscall. This is now the default. Do note, however, that the IP-MON key can now
+	be used only once.
+
+	With BPF: The filter knows the instruction pointer of the unchecked syscall
+	address so it evaluates to return a SECCOMP_RET_ALLOW action.
 
 TODO:	 This function should be inlined in the C code!!
 -----------------------------------------------------------------------------*/
@@ -60,13 +88,19 @@ FUNCTION_START(ipmon_unchecked_syscall)
 		mov r10, r8
 		mov r8, r9
 		mov r9, QWORD PTR [rsp + 8]
-		syscall
+		call ipmon_unchecked_syscall_instr@plt
 		ret
 FUNCTION_END(ipmon_unchecked_syscall)
 
 /*-----------------------------------------------------------------------------
-	ipmon_checked_syscall - we explicitly clear register r12 here so as to force
-	the kernel to report this syscall to the ptracer
+	ipmon_checked_syscall - Perform a syscall with oversight, this will pass by
+	the tracer.
+
+	Without BPF: We explicitly clear register r12 here so as to force the kernel
+	to report this syscall to the ptracer.
+
+	With BPF: The filter knows the instruction pointer of the checked syscall
+	address so it evaluates to return a SECCOMP_RET_TRACE action.
 
 TODO:	This function should be inlined in the C code!!
 -----------------------------------------------------------------------------*/
@@ -79,6 +113,7 @@ FUNCTION_START(ipmon_checked_syscall)
 		mov r8, r9
 		mov r9, QWORD PTR [rsp + 8]
 		
+#ifndef IPMON_USE_BPF
 		// We want to report this call to the ptracer so we will clear register
         // r12 (which contains the IP-MON key)
 		push r13
@@ -86,18 +121,22 @@ FUNCTION_START(ipmon_checked_syscall)
 		.cfi_offset r13, -16
 		mov r13, r12
 		xor r12, r12
+#endif
 		
-		syscall
+		call ipmon_checked_syscall_instr@plt
 
+#ifndef IPMON_USE_BPF
 		// We might want to use the IP-MON key later (for futex etc)
 		mov r12, r13
 		pop r13
 		.cfi_adjust_cfa_offset -8
 		.cfi_restore r13
+#endif
 		
 		ret
 FUNCTION_END(ipmon_checked_syscall)
 
+#ifndef IPMON_PASS_RB_POINTER_EXPLICITLY
 /*-----------------------------------------------------------------------------
     ipmon_enclave_entrypoint - This is where the kernel lands when the app
 	executes a syscall that is on the IP-MON whitelist. Incoming arguments are
@@ -110,8 +149,8 @@ rdx:	arg3
 r10:	arg4
 r8:		arg5
 r9:		arg6
-r11:	Replication Buffer Pointer
-rcx:	IP-MON key
+r11:	Replication Buffer Pointer     (when not using BPF)
+rcx:	IP-MON key                     (when not using BPF)
 
 	In this function, we just do some juggling so we can handle all of the
 	replication/checking logic in plain C code.
@@ -127,14 +166,15 @@ rcx:	arg3
 r8:		arg4
 r9:		arg5
 		
-r11:	Replication Buffer Pointer
-r12:	IP-MON key
-r13:	Reserved
+r11:	Replication Buffer Pointer     (when not using BPF)
+r12:	IP-MON key                     (when not using BPF)
+r13:	Reserved                       (when not using BPF)
 
 Outgoing Stack:
 		+00 enclave entrypoint return address
-		+08 arg6
+		+08 arg6                         (when not using BPF)
 -----------------------------------------------------------------------------*/
+		.align 4096									// algin 4096 to get the 12 most lsbs to 0
 FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint)
 		// The callee (ipmon_enclave) will preserve registers rbp,rbx and r12-r15.
 		// We are responsible for preserving the rest of the registers except for:
@@ -162,10 +202,12 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint)
 		and rsp, 0xfffffffffffffff0
 		sub rsp, 8
 		
+#ifndef IPMON_USE_BPF
 		push r13
 		push r12
-		push r9 // syscall arg6 must be arg7 for the enclave C function
 		mov r12, rcx // IP-MON key
+#endif
+		push r9 // syscall arg6 must be arg7 for the enclave C function
 
 		mov r9, r8   // arg5
 		mov r8, r10  // arg4
@@ -177,11 +219,13 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint)
 		call ipmon_enclave
 
 		pop r9
+#ifndef IPMON_USE_BPF
 		pop r12
 		pop r13
 
 		// Don't leak the Replication Buffer Pointer
 		xor r11, r11
+#endif
 
 		mov rsp, rbp
 		.cfi_def_cfa_register rbp
@@ -202,6 +246,7 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint)
 		
 FUNCTION_END(ipmon_enclave_entrypoint)
 
+#else
 /*-----------------------------------------------------------------------------
     ipmon_enclave_entrypoint_alternative - This is an alternative version of
 	the enclave entrypoint function. It passes the RB pointer to the C enclave
@@ -288,4 +333,4 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint_alternative)
 		retq
 
 FUNCTION_END(ipmon_enclave_entrypoint_alternative)
-
+#endif

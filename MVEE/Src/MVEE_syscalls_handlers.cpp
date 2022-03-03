@@ -132,6 +132,9 @@
 #ifdef MVEE_ARCH_HAS_ARCH_PRCTL
 #include <asm/prctl.h>
 #endif
+#ifdef MVEE_USE_BPF
+#include <regex>
+#endif
 
 /*-----------------------------------------------------------------------------
   old_kernel_stat
@@ -1269,6 +1272,8 @@ POSTCALL(execve)
         for (i = 0; i < mvee::numvariants; ++i)
             set_mmap_table->refresh_variant_maps(i, variants[i].variantpid);
 #endif
+
+		ipmon_mapped_first_time_in_ld = false;
 
         for (i = 0; i < mvee::numvariants; ++i)
             set_mmap_table->verify_mman_table(i, variants[i].variantpid);
@@ -7061,14 +7066,6 @@ PRECALL(prctl)
 
     CHECKARG(1);
 
-    // syntax: sys_prctl(PR_REGISTER_IPMON, syscall_mask_ptr, syscall_mask_size)
-    if (ARG1(0) == PR_REGISTER_IPMON)
-    {
-        CHECKARG(3);
-        CHECKPOINTER(2);
-        CHECKBUFFER(2, ARG3(0));
-    }
-
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
@@ -7080,49 +7077,19 @@ CALL(prctl)
         cache_mismatch_info("The program is trying to enable directly reading the time stamp counter. This call has been denied.\n");
         return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
     }
-	else if (ARG1(0) == PR_REGISTER_IPMON)
-	{
-		// inspect the list of syscalls
-		unsigned char* ipmon_mask = rw::read_data(variants[0].variantpid, (void*) ARG2(0), ARG3(0));
-		SYSCALL_MASK(dummy_mask);
 
-		if (ipmon_mask)
-		{
-			if (ARG3(0) >= sizeof(dummy_mask))
-			{
-#ifdef __NR_mmap
-				if (SYSCALL_MASK_ISSET(ipmon_mask, __NR_mmap))
-					ipmon_mmap_handling = true;
-#endif
-#ifdef __NR_mmap2
-				if (SYSCALL_MASK_ISSET(ipmon_mask, __NR_mmap2))
-					ipmon_mmap_handling = true;
-#endif
-
-				if (SYSCALL_MASK_ISSET(ipmon_mask, __NR_open))
-					ipmon_fd_handling = true;
-			}
-			
-			debugf("IP-MON handling mmap: %d - fd: %d\n", ipmon_mmap_handling, ipmon_fd_handling);
-
-			delete[] ipmon_mask;
-		}
-	}
+#ifndef MVEE_USE_BPF
 	else if (ARG1(0) == PR_SET_SECCOMP && ARG2(0) == SECCOMP_MODE_FILTER)
 	{
 		return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EINVAL);
 	}
+#endif
+
     return MVEE_CALL_ALLOW;
 }
 
 POSTCALL(prctl)
 {
-#ifdef MVEE_ARCH_SUPPORTS_IPMON
-    // PR_REGISTER_IPMON returns the IP-MON key
-    if (ARG1(0) == PR_REGISTER_IPMON && call_succeeded)
-		initialize_ipmon(variantnum);
-#endif
-
     return 0;
 }
 
@@ -7718,6 +7685,38 @@ CALL(mmap)
 			// return MVEE_CALL_ALLOW;
 #endif
         }
+
+#ifdef MVEE_USE_BPF
+		//std::string libipmonso = "libipmon.so";
+		std::regex libipmonso(R"(libipmon([\w\-. ]*)\.so$)");
+		std::string info_filename = info->get_path_string();
+		//if (info_filename.length() >= libipmonso.length() && info_filename.compare(info_filename.length() - libipmonso.length(), libipmonso.length(), libipmonso) == 0)
+		if (regex_search(info_filename, libipmonso))
+		{
+			debugf("INFO: fd_info path name is %s\n", info_filename.c_str());
+
+			
+			if (!ipmon_mapped)
+			{
+				set_mmap_table->calculate_disjoint_bases(ARG2(0), ipmon_bases);
+				ipmon_mapped = true;
+			}
+
+			debugf("GHUMVEE is overriding the base address of a new code region backed by file: %s\n",
+					info->paths[0].c_str());
+
+			if (!ipmon_mapped_first_time_in_ld) {
+				for (int i = 0; i < mvee::numvariants; ++i) {
+					/*warnf("> variant %d => region span: 0x" PTRSTR "-0x" PTRSTR "\n", i,
+					ipmon_bases[i], ROUND_UP(ipmon_bases[i] + ARG2(0), 4096));*/
+					SETARG1(i, ipmon_bases[i]);
+				}
+				ipmon_mapped_first_time_in_ld = true;
+			}
+
+            return MVEE_CALL_ALLOW;
+		}
+#endif
 
 #ifdef MVEE_ALLOW_SHM
 		if (ARG4(0) & MAP_SHARED)
@@ -11499,8 +11498,12 @@ CALL(seccomp)
 {
 	// Unless the program is GHUMVEE-aware, these filters will not work
 	// well. We'll just pretend like the kernel doesn't support seccomp-filtering
+
+#ifndef MVEE_USE_BPF
 	if (ARG1(0) == SECCOMP_SET_MODE_FILTER)
 		return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EINVAL);
+#endif
+
 	return MVEE_CALL_ALLOW;	
 }
 #endif
