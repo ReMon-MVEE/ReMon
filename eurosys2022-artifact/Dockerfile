@@ -18,7 +18,3 @@ RUN useradd -rm -d /home/${__user} -s /bin/bash -g root -G sudo -u ${__uid} ${__
 RUN echo "${__user}:${__password}" | chpasswd
 USER ${__user}
 WORKDIR /home/${__user}
-
-RUN git config --global credential.helper store
-
-RUN chmod 400 /home/eval/.ssh/id_rsa*
