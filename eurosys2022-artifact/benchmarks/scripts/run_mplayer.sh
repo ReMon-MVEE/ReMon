@@ -38,8 +38,11 @@ do
       shift
       __mplayer_options="$__mplayer_options $1"
       shift
-      __mplayer_options="$__mplayer_options -sub $1"
-      shift
+      if test $# -gt 0
+      then
+        __mplayer_options="$__mplayer_options -sub $1"
+        shift
+      fi
       break
       ;;
     *)
@@ -72,18 +75,18 @@ then
   exit 2
 fi
 
-
 export DYNINST_INSTALL=$__home_dir/../deps/dyninst/build/../install 
 export DYNINSTAPI_RT_LIB=${DYNINST_INSTALL}/lib/libdyninstAPI_RT.so
 export LD_LIBRARY_PATH=${DYNINST_INSTALL}/lib/:$LD_LIBRARY_PATH
 
 
-LD_PRELOAD="$__home_dir/benchmarks/out/fontconfig/base/libfontconfig.so.1:$__home_dir/benchmarks/out/pulseaudio/base/libpulsecommon-14.2.so:$__home_dir/benchmarks/out/pulseaudio/base/libpulse.so.0"
+LD_PRELOAD="$__home_dir/benchmarks/out/fontconfig/default/libfontconfig.so.1:$__home_dir/benchmarks/out/pulseaudio/default/libpulsecommon-14.2.so:$__home_dir/benchmarks/out/pulseaudio/default/libpulse.so.0"
 ln -fs "$__home_dir/benchmarks/out/pulseaudio/wrapped/"* "$__home_dir/../patched_binaries/gnomelibs/amd64/"
 ln -fs "$__home_dir/benchmarks/out/fontconfig/wrapped/libfontconfig.so.1" \
   "$__home_dir/../patched_binaries/gnomelibs/amd64/"
 ln -fs "$__home_dir/../deps/ReMon-glibc/build/built-versions/normal/"* "$__home_dir/../patched_binaries/libc/amd64"
 
+__run="$__home_dir/benchmarks/out/mplayer/$__version/bin/mplayer $__mplayer_options"
 
 if [[ "$__native" == 1 ]]
 then

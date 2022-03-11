@@ -96,13 +96,18 @@ do
       ;;
 
    --dyninst)
-      __prefix="$__current_dir/../out/mplayer/dyninst/bin"
-      mkdir -p "$__prefix"
+      __prefix="$__current_dir/../out/mplayer/default_no_fast_memcpy"
+      __disable="--disable-fastmemcpy"
+      ln -s "$__current_dir/../patches/mplayer/a/sub/osd.c" -f "$__current_dir/sub/osd.c"
+
+      export CC="$__llvm_bin_dir/clang -g -O3"
+      export CXX="$__llvm_bin_dir/clang++ -g -O3"
 
       if [[ ! -e "$__current_dir/../out/mplayer/default_no_fast_memcpy/bin/mplayer" ]]
       then
-        echo " > no default build for mplayer found to base --dyninst on."
-        exit 1
+        do_make
+      else
+        ./configure --prefix=$__prefix --enable-debug $__disable --enable-xv --enable-pulse --yasm=''
       fi
 
       if [[ ! -e "$__current_dir/../instrumenting/mplayer_no_fast_memcpy.dyninst" ]]
@@ -110,11 +115,11 @@ do
         echo " > dyninst input file $__current_dir/../instrumenting/mplayer_no_fast_memcpy.dyninst not found"
         echo " > we will start mplayer now, please allow a few frames of subtitles to render before closing with ctrl+C"
 
-        $__current_dir/../scripts/run.sh --video "$__current_dir/../input/video/1080p30.webm" \
-          --subs "$__current_dir/../input/subs.srt --wrapped-pulseaudio --wrapped-fontconfig --debug -- \
-          mplayer default_no_fast_memcpy"
+        $__current_dir/../scripts/run.sh --video "$__current_dir/../input/video/1080p30.webm"            \
+          --subs "$__current_dir/../input/subs.srt" --wrapped-pulseaudio --wrapped-fontconfig --debug -- \
+          mplayer default_no_fast_memcpy
         
-        grep mplayer "$__current_dir/../MVEE/bin/Debug/Logs/non-instrumented.csv" | cut '-d;' -f4 > \
+        grep mplayer "$__current_dir/../../../MVEE/bin/Debug/Logs/non-instrumented.csv" | cut '-d;' -f4 > \
           "$__current_dir/../instrumenting/mplayer_no_fast_memcpy.dyninst"
       fi
 
@@ -126,6 +131,8 @@ do
       cd "$__current_dir/../../../dyninst_shm/"
       ./bartTestInstrumenter "$__current_dir/../out/mplayer/default_no_fast_memcpy/bin/mplayer" \
         "$__current_dir/../instrumenting/mplayer_no_fast_memcpy.dyninst"
+      __prefix="$__current_dir/../out/mplayer/dyninst/bin"
+      mkdir -p "$__prefix"
       mv ./InterestingProgram-rewritten "$__prefix/mplayer"
 
       shift
