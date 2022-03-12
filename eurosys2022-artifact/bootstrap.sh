@@ -14,11 +14,11 @@ cd ../
 ./bootstrap.sh
 cd ./build/
 
+make emulate-shm
 make benchmark
-make emulate-shm
 make -j$(nproc)
-make debug
 make emulate-shm
+make debug
 make -j$(nproc)
 
 sudo apt install -y clang

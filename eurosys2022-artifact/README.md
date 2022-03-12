@@ -5,6 +5,13 @@ to Eurosys 2022. All bash snippets in the steps below are assumed to start from 
 
 ## Prerequisites
 
+For more reproducible results turn off hyperthreading and turbo boost. The method for this depends on your system.
+General Intel way:
+
+```bash
+
+```
+
 ---
 
 ## Docker instructions
@@ -39,7 +46,7 @@ docker build ./eurosys2022-artifact/ -t shmvee:ae
 
 ```bash
 docker run                                                                             \
-    "-v ./:/home/eval/artifact/" --workdir="/home/eval/artifact/eurosys2022-artifact/" \
+    -v "./:/home/eval/artifact/" --workdir="/home/eval/artifact/eurosys2022-artifact/" \
     --env BUILDALL=1 --name artifact -it shmvee:ae                                     \
     ./bootstrap.sh
 docker commit artifact shmvee:ae

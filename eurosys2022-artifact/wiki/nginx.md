@@ -9,7 +9,7 @@ Open two terminal windows:
 Ideally, the client terminal is opened on a separate machine connected via a dedicated gigabit ethernet link, to
 replicate our evaluation setup.
 
-Client wrk command: `wrk -d 10s -t 1 -c 10 --timeout 10s http:/127.0.0.1:8080 >> outfile`, outfile is mentioned in the
+Client wrk command: `wrk -d 10s -t 1 -c 10 --timeout 10s http://127.0.0.1:8080 >> outfile`, outfile is mentioned in the
 comments between the commands. If you are using separate machines to benchmark nginx, the ip is the ip on the dedicated
 link for the machine running nginx.
 
@@ -27,7 +27,7 @@ docker_control.sh script.
 ```bash
     docker run                                                                     \
         --security-opt seccomp=unconfined                                          \
-        "-v ./:/home/eval/artifact/" -p 8080:8080 --workdir="/home/eval/artifact/" \
+        -v "./:/home/eval/artifact/" -p 8080:8080 --workdir="/home/eval/artifact/" \
         -it shmvee:ae bash
 ```
 
@@ -36,12 +36,13 @@ docker_control.sh script.
 ```bash
 # Optional for when you want to enable IP-MON, has no effect when kernel is not IP-MON enabled.
 cd IP-MON/
-ln -fs libipmon-default.so libipmon.so
+ln -fs libipmon-nginx.so libipmon.so
 cd ../
 
 
 cd MVEE/bin/Release/
 # Enable IP-MON by editing MVEE.ini and setting "use_ipmon" to true, has no effect when kernel is not IP-MON enabled.
+sed -i "s/\"use_ipmon\" : false/\"use_ipmon\" : true/g" ./MVEE.ini
 ```
 
 ## Step 2 - run experiments
@@ -89,8 +90,9 @@ sed -i "s/.*worker_processes.*/worker_processes  2;/" ../../../eurosys2022-artif
 
 If you used a separate client machine, copy all outfiles generated to eurosys2022-artifact/benchmarks/results/nginx.
 
-This will output the average of the 5 runs for each experiment.
+This will output the average of the runs for each experiment. This does not have to be run inside the docker container,
+but works either way. Run this from the repo's root.
 
 ```bash
-../../../eurosys2022-artifact/benchmarks/scripts/process_nginx.sh
+./eurosys2022-artifact/benchmarks/scripts/process_nginx.sh
 ```

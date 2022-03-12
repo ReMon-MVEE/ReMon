@@ -45,7 +45,6 @@ ln -fs "$__root_dir/eurosys2022-artifact/../deps/ReMon-glibc/build/built-version
 
 
 cd MVEE/bin/Release/
-# Enable IP-MON by editing MVEE.ini and setting "use_ipmon" to true, has no effect when kernel is not IP-MON enabled.
 sed -i "s/\"use_ipmon\" : false/\"use_ipmon\" : true/g" ./MVEE.ini
 ```
 
@@ -215,8 +214,9 @@ sed -i "s/\"use_ipmon\" : false/\"use_ipmon\" : true/g" ./MVEE.ini
 
 ## Step 3 - automatic processing
 
-This will output the average of 10 runs for each buffer size for each experiment.
+This will output the average of the runs for each experiment. This does not have to be run inside the docker container,
+but works either way. Run this from the repo's root.
 
 ```bash
-../../../eurosys2022-artifact/benchmarks/scripts/process_mplayer.sh
+./eurosys2022-artifact/benchmarks/scripts/process_mplayer.sh
 ```

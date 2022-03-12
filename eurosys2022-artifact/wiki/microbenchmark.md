@@ -2,28 +2,59 @@
 
 ## Automatic
 
+### Native
+
 ```bash
 ./eurosys2022-artifact/benchmarks/scripts/run_microbenchmark.sh
 ```
 
-## Manual
+### Running in docker
 
-## Step 0 - docker entrance
-
-**Optional!** Skip if you are running the experiments natively.
-
-## Step 1 - setting up the output for automatic processing
+**Method 1**: using the included docker bash script
 
 ```bash
-# Clear file containing output for native run.
-rm ./eurosys2022-artifact/benchmarks/results/microbenchmarks/native.out
-# Clear file containing output for mvee run with burst accesses wrapped.
-rm ./eurosys2022-artifact/benchmarks/results/microbenchmarks/default.out
-# Clear file containing output for mvee run, without burst accesses wrapped.
-rm ./eurosys2022-artifact/benchmarks/results/microbenchmarks/stripped.out
+./eurosys2022-artifact/docker_control.sh run ./eurosys2022-artifact/benchmarks/scripts/run_microbenchmark.sh
 ```
 
-## Step 2 - setting up the MVEE
+**Method 2**: running docker command manually:
+
+```bash
+docker run                                                        \
+    --security-opt seccomp=unconfined                             \
+    -v "./:/home/eval/artifact/" --workdir="/home/eval/artifact/" \
+    -it shmvee:ae ./eurosys2022-artifact/benchmarks/scripts/run_microbenchmark.sh
+```
+
+## Manual
+
+### Step 0 - docker entrance
+
+**Optional!** Skip if you are running the experiments natively. All following commands are to be run inside the docker
+container, unless mentioned otherwise.
+
+**Method 1**: using the included docker bash script
+
+```bash
+./eurosys2022-artifact/docker_control.sh run
+```
+
+**Method 2**: running docker command manually:
+
+```bash
+docker run                                                        \
+    --security-opt seccomp=unconfined                             \
+    -v "./:/home/eval/artifact/" --workdir="/home/eval/artifact/" \
+    -it shmvee:ae bash
+```
+
+### Step 1 - setting up the output for automatic processing
+
+```bash
+# Clear files containing output.
+rm ./eurosys2022-artifact/benchmarks/results/microbenchmarks/*
+```
+
+### Step 2 - setting up the MVEE
 
 ```bash
 # Optional for when you want to enable IP-MON, has no effect when kernel is not IP-MON enabled.
@@ -37,7 +68,7 @@ cd MVEE/bin/Release/
 sed -i "s/\"use_ipmon\" : false/\"use_ipmon\" : true/g" ./MVEE.ini
 ```
 
-## Step 2 - running the experiments
+### Step 2 - running the experiments
 
 ```bash
 # native run, do this 10 times
@@ -55,10 +86,11 @@ sed -i "s/\"use_ipmon\" : false/\"use_ipmon\" : true/g" ./MVEE.ini
 ../../../eurosys2022-artifact/benchmarks/scripts/relink-libc.sh default
 ```
 
-## Step 3 - automatic processing
+### Step 3 - automatic processing
 
-This will output the average of 10 runs for each buffer size for each experiment.
+This will output the average of the runs for each buffer size for each experiment. This does not have to be run inside
+the docker container, but works either way. Run this from the repo's root.
 
 ```bash
-../../../eurosys2022-artifact/benchmarks/scripts/process_microbenchmark.sh
+./eurosys2022-artifact/benchmarks/scripts/process_microbenchmark.sh
 ```
