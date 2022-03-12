@@ -1,159 +1,29 @@
-# Running the experiments
-
-All command listings start from the repository's root.
-
-## microbenchmark
+## Automatic
 
 ```bash
-# prints out: "> size: time in ns"
-
-# # Optional for when you want to enable IP-MON
-# cd IP-MON/
-# ln -fs libipmon-default.so libipmon.so
-# cd ../
-
-
-cd MVEE/bin/Release/
-# Enable IP-MON by editing MVEE.ini and setting "use_ipmon" to true
-
-
-# native run, do this 10 times
-../../../eurosys2022-artifact/benchmarks/microbenchmarks/memcpy
-
-# wrapped bursts, do this 10 times
-../../../eurosys2022-artifact/benchmarks/scripts/relink-libc.sh default
-./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/microbenchmarks/memcpy
-
-# non-wrapped bursts, do this 10 times
-../../../eurosys2022-artifact/benchmarks/scripts/relink-libc.sh stripped
-# optionally enable IP-MON by editing MVEE.ini and setting "use_ipmon" to true
-./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/microbenchmarks/memcpy
-
-# make sure the correct libc version is used for later experiments
-../../../eurosys2022-artifact/benchmarks/scripts/relink-libc.sh default
+./eurosys2022-artifact/benchmarks/scripts/run_mplayer.sh
 ```
 
-## nginx
+## Manual
 
-Open two terminal windows: one to run nginx from and one to run wrk from. Ideally, the one running wrk is opened on a
-separate machine connected via a dedicated gigabit ethernet link, to replicate our evaluation setup.
+## Step 0 - docker entrance
 
-wrk command: `wrk -d 10s -t 1 -c 10 --timeout 10s http:/127.0.0.1:8080`. If you are using separate machines to
-benchmark nginx, the ip is the ip on the dedicated link for the machine running nginx.
+**Optional!** Skip if you are running the experiments natively.
+
+## Step 1 - setting up the output for automatic processing
 
 ```bash
-# # Optional for when you want to enable IP-MON
-# cd IP-MON/
-# ln -fs libipmon-nginx.so libipmon.so
-# cd ../
-
-
-cd MVEE/bin/Release/
-# Enable IP-MON by editing MVEE.ini and setting "use_ipmon" to true
-
-
-# native run, 1 worker, do this 5 times
-# edit  ../../../eurosys2022-artifact/benchmarks/nginx/conf/nginx.conf and set worker_processes to 1
-../../../eurosys2022-artifact/benchmarks/out/nginx/base_anon/sbin/nginx
-# run the wrk command in the other terminal and wait for the results
-../../../eurosys2022-artifact/benchmarks/out/nginx/base_anon/sbin/nginx -s stop
-
-# non-insturmented shm accesses run, 1 worker, do this 5 times
-# edit  ../../../eurosys2022-artifact/benchmarks/nginx/conf/nginx.conf and set worker_processes to 1
-./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/nginx/default_anon/sbin/nginx
-# run the wrk command in the other terminal and wait for the results
-# crtl+c to terminate the MVEE
-
-# insturmented shm accesses run, 1 worker, do this 5 times
-# edit  ../../../eurosys2022-artifact/benchmarks/nginx/conf/nginx.conf and set worker_processes to 1
-./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/nginx/wrapped_anon/sbin/nginx
-# run the wrk command in the other terminal and wait for the results
-# crtl+c to terminate the MVEE
-
-
-# native run, 2 workers, do this 5 times
-# edit  ../../../eurosys2022-artifact/benchmarks/nginx/conf/nginx.conf and set worker_processes to 2
-../../../eurosys2022-artifact/benchmarks/out/nginx/base_anon/sbin/nginx
-# run the wrk command in the other terminal and wait for the results
-../../../eurosys2022-artifact/benchmarks/out/nginx/base_anon/sbin/nginx -s stop
-
-# non-insturmented shm accesses run, 2 workers, do this 5 times
-# edit  ../../../eurosys2022-artifact/benchmarks/nginx/conf/nginx.conf and set worker_processes to 2
-./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/nginx/default_anon/sbin/nginx
-# run the wrk command in the other terminal and wait for the results
-# crtl+c to terminate the MVEE
-
-# insturmented shm accesses run, 2 workers, do this 5 times
-# edit  ../../../eurosys2022-artifact/benchmarks/nginx/conf/nginx.conf and set worker_processes to 2
-./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/nginx/wrapped_anon/sbin/nginx
-# run the wrk command in the other terminal and wait for the results
-# crtl+c to terminate the MVEE
+# Clear files containing output.
+rm ./eurosys2022-artifact/benchmarks/results/mplayer/*
 ```
 
-## apache
-
-Open two terminal windows: one to run apache from and one to run wrk from. Ideally, the one running wrk is opened on a
-separate machine connected via a dedicated gigabit ethernet link, to replicate our evaluation setup.
-
-wrk command: `wrk -d 10s -t 1 -c 10 --timeout 10s http:/127.0.0.1:8080`. If you are using separate machines to
-benchmark apache, the ip is the ip on the dedicated link for the machine running apache.
+## Step 2 - setting up the MVEE
 
 ```bash
-# # Optional for when you want to enable IP-MON
-# cd IP-MON/
-# ln -fs libipmon-apache.so libipmon.so
-# cd ../
-
-
-cd MVEE/bin/Release/
-# Enable IP-MON by editing MVEE.ini and setting "use_ipmon" to true
-
-
-# native run, 1 worker, do this 5 times
-# edit  ../../../eurosys2022-artifact/benchmarks/out/apache/base/conf/httpd.conf and set ServerLimit to 1
-../../../eurosys2022-artifact/benchmarks/out/apache/base/bin/apachectl start
-# run the wrk command in the other terminal and wait for the results
-../../../eurosys2022-artifact/benchmarks/out/apache/base/bin/apachectl stop
-
-# non-insturmented shm accesses run, 1 worker, do this 5 times
-# edit  ../../../eurosys2022-artifact/benchmarks/out/apache/default/conf/httpd.conf and set ServerLimit to 1
-./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/apache/default/bin/apachectl start
-# run the wrk command in the other terminal and wait for the results
-# crtl+c to terminate the MVEE
-
-# insturmented shm accesses run, 1 worker, do this 5 times
-# edit  ../../../eurosys2022-artifact/benchmarks/out/apache/wrapped/conf/httpd.conf and set ServerLimit to 1
-./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/apache/wrapped/bin/apachectl start
-# run the wrk command in the other terminal and wait for the results
-# crtl+c to terminate the MVEE
-
-
-# native run, 2 workers, do this 5 times
-# edit  ../../../eurosys2022-artifact/benchmarks/out/apache/base/conf/httpd.conf and set ServerLimit to 2
-../../../eurosys2022-artifact/benchmarks/out/apache/base/bin/apachectl start
-# run the wrk command in the other terminal and wait for the results
-../../../eurosys2022-artifact/benchmarks/out/apache/base/bin/apachectl stop
-
-# non-insturmented shm accesses run, 2 workers, do this 5 times
-# edit  ../../../eurosys2022-artifact/benchmarks/out/apache/default/conf/httpd.conf and set ServerLimit to 2
-./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/apache/default/bin/apachectl start
-# run the wrk command in the other terminal and wait for the results
-# crtl+c to terminate the MVEE
-
-# insturmented shm accesses run, 2 workers, do this 5 times
-# edit  ../../../eurosys2022-artifact/benchmarks/out/apache/wrapped/conf/httpd.conf and set ServerLimit to 2
-./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/apache/wrapped/bin/apachectl start
-# run the wrk command in the other terminal and wait for the results
-# crtl+c to terminate the MVEE
-```
-
-## MPlayer
-
-```bash
-# # Optional for when you want to enable IP-MON
-# cd IP-MON/
-# ln -fs libipmon-mplayer.so libipmon.so
-# cd ../
+# Optional for when you want to enable IP-MON, has no effect when kernel is not IP-MON enabled.
+cd IP-MON/
+ln -fs libipmon-mplayer.so libipmon.so
+cd ../
 
 
 __root_dir=$(pwd)
@@ -175,166 +45,178 @@ ln -fs "$__root_dir/eurosys2022-artifact/../deps/ReMon-glibc/build/built-version
 
 
 cd MVEE/bin/Release/
-# Enable IP-MON by editing MVEE.ini and setting "use_ipmon" to true
+# Enable IP-MON by editing MVEE.ini and setting "use_ipmon" to true, has no effect when kernel is not IP-MON enabled.
+sed -i "s/\"use_ipmon\" : false/\"use_ipmon\" : true/g" ./MVEE.ini
+```
 
+## Step 2 - running the experiments
 
+```bash
 # native 10 second 1080p 30 fps framedrop test, without subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                        \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p30.mp4
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p30.mp4 >> native-10s-1080p30-framedrop
 # native 10 second 1080p 60 fps framedrop test, without subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                        \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4 >> native-10s-1080p60-framedrop
 # native 10 second 1080p 90 fps framedrop test, without subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                        \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p90.mp4
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p90.mp4 >> native-10s-1080p90-framedrop
 # native 10 second 1080p 120 fps framedrop test, without subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                        \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p120.mp4
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p120.mp4 >> native-10s-1080p120-framedrop
 
 
 # mvee 10 second 1080p 30 fps framedrop test, without subtitles, do this 5 times
 ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                                       \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p30.mp4
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p30.mp4 >> mvee-10s-1080p30-framedrop
 # mvee 10 second 1080p 60 fps framedrop test, without subtitles, do this 5 times
 ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                                       \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4 >> mvee-10s-1080p60-framedrop
 # mvee 10 second 1080p 90 fps framedrop test, without subtitles, do this 5 times
 ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                                       \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p90.mp4
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p90.mp4 >> mvee-10s-1080p90-framedrop
 # mvee 10 second 1080p 120 fps framedrop test, without subtitles, do this 5 times
 ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                                       \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p120.mp4
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p120.mp4 >> mvee-10s-1080p120-framedrop
 
 
 # native 10 second 1080p 30 fps framedrop test, with subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                        \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt          \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p30.mp4
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p30.mp4 >> native-10s-1080p30-framedrop-subs
 # native 10 second 1080p 60 fps framedrop test, with subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                        \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt          \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4 >> native-10s-1080p60-framedrop-subs
 # native 10 second 1080p 90 fps framedrop test, with subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                        \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt          \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p90.mp4
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p90.mp4 >> native-10s-1080p90-framedrop-subs
 # native 10 second 1080p 120 fps framedrop test, with subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                        \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt          \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p120.mp4
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p120.mp4 >> native-10s-1080p120-framedrop-subs
 
 
 # mvee 10 second 1080p 30 fps framedrop test, with subtitles, do this 5 times
 ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                                       \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                         \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p30.mp4
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p30.mp4 >> mvee-10s-1080p30-framedrop-subs
 # mvee 10 second 1080p 60 fps framedrop test, with subtitles, do this 5 times
 ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                                       \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                         \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4 >> mvee-10s-1080p60-framedrop-subs
 # mvee 10 second 1080p 90 fps framedrop test, with subtitles, do this 5 times
 ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                                       \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                         \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p90.mp4
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p90.mp4 >> mvee-10s-1080p90-framedrop-subs
 # mvee 10 second 1080p 120 fps framedrop test, with subtitles, do this 5 times
 ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                                       \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                         \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p120.mp4
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p120.mp4 >> mvee-10s-1080p120-framedrop-subs
 
 
 
 # native 10 second 1080p webm max fps test, without subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -nosound                          \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm >> native-10s-1080pwebm-maxfps
 # native 10 second 1080p mp4 max fps test, without subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -nosound                          \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4 >> native-10s-1080pmp4-maxfps
 # native 10 second 1440p webm max fps test, without subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -nosound                          \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm
+  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm >> native-10s-1440pwebm-maxfps
 # native 10 second 1440p mp4 max fps test, without subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -nosound                          \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4
+  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4 >> native-10s-1440pmp4-maxfps
 
 
 # mvee 10 second 1080p webm max fps test, without subtitles, do this 5 times
 ./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm >> mvee-10s-1080pwebm-maxfps
 # mvee 10 second 1080p mp4 max fps test, without subtitles, do this 5 times
 ./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4 >> mvee-10s-1080pmp4-maxfps
 # mvee 10 second 1440p webm max fps test, without subtitles, do this 5 times
 ./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm
+  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm >> mvee-10s-1440pwebm-maxfps
 # mvee 10 second 1440p mp4 max fps test, without subtitles, do this 5 times
 ./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4
+  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4 >> mvee-10s-1440pmp4-maxfps
 
 
 # native 10 second 1080p webm max fps test, with subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -nosound                          \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt          \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm >> native-10s-1080pwebm-maxfps-subs
 # native 10 second 1080p mp4 max fps test, with subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -nosound                          \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt          \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4 >> native-10s-1080pmp4-maxfps-subs
 # native 10 second 1440p webm max fps test, with subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -nosound                          \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt          \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm
+  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm >> native-10s-1440pwebm-maxfps-subs
 # native 10 second 1440p mp4 max fps test, with subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -nosound                          \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt          \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4
+  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4 >> native-10s-1440pmp4-maxfps-subs
 
 
 # mvee 10 second 1080p webm max fps test, with subtitles, do this 5 times
 ./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                 \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm >> mvee-10s-1080pwebm-maxfps-subs
 # mvee 10 second 1080p mp4 max fps test, with subtitles, do this 5 times
 ./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                 \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4 >> mvee-10s-1080pmp4-maxfps-subs
 # mvee 10 second 1440p webm max fps test, with subtitles, do this 5 times
 ./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                 \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm
+  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm >> mvee-10s-1440pwebm-maxfps-subs
 # mvee 10 second 1440p mp4 max fps test, with subtitles, do this 5 times
 ./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                 \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4
+  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4 >> mvee-10s-1440pmp4-maxfps-subs
+```
+
+## Step 3 - automatic processing
+
+This will output the average of 10 runs for each buffer size for each experiment.
+
+```bash
+../../../eurosys2022-artifact/benchmarks/scripts/process_mplayer.sh
 ```

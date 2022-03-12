@@ -199,4 +199,9 @@ then
     "$__home_dir/benchmarks/scripts/build_all.sh"
 fi
 
+cd "$__home_dir/"
+mkdir -p ./benchmarks/results/microbenchmark
+mkdir -p ./benchmarks/results/nginx
+mkdir -p ./benchmarks/results/apache
+mkdir -p ./benchmarks/results/mplayer
 ## Benchmark Setup #####################################################################################################

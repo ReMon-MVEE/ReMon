@@ -5,9 +5,6 @@ __home_dir=$(readlink -f $(dirname ${BASH_SOURCE}))
 
 
 $__home_dir/nginx_build.sh \
-        --base             \
-        --default          \
-        --wrapped          \
         --base-anon        \
         --default-anon     \
         --wrapped-anon
@@ -15,12 +12,6 @@ $__home_dir/nginx_build.sh \
 
 $__home_dir/mplayer_build.sh     \
         --default                \
-        --wrapped                \
-        --default-no-fast-memcpy \
-        --wrapped-no-fast-memcpy \
-        --default-osd-fixed      \
-        --wrapped-osd-fixed      \
-        --default-full           \
         --wrapped-full
 
 

@@ -16,22 +16,14 @@ __ports="-p 8080:8080"
 
 
 build_docker() {
-    cp ~/.ssh/id_rsa      "$__home_dir/id_rsa"           || touch "$__home_dir/id_rsa"
-    cp ~/.ssh/id_rsa.pub  "$__home_dir/id_rsa.pub"       || touch "$__home_dir/id_rsa.pub"
-    cp ~/.git-credentials "$__home_dir/.git-credentials" || touch "$__home_dir/.git-credentials"
-
     docker build $__home_dir -t $__docker_image
-    
-    rm "$__home_dir/id_rsa"
-    rm "$__home_dir/id_rsa.pub"
-    rm "$__home_dir/.git-credentials"
 }
 
 
 bootstrap_docker() {
     docker run                                                           \
         $__volumes --workdir="/home/eval/artifact/eurosys2022-artifact/" \
-        --env BUILDALL=0 --name artifact -it $__docker_image             \
+        --env BUILDALL=1 --name artifact -it $__docker_image             \
         ./bootstrap.sh
     docker commit artifact $__docker_image
     docker rm artifact

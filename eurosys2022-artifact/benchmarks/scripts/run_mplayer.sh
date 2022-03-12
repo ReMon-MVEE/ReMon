@@ -1,113 +1,203 @@
 #!/bin/bash
 set -e
 
-__home_dir=$(readlink -f $(dirname ${BASH_SOURCE})/../../)
+cd "$(readlink -f $(dirname ${BASH_SOURCE})/../../../)"
 
-__native=0
-__ipmon=1
-__mplayer_options="-benchmark -osdlevel 0 -vo xv -quiet"
-__benchmark=""
-__version=""
-__build="Release"
-__variants="2"
-__video=""
 
-while test $# -gt 0
+rm ./eurosys2022-artifact/benchmarks/results/mplayer/*
+
+
+# Optional for when you want to enable IP-MON, has no effect when kernel is not IP-MON enabled.
+cd IP-MON/
+ln -fs libipmon-mplayer.so libipmon.so
+cd ../
+
+
+__root_dir=$(pwd)
+
+# Set dyninst variables
+export DYNINST_INSTALL="$__root_dir/deps/dyninst/build/../install"
+export DYNINSTAPI_RT_LIB="${DYNINST_INSTALL}/lib/libdyninstAPI_RT.so"
+export LD_LIBRARY_PATH="${DYNINST_INSTALL}/lib/:$LD_LIBRARY_PATH"
+
+
+# Set environment to use correct .so for every run
+LD_PRELOAD="$__root_dir/eurosys2022-artifact/benchmarks/out/fontconfig/base/libfontconfig.so.1:$__root_dir/eurosys2022-artifact/benchmarks/out/pulseaudio/base/libpulsecommon-14.2.so:$__root_dir/eurosys2022-artifact/benchmarks/out/pulseaudio/base/libpulse.so.0:$LD_PRELOAD"
+ln -fs "$__root_dir/eurosys2022-artifact/benchmarks/out/pulseaudio/wrapped/"* \
+  "$__root_dir/eurosys2022-artifact/../patched_binaries/gnomelibs/amd64/"
+ln -fs "$__root_dir/eurosys2022-artifact/benchmarks/out/fontconfig/wrapped/libfontconfig.so.1" \
+  "$__root_dir/eurosys2022-artifact/../patched_binaries/gnomelibs/amd64/"
+ln -fs "$__root_dir/eurosys2022-artifact/../deps/ReMon-glibc/build/built-versions/normal/"* \
+  "$__root_dir/eurosys2022-artifact/../patched_binaries/libc/amd64"
+
+
+cd MVEE/bin/Release/
+sed -i "s/\"use_ipmon\" : false/\"use_ipmon\" : true/g" ./MVEE.ini
+
+
+for __i in {1..5}
 do
-  case $1 in
-    --native)
-      __native=1
-      shift
-      ;;
-    --variants)
-      shift
-      __variants="$1"
-      shift
-      ;;
-    --framedrop)
-      __mplayer_options="$__mplayer_options -framedrop"
-      shift
-      ;;
-    --maxfps)
-      __mplayer_options="$__mplayer_options -nosound"
-      shift
-      ;;
-    --)
-      shift
-      __version="$1"
-      shift
-      __mplayer_options="$__mplayer_options $1"
-      shift
-      if test $# -gt 0
-      then
-        __mplayer_options="$__mplayer_options -sub $1"
-        shift
-      fi
-      break
-      ;;
-    *)
-      echo " > unrecoginsed option $1"
-      shift
-      ;;
-  esac
+  echo "   > [$__i/5] native 10 second 1080p 30 fps framedrop test, without subtitles"
+  ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -framedrop                        \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p30.mp4 >> native-10s-1080p30-framedrop
+  echo "   > [$__i/5] native 10 second 1080p 60 fps framedrop test, without subtitles"
+  ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -framedrop                        \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4 >> native-10s-1080p60-framedrop
+  echo "   > [$__i/5] native 10 second 1080p 90 fps framedrop test, without subtitles"
+  ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -framedrop                        \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p90.mp4 >> native-10s-1080p90-framedrop
+  echo "   > [$__i/5] native 10 second 1080p 120 fps framedrop test, without subtitles"
+  ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -framedrop                        \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p120.mp4 >> native-10s-1080p120-framedrop
+
+
+  echo "   > [$__i/5] mvee 10 second 1080p 30 fps framedrop test, without subtitles"
+  ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -framedrop                                       \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p30.mp4 >> mvee-10s-1080p30-framedrop
+  echo "   > [$__i/5] mvee 10 second 1080p 60 fps framedrop test, without subtitles"
+  ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -framedrop                                       \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4 >> mvee-10s-1080p60-framedrop
+  echo "   > [$__i/5] mvee 10 second 1080p 90 fps framedrop test, without subtitles"
+  ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -framedrop                                       \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p90.mp4 >> mvee-10s-1080p90-framedrop
+  echo "   > [$__i/5] mvee 10 second 1080p 120 fps framedrop test, without subtitles"
+  ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -framedrop                                       \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p120.mp4 >> mvee-10s-1080p120-framedrop
+
+
+  echo "   > [$__i/5] native 10 second 1080p 30 fps framedrop test, with subtitles"
+  ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -framedrop                        \
+    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt           \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p30.mp4 >> native-10s-1080p30-framedrop-subs
+  echo "   > [$__i/5] native 10 second 1080p 60 fps framedrop test, with subtitles"
+  ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -framedrop                        \
+    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt           \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4 >> native-10s-1080p60-framedrop-subs
+  echo "   > [$__i/5] native 10 second 1080p 90 fps framedrop test, with subtitles"
+  ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -framedrop                        \
+    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt           \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p90.mp4 >> native-10s-1080p90-framedrop-subs
+  echo "   > [$__i/5] native 10 second 1080p 120 fps framedrop test, with subtitles"
+  ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -framedrop                        \
+    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt           \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p120.mp4 >> native-10s-1080p120-framedrop-subs
+
+
+  echo "   > [$__i/5] mvee 10 second 1080p 30 fps framedrop test, with subtitles"
+  ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -framedrop                                       \
+    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                          \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p30.mp4 >> mvee-10s-1080p30-framedrop-subs
+  echo "   > [$__i/5] mvee 10 second 1080p 60 fps framedrop test, with subtitles"
+  ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -framedrop                                       \
+    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                          \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4 >> mvee-10s-1080p60-framedrop-subs
+  echo "   > [$__i/5] mvee 10 second 1080p 90 fps framedrop test, with subtitles"
+  ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -framedrop                                       \
+    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                          \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p90.mp4 >> mvee-10s-1080p90-framedrop-subs
+  echo "   > [$__i/5] mvee 10 second 1080p 120 fps framedrop test, with subtitles"
+  ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -framedrop                                       \
+    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                          \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p120.mp4 >> mvee-10s-1080p120-framedrop-subs
+
+
+
+  echo "   > [$__i/5] native 10 second 1080p webm max fps test, without subtitles"
+  ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -nosound                          \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm >> native-10s-1080pwebm-maxfps
+  echo "   > [$__i/5] native 10 second 1080p mp4 max fps test, without subtitles"
+  ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -nosound                          \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4 >> native-10s-1080pmp4-maxfps
+  echo "   > [$__i/5] native 10 second 1440p webm max fps test, without subtitles"
+  ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -nosound                          \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm >> native-10s-1440pwebm-maxfps
+  echo "   > [$__i/5] native 10 second 1440p mp4 max fps test, without subtitles"
+  ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -nosound                          \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4 >> native-10s-1440pmp4-maxfps
+
+
+  echo "   > [$__i/5] mvee 10 second 1080p webm max fps test, without subtitles"
+  ./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm >> mvee-10s-1080pwebm-maxfps
+  echo "   > [$__i/5] mvee 10 second 1080p mp4 max fps test, without subtitles"
+  ./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4 >> mvee-10s-1080pmp4-maxfps
+  echo "   > [$__i/5] mvee 10 second 1440p webm max fps test, without subtitles"
+  ./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm >> mvee-10s-1440pwebm-maxfps
+  echo "   > [$__i/5] mvee 10 second 1440p mp4 max fps test, without subtitles"
+  ./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4 >> mvee-10s-1440pmp4-maxfps
+
+
+  echo "   > [$__i/5] native 10 second 1080p webm max fps test, with subtitles"
+  ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -nosound                          \
+    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt           \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm >> native-10s-1080pwebm-maxfps-subs
+  echo "   > [$__i/5] native 10 second 1080p mp4 max fps test, with subtitles"
+  ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -nosound                          \
+    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt           \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4 >> native-10s-1080pmp4-maxfps-subs
+  echo "   > [$__i/5] native 10 second 1440p webm max fps test, with subtitles"
+  ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -nosound                          \
+    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt           \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm >> native-10s-1440pwebm-maxfps-subs
+  echo "   > [$__i/5] native 10 second 1440p mp4 max fps test, with subtitles"
+  ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -nosound                          \
+    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt           \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4 >> native-10s-1440pmp4-maxfps-subs
+
+
+  echo "   > [$__i/5] mvee 10 second 1080p webm max fps test, with subtitles"
+  ./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
+    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                  \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm >> mvee-10s-1080pwebm-maxfps-subs
+  echo "   > [$__i/5] mvee 10 second 1080p mp4 max fps test, with subtitles"
+  ./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
+    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                  \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4 >> mvee-10s-1080pmp4-maxfps-subs
+  echo "   > [$__i/5] mvee 10 second 1440p webm max fps test, with subtitles"
+  ./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
+    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                  \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm >> mvee-10s-1440pwebm-maxfps-subs
+  echo "   > [$__i/5] mvee 10 second 1440p mp4 max fps test, with subtitles"
+  ./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
+    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                  \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4 >> mvee-10s-1440pmp4-maxfps-subs
 done
 
 
-ln -fs "$__home_dir/../deps/ReMon-glibc/build/built-versions/normal/"* \
-  "$__home_dir/../patched_binaries/libc/amd64"
-export LD_PRELOAD="$__ld_preload"
-
-
-if [[ ! -e "$__home_dir/benchmarks/out/mplayer/" ]]
-then
-  echo " > mplayer not currently available, did you build it?"
-  exit 2
-fi
-
-if [[ ! -n "$__version" ]]
-then
-  echo " > somehow no version given"
-  exit 2
-fi
-if [[ ! -e "$__home_dir/benchmarks/out/mplayer/$__version" ]]
-then
-  echo " > $__version version of mplayer not currently available, did you build it?"
-  exit 2
-fi
-
-export DYNINST_INSTALL=$__home_dir/../deps/dyninst/build/../install 
-export DYNINSTAPI_RT_LIB=${DYNINST_INSTALL}/lib/libdyninstAPI_RT.so
-export LD_LIBRARY_PATH=${DYNINST_INSTALL}/lib/:$LD_LIBRARY_PATH
-
-
-LD_PRELOAD="$__home_dir/benchmarks/out/fontconfig/default/libfontconfig.so.1:$__home_dir/benchmarks/out/pulseaudio/default/libpulsecommon-14.2.so:$__home_dir/benchmarks/out/pulseaudio/default/libpulse.so.0"
-ln -fs "$__home_dir/benchmarks/out/pulseaudio/wrapped/"* "$__home_dir/../patched_binaries/gnomelibs/amd64/"
-ln -fs "$__home_dir/benchmarks/out/fontconfig/wrapped/libfontconfig.so.1" \
-  "$__home_dir/../patched_binaries/gnomelibs/amd64/"
-ln -fs "$__home_dir/../deps/ReMon-glibc/build/built-versions/normal/"* "$__home_dir/../patched_binaries/libc/amd64"
-
-__run="$__home_dir/benchmarks/out/mplayer/$__version/bin/mplayer $__mplayer_options"
-
-if [[ "$__native" == 1 ]]
-then
-  echo " > using native execution"
-  echo " > executing command: $__run"
-
-  $__run
-else
-  if [[ "$__ipmon" == 1 ]]
-  then
-    echo " > enabling ipmon for this run"
-    ln -fs "$__home_dir/benchmarks/conf/MVEE-ipmon.ini" "$__home_dir/../MVEE/bin/Release/MVEE.ini"
-    ln -fs "$__home_dir/../IP-MON/libipmon-mplayer.so" "$__home_dir/../IP-MON/libipmon.so"
-  else
-    echo " > disabling ipmon for this run"
-    ln -fs "$__home_dir/benchmarks/conf/MVEE.ini" "$__home_dir/../MVEE/bin/Release/MVEE.ini"
-  fi
-
-  cd "$__home_dir/../MVEE/bin/Release/"
-  echo " > executing command: ./mvee -N $__variants -- $__run"
-  ./mvee -N "$__variants" -- "$__run"
-  ln -fs "$__home_dir/../IP-MON/libipmon-default.so" "$__home_dir/../IP-MON/libipmon.so"
-
-fi
+# Output result.
+../../../eurosys2022-artifact/benchmarks/scripts/process_mplayer.sh
