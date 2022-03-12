@@ -3,12 +3,8 @@ set -e
 
 cd "$(readlink -f $(dirname ${BASH_SOURCE})/../../../)"
 
-# Clear file containing output for native run.
-rm ./eurosys2022-artifact/benchmarks/results/microbenchmarks/native.out
-# Clear file containing output for mvee run with burst accesses wrapped.
-rm ./eurosys2022-artifact/benchmarks/results/microbenchmarks/default.out
-# Clear file containing output for mvee run, without burst accesses wrapped.
-rm ./eurosys2022-artifact/benchmarks/results/microbenchmarks/stripped.out
+# Clear files containing output.
+rm ./eurosys2022-artifact/benchmarks/results/microbenchmarks/* || :
 
 
 # Optional for when you want to enable IP-MON, has no effect when kernel is not IP-MON enabled.
