@@ -11,15 +11,12 @@ process_max_fps ()
     echo " > $2: $(python -c "print(($__sum)/$__count.0)")"
     
 }
-    __results=($(grep BENCHMARKs ~/temp/test3 | cut -d '=' -f2 | cut -d 's' -f1))
-    __sum=$(echo "${__results[*]}"|sed "s/ /+/g")
-    __count=${#__results[@]}
-    echo " > $2: $(python -c "print(($__sum)/$__count.0)")"
 
 process_framedrop ()
 {
     __results=($(grep BENCHMARKn $1 | cut -d ':' -f3 | cut -d '(' -f1))
     __sum=$(echo "${__results[*]}"|sed "s/ /+/g")
+    __count=${#__results[@]}
     echo " > $2: $(python -c "print($__sum/$__count.0)")"
 }
 

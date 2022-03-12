@@ -51,7 +51,7 @@ docker run                                                        \
 
 ```bash
 # Clear files containing output.
-rm ./eurosys2022-artifact/benchmarks/results/microbenchmarks/*
+rm ./eurosys2022-artifact/benchmarks/results/microbenchmark/*
 ```
 
 ### Step 2 - setting up the MVEE
@@ -72,15 +72,15 @@ sed -i "s/\"use_ipmon\" : false/\"use_ipmon\" : true/g" ./MVEE.ini
 
 ```bash
 # native run, do this 10 times
-../../../eurosys2022-artifact/benchmarks/microbenchmarks/memcpy >> ../../../eurosys2022-artifact/benchmarks/results/microbenchmarks/native.out
+../../../eurosys2022-artifact/benchmarks/microbenchmark/memcpy >> ../../../eurosys2022-artifact/benchmarks/results/microbenchmark/native.out
 
 # wrapped bursts, do this 10 times
 ../../../eurosys2022-artifact/benchmarks/scripts/relink-libc.sh default
-./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/microbenchmarks/memcpy >> ../../../eurosys2022-artifact/benchmarks/results/microbenchmarks/default.out
+./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/microbenchmark/memcpy >> ../../../eurosys2022-artifact/benchmarks/results/microbenchmark/default.out
 
 # non-wrapped bursts, do this 10 times
 ../../../eurosys2022-artifact/benchmarks/scripts/relink-libc.sh stripped
-./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/microbenchmarks/memcpy >> ../../../eurosys2022-artifact/benchmarks/results/microbenchmarks/stripped.out
+./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/microbenchmark/memcpy >> ../../../eurosys2022-artifact/benchmarks/results/microbenchmark/stripped.out
 
 # make sure the correct libc version is used for later experiments
 ../../../eurosys2022-artifact/benchmarks/scripts/relink-libc.sh default

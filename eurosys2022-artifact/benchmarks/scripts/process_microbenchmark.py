@@ -1,7 +1,8 @@
 import sys
 
 
-results={}
+results = {}
+max_size = 0
 with open(sys.argv[1], 'r') as input_file:
     while True:
         line = input_file.readline()
@@ -9,9 +10,10 @@ with open(sys.argv[1], 'r') as input_file:
             break
         line = line.replace(' ', '').replace('>','').replace("ns", '').split(':')
         if line[0] not in results:
-            results[int(line[0])] = float(line[1])
+            max_size = max(max_size, int(line[0]))
+            results[int(line[0])] = [float(line[1])]
         else:
-            results[int(line[0])] += float(line[1])
+            results[int(line[0])].append(float(line[1]))
 
 for size in sorted(results):
-    print("   > %s: %f ns" % (size, results[size]/10.0))
+    print("   > %s: %s%f ns" % (size, ' '*(len(str(max_size))-len(str(size))), sum(results[size])/len(results[size])))

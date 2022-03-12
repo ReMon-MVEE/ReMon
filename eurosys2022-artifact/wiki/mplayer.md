@@ -14,7 +14,7 @@
 
 ```bash
 # Clear files containing output.
-rm ./eurosys2022-artifact/benchmarks/results/mplayer/*
+rm ../../../eurosys2022-artifact/benchmarks/results/mplayer/*
 ```
 
 ## Step 2 - setting up the MVEE
@@ -54,162 +54,194 @@ sed -i "s/\"use_ipmon\" : false/\"use_ipmon\" : true/g" ./MVEE.ini
 # native 10 second 1080p 30 fps framedrop test, without subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                        \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p30.mp4 >> native-10s-1080p30-framedrop
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p30.mp4       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/native-10s-1080p30-framedrop
 # native 10 second 1080p 60 fps framedrop test, without subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                        \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4 >> native-10s-1080p60-framedrop
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/native-10s-1080p60-framedrop
 # native 10 second 1080p 90 fps framedrop test, without subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                        \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p90.mp4 >> native-10s-1080p90-framedrop
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p90.mp4       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/native-10s-1080p90-framedrop
 # native 10 second 1080p 120 fps framedrop test, without subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                        \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p120.mp4 >> native-10s-1080p120-framedrop
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p120.mp4       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/native-10s-1080p120-framedrop
 
 
 # mvee 10 second 1080p 30 fps framedrop test, without subtitles, do this 5 times
 ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                                       \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p30.mp4 >> mvee-10s-1080p30-framedrop
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p30.mp4       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/mvee-10s-1080p30-framedrop
 # mvee 10 second 1080p 60 fps framedrop test, without subtitles, do this 5 times
 ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                                       \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4 >> mvee-10s-1080p60-framedrop
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/mvee-10s-1080p60-framedrop
 # mvee 10 second 1080p 90 fps framedrop test, without subtitles, do this 5 times
 ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                                       \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p90.mp4 >> mvee-10s-1080p90-framedrop
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p90.mp4       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/mvee-10s-1080p90-framedrop
 # mvee 10 second 1080p 120 fps framedrop test, without subtitles, do this 5 times
 ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                                       \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p120.mp4 >> mvee-10s-1080p120-framedrop
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p120.mp4       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/mvee-10s-1080p120-framedrop
 
 
 # native 10 second 1080p 30 fps framedrop test, with subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                        \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt          \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p30.mp4 >> native-10s-1080p30-framedrop-subs
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p30.mp4       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/native-10s-1080p30-framedrop-subs
 # native 10 second 1080p 60 fps framedrop test, with subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                        \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt          \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4 >> native-10s-1080p60-framedrop-subs
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/native-10s-1080p60-framedrop-subs
 # native 10 second 1080p 90 fps framedrop test, with subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                        \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt          \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p90.mp4 >> native-10s-1080p90-framedrop-subs
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p90.mp4       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/native-10s-1080p90-framedrop-subs
 # native 10 second 1080p 120 fps framedrop test, with subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                        \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt          \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p120.mp4 >> native-10s-1080p120-framedrop-subs
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p120.mp4       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/native-10s-1080p120-framedrop-subs
 
 
 # mvee 10 second 1080p 30 fps framedrop test, with subtitles, do this 5 times
 ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                                       \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                         \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p30.mp4 >> mvee-10s-1080p30-framedrop-subs
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p30.mp4       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/mvee-10s-1080p30-framedrop-subs
 # mvee 10 second 1080p 60 fps framedrop test, with subtitles, do this 5 times
 ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                                       \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                         \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4 >> mvee-10s-1080p60-framedrop-subs
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/mvee-10s-1080p60-framedrop-subs
 # mvee 10 second 1080p 90 fps framedrop test, with subtitles, do this 5 times
 ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                                       \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                         \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p90.mp4 >> mvee-10s-1080p90-framedrop-subs
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p90.mp4       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/mvee-10s-1080p90-framedrop-subs
 # mvee 10 second 1080p 120 fps framedrop test, with subtitles, do this 5 times
 ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -framedrop                                       \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                         \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p120.mp4 >> mvee-10s-1080p120-framedrop-subs
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p120.mp4       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/mvee-10s-1080p120-framedrop-subs
 
 
 
 # native 10 second 1080p webm max fps test, without subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -nosound                          \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm >> native-10s-1080pwebm-maxfps
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/native-10s-1080pwebm-maxfps
 # native 10 second 1080p mp4 max fps test, without subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -nosound                          \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4 >> native-10s-1080pmp4-maxfps
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/native-10s-1080pmp4-maxfps
 # native 10 second 1440p webm max fps test, without subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -nosound                          \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm >> native-10s-1440pwebm-maxfps
+  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/native-10s-1440pwebm-maxfps
 # native 10 second 1440p mp4 max fps test, without subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -nosound                          \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4 >> native-10s-1440pmp4-maxfps
+  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/native-10s-1440pmp4-maxfps
 
 
 # mvee 10 second 1080p webm max fps test, without subtitles, do this 5 times
-./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
-  -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm >> mvee-10s-1080pwebm-maxfps
+./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
+  -benchmark -osdlevel 0 -vo xv -quiet -nosound                                         \
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/mvee-10s-1080pwebm-maxfps
 # mvee 10 second 1080p mp4 max fps test, without subtitles, do this 5 times
-./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
-  -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4 >> mvee-10s-1080pmp4-maxfps
+./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
+  -benchmark -osdlevel 0 -vo xv -quiet -nosound                                         \
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/mvee-10s-1080pmp4-maxfps
 # mvee 10 second 1440p webm max fps test, without subtitles, do this 5 times
-./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
-  -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm >> mvee-10s-1440pwebm-maxfps
+./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
+  -benchmark -osdlevel 0 -vo xv -quiet -nosound                                         \
+  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/mvee-10s-1440pwebm-maxfps
 # mvee 10 second 1440p mp4 max fps test, without subtitles, do this 5 times
-./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
-  -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4 >> mvee-10s-1440pmp4-maxfps
+./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
+  -benchmark -osdlevel 0 -vo xv -quiet -nosound                                         \
+  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/mvee-10s-1440pmp4-maxfps
 
 
 # native 10 second 1080p webm max fps test, with subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -nosound                          \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt          \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm >> native-10s-1080pwebm-maxfps-subs
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/native-10s-1080pwebm-maxfps-subs
 # native 10 second 1080p mp4 max fps test, with subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -nosound                          \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt          \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4 >> native-10s-1080pmp4-maxfps-subs
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/native-10s-1080pmp4-maxfps-subs
 # native 10 second 1440p webm max fps test, with subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -nosound                          \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt          \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm >> native-10s-1440pwebm-maxfps-subs
+  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/native-10s-1440pwebm-maxfps-subs
 # native 10 second 1440p mp4 max fps test, with subtitles, do this 5 times
 ../../../eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
   -benchmark -osdlevel 0 -vo xv -quiet -nosound                          \
    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt          \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4 >> native-10s-1440pmp4-maxfps-subs
+  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/native-10s-1440pmp4-maxfps-subs
 
 
 # mvee 10 second 1080p webm max fps test, with subtitles, do this 5 times
-./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
-  -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
-   -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                 \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm >> mvee-10s-1080pwebm-maxfps-subs
+./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
+  -benchmark -osdlevel 0 -vo xv -quiet -nosound                                         \
+   -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                         \
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/mvee-10s-1080pwebm-maxfps-subs
 # mvee 10 second 1080p mp4 max fps test, with subtitles, do this 5 times
-./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
-  -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
-   -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                 \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4 >> mvee-10s-1080pmp4-maxfps-subs
+./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
+  -benchmark -osdlevel 0 -vo xv -quiet -nosound                                         \
+   -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                         \
+  ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/mvee-10s-1080pmp4-maxfps-subs
 # mvee 10 second 1440p webm max fps test, with subtitles, do this 5 times
-./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
-  -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
-   -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                 \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm >> mvee-10s-1440pwebm-maxfps-subs
+./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
+  -benchmark -osdlevel 0 -vo xv -quiet -nosound                                         \
+   -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                         \
+  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/mvee-10s-1440pwebm-maxfps-subs
 # mvee 10 second 1440p mp4 max fps test, with subtitles, do this 5 times
-./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
-  -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
-   -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                 \
-  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4 >> mvee-10s-1440pmp4-maxfps-subs
+./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
+  -benchmark -osdlevel 0 -vo xv -quiet -nosound                                         \
+   -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                         \
+  ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4       \
+  >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/mvee-10s-1440pmp4-maxfps-subs
 ```
 
 ## Step 3 - automatic processing
