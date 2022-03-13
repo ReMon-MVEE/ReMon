@@ -5,11 +5,44 @@ to Eurosys 2022. All bash snippets in the steps below are assumed to start from 
 
 ## Prerequisites
 
-For more reproducible results turn off hyperthreading and turbo boost. The method for this depends on your system.
+For more reproducible results turn off hyper threading and turbo boost. The method for this might depend on your system.
 General Intel way:
 
 ```bash
+echo "1"   | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
+echo "off" | sudo tee /sys/devices/system/cpu/smt/control
+```
 
+## Optional IP-MON setup
+
+To run ReMon at its full potential, a small kernel patch is required. We override ReMon's kernel patch with a rolled
+back version for 5.3.0. Note that this patch should work just fine on a 5.4.0 kernel if you're running Ubuntu 20.04 LTS,
+but we suggest using 18.04 LTS and a 5.3.0 kernel for reproducibility. We provide a method of setting up the kernel here
+that will install it as a separate package, next to your default kernel, instead of overwriting it. This allows you to
+select what kernel to use at boot time via the _Advanced Options For Ubuntu_ option. The IP-MON kernel is only tested on
+Ubuntu kernel source, running it in other distros is not guaranteed to work. However, installing the kernel as mentioned
+below will have little to no impact on your experience.
+
+To show the grub boot menu go to /etc/default/grub and add/change: GRUB_TIMEOUT_STYLE=menu and GRUB_TIMEOUT=10. After
+saving the changes execute `sudo update-grub`.
+
+```bash
+cd /wherever/you/want/to/download/the/kernel
+
+sudo apt-get update
+sudo apt-get install linux-source-5.3.0
+tar jxf /usr/src/linux-source-5.3.0/linux-source-5.3.0.tar.bz2
+# Alternatively: obtain linux 5.3.0 of 5.4.0 kernel source elsewhere, not guaranteed to work.
+
+cd linux-source-5.3.0
+patch -p1 < /wherever/you/cloned/remon/eurosys2022-artifact/benchmarks/patches/linux-5.3.0-full-ipmon.patch
+make menuconfig 
+# while you're in the config menu, you might want to bump the kernel tick rate up to 1000Hz
+# you can do so by navigating to "Processor type and features" > "Timer Frequency"
+./scripts/config --disable CONFIG_SYSTEM_TRUSTED_KEYS
+
+make -j$(nproc) deb-pkg LOCALVERSION=-ipmon
+sudo dpkg -i ../linux-headers*.deb ../linux-image*.deb ../linux-libc-dev*.deb
 ```
 
 ---
@@ -31,7 +64,7 @@ When prompted for a user password inside the container
 **Method 2**: running docker command manually:
 
 ```bash
-docker build ./eurosys2022-artifact/ -t shmvee:ae
+docker build -t shmvee:ae ./eurosys2022-artifact/
 ```
 
 ### Step 1 - bootstrap

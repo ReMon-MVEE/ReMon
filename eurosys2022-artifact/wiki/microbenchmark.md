@@ -1,5 +1,7 @@
 # Microbenchmark
 
+Time: . Start from the repo's root directory.
+
 ## Automatic
 
 ### Native
@@ -75,15 +77,15 @@ sed -i "s/\"use_ipmon\" : false/\"use_ipmon\" : true/g" ./MVEE.ini
 ../../../eurosys2022-artifact/benchmarks/microbenchmark/memcpy >> ../../../eurosys2022-artifact/benchmarks/results/microbenchmark/native.out
 
 # wrapped bursts, do this 10 times
-../../../eurosys2022-artifact/benchmarks/scripts/relink-libc.sh default
+../../../eurosys2022-artifact/benchmarks/scripts/relink_glibc.sh default
 ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/microbenchmark/memcpy >> ../../../eurosys2022-artifact/benchmarks/results/microbenchmark/default.out
 
 # non-wrapped bursts, do this 10 times
-../../../eurosys2022-artifact/benchmarks/scripts/relink-libc.sh stripped
+../../../eurosys2022-artifact/benchmarks/scripts/relink_glibc.sh stripped
 ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/microbenchmark/memcpy >> ../../../eurosys2022-artifact/benchmarks/results/microbenchmark/stripped.out
 
 # make sure the correct libc version is used for later experiments
-../../../eurosys2022-artifact/benchmarks/scripts/relink-libc.sh default
+../../../eurosys2022-artifact/benchmarks/scripts/relink_glibc.sh default
 ```
 
 ### Step 3 - automatic processing

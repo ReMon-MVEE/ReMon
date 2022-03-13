@@ -1,5 +1,7 @@
 # Nginx
 
+Time required: ~15 minutes.  Start from the repo's root directory.
+
 ## Step 0 - setup
 
 Open two terminal windows: 

@@ -21,16 +21,16 @@ cd MVEE/bin/Release/
 ../../../eurosys2022-artifact/benchmarks/microbenchmarks/memcpy
 
 # wrapped bursts, do this 10 times
-../../../eurosys2022-artifact/benchmarks/scripts/relink-libc.sh default
+../../../eurosys2022-artifact/benchmarks/scripts/relink_glibc.sh default
 ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/microbenchmarks/memcpy
 
 # non-wrapped bursts, do this 10 times
-../../../eurosys2022-artifact/benchmarks/scripts/relink-libc.sh stripped
+../../../eurosys2022-artifact/benchmarks/scripts/relink_glibc.sh stripped
 # optionally enable IP-MON by editing MVEE.ini and setting "use_ipmon" to true
 ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/microbenchmarks/memcpy
 
 # make sure the correct libc version is used for later experiments
-../../../eurosys2022-artifact/benchmarks/scripts/relink-libc.sh default
+../../../eurosys2022-artifact/benchmarks/scripts/relink_glibc.sh default
 ```
 
 ## nginx

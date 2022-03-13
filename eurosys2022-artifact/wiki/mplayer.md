@@ -1,7 +1,35 @@
+# MPlayer
+
+Time required: ~45 minutes. Start from the repo's root directory.
+
+**Note**: There is a known synchronization issue that might cause the MVEE to not shut down after the benchmark has
+finished. If not new window appears while running the automatic script or no new terminal prompt appears while runin
+manual commands, it is safe to crl+c to shut down the MVEE.
+
 ## Automatic
+
+### Native
 
 ```bash
 ./eurosys2022-artifact/benchmarks/scripts/run_mplayer.sh
+```
+
+### Running in docker
+
+**Method 1**: using the included docker bash script
+
+```bash
+./eurosys2022-artifact/docker_control.sh runx11 ./eurosys2022-artifact/benchmarks/scripts/run_mplayer.sh
+```
+
+**Method 2**: running docker command manually:
+
+```bash
+x11docker --hostdisplay --hostipc --gpu --pulseaudio --interactive   \
+  --user=RETAIN --network --clipboard --cap-default                  \
+  --workdir=/home/eval/artifact --                                   \
+  --cap-add SYS_PTRACE -ti -v "./:/home/eval/artifact/" --           \
+  shmvee:ae ./eurosys2022-artifact/benchmarks/scripts/run_mplayer.sh
 ```
 
 ## Manual
@@ -9,6 +37,22 @@
 ## Step 0 - docker entrance
 
 **Optional!** Skip if you are running the experiments natively.
+
+**Method 1**: using the included docker bash script
+
+```bash
+./eurosys2022-artifact/docker_control.sh runx11
+```
+
+**Method 2**: running docker command manually:
+
+```bash
+x11docker --hostdisplay --hostipc --gpu --pulseaudio --interactive \
+  --user=RETAIN --network --clipboard --cap-default                \
+  --workdir=/home/eval/artifact --                                 \
+  --cap-add SYS_PTRACE -ti -v ./:/home/eval/artifact/ --           \
+  shmvee:ae bash
+```
 
 ## Step 1 - setting up the output for automatic processing
 
