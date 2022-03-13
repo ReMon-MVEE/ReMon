@@ -1,6 +1,6 @@
 # Microbenchmark
 
-Time: . Start from the repo's root directory.
+Time: ~3 hours. Start from the repo's root directory.
 
 ## Automatic
 

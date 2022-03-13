@@ -27,10 +27,10 @@ docker_control.sh script.
 **Method 2**: running docker command manually:
 
 ```bash
-    docker run                                                                     \
-        --security-opt seccomp=unconfined                                          \
-        -v "./:/home/eval/artifact/" -p 8080:8080 --workdir="/home/eval/artifact/" \
-        -it shmvee:ae bash
+docker run                                                                     \
+    --security-opt seccomp=unconfined                                          \
+    -v "./:/home/eval/artifact/" -p 8080:8080 --workdir="/home/eval/artifact/" \
+    -it shmvee:ae bash
 ```
 
 ## Step 1 - setting up the MVEE
