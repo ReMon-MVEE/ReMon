@@ -11,7 +11,7 @@ Open two terminal windows:
 Ideally, the client terminal is opened on a separate machine connected via a dedicated gigabit ethernet link, to
 replicate our evaluation setup.
 
-Client wrk command: `wrk -d 10s -t 1 -c 10 --timeout 10s http:/127.0.0.1:8080 >> outfile`, outfile is mentioned in the
+Client wrk command: `wrk -d 10s -t 1 -c 10 --timeout 10s http://127.0.0.1:8080 >> outfile`, outfile is mentioned in the
 comments between the commands. If you are using separate machines to benchmark apache, the ip is the ip on the dedicated
 link for the machine running apache.
 

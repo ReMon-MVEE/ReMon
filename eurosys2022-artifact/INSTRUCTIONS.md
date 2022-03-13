@@ -38,7 +38,7 @@ cd MVEE/bin/Release/
 Open two terminal windows: one to run nginx from and one to run wrk from. Ideally, the one running wrk is opened on a
 separate machine connected via a dedicated gigabit ethernet link, to replicate our evaluation setup.
 
-wrk command: `wrk -d 10s -t 1 -c 10 --timeout 10s http:/127.0.0.1:8080`. If you are using separate machines to
+wrk command: `wrk -d 10s -t 1 -c 10 --timeout 10s http://127.0.0.1:8080`. If you are using separate machines to
 benchmark nginx, the ip is the ip on the dedicated link for the machine running nginx.
 
 ```bash
@@ -95,7 +95,7 @@ cd MVEE/bin/Release/
 Open two terminal windows: one to run apache from and one to run wrk from. Ideally, the one running wrk is opened on a
 separate machine connected via a dedicated gigabit ethernet link, to replicate our evaluation setup.
 
-wrk command: `wrk -d 10s -t 1 -c 10 --timeout 10s http:/127.0.0.1:8080`. If you are using separate machines to
+wrk command: `wrk -d 10s -t 1 -c 10 --timeout 10s http://127.0.0.1:8080`. If you are using separate machines to
 benchmark apache, the ip is the ip on the dedicated link for the machine running apache.
 
 ```bash
