@@ -19,27 +19,27 @@ sed -i "s/\"use_ipmon\" : false/\"use_ipmon\" : true/g" ./MVEE.ini
 
 # Native run
 echo " > running native microbenchmark..."
-for __i in {1..10}
+for __i in {1..5}
 do
-    echo " > run $__i/10"
+    echo " > run $__i/5"
     ../../../eurosys2022-artifact/benchmarks/microbenchmark/memcpy >> ../../../eurosys2022-artifact/benchmarks/results/microbenchmark/native.out
 done
 
 # Wrapped bursts
 ../../../eurosys2022-artifact/benchmarks/scripts/relink_glibc.sh default
 echo " > running mvee microbenchmark with wrapped access..."
-for __i in {1..10}
+for __i in {1..5}
 do
-    echo " > run $__i/10"
+    echo " > run $__i/5"
     ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/microbenchmark/memcpy >> ../../../eurosys2022-artifact/benchmarks/results/microbenchmark/default.out
 done
 
 # Non-wrapped bursts
 ../../../eurosys2022-artifact/benchmarks/scripts/relink_glibc.sh stripped
 echo " > running mvee microbenchmark without wrapped access..."
-for __i in {1..10}
+for __i in {1..5}
 do
-    echo " > run $__i/10"
+    echo " > run $__i/5"
     ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/microbenchmark/memcpy >> ../../../eurosys2022-artifact/benchmarks/results/microbenchmark/stripped.out
 done
 

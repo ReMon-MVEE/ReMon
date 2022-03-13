@@ -19,5 +19,5 @@ with open(sys.argv[1], 'r') as input_file:
         elif "Requests/sec" in line:
             requests.append(float(line.replace(' ', '').split(':')[1]))
 
-print("   > average latency:    %f us"           % (sum(latencies)/len(latencies)))
-print("   > average throughput: %f requests/sec" % (sum(requests)/len(requests)))
+print("   > average latency:    (%s)/%d us"           % ('+'.join(map(str, latencies)), len(latencies)))
+print("   > average throughput: (%s)/%d requests/sec" % ('+'.join(map(str, requests)),  len(requests)))
