@@ -27,9 +27,9 @@ docker_control.sh script.
 **Method 2**: running docker command manually:
 
 ```bash
-docker run                                                                     \
-    --security-opt seccomp=unconfined                                          \
-    -v "./:/home/eval/artifact/" -p 8080:8080 --workdir="/home/eval/artifact/" \
+docker run                                                                         \
+    --security-opt seccomp=unconfined                                              \
+    -v "$(pwd):/home/eval/artifact/" -p 8080:8080 --workdir="/home/eval/artifact/" \
     -it shmvee:ae bash
 ```
 

@@ -21,9 +21,9 @@ Time: ~3 hours. Start from the repo's root directory.
 **Method 2**: running docker command manually:
 
 ```bash
-docker run                                                        \
-    --security-opt seccomp=unconfined                             \
-    -v "./:/home/eval/artifact/" --workdir="/home/eval/artifact/" \
+docker run                                                            \
+    --security-opt seccomp=unconfined                                 \
+    -v "$(pwd):/home/eval/artifact/" --workdir="/home/eval/artifact/" \
     -it shmvee:ae ./eurosys2022-artifact/benchmarks/scripts/run_microbenchmark.sh
 ```
 
@@ -43,9 +43,9 @@ container, unless mentioned otherwise.
 **Method 2**: running docker command manually:
 
 ```bash
-docker run                                                        \
-    --security-opt seccomp=unconfined                             \
-    -v "./:/home/eval/artifact/" --workdir="/home/eval/artifact/" \
+docker run                                                            \
+    --security-opt seccomp=unconfined                                 \
+    -v "$(pwd):/home/eval/artifact/" --workdir="/home/eval/artifact/" \
     -it shmvee:ae bash
 ```
 

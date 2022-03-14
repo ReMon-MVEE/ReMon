@@ -28,7 +28,7 @@ manual commands, it is safe to crl+c to shut down the MVEE.
 x11docker --hostdisplay --hostipc --gpu --pulseaudio --interactive   \
   --user=RETAIN --network --clipboard --cap-default                  \
   --workdir=/home/eval/artifact --                                   \
-  --cap-add SYS_PTRACE -ti -v "./:/home/eval/artifact/" --           \
+  --cap-add SYS_PTRACE -ti -v "$(pwd):/home/eval/artifact/" --       \
   shmvee:ae ./eurosys2022-artifact/benchmarks/scripts/run_mplayer.sh
 ```
 

@@ -3,6 +3,14 @@
 This artifact relates to the "Sharing is Caring: Secure and Efficient Shared Memory Support for MVEEs" paper submitted
 to Eurosys 2022. All bash snippets in the steps below are assumed to start from the repository root.
 
+## System
+
+All benchmarks were originally run on a system running Ubuntu 18.04 LTS, equipped with a 6-core AMD Ryzen 5 5600x CPU,
+Nvidia 2060 GPU, and 16GB of RAM. For our experiments we disabled hyper-threading and turbo-boost.
+
+As a rule of thumb we suggest counting one core for the monitor and n additional cores for every process that would be
+started by the application being run. With n representing the configured number of variants.
+
 ## Prerequisites
 
 For more reproducible results turn off hyper threading and turbo boost. The method for this might depend on your system.
@@ -12,6 +20,18 @@ General Intel way:
 echo "1"   | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
 echo "off" | sudo tee /sys/devices/system/cpu/smt/control
 ```
+
+## Setup
+
+While we suggest running the experiments in a native Ubuntu 18.04 machine, we do provide a docker image that can be used
+instead.
+
+To run MPlayer, a graphical application, in the docker container, download and install x11docker from
+https://github.com/mviereck/x11docker.
+
+To benchmark the servers download and install wrk from https://github.com/wg/wrk. Even if you run the benchmarks using
+docker, wrk does **not** need to run inside the docker container. To reproduce our results, run the web server on one
+system and the wrk benchmark on a second system, connecting both through a dedicated gigabit ethernet connection.
 
 ## Optional IP-MON setup
 
@@ -23,8 +43,8 @@ select what kernel to use at boot time via the _Advanced Options For Ubuntu_ opt
 Ubuntu kernel source, running it in other distros is not guaranteed to work. However, installing the kernel as mentioned
 below will have little to no impact on your experience.
 
-To show the grub boot menu go to /etc/default/grub and add/change: GRUB_TIMEOUT_STYLE=menu and GRUB_TIMEOUT=10. After
-saving the changes execute `sudo update-grub`.
+To show the grub boot menu go to /etc/default/grub and add/change: `GRUB_TIMEOUT_STYLE=menu` and `GRUB_TIMEOUT=10`.
+After saving the changes execute `sudo update-grub`.
 
 ```bash
 cd /wherever/you/want/to/download/the/kernel
@@ -78,9 +98,9 @@ docker build -t shmvee:ae ./eurosys2022-artifact/
 **Method 2**: running docker command manually:
 
 ```bash
-docker run                                                                             \
-    -v "./:/home/eval/artifact/" --workdir="/home/eval/artifact/eurosys2022-artifact/" \
-    --env BUILDALL=1 --name artifact -it shmvee:ae                                     \
+docker run                                                                                 \
+    -v "$(pwd):/home/eval/artifact/" --workdir="/home/eval/artifact/eurosys2022-artifact/" \
+    --env BUILDALL=1 --name artifact -it shmvee:ae                                         \
     ./bootstrap.sh
 docker commit artifact shmvee:ae
 docker rm artifact
