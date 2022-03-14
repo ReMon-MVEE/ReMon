@@ -184,9 +184,9 @@ do
     ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm      \
     >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/native-10s-1080pwebm-maxfps
   echo "   > [$__i/5] mvee 10 second 1080p webm max fps test, without subtitles"
-  ./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
-    -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
-    ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm             \
+  ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -nosound                                         \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm                     \
     >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/mvee-10s-1080pwebm-maxfps
 done
 
@@ -200,9 +200,9 @@ do
     ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4       \
     >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/native-10s-1080pmp4-maxfps
   echo "   > [$__i/5] mvee 10 second 1080p mp4 max fps test, without subtitles"
-  ./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
-    -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
-    ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4              \
+  ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -nosound                                         \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4                      \
     >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/mvee-10s-1080pmp4-maxfps
 done
 
@@ -216,9 +216,9 @@ do
     ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm      \
     >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/native-10s-1440pwebm-maxfps
   echo "   > [$__i/5] mvee 10 second 1440p webm max fps test, without subtitles"
-  ./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
-    -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
-    ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm             \
+  ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -nosound                                         \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm                     \
     >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/mvee-10s-1440pwebm-maxfps
 done
 
@@ -232,9 +232,9 @@ do
     ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4       \
     >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/native-10s-1440pmp4-maxfps
   echo "   > [$__i/5] mvee 10 second 1440p mp4 max fps test, without subtitles"
-  ./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
-    -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
-    ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4              \
+  ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -nosound                                         \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4                      \
     >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/mvee-10s-1440pmp4-maxfps
 done
 
@@ -250,10 +250,10 @@ do
     ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm      \
     >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/native-10s-1080pwebm-maxfps-subs
   echo "   > [$__i/5] mvee 10 second 1080p webm max fps test, with subtitles"
-  ./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
-    -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
-    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                  \
-    ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm             \
+  ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -nosound                                         \
+    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                          \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.webm                     \
     >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/mvee-10s-1080pwebm-maxfps-subs
 done
 
@@ -268,10 +268,10 @@ do
     ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4       \
     >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/native-10s-1080pmp4-maxfps-subs
   echo "   > [$__i/5] mvee 10 second 1080p mp4 max fps test, with subtitles"
-  ./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
-    -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
-    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                  \
-    ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4              \
+  ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -nosound                                         \
+    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                          \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1080p60.mp4                      \
     >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/mvee-10s-1080pmp4-maxfps-subs
 done
 
@@ -286,10 +286,10 @@ do
     ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm      \
     >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/native-10s-1440pwebm-maxfps-subs
   echo "   > [$__i/5] mvee 10 second 1440p webm max fps test, with subtitles"
-  ./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
-    -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
-    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                  \
-    ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm             \
+  ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -nosound                                         \
+    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                          \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.webm                     \
     >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/mvee-10s-1440pwebm-maxfps-subs
 done
 
@@ -304,10 +304,10 @@ do
     ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4       \
     >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/native-10s-1440pmp4-maxfps-subs
   echo "   > [$__i/5] mvee 10 second 1440p mp4 max fps test, with subtitles"
-  ./mvee -N 2 -- /eurosys2022-artifact/benchmarks/out/mplayer/default/bin/mplayer \
-    -benchmark -osdlevel 0 -vo xv -quiet -nosound                                 \
-    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                  \
-    ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4              \
+  ./mvee -N 2 -- ../../../eurosys2022-artifact/benchmarks/out/mplayer/dyninst/bin/mplayer \
+    -benchmark -osdlevel 0 -vo xv -quiet -nosound                                         \
+    -sub ../../../eurosys2022-artifact/benchmarks/input/subs.srt                          \
+    ../../../eurosys2022-artifact/benchmarks/input/video/1440p60.mp4                      \
     >> ../../../eurosys2022-artifact/benchmarks/results/mplayer/mvee-10s-1440pmp4-maxfps-subs
 done
 

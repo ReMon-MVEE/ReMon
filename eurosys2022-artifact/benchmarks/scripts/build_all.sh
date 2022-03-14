@@ -12,6 +12,7 @@ $__home_dir/nginx_build.sh \
 
 $__home_dir/mplayer_build.sh     \
         --default                \
+        --default-no-fast-memcpy \
         --wrapped-full
 
 
