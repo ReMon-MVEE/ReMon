@@ -92,12 +92,18 @@ docker build -t shmvee:ae ./eurosys2022-artifact/
 **Method 1**: using the included docker bash script
 
 ```bash
+# This is necessary as running this in docker might fail.
+sudo sysctl -w kernel.yama.ptrace_scope=0
+
 ./eurosys2022-artifact/docker_control.sh bootstrap
 ```
 
 **Method 2**: running docker command manually:
 
 ```bash
+# This is necessary as running this in docker might fail.
+sudo sysctl -w kernel.yama.ptrace_scope=0
+
 docker run                                                                                 \
     -v "$(pwd):/home/eval/artifact/" --workdir="/home/eval/artifact/eurosys2022-artifact/" \
     --env BUILDALL=1 --name artifact -it shmvee:ae                                         \
