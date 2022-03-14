@@ -18,6 +18,8 @@ __root_dir=$(pwd)
 # Set dyninst variables
 export DYNINST_INSTALL="$__root_dir/deps/dyninst/build/../install"
 export DYNINSTAPI_RT_LIB="${DYNINST_INSTALL}/lib/libdyninstAPI_RT.so"
+ln -fs "${DYNINST_INSTALL}/lib/libdyninstAPI_RT.so" \
+  "$__root_dir/eurosys2022-artifact/../patched_binaries/gnomelibs/amd64/"
 export LD_LIBRARY_PATH="${DYNINST_INSTALL}/lib/:$LD_LIBRARY_PATH"
 
 
