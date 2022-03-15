@@ -1,7 +1,7 @@
 # Eurosys 2022 Artifact
 
-This artifact relates to the "Sharing is Caring: Secure and Efficient Shared Memory Support for MVEEs" paper submitted
-to Eurosys 2022. All bash snippets in the steps below are assumed to start from the repository root.
+This artifact relates to the "Sharing is Caring: Secure and Efficient Shared Memory Support for MVEEs" paper accepted
+at Eurosys 2022. All bash snippets in the steps below are assumed to start from the repository root.
 
 ## System
 
