@@ -185,7 +185,7 @@ then
     cd "$__home_dir/benchmarks/"
     mkdir "$__home_dir/benchmarks/input/video/"
     cd "$__home_dir/benchmarks/input/video/"
-    wget https://bartcoppens.be/misc/eurosys2020-artifact-inputs.zip && \
+    wget https://users.elis.ugent.be/~bcoppens/eurosys2022-artifact-inputs.zip && \
         unzip eurosys2020-artifact-inputs.zip
 fi
 
