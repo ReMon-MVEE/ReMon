@@ -36,9 +36,9 @@ static unsigned long long SIZES_ARRAY[] =
     4096*256,  // 20
     4096*512,  // 21
     4096*1024, // 22
-    4096*2048, // 23
-    4096*4096, // 24
-    4096*8192, // 25
+    // 4096*2048, // 23
+    // 4096*4096, // 24
+    // 4096*8192, // 25
 };
 static int SIZES_ARRAY_SIZE = sizeof(SIZES_ARRAY) / sizeof(unsigned long long);
 
