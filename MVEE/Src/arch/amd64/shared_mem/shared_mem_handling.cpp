@@ -1145,18 +1145,24 @@ bool            mmap_table::requires_shadow                              (varian
 #ifdef MVEE_SHM_ALLOW_SHADOW
     /* Get the path for the binary that requested shared memory */
     mvee_dwarf_context context(variant->variantpid);
-    this->dwarf_step(0, variant->variantpid, &context);
-    // do this twice, first one is always in libc.so, we check before requires_shadow is even called
-    this->dwarf_step(0, variant->variantpid, &context);
-    mmap_region_info* info = this->get_region_info(0, IP_IN_REGS(context.regs), 0);
-    if (!info)
+
+    std::string binary_path = "";
+    std::string binary_name = "";
+    do
     {
-        // warnf(" > no info found for %p\n", (void*)IP_IN_REGS(context.regs));
-        // print_mmap_table();
-        return false;
-    }
-    std::string binary_path = info->region_backing_file_path;
-    std::string binary_name = binary_path.substr(binary_path.rfind('/'));
+        // do this until we leave libc.so
+        mmap_region_info* info = this->get_region_info(0, IP_IN_REGS(context.regs), 0);
+        if (!info)
+        {
+            // warnf(" > no info found for %p\n", (void*)IP_IN_REGS(context.regs));
+            // print_mmap_table();
+            return false;
+        }
+        binary_path = info->region_backing_file_path;
+        binary_name = binary_path.substr(binary_path.rfind('/') + 1);
+
+        this->dwarf_step(0, variant->variantpid, &context);
+    } while(binary_name.find("libc") == 0);
 
     /* Allowlist: no shadow memory required
      *  - libc: sometimes mmap used in some internal glibc functions around file operations

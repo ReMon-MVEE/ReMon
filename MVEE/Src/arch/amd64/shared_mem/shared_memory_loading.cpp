@@ -2135,5 +2135,15 @@ BYTE_LOADER_IMPL(0xf6)
 // BYTE_LOADER_IMPL(0xfe)
 
 
-/* Not implemented - blocked */
-// BYTE_LOADER_IMPL(0xff)
+/* Valid in first round */
+BYTE_LOADER_IMPL(0xff)
+{
+    if (round == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        SET_EFFECTIVE_OPCODE(instruction, INSTRUCTION_DECODING_FIRST_LEVEL)
+        LOAD_REST_OF_INSTRUCTION(REST_CHECK_MODRM, 0)
+    }
+    // illegal otherwise
+    else
+      return ILLEGAL_ACCESS_TERMINATION;
+}

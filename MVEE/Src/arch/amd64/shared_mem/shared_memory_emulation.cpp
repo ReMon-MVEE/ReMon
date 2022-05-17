@@ -3263,5 +3263,50 @@ BYTE_EMULATOR_IMPL(0xf6)
 // BYTE_EMULATOR_IMPL(0xfe)
 
 
-/* Not implemented - blocked */
-// BYTE_EMULATOR_IMPL(0xff)
+/* Valid in first round */
+BYTE_EMULATOR_IMPL(0xff)
+{
+    if (EXTRA_INFO_ROUND_CODE(instruction) == INSTRUCTION_DECODING_FIRST_LEVEL)
+    {
+        DEFINE_MODRM
+        DEFINE_REGS_STRUCT
+
+        switch (GET_REG_CODE(modrm))
+        {
+            case 0b000u: // INC r/m(16, 32, 64)  - Not implemented
+            case 0b001u: // DEC r/m(16, 32, 64)  - Not implemented
+                return -1;
+            case 0b010u: // near CALL r/m64
+            {
+                LOAD_RM_CODE_NO_DEFINE(sizeof(unsigned long long), DO_SET_SHADOW_BASE)
+                NORMAL_FROM_SHARED(unsigned long long)
+
+                regs_struct->rsp -= sizeof(unsigned long long);
+                unsigned long long next_rip = regs_struct->rip + instruction.size;
+                warnf(" > %p = %p + %hhu\n", (void*)next_rip, (void*)regs_struct->rip, instruction.size);
+                if (!interaction::write_memory(variant->variantpid, (void*)regs_struct->rsp, sizeof(unsigned long long),
+                        &next_rip))
+                {
+                    warnf(" > failed to push rip for 0xff\n");
+                    return -1;
+                }
+
+                // kind of hacky, but we increment this pointer later, so it's just necessary.
+                regs_struct->rip = *typed_source - instruction.size;
+                break;
+            }
+            case 0b011u: // far CALL 64          - Not implemented
+            case 0b100u: // near JMP r/m64       - Not implemented
+            case 0b101u: // far JMP m64          - Not implemented
+            case 0b110u: // PUSH r/m(16, 32, 64) - Not implemented
+            case 0b111u: // illegal
+            default:
+                return -1;
+        }
+
+        RETURN_ADVANCE
+    }
+
+    // illegal otherwise
+    return -1;
+}
