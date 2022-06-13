@@ -5,7 +5,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 RUN \
     apt-get update && \
     # Required to build dependencies
-    apt-get install -y gcc g++ cmake bison flex python texinfo texi2html automake zlib1g-dev ccache \
+    apt-get install -y gcc g++ cmake bison flex python python3 texinfo texi2html automake zlib1g-dev ccache \
     # Required to build MVEE
     ruby libselinux-dev musl-tools libelf-dev libdwarf-dev libgmp-dev libmpfr-dev libmpc-dev libconfig-dev libcap-dev libunwind8 libunwind8-dev liblzma5 liblzma-dev libjsoncpp-dev
 
@@ -46,7 +46,7 @@ RUN sed -i 's/^#\sdeb-src/deb-src/' /etc/apt/sources.list
 # Install extra applications to run in MVEE, or tools to build those applications
 RUN \
     apt-get update && \
-    apt-get install -y vim less strace sudo dpkg-dev cmake-curses-gui gawk htop
+    apt-get install -y vim less strace sudo dpkg-dev cmake-curses-gui gawk htop lsb-release dialog apt-utils
 
 # Make sure normal users have plenty of rights to /opt
 RUN chmod 777 /opt
