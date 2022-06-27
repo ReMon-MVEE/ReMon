@@ -27,6 +27,11 @@ name:
 		.align 16;                      \
 name:
 
+#define SYMBOL(name)			\
+		.globl name;					\
+		.hidden name;					\
+name:
+
 /*-----------------------------------------------------------------------------
     Global Variables
 -----------------------------------------------------------------------------*/
@@ -40,28 +45,6 @@ ipmon_initialized:
 		.section .text
 		.intel_syntax noprefix
 
-
-/*-----------------------------------------------------------------------------
-	ipmon_unchecked_syscall_instr - Syscall instruction that is executed when 
-	ipmon_unchecked_syscall is executed.
-
-TODO:	 This function should be inlined in the C code!!
------------------------------------------------------------------------------*/
-FUNCTION_START(ipmon_unchecked_syscall_instr)
-		syscall
-		ret
-FUNCTION_END(ipmon_unchecked_syscall_instr)
-
-/*-----------------------------------------------------------------------------
-	ipmon_checked_syscall_instr - Syscall instruction that is executed when 
-	ipmon_checked_syscall is executed.
-
-TODO:	 This function should be inlined in the C code!!
------------------------------------------------------------------------------*/
-FUNCTION_START(ipmon_checked_syscall_instr)
-		syscall
-		ret
-FUNCTION_END(ipmon_checked_syscall_instr)
 
 /*-----------------------------------------------------------------------------
 	ipmon_unchecked_syscall - Perform a syscall without oversight, will not pass
@@ -88,7 +71,8 @@ FUNCTION_START(ipmon_unchecked_syscall)
 		mov r10, r8
 		mov r8, r9
 		mov r9, QWORD PTR [rsp + 8]
-		call ipmon_unchecked_syscall_instr@plt
+SYMBOL(ipmon_unchecked_syscall_instr)
+		syscall
 		ret
 FUNCTION_END(ipmon_unchecked_syscall)
 
@@ -122,8 +106,9 @@ FUNCTION_START(ipmon_checked_syscall)
 		mov r13, r12
 		xor r12, r12
 #endif
-		
-		call ipmon_checked_syscall_instr@plt
+
+SYMBOL(ipmon_checked_syscall_instr)
+		syscall
 
 #ifndef IPMON_USE_BPF
 		// We might want to use the IP-MON key later (for futex etc)

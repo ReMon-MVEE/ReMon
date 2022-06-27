@@ -3781,8 +3781,8 @@ void ipmon_rb_probe()
     ipmon_unchecked_syscall_ptr - defined in MVEE_ipmon_syscall.S. This is where
 	IP-MON will call the syscall instruction of a syscall on the IP-MON whitelist
 -----------------------------------------------------------------------------*/
-extern "C" void ipmon_unchecked_syscall_instr();
-extern "C" void ipmon_checked_syscall_instr();
+extern "C" void *ipmon_unchecked_syscall_instr;
+extern "C" void *ipmon_checked_syscall_instr;
 
 /*-----------------------------------------------------------------------------
     ipmon_register_thread - IP-MON registration is thread-local now!
@@ -3929,10 +3929,10 @@ static void set_seccomp_bpf_filter()
 		printf("INFO: ipmon_enclave_entrypoint_ptr_bits_48_59 = %llx\n", ipmon_enclave_entrypoint_ptr_bits_48_59);
 		printf("INFO: ipmon_enclave_entrypoint_ptr_bits_60_63 = %llx\n", ipmon_enclave_entrypoint_ptr_bits_60_63);*/
 
-		uintptr_t ipmon_unchecked_syscall_instr_ptr = (uintptr_t)ipmon_unchecked_syscall_instr;
+		uintptr_t ipmon_unchecked_syscall_instr_ptr = (uintptr_t)&ipmon_unchecked_syscall_instr;
 		ipmon_unchecked_syscall_instr_ptr += 0x02; // align address with seccomp bpf instruction pointer on x86_64
 
-		uintptr_t ipmon_checked_syscall_instr_ptr = (uintptr_t)ipmon_checked_syscall_instr;
+		uintptr_t ipmon_checked_syscall_instr_ptr = (uintptr_t)&ipmon_checked_syscall_instr;
 		ipmon_checked_syscall_instr_ptr += 0x02; // align address with seccomp bpf instruction pointer on x86_64
 
 		// Define BPF-filter
