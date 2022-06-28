@@ -71,8 +71,8 @@ FUNCTION_START(ipmon_unchecked_syscall)
 		mov r10, r8
 		mov r8, r9
 		mov r9, QWORD PTR [rsp + 8]
-SYMBOL(ipmon_unchecked_syscall_instr)
 		syscall
+SYMBOL(ipmon_unchecked_syscall_ret)
 		ret
 FUNCTION_END(ipmon_unchecked_syscall)
 
@@ -107,8 +107,8 @@ FUNCTION_START(ipmon_checked_syscall)
 		xor r12, r12
 #endif
 
-SYMBOL(ipmon_checked_syscall_instr)
 		syscall
+SYMBOL(ipmon_checked_syscall_ret)
 
 #ifndef IPMON_USE_BPF
 		// We might want to use the IP-MON key later (for futex etc)

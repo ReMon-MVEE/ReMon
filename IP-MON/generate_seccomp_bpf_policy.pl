@@ -19,6 +19,10 @@ if ($config->{"seccomp_bpf_policy"}{"default_policy"} eq 'TRACE') {
   $filename = 'MVEE_ipmon_seccomp_bpf_policy.h';
   open(FH, '>', $filename) or die $!;
 
+  my $header =
+"extern void *ipmon_unchecked_syscall_ret;
+extern void *ipmon_checked_syscall_ret;
+";
   my $variables =
 "// Define variables for jump instructions in the seccomp-bpf filter
 ";
@@ -45,9 +49,9 @@ struct sock_filter filter[] = {
 "/* [0] Load the instruction pointer from 'seccomp_data' buffer into accumulator */
 BPF_STMT(BPF_LD | BPF_W | BPF_ABS, (offsetof(struct seccomp_data, instruction_pointer))),
 /* [1][A] Jump forward to the next if instruction pointer does not match the ipmon checked syscall instruction address. If it matches, we need to trace (E-A-1) */
-BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, ((__u32*)&ipmon_checked_syscall_instr_ptr)[0], (unsigned char)(E-A-1), 0),
+BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, ((uintptr_t)&ipmon_checked_syscall_ret), (unsigned char)(E-A-1), 0),
 /* [2][B] Jump forward C-A-1 instructions if instruction pointer does not match the ipmon unchecked syscall instruction address. */
-BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, ((__u32*)&ipmon_unchecked_syscall_instr_ptr)[0], 0, (unsigned char)(D-B-1)),
+BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, ((uintptr_t)&ipmon_unchecked_syscall_ret), 0, (unsigned char)(D-B-1)),
 /* [3] Load system call number from 'seccomp_data' buffer into accumulator. */
 BPF_STMT(BPF_LD | BPF_W | BPF_ABS, (offsetof(struct seccomp_data, nr))),
 ";
@@ -146,6 +150,7 @@ const __u32 invoke_key_exchange = (__u32)(lower + (invoke_key_exchange_mod * num
   $filter .=
 "};
 ";
+  print FH $header;
   print FH $variables;
   print FH $filter;
 
