@@ -3901,7 +3901,7 @@ extern "C" void* ipmon_register_thread()
     is_ipmon_kernel_compatible - Check if the currently loaded kernel supports
 	the sys_ipmon_return syscall
 -----------------------------------------------------------------------------*/
-unsigned char is_ipmon_kernel_compatible()
+static unsigned char is_ipmon_kernel_compatible()
 {
 	if (!ipmon_initialized)
 	{
