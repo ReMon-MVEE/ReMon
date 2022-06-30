@@ -68,7 +68,6 @@
 // Retard check - is the loaded kernel compatible with IP-MON or not?
 //
 extern "C" unsigned char ipmon_initialized; // MVEE_ipmon_syscall.S
-bool                   seccomp_bpf_filter_is_set = false;
 unsigned char            ipmon_kernel_compatible = 0;
 unsigned char            ipmon_variant_num       = 0;
 #ifdef IPMON_USE_BPF
@@ -3894,9 +3893,7 @@ extern "C" struct ipmon_buffer* ipmon_register_thread()
 static void set_seccomp_bpf_filter()
 {
 #ifdef IPMON_USE_BPF
-	int is_seccomp_bpf_filter_installed = ipmon_checked_syscall(MVEE_IS_SECCOMP_BPF_FILTER_INSTALLED);
-
-	if (is_seccomp_bpf_filter_installed == 0)
+	if (!ipmon_checked_syscall(MVEE_IS_SECCOMP_BPF_FILTER_INSTALLED))
 	{
 		// Get the address of the ipmon enlcave entrypoint
 		unsigned long long ipmon_enclave_entrypoint_ptr = (unsigned long long)ipmon_enclave_entrypoint;
@@ -3938,8 +3935,7 @@ static void set_seccomp_bpf_filter()
 		}
 		else
 		{
-			int seccomp_bpf_filter_installed = ipmon_checked_syscall(MVEE_SECCOMP_BPF_FILTER_INSTALLED);
-			seccomp_bpf_filter_is_set = true;
+			ipmon_checked_syscall(MVEE_SECCOMP_BPF_FILTER_INSTALLED);
 		}
 	}
 #endif
@@ -3976,10 +3972,7 @@ void __attribute__((constructor)) init()
 		is_ipmon_kernel_compatible())
 	{
 		ipmon_register_thread();
-		if (!seccomp_bpf_filter_is_set)
-		{
-			set_seccomp_bpf_filter();
-		}
+		set_seccomp_bpf_filter();
 		return;
 	}
 
@@ -4151,10 +4144,7 @@ void __attribute__((constructor)) init()
 #endif
 
 	ipmon_register_thread();
-	if (!seccomp_bpf_filter_is_set)
-	{
-		set_seccomp_bpf_filter();
-	}
+	set_seccomp_bpf_filter();
 
 #ifdef IPMON_USE_MPK
 	erim_switch_to_untrusted;
