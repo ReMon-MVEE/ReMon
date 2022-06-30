@@ -3814,9 +3814,12 @@ extern "C" struct ipmon_buffer* ipmon_register_thread()
 	// optonally also set the variant number
 	ipmon_checked_syscall(MVEE_GET_THREAD_NUM, &ipmon_variant_num);
 
-	long ret = ipmon_checked_syscall(MVEE_REGISTER_IPMON, 
+	// Register IP-MON
+	long ret = ipmon_checked_syscall(__NR_prctl, 
+									 PR_REGISTER_IPMON, 
 									 kernelmask, 
 									 ROUND_UP(__NR_syscalls, 8) / 8, 
+									 RB, 
 #ifdef IPMON_PASS_RB_POINTER_EXPLICITLY
 									 ipmon_enclave_entrypoint_alternative
 #else
@@ -3828,7 +3831,7 @@ extern "C" struct ipmon_buffer* ipmon_register_thread()
 
 	if (ret < 0 && ret > -4096)
 	{
-		printf("ERROR: IP-MON registration failed. syscall(PR_REGISTER_IPMON) returned: %ld (%s)\n", ret, strerror(-ret));
+		printf("ERROR: IP-MON registration failed. sys_prctl(PR_REGISTER_IPMON) returned: %ld (%s)\n", ret, strerror(-ret));
 //		exit(-1);
 		return NULL;
 	}

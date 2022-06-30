@@ -7066,6 +7066,14 @@ PRECALL(prctl)
 
     CHECKARG(1);
 
+    // syntax: sys_prctl(PR_REGISTER_IPMON, syscall_mask_ptr, syscall_mask_size)
+    if (ARG1(0) == PR_REGISTER_IPMON)
+    {
+        CHECKARG(3);
+        CHECKPOINTER(2);
+        CHECKBUFFER(2, ARG3(0));
+    }
+
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
@@ -7077,19 +7085,53 @@ CALL(prctl)
         cache_mismatch_info("The program is trying to enable directly reading the time stamp counter. This call has been denied.\n");
         return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
     }
+	else if (ARG1(0) == PR_REGISTER_IPMON)
+	{
+		// inspect the list of syscalls
+		unsigned char* ipmon_mask = rw::read_data(variants[0].variantpid, (void*) ARG2(0), ARG3(0));
+		SYSCALL_MASK(dummy_mask);
 
-#ifndef MVEE_USE_BPF
+		if (ipmon_mask)
+		{
+			if (ARG3(0) >= sizeof(dummy_mask))
+			{
+#ifdef __NR_mmap
+				if (SYSCALL_MASK_ISSET(ipmon_mask, __NR_mmap))
+					ipmon_mmap_handling = true;
+#endif
+#ifdef __NR_mmap2
+				if (SYSCALL_MASK_ISSET(ipmon_mask, __NR_mmap2))
+					ipmon_mmap_handling = true;
+#endif
+
+				if (SYSCALL_MASK_ISSET(ipmon_mask, __NR_open))
+					ipmon_fd_handling = true;
+			}
+			
+			debugf("IP-MON handling mmap: %d - fd: %d\n", ipmon_mmap_handling, ipmon_fd_handling);
+
+			delete[] ipmon_mask;
+#ifdef MVEE_USE_BPF
+			initialize_ipmon(variantnum);
+			return MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
+#endif
+		}
+	}
 	else if (ARG1(0) == PR_SET_SECCOMP && ARG2(0) == SECCOMP_MODE_FILTER)
 	{
 		return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EINVAL);
 	}
-#endif
-
     return MVEE_CALL_ALLOW;
 }
 
 POSTCALL(prctl)
 {
+#ifdef MVEE_ARCH_SUPPORTS_IPMON
+    // PR_REGISTER_IPMON returns the IP-MON key
+    if (ARG1(0) == PR_REGISTER_IPMON && call_succeeded)
+		initialize_ipmon(variantnum);
+#endif
+
     return 0;
 }
 

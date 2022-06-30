@@ -193,11 +193,6 @@ enum mvee_shared_buffer_types
 #define MVEE_RESET_ATFORK              MVEE_FAKE_SYSCALL_BASE + 21
 
 //
-// MVEE_REGISTER_IPMON: Adds addresses and needed state to the variant to use ipmon
-//
-#define MVEE_REGISTER_IPMON            MVEE_FAKE_SYSCALL_BASE + 22
-
-//
 // MVEE_SECCOMP_BPF_FILTER_INSTALLED: Sets a flag that indicates that our seccomp-BPF
 // filter is installed in IP-MON.
 //
