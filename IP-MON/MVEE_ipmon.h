@@ -28,7 +28,7 @@ extern "C" {
 // If this is _NOT_ defined, then the enclave entrypoint will just keep
 // the RB pointer in register R11
 //
-#define IPMON_PASS_RB_POINTER_EXPLICITLY
+//#define IPMON_PASS_RB_POINTER_EXPLICITLY
 
 /*-----------------------------------------------------------------------------
     Policy control

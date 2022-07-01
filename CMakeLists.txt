@@ -294,6 +294,7 @@ endif()
 
 # ----------------------------------------------------------------------------------------------------------------------
 option(BenchmarkMode "Run MVEE in Benchmark mode." OFF)
+option(BuildIpmon "Build IP-MON." ON)
 option(EmulateCPUID "Emulate CPUID instruction." ON)
 option(EmulateShm "Emulate shared memory." ON)
 option(LogNonInstrumentedIns "Log non-instrumented instructions using shared memory." ON)
@@ -316,5 +317,8 @@ target_compile_definitions(mvee PRIVATE
     #MVEE_LOG_ALL_SHM_INSTRUCTIONS
 )
 # ======================================================================================================================
+if (BuildIpmon)
+  add_subdirectory(IP-MON)
+endif()
 add_subdirectory(MVEE_LD_Loader)
 add_subdirectory(Utilities)
