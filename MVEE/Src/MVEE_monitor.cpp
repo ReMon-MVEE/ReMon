@@ -2328,27 +2328,10 @@ void monitor::handle_syscall_event(int index)
         return;
     }
 
-#ifdef MVEE_USE_BPF
-    if (variants[index].ipmon_active)
-    {
-        if (variants[index].callnum == NO_CALL)
-            handle_syscall_entrance_event(index);
-        else
-            handle_syscall_exit_event(index);
-    }
-    else
-    {
-        if (variants[index].callnum == NO_CALL)
-            handle_syscall_entrance_event(index);
-        else
-            handle_syscall_exit_event(index);
-    }
-#else
     if (variants[index].callnum == NO_CALL)
         handle_syscall_entrance_event(index);
     else
         handle_syscall_exit_event(index);
-#endif
 }
 
 /*-----------------------------------------------------------------------------
