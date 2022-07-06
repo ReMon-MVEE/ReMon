@@ -59,63 +59,41 @@ unsigned char monitor::call_is_known_false_positive(long* precall_flags)
 }
 
 /*-----------------------------------------------------------------------------
-    call_resume_seccomp - 
------------------------------------------------------------------------------*/
-void monitor::call_resume_seccomp(int variantnum)
-{
-    pid_t pid = variants[variantnum].variantpid;
-	if (!interaction::resume(pid))
-		throw ResumeFailure(variantnum, "syscall resume seccomp");
-}
-
-/*-----------------------------------------------------------------------------
-    call_resume_seccomp_all - Resumes all variants attached to the current monitor thread.
------------------------------------------------------------------------------*/
-void monitor::call_resume_seccomp_all()
-{
-    for (int i = 0; i < mvee::numvariants; ++i)
-		call_resume_seccomp(i);
-}
-
-/*-----------------------------------------------------------------------------
     call_resume - 
 -----------------------------------------------------------------------------*/
-void monitor::call_resume(int variantnum)
+void monitor::call_resume(int variantnum, bool until_syscall)
 {
-    pid_t pid = variants[variantnum].variantpid;
-	if (!interaction::resume_until_syscall(pid))
-		throw ResumeFailure(variantnum, "syscall resume");
+	resume(variantnum, "syscall resume", until_syscall);
 }
 
 /*-----------------------------------------------------------------------------
     call_resume_all - Resumes all variants attached to the current monitor thread.
 -----------------------------------------------------------------------------*/
-void monitor::call_resume_all()
+void monitor::call_resume_all(bool until_syscall)
 {
     for (int i = 0; i < mvee::numvariants; ++i)
-		call_resume(i);
+		call_resume(i, until_syscall);
 }
 
 /*-----------------------------------------------------------------------------
     call_resume_fake_syscall - 
 -----------------------------------------------------------------------------*/
-void monitor::call_resume_fake_syscall(int variantnum)
+void monitor::call_resume_fake_syscall(int variantnum, bool until_syscall)
 {
 	// let the variants execute a dummy getpid syscall instead
 	if (!interaction::write_syscall_no(variants[variantnum].variantpid, __NR_getpid))
 		throw RwRegsFailure(variantnum, "set fake syscall no");
 
-	if (!interaction::resume_until_syscall(variants[variantnum].variantpid))
-		throw ResumeFailure(variantnum, "fake syscall resume");
+	resume(variantnum, "fake syscall resume", until_syscall);
 }
 
 /*-----------------------------------------------------------------------------
     call_resume_fake_syscall_all - 
 -----------------------------------------------------------------------------*/
-void monitor::call_resume_fake_syscall_all()
+void monitor::call_resume_fake_syscall_all(bool until_syscall)
 {
     for (int i = 0; i < mvee::numvariants; ++i)
-		call_resume_fake_syscall(i);
+		call_resume_fake_syscall(i, until_syscall);
 }
 
 /*-----------------------------------------------------------------------------

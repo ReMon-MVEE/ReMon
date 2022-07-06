@@ -613,29 +613,19 @@ private:
 	//
 	// Resume a single variant
 	// 
-	void          call_resume                         (int variantnum);
+	void          call_resume                         (int variantnum, bool until_syscall = false);
 
 	// 
 	// Resume all variants
 	//
-    void          call_resume_all                     ();
-
-	//
-	// Resume a single variant
-	// 
-	void          call_resume_seccomp                         (int variantnum);
-
-	// 
-	// Resume all variants
-	//
-    void          call_resume_seccomp_all                     ();
+    void          call_resume_all                     (bool until_syscall = false);
 
 	// 
 	// Replace the syscall number for a single variant with __NR_getpid and then
 	// resume it. This forces the variant to execute sys_getpid instead of
 	// the call it was about to execute
 	// 
-	void         call_resume_fake_syscall             (int variantnum);
+	void         call_resume_fake_syscall             (int variantnum, bool until_syscall = false);
 
 
 	// 
@@ -643,7 +633,7 @@ private:
 	// resume them. This forces all variants to execute sys_getpid instead of
 	// the call they were about to execute
 	// 
-    void          call_resume_fake_syscall_all        ();
+    void          call_resume_fake_syscall_all        (bool until_syscall = false);
 
 	//
 	// The syscall that has just returned for this variant was denied in the 
@@ -769,6 +759,11 @@ private:
     // Event handling - This is all of the non-syscall related event handling
 	// These functions are implemented in MVEE_monitor.cpp
 	// *************************************************************************
+
+	//
+	// Resume a single variant, after handling an event
+	//
+	void          resume                              (int variantnum, const char* when, bool until_syscall = false, int pending_signal_to_be_delivered = 0);
 
 	//
 	// Processes a signal delivery to variant @index. 
