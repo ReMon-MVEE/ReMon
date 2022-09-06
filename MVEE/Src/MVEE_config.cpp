@@ -145,6 +145,8 @@ void mvee::init_config()
 -----------------------------------------------------------------------------*/
 const char* mvee::get_spec_profile(bool native)
 {
+	if (!spec_profile.empty())
+		return spec_profile.c_str();
 //	if (native)
 //		return SPECPROFILENOPIE;
 	return SPECPROFILEPIE;
