@@ -7165,7 +7165,17 @@ LOG_RETURN(pread64)
 
 POSTCALL(pread64)
 {
-    REPLICATEBUFFER(2);
+	if IS_SYNCED_CALL
+	{
+		if (state == STATE_IN_MASTERCALL)
+		{
+			REPLICATEBUFFER(2);
+		}
+	}
+	else
+	{
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
     return 0;
 }
 
