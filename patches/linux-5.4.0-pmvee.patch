@@ -1,0 +1,118 @@
+diff -ur orig/arch/x86/entry/syscalls/syscall_64.tbl linux-source-5.4.0/arch/x86/entry/syscalls/syscall_64.tbl
+--- orig/arch/x86/entry/syscalls/syscall_64.tbl	2023-01-06 13:39:51.898475202 +0100
++++ linux-source-5.4.0/arch/x86/entry/syscalls/syscall_64.tbl	2023-01-06 14:54:42.371625106 +0100
+@@ -364,6 +364,8 @@
+ # on-the-fly for compat_sys_*() compatibility system calls if X86_X32
+ # is defined.
+ #
++509	common	pmvee_switch	__x64_sys_pmvee_switch
++510	common	pmvee_check 	__x64_sys_pmvee_check
+ 512	x32	rt_sigaction		__x32_compat_sys_rt_sigaction
+ 513	x32	rt_sigreturn		sys32_x32_rt_sigreturn
+ 514	x32	ioctl			__x32_compat_sys_ioctl
+Only in linux-source-5.4.0/: .git
+diff -ur orig/kernel/events/uprobes.c linux-source-5.4.0/kernel/events/uprobes.c
+--- orig/kernel/events/uprobes.c	2022-11-23 21:19:00.000000000 +0100
++++ linux-source-5.4.0/kernel/events/uprobes.c	2023-01-06 14:54:42.371625106 +0100
+@@ -1569,11 +1569,13 @@
+ {
+ 	percpu_down_read(&dup_mmap_sem);
+ }
++EXPORT_SYMBOL(uprobe_start_dup_mmap);
+ 
+ void uprobe_end_dup_mmap(void)
+ {
+ 	percpu_up_read(&dup_mmap_sem);
+ }
++EXPORT_SYMBOL(uprobe_end_dup_mmap);
+ 
+ void uprobe_dup_mmap(struct mm_struct *oldmm, struct mm_struct *newmm)
+ {
+@@ -1583,6 +1585,7 @@
+ 		set_bit(MMF_RECALC_UPROBES, &newmm->flags);
+ 	}
+ }
++EXPORT_SYMBOL(uprobe_dup_mmap);
+ 
+ /*
+  *  - search for a free slot.
+diff -ur orig/kernel/fork.c linux-source-5.4.0/kernel/fork.c
+--- orig/kernel/fork.c	2022-11-23 21:19:00.000000000 +0100
++++ linux-source-5.4.0/kernel/fork.c	2023-01-06 14:54:42.372625110 +0100
+@@ -366,6 +366,7 @@
+ 	}
+ 	return new;
+ }
++EXPORT_SYMBOL(vm_area_dup);
+ 
+ void vm_area_free(struct vm_area_struct *vma)
+ {
+diff -ur orig/kernel/sys.c linux-source-5.4.0/kernel/sys.c
+--- orig/kernel/sys.c	2022-11-23 21:19:00.000000000 +0100
++++ linux-source-5.4.0/kernel/sys.c	2023-01-06 14:54:42.372625110 +0100
+@@ -2228,6 +2228,35 @@
+ 	return error;
+ }
+ 
++
++long (*pmvee_switch_stub) (pid_t leader, unsigned long from, unsigned long to, unsigned long flags) = NULL;
++EXPORT_SYMBOL(pmvee_switch_stub);
++
++SYSCALL_DEFINE4(pmvee_switch, pid_t, leader, unsigned long, from, unsigned long, to, unsigned long, flags)
++{
++	if (pmvee_switch_stub)
++		return pmvee_switch_stub(leader, from, to, flags);
++	else
++		printk("system call pmvee_switch not implemented.\n");
++
++	return ENOSYS;
++}
++
++
++long (*pmvee_check_stub) (pid_t leader, unsigned long from, unsigned long to, unsigned long flags) = NULL;
++EXPORT_SYMBOL(pmvee_check_stub);
++
++SYSCALL_DEFINE4(pmvee_check, pid_t, leader, unsigned long, from, unsigned long, to, unsigned long, flags)
++{
++	if (pmvee_check_stub)
++		return pmvee_check_stub(leader, from, to, flags);
++	else
++		printk("system call pmvee_check not implemented.\n");
++
++	return ENOSYS;
++}
++
++
+ #ifdef CONFIG_CHECKPOINT_RESTORE
+ static int prctl_get_tid_address(struct task_struct *me, int __user **tid_addr)
+ {
+diff -ur orig/mm/mmap.c linux-source-5.4.0/mm/mmap.c
+--- orig/mm/mmap.c	2022-11-23 21:19:00.000000000 +0100
++++ linux-source-5.4.0/mm/mmap.c	2023-01-06 14:54:42.373625113 +0100
+@@ -608,6 +608,7 @@
+ 	vma_gap_update(vma);
+ 	vma_rb_insert(vma, &mm->mm_rb);
+ }
++EXPORT_SYMBOL(__vma_link_rb);
+ 
+ static void __vma_link_file(struct vm_area_struct *vma)
+ {
+@@ -2860,6 +2861,7 @@
+ 
+ 	return downgrade ? 1 : 0;
+ }
++EXPORT_SYMBOL(__do_munmap);
+ 
+ int do_munmap(struct mm_struct *mm, unsigned long start, size_t len,
+ 	      struct list_head *uf)
+diff -ur orig/mm/rmap.c linux-source-5.4.0/mm/rmap.c
+--- orig/mm/rmap.c	2022-11-23 21:19:00.000000000 +0100
++++ linux-source-5.4.0/mm/rmap.c	2023-01-06 14:54:42.373625113 +0100
+@@ -381,6 +381,7 @@
+ 	unlink_anon_vmas(vma);
+ 	return -ENOMEM;
+ }
++EXPORT_SYMBOL(anon_vma_fork);
+ 
+ void unlink_anon_vmas(struct vm_area_struct *vma)
+ {

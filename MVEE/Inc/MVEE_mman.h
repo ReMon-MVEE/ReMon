@@ -414,6 +414,12 @@ public:
     void               attach_shared_memory         ();
 
 
+    //
+    // pmvee
+    //
+    unsigned long      init_mp                      (size_t mp_size);
+    unsigned long      calculate_joint_base         (unsigned long size);
+
 private:
     void init();
     pthread_mutex_t mmap_lock;
@@ -433,6 +439,7 @@ private:
     pthread_mutex_t shared_mmap_lock;
     std::vector<shared_monitor_map_info*>
                     variant_mappings;
+    unsigned long   mp_start = -1, mp_end = -1;
 };
 
 #endif /* MVEE_MMAN_H_INCLUDED */

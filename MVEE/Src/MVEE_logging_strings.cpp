@@ -223,6 +223,10 @@ const char* getTextualSyscall(long int syscallnum)
 			DEF_CASE(MVEE_ENABLE_XCHECKS);
 			DEF_CASE(MVEE_GET_LEADER_SHM_TAG);
 			DEF_CASE(MVEE_RESET_ATFORK);
+#ifdef MVEE_ENABLE_PMVEE
+            DEF_CASE(__NR_pmvee_switch)
+            DEF_CASE(__NR_pmvee_check)
+#endif
         }
     }
 

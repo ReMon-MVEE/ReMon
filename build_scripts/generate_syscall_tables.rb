@@ -32,7 +32,7 @@ File.open('syscalls.c', 'w+') { |tmpfile|
   callname = matches[1]
   callnum = matches[2]
 
-  if callname != "ipmon_invoke"
+  if callname != "ipmon_invoke" && callname != "pmvee_switch" && callname != "pmvee_check"
     @syscalls[callnum] = callname
     @numcalls = callnum.to_i+1
   end

@@ -262,6 +262,27 @@ unsigned char monitor::call_precall_get_call_type (int variantnum, long callnum)
                 break;
 			}
 
+#ifdef MVEE_ENABLE_PMVEE
+            case __NR_pmvee_switch:
+            {
+                if (!variantnum)
+                {
+                    call_jump_to_equivalent_function_addresses();
+                    poly_exec = 1;
+                    for (int variant_i = 1; variant_i < mvee::numvariants; variant_i++)
+                        call_resume(variant_i);
+                }
+                result = MVEE_CALL_TYPE_NORMAL;
+                break;
+            }
+
+            case __NR_pmvee_check:
+            {
+                result = MVEE_CALL_TYPE_NORMAL;
+                break;
+            }
+#endif
+
 			default:
 			{
 				if (variants[variantnum].fast_forwarding)
@@ -1019,6 +1040,45 @@ long monitor::call_call_dispatch ()
                 result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
 				break;
 			}
+
+#ifdef MVEE_ENABLE_PMVEE
+            case __NR_pmvee_switch:
+            {
+                for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+                {
+                    debugf(" [%d] swtich <%d> [ 0x%lx ; 0x%lx )\n", variant_i, variants[0].variantpid,
+                            (unsigned long) mp_start, (unsigned long) (mp_start + mp_size));
+                    variants[variant_i].regs.rdi = variants[0].variantpid;
+                    variants[variant_i].regs.rsi = mp_start;
+                    variants[variant_i].regs.rdx = mp_start + mp_size;
+                    // if (variant_i)
+                    //     variants[variant_i].regs.rsp = variants[variant_i].rollback_rsp;
+                    interaction::write_all_regs(variants[variant_i].variantpid, &variants[variant_i].regs);
+                }
+                poly_exec = 1;
+
+                result = MVEE_CALL_ALLOW;
+                break;
+            }
+            case __NR_pmvee_check:
+            {
+                for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+                {
+                    debugf(" [%d] check  <%d> [ 0x%lx ; 0x%lx )\n", variant_i, variants[variant_i].variantpid,
+                            (unsigned long) mp_start, (unsigned long) (mp_start + mp_size));
+                    variants[variant_i].regs.rdi = variants[0].variantpid;
+                    variants[variant_i].regs.rsi = mp_start;
+                    variants[variant_i].regs.rdx = mp_start + mp_size;
+                    interaction::write_all_regs(variants[variant_i].variantpid, &variants[variant_i].regs);
+
+                    if (variants[variant_i].rollback_rsp == (unsigned long) -1)
+                        variants[variant_i].rollback_rsp = variants[variant_i].regs.rsp;
+                }
+
+                result = MVEE_CALL_ALLOW;
+                break;
+            }
+#endif
         }
     }
 
@@ -1109,7 +1169,7 @@ long monitor::call_postcall_return_unsynced (int variantnum)
 			if (!interaction::write_all_regs(variants[variantnum].variantpid, &variants[variantnum].regs))
 				throw RwRegsFailure(variantnum, "transfer control to interpreter");
 
-#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+#if defined(MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING) || defined(MVEE_ENABLE_PMVEE)
 			variants[variantnum].syscall_pointer = (void*) ARG3(variantnum);
 #endif
 		}
@@ -1137,6 +1197,15 @@ long monitor::call_postcall_return ()
 #ifndef MVEE_BENCHMARK
         if (handler == MVEE_HANDLER_DONTHAVE)
             debugf("WARNING: missing POSTCALL handler for syscall: %ld (%s)\n", callnum, getTextualSyscall(callnum));
+#endif
+    }
+    else
+    {
+#ifdef MVEE_ENABLE_PMVEE
+        if (callnum == __NR_pmvee_check)
+        {
+            poly_exec = 0;
+        }
 #endif
     }
 

@@ -49,6 +49,9 @@ typedef void (monitor:: *mvee_syscall_logger)(int);
 #define NO_MVEE_SCHEDULING                 0                        // mvee won't pin any threads
 #define MVEE_CLEVER_SCHEDULING             1 
 
+#define PMVEE_MP_SIZE                                     0x200000000 // (8GiB)
+#define PMVEE_MP_BINARIES                                 {}
+
 /*-----------------------------------------------------------------------------
   Enumerations
 -----------------------------------------------------------------------------*/
@@ -265,13 +268,15 @@ public:
     instruction_intent
                   instruction;
     int           variant_num;
-#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+#if defined(MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING) || defined(MVEE_ENABLE_PMVEE)
     void*         syscall_pointer;
 #endif
     unsigned long shm_tag;                                          // Tag for shared memory pages
     std::vector<std::pair<unsigned long, size_t>> reset_atfork;     // Variables to reset in forked children
     struct iovec* replaced_iovec;
     // -----------------------------------------------------------------------------------------------------------------
+
+    unsigned long rollback_rsp = -1;
 
     variantstate();
 	~variantstate();
@@ -503,6 +508,12 @@ private:
 														  std::vector<std::string>& resolved_paths,
 														  bool& unsynced_access,
 														  unsigned long open_at_fd=AT_FDCWD);											 
+
+    //
+    // Calculates equivalent function addresses for follower variants based on the leader address. Note: this function
+    // returns the starting address for the given function.
+    //
+    void             call_jump_to_equivalent_function_addresses ();
 
 	//
 	// Comparison functions. These are pretty self-explanatory.  They generally
@@ -1209,6 +1220,13 @@ private:
     std::vector<std::vector<instruction_info_t>> instruction_list;
 #endif
     // shared memory ===================================================================================================
+
+    // pmvee ===========================================================================================================
+    size_t                   mp_size = PMVEE_MP_SIZE;
+    unsigned long            mp_start;
+    int                      poly_exec;
+    std::vector<std::string> mp_binaries = PMVEE_MP_BINARIES;
+    // pmvee ===========================================================================================================
 };
 
 struct detachedvariant
