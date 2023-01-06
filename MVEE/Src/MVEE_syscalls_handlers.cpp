@@ -1916,9 +1916,9 @@ LOG_ARGS(semget)
 
 PRECALL(semget)
 {
-    CHECKARG(1)
-    CHECKARG(2)
-    CHECKARG(3)
+    CHECKARG(1);
+    CHECKARG(2);
+    CHECKARG(3);
 
     return MVEE_PRECALL_ARGS_MATCH;
 }
@@ -5448,7 +5448,7 @@ LOG_ARGS(shmat)
 
 PRECALL(shmat)
 {
-	CHECKARG(3)
+	CHECKARG(3);
 
     // In this very specific case, ARG1 differs
     if (!monitor::atomic_variantwide_buffer.empty())
@@ -5473,7 +5473,7 @@ PRECALL(shmat)
 	CHECKARG(1);
 #endif
 
-	CHECKARG(1)
+	CHECKARG(1);
 
     if ((atomic_buffer &&
                 ((int) ARG1(0) == atomic_buffer->id || (int) ARG1(0) == atomic_buffer->eip_id)) ||
@@ -8478,9 +8478,9 @@ LOG_ARGS(shmget)
 
 PRECALL(shmget)
 {
-    CHECKARG(1)
-    CHECKARG(2)
-    CHECKARG(3)
+    CHECKARG(1);
+    CHECKARG(2);
+    CHECKARG(3);
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
 }
 

@@ -60,7 +60,7 @@ run_docker() {
     # 2nd line: the docker options (allow ptracing and mount volumes)
     # 3rd line: the actual docker image and the command to run in it
     x11docker --hostdisplay --hostipc --gpu --pulseaudio --interactive --home --sudouser --clipboard --cap-default -- \
-        --cap-add SYS_PTRACE -ti $VOLUMES -- \
+        --security-opt seccomp=unconfined --cap-add SYS_PTRACE -ti $VOLUMES -- \
         $IMAGE bash
 }
 
