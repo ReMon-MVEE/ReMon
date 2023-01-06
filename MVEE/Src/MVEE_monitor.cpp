@@ -238,12 +238,15 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
                         parent_monitor->set_sighand_table :
                         std::shared_ptr<sighand_table> (new sighand_table(*parent_monitor->set_sighand_table));
 
+    mp_start = parent_monitor->mp_start;
+    poly_exec = parent_monitor->poly_exec;
+
     for (int i = 0; i < mvee::numvariants; ++i)
     {
         init_variant(i, parent_monitor->variants[i].pendingpid,
 					 shares_tgid ? parent_monitor->variants[i].varianttgid : 
 					 parent_monitor->variants[i].pendingpid);
-#ifdef MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING
+#if defined(MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING) || defined(MVEE_ENABLE_PMVEE)
         variants[i].syscall_pointer = parent_monitor->variants[i].syscall_pointer;
 #endif
         variants[i].shm_tag                  = parent_monitor->variants[i].shm_tag;
@@ -273,6 +276,15 @@ monitor::monitor(std::vector<pid_t>& pids)
     set_mmap_table    = std::shared_ptr<mmap_table> (new mmap_table());
     set_shm_table     = std::shared_ptr<shm_table>  (new shm_table());
     set_sighand_table = std::shared_ptr<sighand_table>(new sighand_table());
+
+    mp_start = (unsigned long) set_mmap_table->init_mp(mp_size);
+    if (mp_start == (unsigned long) -1)
+    {
+        warnf("Could not set up MP region with size %lu\n", mp_size);
+        shutdown(false);
+        // ignore, for now.
+    }
+    poly_exec = 1;
 
     // Monitor 0 runs in a seperate thread IF we do not run in singlethreaded mode
     // Consequently, monitor 0 starts in STATE_WAITING_ATTACH if we run in multithreaded mode
@@ -812,6 +824,12 @@ void monitor::shutdown(bool success)
 #ifdef MVEE_SHM_INSTRUCTION_ACCESS_DEBUGGING
     print_instruction_list();
 #endif
+
+    if (!success)
+    {
+        set_mmap_table->print_mmap_table();
+        log_backtraces();
+    }
 
 #ifndef MVEE_BENCHMARK
 	bool should_log = false;
@@ -1490,7 +1508,7 @@ void monitor::handle_resume_event(int index)
                         debugf("%s - setting master tid for variant\n", 
 							   call_get_variant_pidstr(i).c_str());
 						
-						if (!rw::write_primitive<int>(variants[i].variantpid, 
+						if (!rw::write_primitive<int>(variants[i].variantpid,
 													  variants[i].tid_address[j], 
 													  variants[0].variantpid))
 							throw RwMemFailure(i, "couldn't replicate master tids post-attach");
@@ -1674,7 +1692,7 @@ void monitor::handle_trap_event(int index)
 #ifdef MVEE_ARCH_HAS_X86_HWBP
 			unsigned long dr6;
 			
-			if (!interaction::read_specific_reg(variants[index].variantpid, 
+			if (!interaction::read_specific_reg(variants[index].variantpid,
 									   offsetof(user, u_debugreg) + 6*sizeof(long), 
 									   dr6))
 				throw RwRegsFailure(index, "hwbp dr6");
@@ -1756,6 +1774,12 @@ void monitor::handle_syscall_entrance_event(int index)
 			call_resume(index);
         variants[index].call_dispatched = true;
 
+        return;
+    }
+
+    if (!poly_exec)
+    {
+        call_resume(index);
         return;
     }
 
@@ -1944,6 +1968,12 @@ void monitor::handle_syscall_exit_event(int index)
         return;
     }
 
+    if (!poly_exec)
+    {
+        call_resume(index);
+        return;
+    }
+
     // Synced call => we have to wait until we reach the sync point
     // Do not resume until all variants have returned
     bool all_synced         = true;
@@ -1969,6 +1999,9 @@ void monitor::handle_syscall_exit_event(int index)
     // Sync point reached... It's safe to let the variants return now
     if (all_synced_at_exit)
     {
+       if (poly_exec < 0)
+           poly_exec = 0;
+
         if (in_signal_handler() && !current_signal_sent)
         {
             debugf("All variants have returned and we can now deliver the signal.\n");
@@ -1986,8 +2019,10 @@ void monitor::handle_syscall_exit_event(int index)
 			for (i = 0; i < mvee::numvariants; ++i)
 				if (variants[i].have_overwritten_args)
 					call_restore_args(i);
-
-            call_resume_all();
+            if (!poly_exec)
+                call_resume(0);
+            else
+                call_resume_all();
             return;
         }
 
@@ -2019,8 +2054,10 @@ void monitor::handle_syscall_exit_event(int index)
 			for (i = 0; i < mvee::numvariants; ++i)
 				if (variants[i].have_overwritten_args)
 					call_restore_args(i);
-
-            call_resume_all();
+            if (!poly_exec)
+                call_resume(0);
+            else
+                call_resume_all();
 		}
         else
             debugf("WARNING: postcall handler handled resume. not resuming...\n");

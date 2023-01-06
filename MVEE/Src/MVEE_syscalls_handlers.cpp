@@ -7322,6 +7322,8 @@ GET_CALL_TYPE(mmap)
 		}
 	}
 
+	if (!poly_exec)
+	    return MVEE_CALL_TYPE_UNSYNCED;
 	return MVEE_CALL_TYPE_NORMAL;
 }
 
@@ -7339,6 +7341,9 @@ LOG_ARGS(mmap)
 
 PRECALL(mmap)
 {
+	if (IS_UNSYNCED_CALL)
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
     CHECKARG(2);
     CHECKARG(3);
     CHECKARG(4);
@@ -7462,7 +7467,15 @@ PRECALL(mmap)
 CALL(mmap)
 {
 	if IS_UNSYNCED_CALL
+	{
+		if (!poly_exec)
+		{
+			SETARG1(0, set_mmap_table->calculate_joint_base(ARG2(0)));
+			SETARG4(0, (ARG4(0) & (~MAP_PRIVATE)) | MAP_SHARED);
+		}
 		return MVEE_CALL_ALLOW;
+	}
+
 
     for (int i = 0; i < mvee::numvariants; ++i)
         variants[i].last_mmap_result = 0;
@@ -7623,6 +7636,27 @@ CALL(mmap)
 			}
 		}
 #else
+		if (!(ARG4(0) & MAP_FIXED))
+		{
+			bool should_mp = false;
+			for (auto binary = mp_binaries.begin(); binary != mp_binaries.end(); binary++)
+			{
+				// warnf(" > comparing %s and %s\n", binary->c_str(), info->paths[0].c_str());
+				if (!binary->compare(info->paths[0]))
+				{
+					should_mp = true;
+					break;
+				}
+			}
+			if (should_mp)
+			{
+				warnf(" > should not be hit\n");
+				unsigned long base = set_mmap_table->calculate_joint_base(ARG2(0));
+				for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+					SETARG1(variant_i, base);
+			}
+		}
+
         if ((info->access_flags & O_RDWR) && (ARG4(0) & MAP_SHARED))
 		{
 			if (!info->unlinked)
@@ -9220,6 +9254,29 @@ LOG_ARGS(exit_group)
 		   (int)ARG1(variantnum));
 }
 
+GET_CALL_TYPE(exit_group)
+{
+	if (!poly_exec)
+	{
+		for (int variant_i = 1; variant_i < mvee::numvariants; variant_i++)
+		{
+			call_check_regs(variant_i);
+			variants[variant_i].regs.rip = (unsigned long long) variants[variant_i].syscall_pointer;
+			variants[variant_i].regs.rax = __NR_exit_group;
+			variants[variant_i].regs.rdi = variants[0].regs.rdi;
+			if (!interaction::write_all_regs(variants[variant_i].variantpid, &variants[variant_i].regs))
+			{
+				warnf(" > error writing exit registers\n");
+				shutdown(false);
+				return MVEE_CALL_TYPE_NORMAL;
+			}
+			call_resume(variant_i);
+		}
+		poly_exec = -1;
+	}
+	return MVEE_CALL_TYPE_NORMAL;
+}
+
 CALL(exit_group)
 {
 #ifdef MVEE_DUMP_MEM_STATS
@@ -9951,10 +10008,10 @@ PRECALL(inotify_rm_watch)
 LOG_ARGS(openat)
 {
 	auto filename = rw::read_string(variants[variantnum].variantpid, (void*)ARG2(variantnum));
-
-	debugf("%s - SYS_OPENAT(%d, %s, 0x%08X (%s), 0x%08X (%s))\n", 
+	debugf("%s - SYS_OPENAT(%d, (%p) %s, 0x%08X (%s), 0x%08X (%s))\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   (int)ARG1(variantnum), 
+		   (void*)ARG2(variantnum),
 		   filename.c_str(), 		   
 		   (int)ARG3(variantnum), getTextualFileFlags(ARG3(variantnum)).c_str(),
 		   (int)ARG4(variantnum), getTextualFileMode(ARG4(variantnum) & S_FILEMODEMASK).c_str());

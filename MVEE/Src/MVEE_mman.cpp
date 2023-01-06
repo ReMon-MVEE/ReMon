@@ -1242,6 +1242,16 @@ void mmap_table::calculate_disjoint_bases (unsigned long size, std::vector<unsig
         }
     }
 
+#ifdef MVEE_ENABLE_PMVEE
+    mmap_region_info* mp_region = new mmap_region_info(0, mp_start, mp_end - mp_start, 0, NULL, 0, 0);
+
+    if (!merged_regions.insert(mp_region).second)
+    {
+        // the region could already be in the set
+        SAFEDELETE(mp_region);
+    }
+#endif
+
     // step 1b: We also add a pseudo-region that indicates the highest possible code address we can use
     mmap_region_info* pseudo   = new mmap_region_info(0, HIGHEST_USERMODE_ADDRESS - 4096, 4096, 0, NULL, 0, 0);
 
@@ -1371,6 +1381,188 @@ void mmap_table::calculate_disjoint_bases (unsigned long size, std::vector<unsig
     merged_regions.clear();
     //warnf("ALL DONE!\n");
 }
+
+
+/*-----------------------------------------------------------------------------
+    calculate_joint_bases - The monitor has seen a new mmap call for a region
+    that we want to map at the same address in all variants.
+-----------------------------------------------------------------------------*/
+unsigned long mmap_table::calculate_joint_base (unsigned long size)
+{
+    std::set<mmap_region_info*, region_sort>           merged_regions;
+    std::set<mmap_region_info*, region_sort>::iterator it;
+    std::set<mmap_region_info*, region_sort>::iterator prev;
+    unsigned long                                      ret = (unsigned long) -1;
+
+    struct merged_t
+    {
+        unsigned long long start;
+        unsigned long long end;
+    };
+#ifdef MVEE_ENABLE_PMVEE
+    std::vector<merged_t> merged_map{ { mp_start, mp_end } };
+#else
+    std::vector<merged_t> merged_map{ { 0, HIGHEST_USERMODE_ADDRESS } };
+#endif
+
+    // step 0: Attempt to enlarge each variant's stack to stack_limit size so
+    // we don't accidentally map anything too close to the stack, preventing it
+    // from growing to its maximum size...
+    //
+    // We only have to do this ONCE!
+    unsigned long stack_limit = mvee::os_get_stack_limit();
+    // TODO: Should we also do this for thread stacks? I don't know if
+    // they have the same stack limit...
+    if (stack_limit && !enlarged_initial_stacks)
+    {
+        // warnf("stack limit: %lu\n", stack_limit);
+        enlarged_initial_stacks = 1;
+               unsigned long stack_top = 0;
+        for (int i = 0; i < mvee::numvariants; ++i)
+        {
+            mmap_region_info* stack                    = NULL;
+            mmap_region_info* first_region_below_stack = NULL;
+            it = full_map[i].end();
+            --it;
+            while (true)
+            {
+                if (!stack)
+                {
+                    if ((*it)->region_backing_file_path == "[stack]")
+                    {
+                        stack = *it;
+                        stack_top = stack->region_base_address + stack->region_size;
+                    }
+                }
+                else
+                {
+                    // some NUTJOB could've split the stack in two,
+                    // e.g. by making it partially executable
+                    if ((*it)->region_backing_file_path == "[stack]")
+                    {
+                        stack = *it;
+                    }
+                    else
+                    {
+                        first_region_below_stack = *it;
+                        break;
+                    }
+                }
+
+                if (it == full_map[i].begin())
+                    break;
+
+                --it;
+            }
+
+            // now enlarge it
+            if (stack)
+            {
+                // stack->print_region_info("stack > ", mvee::warnf);
+
+                // it should not overlap with anything that had been mapped below the stack before we could apply DCL
+                if (first_region_below_stack && (first_region_below_stack->region_base_address + first_region_below_stack->region_size > (stack_top - stack_limit - PAGE_SIZE))) // minus PAGE_SIZE b/c of the guard page
+                {
+					unsigned long previous_region_top = first_region_below_stack->region_base_address + first_region_below_stack->region_size;
+
+                    stack->region_size         = (stack->region_base_address + stack->region_size) - previous_region_top;
+                    stack->region_base_address = previous_region_top;
+                }
+                // OK. No overlaps => just enlarge to stack limit
+                else
+                {
+                    // warnf("enlarged stack\n");
+
+					// account for the guard page below the stack!!!
+					unsigned long old_base     = stack->region_base_address;
+                    stack->region_base_address = stack_top - stack_limit - PAGE_SIZE;
+                    stack->region_size         += (old_base - stack->region_base_address);
+                }
+            }
+        }
+    }
+
+
+    for (int i = 0; i < mvee::numvariants; i++)
+    {
+        for (auto region_it: full_map[i])
+        {
+            unsigned long long region_start = region_it->region_base_address;
+            unsigned long long region_end   = region_it->region_base_address + region_it->region_size;
+#ifdef MVEE_ENABLE_PMVEE
+            if (region_start >= mp_end || region_end <= mp_start)
+            {
+                // warnf(" > skipping [ %p ; %p )\n", (void*) region_start, (void*) region_end);
+                continue;
+            }
+            else if ((region_start < mp_start && region_end <= mp_end) ||
+                     (region_start >= mp_start && region_end > mp_end))
+            {
+                warnf("Some NUTJOB managed to map a region over the mp boundary...\n");
+                goto cleanup;
+            }
+#endif
+            for (auto merged_it = merged_map.begin(); merged_it != merged_map.end(); merged_it++)
+            {
+                if (region_start <= merged_it->start && region_end >= merged_it->end)
+                {
+                    merged_map.erase(merged_it);
+                    continue;
+                }
+                if (region_start >= merged_it->start && region_start < merged_it->end)
+                {
+                    if (region_end < merged_it->end)
+                    {
+                        // region in the middle of open space
+                        if (region_start != merged_it->start)
+                        {
+                            unsigned long temp_start = merged_it->start;
+                            merged_it->start = region_end;
+                            merged_map.insert(merged_it, { temp_start, region_start });
+                        }
+                        else
+                            merged_it->start = region_end;
+                    }
+                    else if (merged_it->start != region_start)
+                        // region at end of open space
+                        merged_it->end = region_start;
+                    else
+                        // empty region swallowed
+                        merged_map.erase(merged_it);
+                    break;
+                }
+                else if (region_end >= merged_it->start && region_end <= merged_it->end)
+                {
+                    // region at start of open space
+                    if (merged_it->start < region_end)
+                        merged_it->start = region_end;
+                    break;
+                }
+            }
+        }
+    }
+
+
+    for (auto empty_it = merged_map.rbegin(); empty_it != merged_map.rend(); empty_it++)
+        debugf(" > [ %p ; %p )\n", (void*) empty_it->start, (void*) empty_it->end);
+    for (auto empty_it = merged_map.rbegin(); empty_it != merged_map.rend(); empty_it++)
+    {
+        if (empty_it->end - empty_it->start > size)
+        {
+            ret = empty_it->start;
+            break;
+        }
+    }
+
+    debugf(" > selected %p\n", (void*) ret);
+
+    cleanup:
+    merged_map.clear();
+    //warnf("ALL DONE!\n");
+
+    return ret;
+}
+
 
 /*-----------------------------------------------------------------------------
     mvee_mman_check_vdso_overlap
@@ -1546,4 +1738,22 @@ mmap_region_info* mmap_table::find_writable_region
 
     SAFEDELETEARRAY(look_for_region);
     return NULL;
+}
+
+
+/*-----------------------------------------------------------------------------
+    init_mp - set up the bounds for the PMVEEs MP
+-----------------------------------------------------------------------------*/
+unsigned long  mmap_table::init_mp (size_t mp_size)
+{
+    unsigned long address = calculate_data_mapping_base(mp_size);
+    if (address == 0)
+        return -1;
+
+    mp_start = address;
+    mp_end   = mp_start + mp_size;
+
+    warnf(" > set MP to [ %p ; %p )\n", (void*) mp_start, (void*) mp_end);
+
+    return address;
 }

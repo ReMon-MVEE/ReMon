@@ -235,6 +235,18 @@
 #define LOG_RETURN(syscall_name) \
 	void monitor::handle_##syscall_name##_log_return(int variantnum)
 
+// pmvee ===============================================================================================================
+// These aren't used right now, but might come in handy later. I'm leaving them here so I do not forget.
+#define ARG_COPY(syscall_name) \
+	void monitor::handle_##syscall_name##_arg_copy(int variantnum)
+
+#define SINGLE_CALL(syscall_name) \
+	void monitor::handle_##syscall_name##_single_call(int variantnum)
+
+#define SINGLE_POSTCALL(syscall_name) \
+	void monitor::handle_##syscall_name##_single_postcall(int variantnum)
+// pmvee ===============================================================================================================
+
 //
 // Call type checking macros
 //
