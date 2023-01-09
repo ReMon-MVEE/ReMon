@@ -116,3 +116,23 @@ diff -ur orig/mm/rmap.c linux-source-5.4.0/mm/rmap.c
  
  void unlink_anon_vmas(struct vm_area_struct *vma)
  {
+--- orig/arch/x86/mm/tlb.c	2023-01-09 14:49:50.596258910 +0100
++++ linux-source-5.4.0/arch/x86/mm/tlb.c	2022-11-23 21:19:00.000000000 +0100
+@@ -806,7 +806,6 @@
+ 	put_flush_tlb_info();
+ 	put_cpu();
+ }
++EXPORT_SYMBOL(flush_tlb_mm_range);
+ 
+ 
+ static void do_flush_tlb_all(void *info)
+--- build/mm/memory.c	2023-01-09 14:50:16.096260703 +0100
++++ linux-source-5.4.0/mm/memory.c	2022-11-23 21:19:00.000000000 +0100
+@@ -1012,7 +1012,6 @@
+ 		mmu_notifier_invalidate_range_end(&range);
+ 	return ret;
+ }
++EXPORT_SYMBOL(copy_page_range);
+ 
+ /* Whether we should zap all COWed (private) pages too */
+ static inline bool should_zap_cows(struct zap_details *details)
