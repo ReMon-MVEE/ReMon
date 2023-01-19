@@ -1,4 +1,4 @@
-cmake_minimum_required (VERSION 3.10.2)
+cmake_minimum_required (VERSION 3.13)
 project(remon)
 
 if (NOT CMAKE_BUILD_TYPE)
@@ -245,7 +245,7 @@ if(${CMAKE_BUILD_TYPE} MATCHES "Debug")
     message("generating Debug build\n")
 
     # linker options
-    target_link_libraries(mvee PRIVATE
+    target_link_options(mvee PRIVATE
             -rdynamic
     )
 
@@ -267,7 +267,7 @@ else()
     message("generating Release build\n")
 
     # linker options
-    target_link_libraries(mvee PRIVATE
+    target_link_options(mvee PRIVATE
             -flto
             -O3
             -static

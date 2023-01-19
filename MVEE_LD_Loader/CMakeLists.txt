@@ -24,9 +24,11 @@ target_compile_definitions(${LD_LOADER_LONG_NAME} PRIVATE
 target_compile_options(${LD_LOADER_LONG_NAME} PRIVATE
     -std=c99
 )
-# Ideally we use target_link_options here, but that's only introduced as of CMake 3.13
-set_target_properties(${LD_LOADER_LONG_NAME} PROPERTIES
-    LINK_FLAGS "-fuse-ld=bfd -static -T ${CMAKE_CURRENT_SOURCE_DIR}/linkerscript_${ARCH}.txt")
+target_link_options(${LD_LOADER_LONG_NAME} PRIVATE
+   -fuse-ld=bfd
+   -static
+   -T "${CMAKE_CURRENT_SOURCE_DIR}/linkerscript_${ARCH}.txt"
+)
 set_target_properties(${LD_LOADER_LONG_NAME} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
