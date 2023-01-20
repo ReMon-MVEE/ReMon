@@ -40,7 +40,7 @@ target_compile_options(ipmon PRIVATE
 
 target_link_options(ipmon PRIVATE
   -fPIC
-  -s
+  $<$<CONFIG:RELEASE:-s>
   -z noexecstack
 )
 
