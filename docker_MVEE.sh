@@ -46,11 +46,11 @@ run_docker() {
     # - a persistent home folder. This is provided by x11docker, and can contain your config files and bash history (across docker runs!)
     # - a shared 'projects' folder, where you can place applications to build and/or run in the MVEE, as well as their data.
     # - the 'build' data volume. This named volume can be used to incrementally build LLVM (or other applications) in.
-    VOLUMES="--volume $PWD:/opt/repo --volume $SHARED_PROJECTS_DIR:/projects --volume build:/build"
+    VOLUMES="--mount type=bind,src=$PWD,dst=/opt/repo --mount type=bind,src=$SHARED_PROJECTS_DIR,dst=/projects --mount type=volume,src=build,dst=/build"
 
     # In development mode, we also mount the source code of the dependencies
     if [ "$#" -eq 1 ]; then
-        VOLUMES="$VOLUMES --volume $DEPS_DIR:/opt/source"
+        VOLUMES="$VOLUMES --mount type=bind,src=$DEPS_DIR,dst=/opt/source"
     fi
 
     # The following command consists of:
