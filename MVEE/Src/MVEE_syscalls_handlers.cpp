@@ -7340,7 +7340,7 @@ GET_CALL_TYPE(mmap)
 
 	if (set_mmap_table->have_diversified_variants &&
 		!(ARG4(variantnum) & MAP_ANONYMOUS) &&
-		(long)ARG5(variantnum) > 0)
+		(long)ARG5(variantnum) >= 0)
 	{
 		fd_info* info = set_fd_table->get_fd_info(ARG5(variantnum));
 
@@ -7383,8 +7383,7 @@ PRECALL(mmap)
     MAPFDS(5);
 
 #if defined(MVEE_VERIFY_ATOMIC_INSTRUMENTATION) && !defined(MVEE_BENCHMARK)
-	if ((ARG3(0) & PROT_EXEC) && 
-		ARG5(0) && (int)ARG5(0) != -1)
+	if ((ARG3(0) & PROT_EXEC) && !(ARG4(0) & MAP_ANONYMOUS))
 	{
 		fd_info* info = set_fd_table->get_fd_info(ARG5(0));
 		
@@ -7419,7 +7418,7 @@ PRECALL(mmap)
         }
 
         /* File-backed, check file */
-        if (ARG5(0) && ((int)ARG5(0) != -1))
+        if (!(ARG4(0) & MAP_ANONYMOUS))
         {
             fd_info* info = set_fd_table->get_fd_info(ARG5(0));
             if (!info)
@@ -7576,7 +7575,7 @@ CALL(mmap)
 	}
 
     // non-anonymous ==> it must have a backing file
-    if (ARG5(0) && (int)ARG5(0) != -1)
+    if (!(ARG4(0) & MAP_ANONYMOUS))
     {
         fd_info* info = set_fd_table->get_fd_info(ARG5(0));
 
@@ -7779,7 +7778,7 @@ POSTCALL(mmap)
 		for (int i = 0; i < mvee::numvariants; ++i)
 			variants[i].last_mmap_result = results[i];
 
-        if (ARG5(0) && (int)ARG5(0) != -1)
+        if (!(ARG4(0) & MAP_ANONYMOUS))
 		{
 			info = set_fd_table->get_fd_info(ARG5(0));
 			if (!info)
@@ -7950,7 +7949,7 @@ POSTCALL(mmap)
 		fd_info*      info      = NULL;
 		unsigned long result = call_postcall_get_variant_result(variantnum);
 
-		if (ARG5(variantnum) && (int)ARG5(variantnum) != -1)
+        if (!(ARG4(variantnum) & MAP_ANONYMOUS))
 		{
 			info = set_fd_table->get_fd_info(ARG5(variantnum), variantnum);
 			if (!info)
