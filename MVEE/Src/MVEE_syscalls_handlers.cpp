@@ -847,7 +847,8 @@ POSTCALL(open)
 #ifdef MVEE_FD_DEBUG
 		set_fd_table->verify_fd_table(getpids());
 #endif
-		REPLICATEFDRESULT();
+		if (!aliased_open)
+			REPLICATEFDRESULT();
 		aliased_open = false;
 	}
 	else
@@ -10217,8 +10218,9 @@ POSTCALL(openat)
 									 ARG3(0) & O_CLOEXEC,                      // cloexec file?
 									 state == STATE_IN_MASTERCALL,                          // opened by master only?
 									 unsynced_access);                                                // unsynced access to the file?
+		if (!aliased_open)
+			REPLICATEFDRESULT();
 
-		REPLICATEFDRESULT();
 #ifdef MVEE_FD_DEBUG
 		set_fd_table->verify_fd_table(getpids());
 #endif
