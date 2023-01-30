@@ -9,7 +9,7 @@
     Includes
 -----------------------------------------------------------------------------*/
 #include <unistd.h>
-#include <asm/unistd_64.h>
+#include <asm-generic/unistd.h>
 
 /*-----------------------------------------------------------------------------
     Hax0r
@@ -70,10 +70,6 @@ extern "C" {
 /*-----------------------------------------------------------------------------
     Definitions and Generic Macros
 -----------------------------------------------------------------------------*/
-#ifndef __NR_syscalls
-#define __NR_syscalls 317
-#endif
-
 #define __NR_ipmon_invoke 511
 
 #ifndef ROUND_UP
