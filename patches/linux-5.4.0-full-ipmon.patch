@@ -24,7 +24,7 @@ diff --color -ruN linux-source-5.4.0/fs/exec.c custom-linux-source-5.4.0/fs/exec
 diff --color -ruN linux-source-5.4.0/include/linux/sched.h custom-linux-source-5.4.0/include/linux/sched.h
 --- linux-source-5.4.0/include/linux/sched.h	2021-11-05 17:30:43.000000000 +0100
 +++ custom-linux-source-5.4.0/include/linux/sched.h	2021-12-06 11:03:28.844120436 +0100
-@@ -621,6 +621,58 @@
+@@ -621,6 +621,59 @@
  	struct wake_q_node *next;
  };
  
@@ -34,7 +34,8 @@ diff --color -ruN linux-source-5.4.0/include/linux/sched.h custom-linux-source-5
 +
 +#ifndef __NR_syscalls
 +  /* this is the highest known syscall no for x86_64 in this kernel... */
-+  #define __NR_syscalls __NR_mlock2
++  /* TODO: check this is correct when updating! Or fix it generically.. */
++  #define __NR_syscalls __NR_clone3 +1
 +#endif
 +
 +/* MVEE IP-MON patch */
