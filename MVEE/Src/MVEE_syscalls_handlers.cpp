@@ -7726,6 +7726,7 @@ CALL(mmap)
                 return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
             }
         }
+#endif
         else if ((ARG3(0) & PROT_EXEC))
         {
             if ((*mvee::config_variant_global)["non_overlapping_mmaps"].asInt())
@@ -7754,7 +7755,6 @@ CALL(mmap)
                 }
             }
         }
-#endif
     }
 
     return MVEE_CALL_ALLOW;
