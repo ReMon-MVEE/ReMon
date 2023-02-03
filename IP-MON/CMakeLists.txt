@@ -8,6 +8,8 @@ set(generated_headers_list
   ${CMAKE_CURRENT_SOURCE_DIR}/MVEE_ipmon_precall.h
   ${CMAKE_CURRENT_SOURCE_DIR}/MVEE_ipmon_calcsize.h
   ${CMAKE_CURRENT_SOURCE_DIR}/MVEE_ipmon_postcall.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/MVEE_ipmon_seccomp_bpf_always_allow.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/MVEE_ipmon_seccomp_bpf_maybe_unchecked.h
 )
 
 add_custom_command(
@@ -18,18 +20,8 @@ add_custom_command(
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-add_custom_command(
-  OUTPUT  ${CMAKE_CURRENT_SOURCE_DIR}/MVEE_ipmon_seccomp_bpf_policy.h
-  COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/generate_seccomp_bpf_policy.pl
-  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/generate_seccomp_bpf_policy.pl
-  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/seccomp_bpf_policy.json
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-)
-
-
 add_custom_target(generated_headers
   DEPENDS ${generated_headers_list}
-  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/MVEE_ipmon_seccomp_bpf_policy.h
 )
 
 add_library(ipmon SHARED

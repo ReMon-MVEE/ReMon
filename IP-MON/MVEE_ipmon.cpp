@@ -68,6 +68,8 @@
 // Retard check - is the loaded kernel compatible with IP-MON or not?
 //
 extern "C" unsigned char ipmon_initialized; // MVEE_ipmon_syscall.S
+extern "C" void *ipmon_unchecked_syscall_ret;
+extern "C" void *ipmon_checked_syscall_ret;
 unsigned char            ipmon_kernel_compatible = 0;
 unsigned char            ipmon_variant_num       = 0;
 #ifdef IPMON_USE_BPF
@@ -3896,34 +3898,80 @@ extern "C" struct ipmon_buffer* ipmon_register_thread()
 static void set_seccomp_bpf_filter()
 {
 #ifdef IPMON_USE_BPF
+#define ALLOW_SYSCALL(name) \
+	BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_##name, 0, 1), \
+	BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ALLOW)
+
+#define START_KEY_EXCHANGE_SYSCALL(name) \
+	BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_##name, 0, 1), \
+	BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (invoke_key_exchange & SECCOMP_RET_DATA))
+
 	if (!ipmon_checked_syscall(MVEE_IS_SECCOMP_BPF_FILTER_INSTALLED))
 	{
-		// Get the address of the ipmon enlcave entrypoint
+		// Get the address of the ipmon enclave entrypoint
 		unsigned long long ipmon_enclave_entrypoint_ptr = (unsigned long long)ipmon_enclave_entrypoint;
-		//printf("INFO: ipmon_enclave_entrypoint_ptr = %llx\n", ipmon_enclave_entrypoint_ptr);
 
 		// We add the entrypoint to a mask and shift it back to align on bit 0
-		unsigned long long ipmon_enclave_entrypoint_ptr_bits_0_11  = ((unsigned long long)ipmon_enclave_entrypoint_ptr) & 0x0000000000000FFF;
-		unsigned long long ipmon_enclave_entrypoint_ptr_bits_12_23 = ((unsigned long long)ipmon_enclave_entrypoint_ptr) & 0x0000000000FFF000;
-		ipmon_enclave_entrypoint_ptr_bits_12_23 >>= 12;
-		unsigned long long ipmon_enclave_entrypoint_ptr_bits_24_35 = ((unsigned long long)ipmon_enclave_entrypoint_ptr) & 0x0000000FFF000000;
-		ipmon_enclave_entrypoint_ptr_bits_24_35 >>= 24;
-		unsigned long long ipmon_enclave_entrypoint_ptr_bits_36_47 = ((unsigned long long)ipmon_enclave_entrypoint_ptr) & 0x0000FFF000000000;
-		ipmon_enclave_entrypoint_ptr_bits_36_47 >>= 36;
-		unsigned long long ipmon_enclave_entrypoint_ptr_bits_48_59 = ((unsigned long long)ipmon_enclave_entrypoint_ptr) & 0x0FFF000000000000;
-		ipmon_enclave_entrypoint_ptr_bits_48_59 >>= 48;
-		unsigned long long ipmon_enclave_entrypoint_ptr_bits_60_63 = ((unsigned long long)ipmon_enclave_entrypoint_ptr) & 0xF000000000000000;
-		ipmon_enclave_entrypoint_ptr_bits_60_63 >>= 60;
+		const unsigned long long ipmon_enclave_entrypoint_ptr_bits_0_11  = (ipmon_enclave_entrypoint_ptr & 0x0000000000000FFF);
+		const unsigned long long ipmon_enclave_entrypoint_ptr_bits_12_23 = (ipmon_enclave_entrypoint_ptr & 0x0000000000FFF000) >> 12;
+		const unsigned long long ipmon_enclave_entrypoint_ptr_bits_24_35 = (ipmon_enclave_entrypoint_ptr & 0x0000000FFF000000) >> 24;
+		const unsigned long long ipmon_enclave_entrypoint_ptr_bits_36_47 = (ipmon_enclave_entrypoint_ptr & 0x0000FFF000000000) >> 36;
+		const unsigned long long ipmon_enclave_entrypoint_ptr_bits_48_59 = (ipmon_enclave_entrypoint_ptr & 0x0FFF000000000000) >> 48;
+		const unsigned long long ipmon_enclave_entrypoint_ptr_bits_60_63 = (ipmon_enclave_entrypoint_ptr & 0xF000000000000000) >> 60;
 
-		/*printf("INFO: ipmon_enclave_entrypoint_ptr_bits_0_11 = %llx\n", ipmon_enclave_entrypoint_ptr_bits_0_11);
-		printf("INFO: ipmon_enclave_entrypoint_ptr_bits_12_23 = %llx\n", ipmon_enclave_entrypoint_ptr_bits_12_23);
-		printf("INFO: ipmon_enclave_entrypoint_ptr_bits_24_35 = %llx\n", ipmon_enclave_entrypoint_ptr_bits_24_35);
-		printf("INFO: ipmon_enclave_entrypoint_ptr_bits_36_47 = %llx\n", ipmon_enclave_entrypoint_ptr_bits_36_47);
-		printf("INFO: ipmon_enclave_entrypoint_ptr_bits_48_59 = %llx\n", ipmon_enclave_entrypoint_ptr_bits_48_59);
-		printf("INFO: ipmon_enclave_entrypoint_ptr_bits_60_63 = %llx\n", ipmon_enclave_entrypoint_ptr_bits_60_63);*/
+		// Define variables for jump instructions in the seccomp-bpf filter
+		const int upper = 4095;
+		const int lower = 2048;
+		const int number_of_values = upper - lower;
+		const int number_of_passes = 6;
+		const int mod_6_upper_bound = number_of_values / number_of_passes;
+		const int invoke_key_exchange_mod = (rand() % number_of_values) + 1;
+		const __u32 invoke_key_exchange = (__u32)(lower + (invoke_key_exchange_mod * number_of_passes));
 
-		// Define BPF-filter
-#include "MVEE_ipmon_seccomp_bpf_policy.h"
+		// Define seccomp-bpf filter
+		struct sock_filter filter[] = {
+			/* Unsynced system calls that can always execute without any checking */
+			BPF_STMT(BPF_LD | BPF_W | BPF_ABS, (offsetof(struct seccomp_data, nr))),
+#include "MVEE_ipmon_seccomp_bpf_always_allow.h"
+
+			/* Load the instruction pointer from 'seccomp_data' buffer into accumulator.
+			 * There are three possible values, with three different corresponding actions:
+			 * - 1. ipmon_checked_syscall_ret   => IP-MON wants to do a checked system call, TRACE
+			 * - 2. ipmon_unchecked_syscall_ret => IP-MON wants to do an UNchecked system call, ALLOW
+			 * - 3. everything else             => maybe unchecked? transfer control over to the IP-MON entrypoint, RET_ERRNO
+			 * -                                => definitely checked: transfer to CP-MON, TRACE
+			 */
+
+			/* Check for case 1: IP-MON wants to do a checked system call */
+			BPF_STMT(BPF_LD | BPF_W | BPF_ABS, (offsetof(struct seccomp_data, instruction_pointer))),
+			BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (uint32_t)((uintptr_t)&ipmon_checked_syscall_ret), 0, 3),
+			BPF_STMT(BPF_LD | BPF_W | BPF_ABS, (offsetof(struct seccomp_data, instruction_pointer) + 4)),
+			BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (uint32_t)(((uintptr_t)&ipmon_checked_syscall_ret) >> 32), 0, 1),
+			BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
+
+			/* Check for case 2: IP-MON wants to do an UNchecked system call */
+			BPF_STMT(BPF_LD | BPF_W | BPF_ABS, (offsetof(struct seccomp_data, instruction_pointer))),
+			BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (uint32_t)((uintptr_t)&ipmon_unchecked_syscall_ret), 0, 3),
+			BPF_STMT(BPF_LD | BPF_W | BPF_ABS, (offsetof(struct seccomp_data, instruction_pointer) + 4)),
+			BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (uint32_t)(((uintptr_t)&ipmon_unchecked_syscall_ret) >> 32), 0, 1),
+			BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+
+			/* Case 3: Transfer to either IP-MON and CP-MON. Load the system call number and decide based on that. */
+			BPF_STMT(BPF_LD | BPF_W | BPF_ABS, (offsetof(struct seccomp_data, nr))),
+			/* We're already in the process of transferring to IP-MON.
+			 * Continue returning the address of its entrypoint in a piecewise manner.
+			 */
+			BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, invoke_key_exchange, 0, 1),
+			BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | ((unsigned int)ipmon_enclave_entrypoint_ptr_bits_12_23 & SECCOMP_RET_DATA)),
+			BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, invoke_key_exchange + 1, 0, 1),
+			BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | ((unsigned int)ipmon_enclave_entrypoint_ptr_bits_24_35 & SECCOMP_RET_DATA)),
+			BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, invoke_key_exchange + 2, 0, 1),
+			BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | ((unsigned int)ipmon_enclave_entrypoint_ptr_bits_36_47 & SECCOMP_RET_DATA)),
+			/* If the syscall might be unchecked, start the procedure to transfer to IP-MON */
+#include "MVEE_ipmon_seccomp_bpf_maybe_unchecked.h"
+			/* Otherwise, definitely checked, inform CP-MON */
+			BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
+		};
 
 		// Set BPF-filter
 		struct sock_fprog prog = {

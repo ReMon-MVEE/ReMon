@@ -6,7 +6,7 @@ ORIG_PWD=$(pwd)
 # Install the necessary ubuntu packages
 if [ -e /usr/bin/apt ]
 then
-    sudo apt install ruby gcc g++ libselinux-dev musl-tools libelf-dev libdwarf-dev libgmp-dev libmpfr-dev libmpc-dev libconfig-dev libcap-dev cmake bison flex git texinfo texi2html zlib1g-dev libunwind8 libunwind8-dev liblzma5 liblzma-dev automake autoconf perl libjson-perl
+    sudo apt install ruby gcc g++ libselinux-dev musl-tools libelf-dev libdwarf-dev libgmp-dev libmpfr-dev libmpc-dev libconfig-dev libcap-dev cmake bison flex git texinfo texi2html zlib1g-dev libunwind8 libunwind8-dev liblzma5 liblzma-dev automake autoconf
 fi
 
 # Download submodules

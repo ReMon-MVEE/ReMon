@@ -31,6 +31,18 @@ def write_header(arr, header, args, prefix, suffix)
   replace_if_different("MVEE_ipmon_#{header}.h", "MVEE_ipmon_#{header}.tmp")
 end
 
+def write_bpf_header(arr, header, prefix, suffix)
+  File.open("MVEE_ipmon_#{header}.tmp", 'w') { |file|
+    arr.each { |handler|
+      if @unchecked.include? handler
+        file.write("#{prefix}#{handler}#{suffix}\n")
+      end
+    }
+  }
+
+  replace_if_different("MVEE_ipmon_#{header}.h", "MVEE_ipmon_#{header}.tmp")
+end
+
 def add_to_array(arr, line, handler)
   if line.match(/handle.*#{handler}.*\(/) and not line.match(/case [[:digit:]]+/)
     arr << line.gsub(/_#{handler}.*/, "").gsub(/.*handle_/, "").rstrip
@@ -67,8 +79,10 @@ IO.popen("clang -E MVEE_ipmon.cpp") { |p|
 }
 
 write_header(@unsynced, "is_unsynced", "", "return", "")
+write_bpf_header(@unsynced, "seccomp_bpf_always_allow", "ALLOW_SYSCALL(", "),")
 write_header(@maybe_checked, "maybe_checked", "args", "return", "")
 write_header(@calcsize, "calcsize", "args, args_size, ret_size", "", "break;")
 write_header(@precall, "precall", "args, entry", "return", "")
+write_bpf_header(@unchecked, "seccomp_bpf_maybe_unchecked", "START_KEY_EXCHANGE_SYSCALL(", "),")
 write_header(@postcall, "postcall", "args, entry, ret, realret, success", "return", "")
 

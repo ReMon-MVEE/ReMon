@@ -3,5 +3,6 @@ MVEE_ipmon_precall.h
 MVEE_ipmon_postcall.h
 MVEE_ipmon_maybe_checked.h
 MVEE_ipmon_calcsize.h
-MVEE_ipmon_seccomp_bpf_policy.h
+MVEE_ipmon_seccomp_bpf_always_allow.h
+MVEE_ipmon_seccomp_bpf_maybe_unchecked.h
 *.so
