@@ -147,6 +147,8 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint)
 		.cfi_adjust_cfa_offset 8
 		push rsi
 		.cfi_adjust_cfa_offset 8
+		push r8
+		.cfi_adjust_cfa_offset 8
 		push r10
 		.cfi_adjust_cfa_offset 8
 		push rdi
@@ -185,6 +187,8 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint)
 		pop rdi
 		.cfi_adjust_cfa_offset -8
 		pop r10
+		.cfi_adjust_cfa_offset -8
+		pop r8
 		.cfi_adjust_cfa_offset -8
 		pop rsi
 		.cfi_adjust_cfa_offset -8
