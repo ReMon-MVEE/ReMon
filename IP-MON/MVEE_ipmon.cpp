@@ -74,6 +74,7 @@ unsigned char            ipmon_kernel_compatible = 0;
 unsigned char            ipmon_variant_num       = 0;
 #ifdef IPMON_USE_BPF
 thread_local struct ipmon_buffer* ipmon_RB       = 0;
+thread_local unsigned char ipmon_RB_initialized  = 0;
 #endif
 
 //
@@ -3761,6 +3762,18 @@ extern "C" long ipmon_enclave
 
 	long ret = ipmon_handle_syscall(RB, syscall_no, args);
 
+#ifdef IPMON_USE_BPF
+	// check if we need to reinitialize
+	if (!ipmon_RB_initialized) {
+		if (RB) {
+			ipmon_checked_syscall(__NR_shmdt, RB); // detach from parent's RB
+			ipmon_checked_syscall(__NR_shmdt, ipmon_reg_file_map); // detach from parent's file map
+		}
+
+		RB = (ipmon_buffer *) ipmon_register_thread();
+	}
+#endif
+
 #ifdef IPMON_USE_MPK
 	erim_switch_to_untrusted;
 #endif
@@ -3888,6 +3901,8 @@ extern "C" struct ipmon_buffer* ipmon_register_thread()
 
 #ifdef IPMON_USE_BPF
 	ipmon_RB = (ipmon_buffer*)RB;
+	ipmon_RB_initialized = 1;
+	ipmon_checked_syscall(MVEE_RESET_ATFORK, &ipmon_RB_initialized, sizeof(ipmon_RB_initialized));
 #endif
 	return RB;
 }
