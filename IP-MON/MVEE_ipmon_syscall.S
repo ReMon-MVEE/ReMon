@@ -32,6 +32,7 @@ name:
 -----------------------------------------------------------------------------*/
 		.section .data
 		.globl ipmon_initialized
+		.hidden ipmon_initialized;		\
 ipmon_initialized:
 		.byte 0
 
@@ -173,7 +174,7 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint)
 		mov rsi, rdi // arg1
 		mov rdi, rax // syscall no
 		
-		call ipmon_enclave@plt
+		call ipmon_enclave
 
 		pop r9
 		pop r12
@@ -265,7 +266,7 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint_alternative)
 		mov rdi, r11 // RB pointer
 		xor r11, r11
 
-		call ipmon_enclave@plt
+		call ipmon_enclave
 
 		pop r8
 		pop r9

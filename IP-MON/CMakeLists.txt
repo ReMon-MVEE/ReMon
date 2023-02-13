@@ -36,6 +36,7 @@ target_compile_definitions(ipmon PRIVATE
 target_compile_options(ipmon PRIVATE
   -ffixed-r12
   -fPIC
+  -fvisibility=hidden
 )
 
 target_link_options(ipmon PRIVATE
