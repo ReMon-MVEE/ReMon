@@ -49,6 +49,22 @@ RUN \
     apt-get update && \
     apt-get install -y vim less strace sudo dpkg-dev cmake-curses-gui gawk htop lsb-release dialog apt-utils tmux
 
+################################################################################################################################################################
+########################################################################## PIROP stuff #########################################################################
+################################################################################################################################################################
+RUN \
+    apt-get update && \
+    apt-get install -y gdb time python3-pip libhugetlbfs-bin libhugetlbfs-dev libssl-dev libffi-dev devscripts libpcre3-dev python3-pandas python3-pwntools python3-venv nginx-full nginx-extras patchelf && \
+    apt build-dep -y nginx openssl libcrypt1 zlib1g
+   # pip3 install pandas openpyxl pwntools rpyc keystone-engine ropper capstone pyvex z3-solver importlib_resources archinfo
+
+# Set up venv
+RUN python3 -m venv --system-site-packages /opt/venv/analysis && /opt/venv/analysis/bin/pip3 install ropper keystone-engine pyvex archinfo z3-solver
+
+# TODO: set all compilers to clang
+RUN ln -sf /opt/deps/llvm/build-tree/bin/clang  $(readlink -f $(which gcc))
+RUN ln -sf /opt/deps/llvm/build-tree/bin/clang++  $(readlink -f $(which g++))
+
 # Make sure normal users have plenty of rights to /opt
 RUN chmod 777 /opt
 
