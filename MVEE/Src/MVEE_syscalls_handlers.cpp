@@ -2909,7 +2909,8 @@ PRECALL(shmdt)
 
 
     if (caller_info.find("mvee_shm_shmdt") == std::string::npos &&
-            caller_info.find("mvee_shm_munmap") == std::string::npos)
+            caller_info.find("mvee_shm_munmap") == std::string::npos &&
+            caller_info.find("libipmon.so") == std::string::npos)
     {
         if (special_shmdt_count == 0)
             return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOMEM);
@@ -5580,7 +5581,9 @@ CALL(shmat)
 #ifdef MVEE_ALLOW_SHM
             call_check_regs(0);
             auto caller_info = set_mmap_table->get_caller_info(0, variants[0].variantpid, variants[0].regs.rip);
-            if (caller_info.find("mvee_shm_shmat") == std::string::npos)
+            if (caller_info.find("mvee_shm_shmat") == std::string::npos &&
+                    caller_info.find("custom_syscall") == std::string::npos &&
+                    caller_info.find("libipmon.so") == std::string::npos)
             {
                 log_variant_backtrace(0);
                 return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOMEM);
