@@ -32,6 +32,7 @@ name:
 -----------------------------------------------------------------------------*/
 		.section .data
 		.globl ipmon_initialized
+		.hidden ipmon_initialized;		\
 ipmon_initialized:
 		.byte 0
 
@@ -147,6 +148,8 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint)
 		.cfi_adjust_cfa_offset 8
 		push rsi
 		.cfi_adjust_cfa_offset 8
+		push r8
+		.cfi_adjust_cfa_offset 8
 		push r10
 		.cfi_adjust_cfa_offset 8
 		push rdi
@@ -171,7 +174,7 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint)
 		mov rsi, rdi // arg1
 		mov rdi, rax // syscall no
 		
-		call ipmon_enclave@plt
+		call ipmon_enclave
 
 		pop r9
 		pop r12
@@ -185,6 +188,8 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint)
 		pop rdi
 		.cfi_adjust_cfa_offset -8
 		pop r10
+		.cfi_adjust_cfa_offset -8
+		pop r8
 		.cfi_adjust_cfa_offset -8
 		pop rsi
 		.cfi_adjust_cfa_offset -8
@@ -261,7 +266,7 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint_alternative)
 		mov rdi, r11 // RB pointer
 		xor r11, r11
 
-		call ipmon_enclave@plt
+		call ipmon_enclave
 
 		pop r8
 		pop r9

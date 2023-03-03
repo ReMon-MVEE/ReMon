@@ -1,4 +1,4 @@
-cmake_minimum_required (VERSION 3.10.2)
+cmake_minimum_required (VERSION 3.13)
 project(remon)
 
 if (NOT CMAKE_BUILD_TYPE)
@@ -245,7 +245,7 @@ if(${CMAKE_BUILD_TYPE} MATCHES "Debug")
     message("generating Debug build\n")
 
     # linker options
-    target_link_libraries(mvee PRIVATE
+    target_link_options(mvee PRIVATE
             -rdynamic
     )
 
@@ -267,7 +267,7 @@ else()
     message("generating Release build\n")
 
     # linker options
-    target_link_libraries(mvee PRIVATE
+    target_link_options(mvee PRIVATE
             -flto
             -O3
             -static
@@ -294,6 +294,7 @@ endif()
 
 # ----------------------------------------------------------------------------------------------------------------------
 option(BenchmarkMode "Run MVEE in Benchmark mode." OFF)
+option(BuildIpmon "Build IP-MON." ON)
 option(EmulateCPUID "Emulate CPUID instruction." ON)
 option(EmulateShm "Emulate shared memory." ON)
 option(LogNonInstrumentedIns "Log non-instrumented instructions using shared memory." ON)
@@ -318,5 +319,8 @@ target_compile_definitions(mvee PRIVATE
     #MVEE_LOG_ALL_SHM_INSTRUCTIONS
 )
 # ======================================================================================================================
+if (BuildIpmon)
+  add_subdirectory(IP-MON)
+endif()
 add_subdirectory(MVEE_LD_Loader)
 add_subdirectory(Utilities)

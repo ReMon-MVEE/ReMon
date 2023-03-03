@@ -24,7 +24,7 @@ diff --recursive --unified linux-source-5.10/fs/exec.c linux-source-5.10-ipmon-p
 diff --recursive --unified linux-source-5.10/include/linux/sched.h linux-source-5.10-ipmon-pku/include/linux/sched.h
 --- linux-source-5.10/include/linux/sched.h	2021-12-08 17:21:12.000000000 +0100
 +++ linux-source-5.10-ipmon-pku/include/linux/sched.h	2021-12-20 23:09:25.384558671 +0100
-@@ -645,6 +645,58 @@
+@@ -645,6 +645,59 @@
  	struct wake_q_node *next;
  };
  
@@ -34,7 +34,8 @@ diff --recursive --unified linux-source-5.10/include/linux/sched.h linux-source-
 +
 +#ifndef __NR_syscalls
 +  /* this is the highest known syscall no for x86_64 in this kernel... */
-+  #define __NR_syscalls __NR_mlock2
++  /* TODO: check this is correct when updating! Or fix it generically.. */
++  #define __NR_syscalls __NR_process_madvise +1
 +#endif
 +
 +/* MVEE IP-MON patch */

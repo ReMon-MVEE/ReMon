@@ -1,6 +1,7 @@
 build/
 ext/
 **/.git
+**/.cache
 **/Dockerfile*
 **/*.pyc
 **/*.sw*
