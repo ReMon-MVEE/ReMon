@@ -895,6 +895,11 @@ private:
 	//
 	void                                       sig_set_pending_signals             (bool pending_signals, bool signal_handler);
 
+	//
+	// Do all necessary initialization for IP-MON from the MVEE-side
+	//
+	bool                                       initialize_ipmon                    (int variantnum);
+
 	// 
 	// Returns true if variant @variantnum's instruction pointer points to the
 	// IP-MON executable code
