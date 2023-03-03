@@ -1735,7 +1735,7 @@ void mvee::start_monitored()
 			fprintf(stderr, "Couldn't accept tracing\n");
 
 #ifdef MVEE_USE_BPF
-        // Avoid the need for CAP_SYS_ADMIN
+        // Avoid the need for CAP_SYS_ADMIN when using seccomp
         if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == -1)
             warnf("Couldn't avoid the need for CAP_SYS_ADMIN\n");
 #endif
