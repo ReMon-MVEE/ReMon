@@ -10,6 +10,8 @@
 #include <linux/pid_namespace.h>
 #include <linux/mman.h>
 
+#include "PMVEE.h"
+
 #include <asm/tlb.h>
 
 
@@ -19,14 +21,9 @@ MODULE_DESCRIPTION("PMVEE project kernel module");
 MODULE_VERSION("0.1");
 
 
-/* Needed exported symbols =============================================================================================
- * vma_set_page_prot
- * change_protection
- * Needed exported symbols ========================================================================================== */
-
-
 // #define DEBUG_k
-#ifdef DEBUG_k
+#define DEBUG_K
+#ifdef DEBUG_K
 #define debugk(...) printk(__VA_ARGS__);
 #else
 #define debugk(...) ;
@@ -100,16 +97,18 @@ static int find_vma_links(struct mm_struct *mm, unsigned long addr,
 }
 
 
-static long actual_pmvee_switch(pid_t leader, unsigned long from, unsigned long to, long flags)
+static long actual_pmvee_switch(pid_t leader, unsigned long from, unsigned long to, unsigned long flags)
 {
     struct pid *leader_pid;
     struct task_struct *leader_task;
     struct mm_struct *follower_mm, *leader_mm;
     struct vm_area_struct *leader_mapping, *tmp, *prev;
     struct rb_node **rb_link, *rb_parent;
+    struct file *file;
     LIST_HEAD(uf);
 
     debugk(" [%d] > <%d> [ %lx ; %lx )\n", current->pid, leader, from, to);
+    debugk(" > flags: %lx", flags);
 
 
     // checks >
@@ -145,6 +144,7 @@ static long actual_pmvee_switch(pid_t leader, unsigned long from, unsigned long 
 
     // This is just here for now, we might want to do this when collisions occur while copying instead. Either not
     // copying or unmapping them then.
+    // TODO: This is gonna have to go, it's starting to cause issues.
 	while (find_vma_links(follower_mm, from, to, &prev, &rb_link, &rb_parent))
     {
  		if (__do_munmap(follower_mm, from, to - from, &uf, false))
@@ -192,6 +192,8 @@ static long actual_pmvee_switch(pid_t leader, unsigned long from, unsigned long 
 
     while (leader_mapping && leader_mapping->vm_end <= to)
     {
+        if (!(flags & PMVEE_FLAGS_DUP_EXEC) && (leader_mapping->vm_flags & VM_EXEC))
+            goto __pmvee_next_mapping;
         debugk("   > duping   [ 0x%lx ; 0x%lx )\n", leader_mapping->vm_start, leader_mapping->vm_end);
 
         tmp = vm_area_dup(leader_mapping);
@@ -201,11 +203,35 @@ static long actual_pmvee_switch(pid_t leader, unsigned long from, unsigned long 
         if (anon_vma_fork(tmp, leader_mapping))
             return -ENOMEM;
 
-        // remove unwanted file permissions >
-        // tmp->vm_flags = leader_mapping->vm_flags & ~(VM_WRITE | VM_EXEC | VM_MAYWRITE | VM_MAYEXEC);
-        // vma_set_page_prot(tmp);
-        // change_protection(tmp, tmp->vm_start, tmp->vm_end, tmp->vm_page_prot, false, 0);
-        // remove unwanted file permissions <
+        // remove unwanted permissions >
+        if (flags & PMVEE_FLAGS_REMOVE_PERMISSIONS)
+        {
+            tmp->vm_flags = leader_mapping->vm_flags & ~(VM_WRITE | VM_EXEC | VM_MAYWRITE | VM_MAYEXEC);
+            vma_set_page_prot(tmp);
+            change_protection(tmp, tmp->vm_start, tmp->vm_end, tmp->vm_page_prot, false, 0);
+        }
+        // remove unwanted permissions <
+
+        
+        file = tmp->vm_file;
+        if (file)
+        {
+            struct inode *inode = file_inode(file);
+            struct address_space *mapping = file->f_mapping;
+
+            vma_get_file(tmp);
+            if (tmp->vm_flags & VM_DENYWRITE)
+                atomic_dec(&inode->i_writecount);
+            i_mmap_lock_write(mapping);
+            if (tmp->vm_flags & VM_SHARED)
+                atomic_inc(&mapping->i_mmap_writable);
+            flush_dcache_mmap_lock(mapping);
+            /* insert tmp into the share list, just after leader_mapping */
+            vma_interval_tree_insert_after(tmp, leader_mapping,
+                    &mapping->i_mmap);
+            flush_dcache_mmap_unlock(mapping);
+            i_mmap_unlock_write(mapping);
+        }
         
         // link it in >
         if (!prev)
@@ -239,7 +265,8 @@ static long actual_pmvee_switch(pid_t leader, unsigned long from, unsigned long 
 		if (tmp->vm_ops && tmp->vm_ops->open)
 			tmp->vm_ops->open(tmp);
         // copy pages <
-
+        
+        __pmvee_next_mapping:
         prev = tmp;
         leader_mapping = leader_mapping->vm_next;
     }
@@ -366,7 +393,7 @@ static long actual_pmvee_check (pid_t leader, unsigned long from, unsigned long 
 		leader_mpnt = leader_mpnt->vm_next;
 	}
     // check mappings for changes <
-
+    debugk(" > pmvee done.\n")
     return 0;
 }
 
