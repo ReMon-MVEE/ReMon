@@ -1307,7 +1307,7 @@ void monitor::call_overwrite_arg_data
 {
 	long old_value;
 	void* overwrite_location;
-	unsigned long skip_bytes = 0;
+	unsigned long skip_bytes = set_mmap_table->enlarged_initial_stacks ? PAGE_SIZE : 0;
 
 	switch(argnum)
 	{
