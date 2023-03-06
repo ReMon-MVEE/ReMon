@@ -146,8 +146,8 @@ diff -ur orig/mm/memory.c linux-source-5.4.0/mm/memory.c
  
  /* Whether we should zap all COWed (private) pages too */
  static inline bool should_zap_cows(struct zap_details *details)
-diff -u build/mm/mprotect.c linux-source-5.4.0/mm/mprotect.c 
---- build/mm/mprotect.c	2023-01-09 15:21:18.085799104 +0100
+diff -ur orig/mm/mprotect.c linux-source-5.4.0/mm/mprotect.c 
+--- orig/mm/mprotect.c	2023-01-09 15:21:18.085799104 +0100
 +++ linux-source-5.4.0/mm/mprotect.c	2022-11-23 21:19:00.000000000 +0100
 @@ -327,7 +327,6 @@
  
@@ -157,3 +157,25 @@ diff -u build/mm/mprotect.c linux-source-5.4.0/mm/mprotect.c
  
  unsigned long change_protection(struct vm_area_struct *vma, unsigned long start,
  		       unsigned long end, pgprot_t newprot,
+diff -ur orig/mm/interval_tree.c linux-source-5.4.0/mm/interval_tree.c
+--- orig/mm/interval_tree.c    2023-01-24 17:04:29.471654623 +0100
++++ linux-source-5.4.0/mm/interval_tree.c  2023-01-24 17:05:32.064768057 +0100
+@@ -57,6 +57,7 @@
+        rb_insert_augmented(&node->shared.rb, &root->rb_root,
+                            &vma_interval_tree_augment);
+ }
++EXPORT_SYMBOL(vma_interval_tree_insert_after);
+ 
+ static inline unsigned long avc_start_pgoff(struct anon_vma_chain *avc)
+ {
+diff -ur orig/mm/prfile.c linux-source-5.4.0/mm/prfile.c
+--- orig/mm/prfile.c   2023-01-24 17:04:27.280645615 +0100
++++ linux-source-5.4.0/mm/prfile.c 2023-01-24 17:05:16.215801167 +0100
+@@ -53,6 +53,7 @@
+        if (f && pr)
+                get_file(pr);
+ }
++EXPORT_SYMBOL(vma_do_get_file);
+ 
+ void vma_do_fput(struct vm_area_struct *vma, const char func[], int line)
+ {
