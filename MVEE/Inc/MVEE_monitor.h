@@ -1147,9 +1147,6 @@ private:
     bool                              monitor_registered;
     bool                              monitor_terminating;
     bool                              ipmon_initialized;
-	std::vector<unsigned long> 		  ipmon_bases;
-	bool                              ipmon_mapped;
-	bool							  ipmon_mapped_first_time_in_ld;
 	bool                              ipmon_mmap_handling;
 	bool                              ipmon_fd_handling;
     bool                              aliased_open;           // 

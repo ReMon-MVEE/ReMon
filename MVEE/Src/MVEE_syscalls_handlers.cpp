@@ -132,9 +132,6 @@
 #ifdef MVEE_ARCH_HAS_ARCH_PRCTL
 #include <asm/prctl.h>
 #endif
-#ifdef MVEE_USE_BPF
-#include <regex>
-#endif
 
 /*-----------------------------------------------------------------------------
   old_kernel_stat
@@ -1272,8 +1269,6 @@ POSTCALL(execve)
         for (i = 0; i < mvee::numvariants; ++i)
             set_mmap_table->refresh_variant_maps(i, variants[i].variantpid);
 #endif
-
-		ipmon_mapped_first_time_in_ld = false;
 
         for (i = 0; i < mvee::numvariants; ++i)
             set_mmap_table->verify_mman_table(i, variants[i].variantpid);
@@ -7727,38 +7722,6 @@ CALL(mmap)
 			// return MVEE_CALL_ALLOW;
 #endif
         }
-
-#ifdef MVEE_USE_BPF
-		//std::string libipmonso = "libipmon.so";
-		std::regex libipmonso(R"(libipmon([\w\-. ]*)\.so$)");
-		std::string info_filename = info->get_path_string();
-		//if (info_filename.length() >= libipmonso.length() && info_filename.compare(info_filename.length() - libipmonso.length(), libipmonso.length(), libipmonso) == 0)
-		if (regex_search(info_filename, libipmonso))
-		{
-			debugf("INFO: fd_info path name is %s\n", info_filename.c_str());
-
-			
-			if (!ipmon_mapped)
-			{
-				set_mmap_table->calculate_disjoint_bases(ARG2(0), ipmon_bases);
-				ipmon_mapped = true;
-			}
-
-			debugf("GHUMVEE is overriding the base address of a new code region backed by file: %s\n",
-					info->paths[0].c_str());
-
-			if (!ipmon_mapped_first_time_in_ld) {
-				for (int i = 0; i < mvee::numvariants; ++i) {
-					/*warnf("> variant %d => region span: 0x" PTRSTR "-0x" PTRSTR "\n", i,
-					ipmon_bases[i], ROUND_UP(ipmon_bases[i] + ARG2(0), 4096));*/
-					SETARG1(i, ipmon_bases[i]);
-				}
-				ipmon_mapped_first_time_in_ld = true;
-			}
-
-            return MVEE_CALL_ALLOW;
-		}
-#endif
 
 #ifdef MVEE_ALLOW_SHM
 		if (ARG4(0) & MAP_SHARED)

@@ -170,8 +170,6 @@ void monitor::init()
     monitor_registered             = false;
     monitor_terminating            = false;
     ipmon_initialized              = false;
-    ipmon_mapped                   = false;
-    ipmon_mapped_first_time_in_ld  = false;
 	ipmon_mmap_handling            = false;
 	ipmon_fd_handling              = false;
 	aliased_open                   = false;
@@ -193,8 +191,6 @@ void monitor::init()
 	current_shadow                 = NULL;
 
 	special_shmdt_count            = 0;
-
-    ipmon_bases.resize(mvee::numvariants);
 
 	blocked_signals.resize(mvee::numvariants);
 	old_blocked_signals.resize(mvee::numvariants);
@@ -263,12 +259,6 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
         // seccomp-BPF filters will be preserved across forks/clones
         // so we need to take over the ipmon_active state of the parent
         variants[i].ipmon_active = parent_monitor->variants[i].ipmon_active;
-        if (variants[i].ipmon_active)
-        {
-            ipmon_mapped = parent_monitor->ipmon_mapped;
-            ipmon_mapped_first_time_in_ld = false;//parent_monitor->ipmon_mapped_first_time_in_ld;
-            ipmon_bases = parent_monitor->ipmon_bases;
-        }
 #endif
     }
 
