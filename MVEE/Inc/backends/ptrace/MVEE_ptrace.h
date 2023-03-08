@@ -49,7 +49,6 @@
 enum StopReason
 {
     STOP_NOTSTOPPED,
-	STOP_SECCOMP,
 	STOP_SYSCALL,
 	STOP_SIGNAL,
 	STOP_EXECVE,
@@ -276,7 +275,7 @@ namespace interaction
 						int event = ((ret & 0x000F0000) >> 16);
 						if (event == PTRACE_EVENT_SECCOMP)
 						{
-							status.reason = STOP_SECCOMP;
+							status.reason = STOP_SYSCALL;
 						}
 						else if (event == PTRACE_EVENT_FORK || 
 							event == PTRACE_EVENT_VFORK ||

@@ -807,13 +807,6 @@ private:
 
 	//
 	// Processes a SIGSYSTRAP signal. This function figures out if the signal
-	// was caused by a syscall entrance and delegates to one of the
-	// above functions accordingly
-	//
-    void handle_seccomp_event                (int index);
-
-	//
-	// Processes a SIGSYSTRAP signal. This function figures out if the signal
 	// was caused by a syscall entrance or exit and delegates to one of the
 	// above functions accordingly
 	//

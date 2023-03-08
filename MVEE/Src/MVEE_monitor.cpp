@@ -1162,13 +1162,6 @@ void monitor::handle_event (interaction::mvee_wait_status& status)
         handle_exit_event(index);
         return;
     }
-#ifdef MVEE_USE_BPF
-    else if (variants[index].ipmon_active && status.reason == STOP_SECCOMP)
-	{
-		handle_seccomp_event(index);
-		return;
-	}
-#endif
     else if (status.reason == STOP_SYSCALL)
 	{
 		handle_syscall_event(index);
@@ -2082,91 +2075,6 @@ void monitor::handle_syscall_exit_event(int index)
     {
         sig_restart_partially_interrupted_syscall();
     }
-}
-
-/*-----------------------------------------------------------------------------
-    handle_seccomp_event
------------------------------------------------------------------------------*/
-void monitor::handle_seccomp_event(int index)
-{
-    // ERESTARTSYS handler
-    if (variants[index].restarting_syscall
-        && !variants[index].restarted_syscall)
-    {
-        bool all_restarted = true;
-        bool all_synced    = true;
-
-        debugf("%s - restarted syscall is back at syscall entry\n",
-			   call_get_variant_pidstr(index).c_str());
-
-        if (variants[index].call_type != MVEE_CALL_TYPE_UNSYNCED
-            && state != STATE_IN_FORKCALL)
-        {
-            variants[index].restarted_syscall = true;
-
-            // This is retarded. Some variants can return normally from the
-            // syscall, while others can see a -ERESTART* error
-            for (int i = 0; i < mvee::numvariants; ++i)
-            {
-                if (!variants[i].restarting_syscall || !variants[i].restarted_syscall)
-                {
-                    all_restarted = false;
-
-                    // call is still in progress
-                    if (variants[i].callnum != NO_CALL)
-                    {
-                        all_synced = false;
-                    }
-                }
-            }
-
-            // Do not blindly resume the variants here! If it's either a master call
-            // OR a normal call that was restarted in _all_ variants, we still have
-            // to check if we can maybe deliver that pending signal.
-            if (all_restarted)
-            {
-                debugf("All variants were restarted and are now back at the syscall entry\n");
-                if (sig_prepare_delivery())
-                {
-//					debugf("Signal delivery in progress!\n");
-                    for (int i = 0; i < mvee::numvariants; ++i)
-                        variants[i].restarting_syscall = false;
-                    return;
-                }
-                else
-                {
-                    // no signal to be delivered. Was this a spurious wakeup?!
-                    // can also happen if a signal was delivered during a master call!!!
-                    debugf("no signal to be delivered...\n");
-                    for (int i = 0; i < mvee::numvariants; ++i)
-                    {
-                        debugf("%s - all restarted - resuming variant from restarted syscall entry\n", 
-							   call_get_variant_pidstr(i).c_str());
-                        variants[i].restarting_syscall = variants[i].restarted_syscall = false;
-						call_resume(i);
-                    }
-                    return;
-                }
-
-            }
-            else if (state != STATE_IN_MASTERCALL && all_synced)
-            {
-                sig_restart_partially_interrupted_syscall();
-            }
-            return;
-        }
-        else
-        {
-            debugf("%s - unsynced or forkcall - resuming variant from restarted syscall entry\n", 
-				   call_get_variant_pidstr(index).c_str());
-            variants[index].restarting_syscall = variants[index].restarted_syscall = false;
-			call_resume(index);
-        }
-
-        return;
-    }
-
-    handle_syscall_entrance_event(index);
 }
 
 /*-----------------------------------------------------------------------------
