@@ -1286,7 +1286,7 @@ bool monitor::handle_rdtsc_event(int variantnum)
 					}
 
 					if (!interaction::resume_until_syscall(variants[i].variantpid))
-						throw RwRegsFailure(i, "RDTSC resume");
+						throw ResumeFailure(i, "RDTSC resume");
 
                     variants[i].callnum = NO_CALL;
                 }
