@@ -438,18 +438,8 @@ void monitor::rewrite_execve_args(int variantnum, bool write_to_stack, bool rewr
 	if (rewrite_envp)
 	{
 		// Get the original envp array
-		char              cmd[256];
-		sprintf(cmd, "strings /proc/%d/environ", variants[variantnum].variantpid);
-
-		std::string       envps = mvee::log_read_from_proc_pipe(cmd, NULL);
-		if (envps != "")
-		{
-			std::stringstream ss(envps);
-			std::string       ln;
-
-			while(std::getline(ss, ln, '\n'))
-				envp.push_back(mvee::strdup(ln.c_str()));
-		}
+		for (auto env : set_mmap_table->mmap_startup_info[variantnum].envp)
+			envp.push_back(mvee::strdup(env.c_str()));
 		
 		if (!mveeroot_found_in_env)
 		{
