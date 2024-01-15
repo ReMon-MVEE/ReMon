@@ -146,10 +146,11 @@ void mmap_region_info::print_region_info(const char* log_prefix, void (*logfunc)
                 ((unsigned long long) shadow->monitor_base + shadow->size) << " )";
     else
         stream.str("");
-    logfunc("%s - " PTRSTR "-" PTRSTR " - %s - %s - %s - %d bytes%s\n",
+    logfunc("%s - " PTRSTR "-" PTRSTR " - %s@%d - %s - %s - %d bytes%s\n",
             log_prefix,
             region_base_address, region_base_address + region_size,
             region_backing_file_path.c_str(),
+            region_backing_file_offset,
             getTextualProtectionFlags(region_prot_flags).c_str(),
             getTextualMapType(region_map_flags).c_str(),
             region_backing_file_size,
