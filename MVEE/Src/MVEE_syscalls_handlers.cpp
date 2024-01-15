@@ -126,6 +126,7 @@
 #include "MVEE_signals.h"
 #include "MVEE_fake_syscall.h"
 #include "MVEE_interaction.h"
+#include "PMVEE.h"
 #ifdef MVEE_ARCH_SUPPORTS_DISASSEMBLY
 #include "hde.h"
 #endif
@@ -2304,7 +2305,7 @@ PRECALL(brk)
 }
 
 CALL(brk)
-{	
+{
 	if (IS_SYNCED_CALL && (*mvee::config_variant_global)["mvee_controlled_aslr"].asInt() > 0)
 	{
 		mmap_region_info* heap_region = set_mmap_table->get_heap_region(0);
@@ -2317,7 +2318,13 @@ CALL(brk)
 			if (ARG1(0) == 0)
 			{
 				// If the MVEE is controlling ASLR, then pick an address for the new heap
-				address = set_mmap_table->calculate_data_mapping_base(4096);
+				// address = set_mmap_table->calculate_data_mapping_base(4096);
+				address = set_mmap_table->calculate_joint_base(4096, true);
+				if (address == (unsigned long)-1)
+				{
+					log_backtraces();
+					shutdown(false);
+				}
 
 				// inject mmap
 				for (int i = 0; i < mvee::numvariants; ++i)
@@ -5038,6 +5045,12 @@ POSTCALL(recvmmsg)
   sys_accept4 - (int fd, struct sockaddr* upeer_sockaddr, int* upeer_addrlen,
   int flags)
 -----------------------------------------------------------------------------*/
+GET_CALL_TYPE(accept4)
+{
+	if (!poly_exec)
+	    return MVEE_CALL_TYPE_UNSYNCED;
+    return MVEE_CALL_TYPE_NORMAL;
+}
 LOG_ARGS(accept4)
 {
 	debugf("%s - SYS_ACCEPT4(%d, 0x" PTRSTR ", 0x" PTRSTR ", %d = %s)\n",
@@ -5060,7 +5073,10 @@ PRECALL(accept4)
 
 POSTCALL(accept4)
 {
-    REPLICATEBUFFERANDLEN(2, 3, int);
+	if (IS_SYNCED_CALL)
+	{
+		REPLICATEBUFFERANDLEN(2, 3, int);
+	}
 
     if (call_succeeded)
     {
@@ -5110,6 +5126,8 @@ POSTCALL(accept4)
 #endif
         }
     }
+	if (IS_UNSYNCED_CALL)
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
     return 0;
 }
 
@@ -5990,6 +6008,26 @@ GET_CALL_TYPE(mprotect)
 	{
 		return MVEE_CALL_TYPE_UNSYNCED;
 	}
+
+	// pmvee related exception sometimes necessary for loading
+	// _dl_map_object_from_fd
+	call_check_regs(0);
+
+    /* Get the path for the binary that requested shared memory */
+    mvee_dwarf_context context(variants[variantnum].variantpid);
+
+    std::string binary_path = "";
+    std::string binary_name = "";
+    do
+    {
+		auto caller_info = set_mmap_table->get_caller_info(variantnum, variants[variantnum].variantpid, IP_IN_REGS(context.regs));
+		if (caller_info.find("_dl_map_object_from_fd") == std::string::npos)
+		{
+			// warnf("Diverging mprotect in _dl_map_object_from_fd, ignoring as false positive.\n");
+			return MVEE_CALL_TYPE_UNSYNCED;
+		}
+        set_mmap_table->dwarf_step(variantnum, variants[variantnum].variantpid, &context);
+    } while(binary_name.find("glibc") == 0);
 
 	return MVEE_CALL_TYPE_NORMAL;
 }
@@ -7348,14 +7386,27 @@ PRECALL(mmap)
 	if (IS_UNSYNCED_CALL)
 		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 
-    CHECKARG(2);
+    for (int i = 1; i < mvee::numvariants; ++i)
+    {
+        if (ARG2(i) != ARG2(i-1))
+        {
+            size_t size = 0;
+            for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+                if (ARG2(variant_i) > size)
+                    size = ARG2(variant_i);
+            for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+                SETARG2(variant_i, size);
+            break;
+        }
+    }
+
     CHECKARG(3);
     CHECKARG(4);
     CHECKFD(5);
 
     // offset is ignored for anonymous mappings
-    if ((int)ARG5(0) !=-1 || (ARG4(0) & MAP_ANONYMOUS))
-        CHECKARG(6);
+    // if ((int)ARG5(0) !=-1 || (ARG4(0) & MAP_ANONYMOUS))
+    //     CHECKARG(6);
 
     MAPFDS(5);
 
@@ -7472,10 +7523,27 @@ CALL(mmap)
 {
 	if IS_UNSYNCED_CALL
 	{
-		if (!poly_exec)
-		{
-			SETARG1(0, set_mmap_table->calculate_joint_base(ARG2(0)));
-			SETARG4(0, (ARG4(0) & (~MAP_PRIVATE)) | MAP_SHARED);
+        if (ARG4(0) & MAP_PMVEE)
+        {
+            unsigned long address = set_mmap_table->calculate_joint_base(ARG2(0), true);
+            if (address == (unsigned long)-1)
+            {
+                log_backtraces();
+                shutdown(false);
+            }
+            SETARG1(0, address);
+            SETARG4(0, (ARG4(0) & (~MAP_SHARED)) | MAP_PRIVATE);
+        }
+        else if (!poly_exec)
+        {
+            unsigned long address = set_mmap_table->calculate_joint_base(ARG2(0), true);
+            if (address == (unsigned long)-1)
+            {
+                log_backtraces();
+                shutdown(false);
+            }
+            SETARG1(0, address);
+            SETARG4(0, (ARG4(0) & (~MAP_SHARED)) | MAP_PRIVATE);
 		}
 		return MVEE_CALL_ALLOW;
 	}
@@ -7493,11 +7561,46 @@ CALL(mmap)
 			(ARG4(0) & MAP_PRIVATE) &&
 			(*mvee::config_variant_global)["mvee_controlled_aslr"].asInt() > 0)
 		{
-			unsigned long address = set_mmap_table->calculate_data_mapping_base(ARG2(0));
+            unsigned long address;
+            if (ARG4(0) & MAP_PMVEE)
+                address = set_mmap_table->calculate_joint_base(ARG2(0), true);
+            else
+                address = set_mmap_table->calculate_data_mapping_base(ARG2(0));
+            if (address == (unsigned long)-1)
+            {
+                log_backtraces();
+                shutdown(false);
+            }
+            SETARG1(0, address);
+
+            for (int i = 0; i < mvee::numvariants; ++i)
+            {
+                call_overwrite_arg_value(i, 1, address, true);
+
+                debugf("%s - replaced call by SYS_MMAP(0x" PTRSTR ", %lu, %s, %s, %d, %lu)\n",
+                       call_get_variant_pidstr(i).c_str(),
+                       address,
+                       (unsigned long)ARG2(i),
+                       getTextualProtectionFlags(ARG3(i)).c_str(),
+                       getTextualMapType(ARG4(i)).c_str(),
+                       (int)ARG5(i),
+                       (unsigned long)ARG6(i));
+            }
+            return MVEE_CALL_ALLOW;
+        }
+        if (ARG4(0) & MAP_PMVEE)
+        {
+            unsigned long address = set_mmap_table->calculate_joint_base(ARG2(0), true);
+            if (address == (unsigned long)-1)
+            {
+                log_backtraces();
+                shutdown(false);
+            }
 
 			for (int i = 0; i < mvee::numvariants; ++i)
 			{
 				call_overwrite_arg_value(i, 1, address, true);
+				SETARG4(i, (ARG4(0) & (~MAP_SHARED)) | MAP_PRIVATE);
 
 				debugf("%s - replaced call by SYS_MMAP(0x" PTRSTR ", %lu, %s, %s, %d, %lu)\n",
 					   call_get_variant_pidstr(i).c_str(),
@@ -7510,7 +7613,7 @@ CALL(mmap)
 			}
             return MVEE_CALL_ALLOW;
 		}
-#ifdef MVEE_ALLOW_SHM
+		#ifdef MVEE_ALLOW_SHM
 		else if (ARG4(0) & MAP_SHARED)
         {
             if (!(shm_setup_state & SHM_SETUP_EXPECTING_ENTRY))
@@ -7557,7 +7660,7 @@ CALL(mmap)
             debugf("%s - call replaced by SYS_SHMAT(%d, 0x" PTRSTR ", 0)\n",
                     call_get_variant_pidstr(0).c_str(), shmid, base_address);
         }
-#endif
+		#endif
         return MVEE_CALL_ALLOW;
 	}
 
@@ -7642,22 +7745,23 @@ CALL(mmap)
 #else
 		if (!(ARG4(0) & MAP_FIXED))
 		{
-			bool should_mp = false;
 			for (auto binary = mp_binaries.begin(); binary != mp_binaries.end(); binary++)
 			{
-				// warnf(" > comparing %s and %s\n", binary->c_str(), info->paths[0].c_str());
 				if (!binary->compare(info->paths[0]))
 				{
-					should_mp = true;
-					break;
-				}
-			}
-			if (should_mp)
-			{
-				warnf(" > should not be hit\n");
-				unsigned long base = set_mmap_table->calculate_joint_base(ARG2(0));
-				for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
-					SETARG1(variant_i, base);
+                    unsigned long base = set_mmap_table->calculate_joint_base(ARG2(0), false);
+                    if (base == (unsigned long)-1)
+                    {
+                        log_backtraces();
+                        shutdown(false);
+                    }
+                    for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+                    {
+                        SETARG1(variant_i, base);
+                        SETARG4(variant_i, (ARG4(0) & (~MAP_SHARED)) | MAP_PRIVATE);
+                    }
+                    break;
+                }
 			}
 		}
 
@@ -7854,6 +7958,13 @@ POSTCALL(mmap)
 					  info->paths[0].c_str(), 
 					  _st.st_size);
 			}
+            if (ARG3(0) & PROT_EXEC)
+            {
+                std::vector<unsigned long> offsets = std::vector<unsigned long>();
+                for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+                        offsets.push_back(ARG6(variant_i));
+                insert_jump_targets(info, results, offsets);
+            }
 		}
 
 #if defined(MVEE_EMULATE_SHARED_MEMORY) && defined(MVEE_ALLOW_SHM)
@@ -8010,8 +8121,8 @@ POSTCALL(mmap)
 		if (variants[variantnum].prevcallnum == __NR_mmap2)
 			actual_offset *= 4096;
 #endif
-        set_mmap_table->map_range(variantnum, result, ARG2(variantnum), ARG4(variantnum), ARG3(variantnum), info,
-                actual_offset);
+        set_mmap_table->map_range(variantnum, result, ARG2(variantnum) + (!poly_exec ? 0x1000 : 0x00),
+				ARG4(variantnum), ARG3(variantnum), info, actual_offset);
         set_mmap_table->verify_mman_table(variantnum, variants[variantnum].variantpid);
 
 // old code that did fast forwarding to the entry point
@@ -10009,6 +10120,11 @@ PRECALL(inotify_rm_watch)
   man(2): (int dfd, const char *filename, int flags, mode_t mode)
   kernel: (int dfd, const char *filename, int flags, umode_t mode)
 -----------------------------------------------------------------------------*/
+GET_CALL_TYPE(openat)
+{
+	return poly_exec ? MVEE_CALL_TYPE_NORMAL : MVEE_CALL_TYPE_UNSYNCED;
+}
+
 LOG_ARGS(openat)
 {
 	auto filename = rw::read_string(variants[variantnum].variantpid, (void*)ARG2(variantnum));

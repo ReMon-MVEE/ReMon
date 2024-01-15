@@ -171,6 +171,7 @@ public:
 	static void init_config_set_defaults    ();
 	static bool process_opts                (int argc, char** argv, bool add_args);
 	static void add_argv                    (const char* arg, bool first_extra_arg);
+	static void init_pmvee_mappings         (const char* file);
 
 
 	//
@@ -613,6 +614,17 @@ public:
 	// control from the main MVEE process to the primary monitor thread.
 	//
     volatile static unsigned long   can_run;
+
+	typedef struct pmvee_mapping_t
+	{
+		std::string      name;
+		unsigned long    leader_offset;
+		std::string      leader_file;
+		unsigned long    follower_offset;
+		std::string      follower_file;
+		int			  type;
+	} pmvee_mapping_t;
+	static std::vector<pmvee_mapping_t> mappings;
 private:
 
 	// *************************************************************************

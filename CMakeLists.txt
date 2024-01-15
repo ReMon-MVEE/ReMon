@@ -171,6 +171,7 @@ set(MVEE_INCLUDE_DIRS
         PRIVATE ${CMAKE_SOURCE_DIR}/MVEE/Inc/arch
         PRIVATE ${CMAKE_SOURCE_DIR}/MVEE/Inc/arch/${ARCH}
         PRIVATE ${CMAKE_SOURCE_DIR}/MVEE/Inc/arch/${ARCH}/shared_mem/
+        PRIVATE ${CMAKE_SOURCE_DIR}/PMVEE
 )
 
 if(DEPS_PRESENT_IN_SYSTEM)
@@ -322,6 +323,7 @@ target_compile_definitions(mvee PRIVATE
     $<$<BOOL:${ShmReplayLeader}>:MVEE_SHARED_MEMORY_REPLAY_LEADER>
     $<$<BOOL:${UseMPK}>:MVEE_USE_MPK>
     $<$<BOOL:${EnablePMVEE}>:MVEE_ENABLE_PMVEE>
+    $<$<BOOL:${EnablePMVEE}>:MVEE_CONNECTED_MMAP_REGIONS>
     #MVEE_LOG_ALL_SHM_INSTRUCTIONS
 )
 # ======================================================================================================================

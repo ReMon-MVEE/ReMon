@@ -65,6 +65,7 @@ void mvee::init_config_set_defaults()
 	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["performance_counting_enabled"], false);
 	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["have_many_threads"], false);
 	WEAK_INIT_KEY(config["variant"]["global"]["settings"]["mvee_controlled_aslr"], 0);
+	WEAK_INIT_KEY(config["monitor"]["pmvee_mappings"], "/dev/null");
 	WEAK_INIT_KEY(config["monitor"]["log_to_stdout"], false);
 	WEAK_INIT_KEY(config["monitor"]["libc_path"]["path"], "/patched_binaries/libc/");
 	WEAK_INIT_KEY(config["monitor"]["libc_path"]["is_absolute"], false);
@@ -87,6 +88,7 @@ void mvee::init_config_set_defaults()
 	config_variant_exec   = &config["variant"]["global"]["exec"];
 	config_monitor        = &config["monitor"];
 
+	init_pmvee_mappings(config["monitor"]["pmvee_mappings"].asCString());
 	if (!(*mvee::config_variant_global)["use_system_libc"].asBool())
 	{
 		bool is_relative = !(*mvee::config_monitor)["libc_path"]["is_absolute"].asBool();

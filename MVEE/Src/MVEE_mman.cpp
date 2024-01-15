@@ -33,6 +33,7 @@
 #include "MVEE_mman.h"
 #include "MVEE_private_arch.h"
 #include "MVEE_macros.h"
+#include "PMVEE.h"
 
 /*-----------------------------------------------------------------------------
     mmap_region_info class
@@ -215,6 +216,8 @@ mmap_table::mmap_table(const mmap_table& parent)
     cached_syms                = parent.cached_syms;
 	thread_group_shutting_down = false;
 	mmap_base                  = parent.mmap_base;
+    mp_start                   = parent.mp_start;
+    mp_end                     = parent.mp_end;
 
     full_map.resize(mvee::numvariants);
 
@@ -1385,10 +1388,10 @@ void mmap_table::calculate_disjoint_bases (unsigned long size, std::vector<unsig
 
 
 /*-----------------------------------------------------------------------------
-    calculate_joint_bases - The monitor has seen a new mmap call for a region
+    calculate_joint_base - The monitor has seen a new mmap call for a region
     that we want to map at the same address in all variants.
 -----------------------------------------------------------------------------*/
-unsigned long mmap_table::calculate_joint_base (unsigned long size)
+unsigned long mmap_table::calculate_joint_base (unsigned long size, bool allow_writes)
 {
     std::set<mmap_region_info*, region_sort>           merged_regions;
     std::set<mmap_region_info*, region_sort>::iterator it;
@@ -1400,10 +1403,15 @@ unsigned long mmap_table::calculate_joint_base (unsigned long size)
         unsigned long long start;
         unsigned long long end;
     };
+    std::vector<merged_t> merged_map;
+    // warnf("> getting joint address\n");
 #ifdef MVEE_ENABLE_PMVEE
-    std::vector<merged_t> merged_map{ { mp_start, mp_end } };
+    if (allow_writes)
+        merged_map.push_back({ mp_start, mp_start + PMVEE_ZONE_ONE_DEFAULT_SIZE });
+    else
+        merged_map.push_back({ mp_start + PMVEE_ZONE_ONE_DEFAULT_SIZE, mp_end });
 #else
-    std::vector<merged_t> merged_map{ { 0, HIGHEST_USERMODE_ADDRESS } };
+    merged_map.push_back({ 0, HIGHEST_USERMODE_ADDRESS });
 #endif
 
     // step 0: Attempt to enlarge each variant's stack to stack_limit size so
@@ -1416,7 +1424,6 @@ unsigned long mmap_table::calculate_joint_base (unsigned long size)
     // they have the same stack limit...
     if (stack_limit && !enlarged_initial_stacks)
     {
-        // warnf("stack limit: %lu\n", stack_limit);
         enlarged_initial_stacks = 1;
                unsigned long stack_top = 0;
         for (int i = 0; i < mvee::numvariants; ++i)
@@ -1459,8 +1466,6 @@ unsigned long mmap_table::calculate_joint_base (unsigned long size)
             // now enlarge it
             if (stack)
             {
-                // stack->print_region_info("stack > ", mvee::warnf);
-
                 // it should not overlap with anything that had been mapped below the stack before we could apply DCL
                 if (first_region_below_stack && (first_region_below_stack->region_base_address + first_region_below_stack->region_size > (stack_top - stack_limit - PAGE_SIZE))) // minus PAGE_SIZE b/c of the guard page
                 {
@@ -1472,8 +1477,6 @@ unsigned long mmap_table::calculate_joint_base (unsigned long size)
                 // OK. No overlaps => just enlarge to stack limit
                 else
                 {
-                    // warnf("enlarged stack\n");
-
 					// account for the guard page below the stack!!!
 					unsigned long old_base     = stack->region_base_address;
                     stack->region_base_address = stack_top - stack_limit - PAGE_SIZE;
@@ -1493,7 +1496,6 @@ unsigned long mmap_table::calculate_joint_base (unsigned long size)
 #ifdef MVEE_ENABLE_PMVEE
             if (region_start >= mp_end || region_end <= mp_start)
             {
-                // warnf(" > skipping [ %p ; %p )\n", (void*) region_start, (void*) region_end);
                 continue;
             }
             else if ((region_start < mp_start && region_end <= mp_end) ||
@@ -1548,18 +1550,17 @@ unsigned long mmap_table::calculate_joint_base (unsigned long size)
         debugf(" > [ %p ; %p )\n", (void*) empty_it->start, (void*) empty_it->end);
     for (auto empty_it = merged_map.rbegin(); empty_it != merged_map.rend(); empty_it++)
     {
-        if (empty_it->end - empty_it->start > size)
+        if (empty_it->end - empty_it->start > (size + 0x1000))
         {
             ret = empty_it->start;
             break;
         }
     }
 
-    debugf(" > selected %p\n", (void*) ret);
-
     cleanup:
     merged_map.clear();
-    //warnf("ALL DONE!\n");
+    if (ret == (unsigned long) -1)
+        warnf(" > woopsiedoopsie ran out of space!\n");
 
     return ret;
 }
