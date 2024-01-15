@@ -1643,10 +1643,11 @@ PRECALL(getpid)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(sendfile)
 {
-	debugf("%s - SYS_SENDFILE(OUT: %d, IN: %d, CNT: %zd)\n",
+	debugf("%s - SYS_SENDFILE(OUT: %d, IN: %d, OFF: %p, CNT: %zd)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   (int)ARG1(variantnum), 
 		   (int)ARG2(variantnum), 
+		   (void*)ARG3(variantnum), 
 		   (size_t)ARG4(variantnum));
 }
 
@@ -3446,13 +3447,16 @@ LOG_ARGS(rt_sigaction)
 {
 	struct sigaction DEBUGVAR action = call_get_sigaction(variantnum, (void*) ARG2(variantnum), OLDCALLIFNOT(__NR_rt_sigaction));
 
-	debugf("%s - SYS_RT_SIGACTION(%d - %s - %s)\n", 
+	debugf("%s - SYS_RT_SIGACTION(%d - %s - %s, %p, %p, %lld)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   (int)ARG1(variantnum), 
 		   getTextualSig(ARG1(variantnum)),
 		   (action.sa_handler == SIG_DFL) ? "SIG_DFL" :
 		   (action.sa_handler == SIG_IGN) ? "SIG_IGN" :
-		   (action.sa_handler == (__sighandler_t)-2) ? "---" : "SIG_PTR"
+		   (action.sa_handler == (__sighandler_t)-2) ? "---" : "SIG_PTR",
+		   (void*)ARG2(variantnum),
+		   (void*)ARG3(variantnum),
+		   ARG4(variantnum)
 		);
 }
 
