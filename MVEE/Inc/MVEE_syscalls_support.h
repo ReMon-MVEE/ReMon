@@ -357,16 +357,15 @@
     if (ARG ## numarg(0))                                                                                      \
     {                                                                                                          \
         std::vector<void*> events(mvee::numvariants);                                                  \
-        FILLARGARRAY(numarg, events);                                                                          \
         struct epoll_event master_event, slave_event;                                                          \
-        if (!rw::read_struct(variants[0].variantpid, events[0], sizeof(struct epoll_event), &master_event))    \
+        if (!rw::read_struct(variants[0].variantpid, (void*)ARG ## numarg(0), sizeof(struct epoll_event), &master_event))    \
         {                                                                                                      \
             cache_mismatch_info("couldn't read epoll_event\n");                                                        \
             return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;                                        \
         }                                                                                                      \
         for (int i = 1; i < mvee::numvariants; ++i)                                                            \
         {                                                                                                      \
-            if (!rw::read_struct(variants[i].variantpid, events[i], sizeof(struct epoll_event), &slave_event)) \
+            if (!rw::read_struct(variants[i].variantpid, (void*)ARG ## numarg(i), sizeof(struct epoll_event), &slave_event)) \
             {                                                                                                  \
                 cache_mismatch_info("couldn't read epoll_event\n");                                                    \
                 return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY;                                    \
