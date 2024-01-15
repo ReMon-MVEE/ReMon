@@ -1293,7 +1293,7 @@ POSTCALL(execve)
 
             int               tries = 0;
 #ifdef MVEE_CONNECTED_MMAP_REGIONS
-            std::shared_ptr<mmap_region_info*[]> stack_regions(new mmap_region_info*[mvee::numvariants]);
+            connected_region_info* stack_regions = new connected_region_info();
 #endif
             for (int j = 1; j < mvee::numvariants; ++j)
             {
