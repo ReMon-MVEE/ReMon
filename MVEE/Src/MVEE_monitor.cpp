@@ -299,6 +299,11 @@ monitor::monitor(std::vector<pid_t>& pids)
         // ignore, for now.
     }
     poly_exec = 1;
+    pmvee_zone_pt = (unsigned long) -1;
+    pmvee_jump_addresses = std::vector<std::vector<unsigned long>>();
+    pmvee_state_copies = std::vector<std::vector<unsigned long>>();
+    pmvee_state_migrations = std::vector<std::vector<unsigned long>>();
+    pmvee_state_copy_zone = { 0, 0, 0 };
 
     // Monitor 0 runs in a seperate thread IF we do not run in singlethreaded mode
     // Consequently, monitor 0 starts in STATE_WAITING_ATTACH if we run in multithreaded mode
@@ -832,6 +837,7 @@ void monitor::set_should_check_multithread_state()
 -----------------------------------------------------------------------------*/
 void monitor::shutdown(bool success)
 {
+    set_mmap_table->print_mmap_table();
 #ifdef MVEE_LOG_NON_INSTRUMENTED_INSTRUCTION
     mvee::flush_non_instrumented_log();
 #endif
@@ -2284,6 +2290,16 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
 #else
                 // update the intent for the faulting variant
                 variant->instruction.update((void*) variant->regs.rip, decode_address_tag(siginfo.si_addr, variant));
+                // if (!poly_exec)
+                // {
+                //     instruction_intent_emulation::lookup_table[instruction->opcode()].emulator(instruction, this, variant)
+                //     variant->regs.rip += variant->instruction.size;
+                //     if (!interaction::write_all_regs(variant->variantpid, &variant->regs) && errno == ESRCH)
+                //         return 0;
+//
+                //     relevant_monitor->call_resume(variant->variant_num);
+                // }
+                // else
                 instruction_intent_emulation::handle_emulation(variant, this);
                 return;
 #endif
