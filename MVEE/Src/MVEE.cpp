@@ -85,6 +85,7 @@ Json::Value*                           mvee::config_monitor                     
 Json::Value*                           mvee::config_variant_global               = NULL;
 Json::Value*                           mvee::config_variant_exec                 = NULL;
 std::string                            mvee::synctrace_logfile                   = "";
+std::string                            mvee::spec_profile                   = "";
 
 /*-----------------------------------------------------------------------------
     Prototypes
@@ -1814,7 +1815,7 @@ bool mvee::process_opts(int argc, char** argv, bool add_args)
 {
 	int opt;
 	bool stop = false;
-	while ((opt = getopt(argc, argv, ":s:f:N:npocS:")) != -1 && !stop)
+	while ((opt = getopt(argc, argv, ":s:f:N:npocS:P:")) != -1 && !stop)
 	{
 		switch(opt)
 		{
@@ -1840,6 +1841,9 @@ bool mvee::process_opts(int argc, char** argv, bool add_args)
 				(*mvee::config_variant_global)["disable_syscall_checks"] = true;
 				break;
 #endif
+			case 'P':
+				mvee::spec_profile = std::string(optarg);
+				break;
 			case 's':
 				mvee::config_variant_set = std::string(optarg);
 				break;

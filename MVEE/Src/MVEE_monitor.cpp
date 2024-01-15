@@ -1324,7 +1324,7 @@ bool monitor::handle_rdtsc_event(int variantnum)
 					}
 
 					if (!interaction::resume_until_syscall(variants[i].variantpid))
-						throw RwRegsFailure(i, "RDTSC resume");
+						throw ResumeFailure(i, "RDTSC resume");
 
                     variants[i].callnum = NO_CALL;
                 }
@@ -2619,6 +2619,45 @@ void monitor::sig_set_pending_signals(bool pending_signals, bool entering_signal
 		buffer->ipmon_have_pending_signals  = pending_signals ? 1 : 0;
 		buffer->ipmon_have_pending_signals |= entering_signal_handler ? 2 : 0;
 	}
+}
+
+/*-----------------------------------------------------------------------------
+    initialize_ipmon
+-----------------------------------------------------------------------------*/
+bool monitor::initialize_ipmon(int variantnum)
+{
+    if (!ipmon_buffer)
+    {
+        warnf("prctl(PR_REGISTER_IPMON) called, but the IP-MON buffer was not yet initialized");
+        return false;
+    }
+
+    // Write the IP-MON buffer header
+    struct ipmon_buffer* buffer = (struct ipmon_buffer*) ipmon_buffer->ptr;
+
+    // The first cacheline contains the key, number of variants and usable size.
+    // Then we have one cacheline for each variant to store its current position within the IP-MON buffer
+    unsigned usable_size = ipmon_buffer->sz - 64 * (1 + mvee::numvariants);
+    buffer->ipmon_numvariants = mvee::numvariants;
+    buffer->ipmon_usable_size = usable_size;
+
+    // remember the base addresses and keys for IP-MON
+    for (int i = 0; i < mvee::numvariants; ++i)
+    {
+        unsigned long ip;
+
+        if (!interaction::fetch_ip(variants[i].variantpid, ip))
+            throw RwRegsFailure(i, "fetch IP-MON registration site");
+
+        variants[i].ipmon_region = set_mmap_table->get_region_info(i, ip, 0);
+        debugf("Initializing IP-MON - IP: 0x" PTRSTR "\n", ip);
+        if (variants[i].ipmon_region)
+            variants[i].ipmon_region->print_region_info("> IP-MON REGION: ");
+    }
+
+    debugf("IP-MON initialized\n");
+    ipmon_initialized = true;
+    return true;
 }
 
 /*-----------------------------------------------------------------------------

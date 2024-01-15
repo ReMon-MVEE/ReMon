@@ -517,6 +517,9 @@ public:
     // The logfile when using SyncTrace
 	static std::string              synctrace_logfile;
 
+	// The SPEC profile to use
+	static std::string              spec_profile;
+
 	// Spec ids for the variants we're running
 	static std::vector<std::string> variant_ids;
 
