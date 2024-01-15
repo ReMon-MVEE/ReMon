@@ -1,6 +1,6 @@
-diff -ur orig/arch/x86/entry/syscalls/syscall_64.tbl linux-source-5.4.0/arch/x86/entry/syscalls/syscall_64.tbl
---- orig/arch/x86/entry/syscalls/syscall_64.tbl	2019-11-25 01:32:01.000000000 +0100
-+++ linux-source-5.4.0/arch/x86/entry/syscalls/syscall_64.tbl	2022-07-28 14:30:23.945840278 +0200
+diff -ur origarch/x86/entry/syscalls/syscall_64.tbl linux-source-5.4.0/arch/x86/entry/syscalls/syscall_64.tbl
+--- origarch/x86/entry/syscalls/syscall_64.tbl	2023-01-06 13:39:51.898475202 +0100
++++ linux-source-5.4.0/arch/x86/entry/syscalls/syscall_64.tbl	2024-01-06 00:06:00.317679038 +0100
 @@ -364,6 +364,9 @@
  # on-the-fly for compat_sys_*() compatibility system calls if X86_X32
  # is defined.
@@ -11,10 +11,21 @@ diff -ur orig/arch/x86/entry/syscalls/syscall_64.tbl linux-source-5.4.0/arch/x86
  512	x32	rt_sigaction		__x32_compat_sys_rt_sigaction
  513	x32	rt_sigreturn		sys32_x32_rt_sigreturn
  514	x32	ioctl			__x32_compat_sys_ioctl
-diff -ur orig/fs/exec.c linux-source-5.4.0/fs/exec.c
---- orig/fs/exec.c	2022-06-22 17:00:11.000000000 +0200
-+++ linux-source-5.4.0/fs/exec.c	2022-07-28 14:30:23.945840278 +0200
-@@ -1876,6 +1876,8 @@
+diff -ur origarch/x86/mm/tlb.c linux-source-5.4.0/arch/x86/mm/tlb.c
+--- origarch/x86/mm/tlb.c	2022-11-23 21:19:00.000000000 +0100
++++ linux-source-5.4.0/arch/x86/mm/tlb.c	2024-01-06 00:06:00.318679042 +0100
+@@ -806,6 +806,7 @@
+ 	put_flush_tlb_info();
+ 	put_cpu();
+ }
++EXPORT_SYMBOL(flush_tlb_mm_range);
+ 
+ 
+ static void do_flush_tlb_all(void *info)
+diff -ur origfs/exec.c linux-source-5.4.0/fs/exec.c
+--- origfs/exec.c	2022-11-23 21:19:00.000000000 +0100
++++ linux-source-5.4.0/fs/exec.c	2024-01-06 00:06:00.319679045 +0100
+@@ -1899,6 +1899,8 @@
  		putname(filename);
  	if (displaced)
  		put_files_struct(displaced);
@@ -23,10 +34,10 @@ diff -ur orig/fs/exec.c linux-source-5.4.0/fs/exec.c
  	return retval;
  
  out:
-diff -ur orig/include/linux/sched.h linux-source-5.4.0/include/linux/sched.h
---- orig/include/linux/sched.h	2022-06-22 17:00:11.000000000 +0200
-+++ linux-source-5.4.0/include/linux/sched.h	2022-07-28 14:30:23.946840280 +0200
-@@ -621,6 +621,58 @@
+diff -ur originclude/linux/sched.h linux-source-5.4.0/include/linux/sched.h
+--- originclude/linux/sched.h	2022-11-23 21:19:00.000000000 +0100
++++ linux-source-5.4.0/include/linux/sched.h	2024-01-06 00:06:00.320679049 +0100
+@@ -625,6 +625,58 @@
  	struct wake_q_node *next;
  };
  
@@ -36,7 +47,7 @@ diff -ur orig/include/linux/sched.h linux-source-5.4.0/include/linux/sched.h
 +
 +#ifndef __NR_syscalls
 +  /* this is the highest known syscall no for x86_64 in this kernel... */
-+  #define __NR_syscalls __NR_mlock2
++  #define __NR_syscalls __NR_clone3 + 1
 +#endif
 +
 +/* MVEE IP-MON patch */
@@ -85,68 +96,77 @@ diff -ur orig/include/linux/sched.h linux-source-5.4.0/include/linux/sched.h
  struct task_struct {
  #ifdef CONFIG_THREAD_INFO_IN_TASK
  	/*
-@@ -726,6 +778,7 @@
+@@ -730,6 +782,8 @@
  
  	struct mm_struct		*mm;
  	struct mm_struct		*active_mm;
 +	struct ipmon_info		ipmon_info;
++	unsigned long			pmvee_last_call;
  
  	/* Per-thread vma caching: */
  	struct vmacache			vmacache;
-@@ -747,6 +800,7 @@
+@@ -751,6 +805,8 @@
  	/* Scheduler bits, serialized by scheduler locks: */
  	unsigned			sched_reset_on_fork:1;
  	unsigned			sched_contributes_to_load:1;
 +	unsigned			ptrace_ignored_current:1;
++	unsigned			pmvee_ignored_current:1;
  	unsigned			sched_migrated:1;
  	unsigned			sched_remote_wakeup:1;
  #ifdef CONFIG_PSI
-@@ -1286,6 +1340,9 @@
+@@ -1290,6 +1346,10 @@
  	 */
  };
  
 +/* Defined in kernel/sys.c */
 +unsigned char ipmon_handle_bypass(struct pt_regs *regs);
++unsigned char pmvee_should_skip(struct pt_regs *regs, int entering);
 +
  static inline struct pid *task_pid(struct task_struct *task)
  {
  	return task->thread_pid;
-Only in linux-source-5.4.0/include/linux: sched.h.orig
-diff -ur orig/include/linux/tracehook.h linux-source-5.4.0/include/linux/tracehook.h
---- orig/include/linux/tracehook.h	2019-11-25 01:32:01.000000000 +0100
-+++ linux-source-5.4.0/include/linux/tracehook.h	2022-07-28 14:30:23.946840280 +0200
-@@ -101,6 +101,11 @@
+diff -ur originclude/linux/tracehook.h linux-source-5.4.0/include/linux/tracehook.h
+--- originclude/linux/tracehook.h	2019-11-25 01:32:01.000000000 +0100
++++ linux-source-5.4.0/include/linux/tracehook.h	2024-01-06 00:06:00.320679049 +0100
+@@ -101,6 +101,15 @@
  static inline __must_check int tracehook_report_syscall_entry(
  	struct pt_regs *regs)
  {
-+	if ((current->ptrace & PT_PTRACED) && ipmon_handle_bypass(regs))
-+	{
-+		current->ptrace_ignored_current = 1;
-+		return 0;
-+	}
++    if (pmvee_should_skip(regs, 1))
++    {
++            return 0;
++    }
++    if ((current->ptrace & PT_PTRACED) && ipmon_handle_bypass(regs))
++    {
++            current->ptrace_ignored_current = 1;
++            return 0;
++    }
  	return ptrace_report_syscall(regs, PTRACE_EVENTMSG_SYSCALL_ENTRY);
  }
  
-@@ -125,8 +130,15 @@
- {
+@@ -126,7 +135,18 @@
  	if (step)
  		user_single_step_report(regs);
--	else
-+	else {
-+		if (current->ptrace_ignored_current)
-+		{
-+			current->ptrace_ignored_current = 0;
-+			return;
-+		}
-+
- 		ptrace_report_syscall(regs, PTRACE_EVENTMSG_SYSCALL_EXIT);
-+	}
+ 	else
+-		ptrace_report_syscall(regs, PTRACE_EVENTMSG_SYSCALL_EXIT);
++    {
++        if (pmvee_should_skip(regs, 0))
++        {
++            return;
++        }
++        if (current->ptrace_ignored_current)
++        {
++            current->ptrace_ignored_current = 0;
++            return;
++        }
++        ptrace_report_syscall(regs, PTRACE_EVENTMSG_SYSCALL_EXIT);
++    }
  }
  
  /**
-diff -ur orig/include/uapi/asm-generic/errno.h linux-source-5.4.0/include/uapi/asm-generic/errno.h
---- orig/include/uapi/asm-generic/errno.h	2019-11-25 01:32:01.000000000 +0100
-+++ linux-source-5.4.0/include/uapi/asm-generic/errno.h	2022-07-28 14:30:23.947840283 +0200
+diff -ur originclude/uapi/asm-generic/errno.h linux-source-5.4.0/include/uapi/asm-generic/errno.h
+--- originclude/uapi/asm-generic/errno.h	2019-11-25 01:32:01.000000000 +0100
++++ linux-source-5.4.0/include/uapi/asm-generic/errno.h	2024-01-06 00:06:00.320679049 +0100
 @@ -120,4 +120,6 @@
  
  #define EHWPOISON	133	/* Memory page has hardware error */
@@ -154,9 +174,9 @@ diff -ur orig/include/uapi/asm-generic/errno.h linux-source-5.4.0/include/uapi/a
 +#define ENOIPMON    256 /* MVEE IP-MON patch */
 +
  #endif
-diff -ur orig/include/uapi/linux/prctl.h linux-source-5.4.0/include/uapi/linux/prctl.h
---- orig/include/uapi/linux/prctl.h	2019-11-25 01:32:01.000000000 +0100
-+++ linux-source-5.4.0/include/uapi/linux/prctl.h	2022-07-28 14:30:23.947840283 +0200
+diff -ur originclude/uapi/linux/prctl.h linux-source-5.4.0/include/uapi/linux/prctl.h
+--- originclude/uapi/linux/prctl.h	2019-11-25 01:32:01.000000000 +0100
++++ linux-source-5.4.0/include/uapi/linux/prctl.h	2024-01-06 00:06:00.321679052 +0100
 @@ -234,4 +234,6 @@
  #define PR_GET_TAGGED_ADDR_CTRL		56
  # define PR_TAGGED_ADDR_ENABLE		(1UL << 0)
@@ -164,9 +184,9 @@ diff -ur orig/include/uapi/linux/prctl.h linux-source-5.4.0/include/uapi/linux/p
 +#define PR_REGISTER_IPMON 0xb00b135 /* MVEE IP-MON patch */
 +
  #endif /* _LINUX_PRCTL_H */
-diff -ur orig/kernel/events/uprobes.c linux-source-5.4.0/kernel/events/uprobes.c
---- orig/kernel/events/uprobes.c	2022-06-22 17:00:11.000000000 +0200
-+++ linux-source-5.4.0/kernel/events/uprobes.c	2022-07-28 14:36:42.971517279 +0200
+diff -ur origkernel/events/uprobes.c linux-source-5.4.0/kernel/events/uprobes.c
+--- origkernel/events/uprobes.c	2022-11-23 21:19:00.000000000 +0100
++++ linux-source-5.4.0/kernel/events/uprobes.c	2024-01-06 00:06:00.321679052 +0100
 @@ -1569,11 +1569,13 @@
  {
  	percpu_down_read(&dup_mmap_sem);
@@ -189,9 +209,9 @@ diff -ur orig/kernel/events/uprobes.c linux-source-5.4.0/kernel/events/uprobes.c
  
  /*
   *  - search for a free slot.
-diff -ur orig/kernel/fork.c linux-source-5.4.0/kernel/fork.c
---- orig/kernel/fork.c	2022-06-22 17:00:11.000000000 +0200
-+++ linux-source-5.4.0/kernel/fork.c	2022-07-28 14:36:11.985555693 +0200
+diff -ur origkernel/fork.c linux-source-5.4.0/kernel/fork.c
+--- origkernel/fork.c	2022-11-23 21:19:00.000000000 +0100
++++ linux-source-5.4.0/kernel/fork.c	2024-01-06 00:06:00.322679056 +0100
 @@ -366,6 +366,7 @@
  	}
  	return new;
@@ -212,9 +232,9 @@ diff -ur orig/kernel/fork.c linux-source-5.4.0/kernel/fork.c
  	/*
  	 * This _must_ happen before we call free_task(), i.e. before we jump
  	 * to any of the bad_fork_* labels. This is to avoid freeing
-diff -ur orig/kernel/sys.c linux-source-5.4.0/kernel/sys.c
---- orig/kernel/sys.c	2022-06-22 17:00:11.000000000 +0200
-+++ linux-source-5.4.0/kernel/sys.c	2022-07-28 14:30:23.948840286 +0200
+diff -ur origkernel/sys.c linux-source-5.4.0/kernel/sys.c
+--- origkernel/sys.c	2022-11-23 21:19:00.000000000 +0100
++++ linux-source-5.4.0/kernel/sys.c	2024-01-06 00:06:00.323679059 +0100
 @@ -61,6 +61,8 @@
  #include <linux/uidgid.h>
  #include <linux/cred.h>
@@ -224,7 +244,7 @@ diff -ur orig/kernel/sys.c linux-source-5.4.0/kernel/sys.c
  #include <linux/nospec.h>
  
  #include <linux/kmsg_dump.h>
-@@ -2228,6 +2230,300 @@
+@@ -2228,6 +2230,309 @@
  	return error;
  }
  
@@ -422,7 +442,7 @@ diff -ur orig/kernel/sys.c linux-source-5.4.0/kernel/sys.c
 +	 * checks here on the reported syscall mask */
 +	if (syscall_mask_size > kernel_syscall_mask_size)
 +    {
-+		printk("process %s (%d) attempted to register an IP-MON but the syscall_mask_size is invalid (%lu)\n", current->comm, current->pid, syscall_mask_size);
++		printk("process %s (%d) attempted to register an IP-MON but the syscall_mask_size is invalid (%lu vs expected %lu)\n", current->comm, current->pid, syscall_mask_size, kernel_syscall_mask_size);
 +		return -EINVAL;
 +    }
 +
@@ -494,13 +514,13 @@ diff -ur orig/kernel/sys.c linux-source-5.4.0/kernel/sys.c
 +}
 +
 +
-+long (*pmvee_switch_stub) (pid_t leader, unsigned long from, unsigned long to, unsigned long flags) = NULL;
++long (*pmvee_switch_stub) (pid_t leader, unsigned long from, unsigned long size_one, unsigned long size_two, unsigned long flags) = NULL;
 +EXPORT_SYMBOL(pmvee_switch_stub);
 +
-+SYSCALL_DEFINE4(pmvee_switch, pid_t, leader, unsigned long, from, unsigned long, to, unsigned long, flags)
++SYSCALL_DEFINE5(pmvee_switch, pid_t, leader, unsigned long, from, unsigned long, size_one, unsigned long, size_two, unsigned long, flags)
 +{
 +	if (pmvee_switch_stub)
-+		return pmvee_switch_stub(leader, from, to, flags);
++		return pmvee_switch_stub(leader, from, size_one, size_two, flags);
 +	else
 +		printk("system call pmvee_switch not implemented.\n");
 +
@@ -508,13 +528,13 @@ diff -ur orig/kernel/sys.c linux-source-5.4.0/kernel/sys.c
 +}
 +
 +
-+long (*pmvee_check_stub) (pid_t leader, unsigned long from, unsigned long to, unsigned long flags) = NULL;
++long (*pmvee_check_stub) (pid_t leader, unsigned long from, unsigned long size_one, unsigned long size_two, unsigned long flags) = NULL;
 +EXPORT_SYMBOL(pmvee_check_stub);
 +
-+SYSCALL_DEFINE4(pmvee_check, pid_t, leader, unsigned long, from, unsigned long, to, unsigned long, flags)
++SYSCALL_DEFINE5(pmvee_check, pid_t, leader, unsigned long, from, unsigned long, size_one, unsigned long, size_two, unsigned long, flags)
 +{
 +	if (pmvee_check_stub)
-+		return pmvee_check_stub(leader, from, to, flags);
++		return pmvee_check_stub(leader, from, size_one, size_two, flags);
 +	else
 +		printk("system call pmvee_check not implemented.\n");
 +
@@ -522,10 +542,19 @@ diff -ur orig/kernel/sys.c linux-source-5.4.0/kernel/sys.c
 +}
 +
 +
++unsigned char (*pmvee_should_skip_stub) (struct pt_regs *regs, int entering) = NULL;
++EXPORT_SYMBOL(pmvee_should_skip_stub);
++
++unsigned char pmvee_should_skip(struct pt_regs *regs, int entering)
++{
++	return (pmvee_should_skip_stub && pmvee_should_skip_stub(regs, entering));
++}
++
++
  #ifdef CONFIG_CHECKPOINT_RESTORE
  static int prctl_get_tid_address(struct task_struct *me, int __user **tid_addr)
  {
-@@ -2496,6 +2792,9 @@
+@@ -2496,6 +2801,9 @@
  			return -EINVAL;
  		error = GET_TAGGED_ADDR_CTRL();
  		break;
@@ -535,59 +564,21 @@ diff -ur orig/kernel/sys.c linux-source-5.4.0/kernel/sys.c
  	default:
  		error = -EINVAL;
  		break;
-diff -ur orig/mm/mmap.c linux-source-5.4.0/mm/mmap.c
---- orig/mm/mmap.c	2023-01-09 15:21:00.373778461 +0100
-+++ linux-source-5.4.0/mm/mmap.c	2022-11-23 21:19:00.000000000 +0100
-@@ -132,7 +132,6 @@
- 	/* remove_protection_ptes reads vma->vm_page_prot without mmap_sem */
- 	WRITE_ONCE(vma->vm_page_prot, vm_page_prot);
+diff -ur origmm/interval_tree.c linux-source-5.4.0/mm/interval_tree.c
+--- origmm/interval_tree.c	2023-01-24 17:04:29.471654623 +0100
++++ linux-source-5.4.0/mm/interval_tree.c	2024-01-06 00:06:00.324679062 +0100
+@@ -57,6 +57,7 @@
+ 	rb_insert_augmented(&node->shared.rb, &root->rb_root,
+ 			    &vma_interval_tree_augment);
  }
-+EXPORT_SYMBOL(vma_set_page_prot);
++EXPORT_SYMBOL(vma_interval_tree_insert_after);
  
- /*
-  * Requires inode->i_mapping->i_mmap_rwsem
-@@ -609,7 +608,6 @@
- 	vma_gap_update(vma);
- 	vma_rb_insert(vma, &mm->mm_rb);
- }
-+EXPORT_SYMBOL(__vma_link_rb);
- 
- static void __vma_link_file(struct vm_area_struct *vma)
+ static inline unsigned long avc_start_pgoff(struct anon_vma_chain *avc)
  {
-@@ -2862,7 +2860,6 @@
- 
- 	return downgrade ? 1 : 0;
- }
-+EXPORT_SYMBOL(__do_munmap);
- 
- int do_munmap(struct mm_struct *mm, unsigned long start, size_t len,
- 	      struct list_head *uf)
-diff -ur orig/mm/rmap.c linux-source-5.4.0/mm/rmap.c
---- orig/mm/rmap.c	2022-06-22 17:00:11.000000000 +0200
-+++ linux-source-5.4.0/mm/rmap.c	2022-07-28 14:35:57.184581365 +0200
-@@ -373,6 +373,7 @@
- 	unlink_anon_vmas(vma);
- 	return -ENOMEM;
- }
-+EXPORT_SYMBOL(anon_vma_fork);
- 
- void unlink_anon_vmas(struct vm_area_struct *vma)
- {
-diff -ur orig/arch/x86/mm/tlb.c linux-source-5.4.0/arch/x86/mm/tlb.c 
---- orig/arch/x86/mm/tlb.c	2023-01-09 14:49:50.596258910 +0100
-+++ linux-source-5.4.0/arch/x86/mm/tlb.c	2022-11-23 21:19:00.000000000 +0100
-@@ -806,7 +806,6 @@
- 	put_flush_tlb_info();
- 	put_cpu();
- }
-+EXPORT_SYMBOL(flush_tlb_mm_range);
- 
- 
- static void do_flush_tlb_all(void *info)
-diff -ur orig/mm/memory.c linux-source-5.4.0/mm/memory.c 
---- orig/mm/memory.c	2023-01-09 14:50:16.096260703 +0100
-+++ linux-source-5.4.0/mm/memory.c	2022-11-23 21:19:00.000000000 +0100
-@@ -1012,7 +1012,6 @@
+diff -ur origmm/memory.c linux-source-5.4.0/mm/memory.c
+--- origmm/memory.c	2022-11-23 21:19:00.000000000 +0100
++++ linux-source-5.4.0/mm/memory.c	2024-01-06 00:06:00.325679066 +0100
+@@ -1012,6 +1012,7 @@
  		mmu_notifier_invalidate_range_end(&range);
  	return ret;
  }
@@ -595,10 +586,45 @@ diff -ur orig/mm/memory.c linux-source-5.4.0/mm/memory.c
  
  /* Whether we should zap all COWed (private) pages too */
  static inline bool should_zap_cows(struct zap_details *details)
-diff -u orig/mm/mprotect.c linux-source-5.4.0/mm/mprotect.c 
---- orig/mm/mprotect.c	2023-01-09 15:21:18.085799104 +0100
-+++ linux-source-5.4.0/mm/mprotect.c	2022-11-23 21:19:00.000000000 +0100
-@@ -327,7 +327,6 @@
+diff -ur origmm/mmap.c linux-source-5.4.0/mm/mmap.c
+--- origmm/mmap.c	2022-11-23 21:19:00.000000000 +0100
++++ linux-source-5.4.0/mm/mmap.c	2024-01-06 00:06:00.327679072 +0100
+@@ -132,6 +132,7 @@
+ 	/* remove_protection_ptes reads vma->vm_page_prot without mmap_sem */
+ 	WRITE_ONCE(vma->vm_page_prot, vm_page_prot);
+ }
++EXPORT_SYMBOL(vma_set_page_prot);
+ 
+ /*
+  * Requires inode->i_mapping->i_mmap_rwsem
+@@ -608,6 +609,7 @@
+ 	vma_gap_update(vma);
+ 	vma_rb_insert(vma, &mm->mm_rb);
+ }
++EXPORT_SYMBOL(__vma_link_rb);
+ 
+ static void __vma_link_file(struct vm_area_struct *vma)
+ {
+@@ -673,6 +675,7 @@
+ 	__vma_link(mm, vma, prev, rb_link, rb_parent);
+ 	mm->map_count++;
+ }
++EXPORT_SYMBOL(__insert_vm_struct);
+ 
+ static __always_inline void __vma_unlink_common(struct mm_struct *mm,
+ 						struct vm_area_struct *vma,
+@@ -2860,6 +2863,7 @@
+ 
+ 	return downgrade ? 1 : 0;
+ }
++EXPORT_SYMBOL(__do_munmap);
+ 
+ int do_munmap(struct mm_struct *mm, unsigned long start, size_t len,
+ 	      struct list_head *uf)
+diff -ur origmm/mprotect.c linux-source-5.4.0/mm/mprotect.c
+--- origmm/mprotect.c	2022-11-23 21:19:00.000000000 +0100
++++ linux-source-5.4.0/mm/mprotect.c	2024-01-06 00:06:00.327679072 +0100
+@@ -327,6 +327,7 @@
  
  	return pages;
  }
@@ -606,25 +632,25 @@ diff -u orig/mm/mprotect.c linux-source-5.4.0/mm/mprotect.c
  
  unsigned long change_protection(struct vm_area_struct *vma, unsigned long start,
  		       unsigned long end, pgprot_t newprot,
-diff -ur orig/mm/interval_tree.c linux-source-5.4.0/mm/interval_tree.c
---- orig/mm/interval_tree.c    2023-01-24 17:04:29.471654623 +0100
-+++ linux-source-5.4.0/mm/interval_tree.c  2023-01-24 17:05:32.064768057 +0100
-@@ -57,6 +57,7 @@
-        rb_insert_augmented(&node->shared.rb, &root->rb_root,
-                            &vma_interval_tree_augment);
- }
-+EXPORT_SYMBOL(vma_interval_tree_insert_after);
- 
- static inline unsigned long avc_start_pgoff(struct anon_vma_chain *avc)
- {
-diff -ur orig/mm/prfile.c linux-source-5.4.0/mm/prfile.c
---- orig/mm/prfile.c   2023-01-24 17:04:27.280645615 +0100
-+++ linux-source-5.4.0/mm/prfile.c 2023-01-24 17:05:16.215801167 +0100
+diff -ur origmm/prfile.c linux-source-5.4.0/mm/prfile.c
+--- origmm/prfile.c	2023-01-24 17:04:27.280645615 +0100
++++ linux-source-5.4.0/mm/prfile.c	2024-01-06 00:06:00.327679072 +0100
 @@ -53,6 +53,7 @@
-        if (f && pr)
-                get_file(pr);
+ 	if (f && pr)
+ 		get_file(pr);
  }
 +EXPORT_SYMBOL(vma_do_get_file);
  
  void vma_do_fput(struct vm_area_struct *vma, const char func[], int line)
+ {
+diff -ur origmm/rmap.c linux-source-5.4.0/mm/rmap.c
+--- origmm/rmap.c	2022-11-23 21:19:00.000000000 +0100
++++ linux-source-5.4.0/mm/rmap.c	2024-01-06 00:06:00.328679075 +0100
+@@ -381,6 +381,7 @@
+ 	unlink_anon_vmas(vma);
+ 	return -ENOMEM;
+ }
++EXPORT_SYMBOL(anon_vma_fork);
+ 
+ void unlink_anon_vmas(struct vm_area_struct *vma)
  {
