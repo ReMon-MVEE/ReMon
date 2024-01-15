@@ -25,6 +25,7 @@
 #include "MVEE_private_arch.h"
 #include "MVEE_interaction.h"
 #include "MVEE_filedesc.h"
+#include "PMVEE.h"
 #ifdef MVEE_ARCH_USE_LIBUNWIND
 #define UNW_REMOTE_ONLY
 #include "libunwind-ptrace.h"
@@ -49,8 +50,8 @@ typedef void (monitor:: *mvee_syscall_logger)(int);
 #define NO_MVEE_SCHEDULING                 0                        // mvee won't pin any threads
 #define MVEE_CLEVER_SCHEDULING             1 
 
-#define PMVEE_MP_SIZE                                     0x200000000 // (8GiB)
-#define PMVEE_MP_BINARIES                                 {}
+#define PMVEE_MP_SIZE                      PMVEE_ZONE_ONE_DEFAULT_SIZE + PMVEE_ZONE_TWO_DEFAULT_SIZE
+#define PMVEE_MP_BINARIES                  {}
 
 /*-----------------------------------------------------------------------------
   Enumerations
@@ -274,6 +275,8 @@ public:
     unsigned long shm_tag;                                          // Tag for shared memory pages
     std::vector<std::pair<unsigned long, size_t>> reset_atfork;     // Variables to reset in forked children
     struct iovec* replaced_iovec;
+	unsigned long pmvee_libc_state_copy_leader_addr;
+	unsigned long pmvee_libc_state_copy_follower_addr;
     // -----------------------------------------------------------------------------------------------------------------
 
     unsigned long rollback_rsp = -1;
@@ -514,6 +517,10 @@ private:
     // returns the starting address for the given function.
     //
     void             call_jump_to_equivalent_function_addresses ();
+	void 	         convert_equivalent_pointer_array           ();
+	void             insert_jump_targets                        (fd_info* info,
+                                                                 std::vector<unsigned long> base_addresses,
+                                                                 std::vector<unsigned long> offsets);
 
 	//
 	// Comparison functions. These are pretty self-explanatory.  They generally
@@ -1225,7 +1232,21 @@ private:
     size_t                   mp_size = PMVEE_MP_SIZE;
     unsigned long            mp_start;
     int                      poly_exec;
+	unsigned long            pmvee_zone_pt;
     std::vector<std::string> mp_binaries = PMVEE_MP_BINARIES;
+	std::vector<std::vector<unsigned long>>
+                             pmvee_jump_addresses;
+	std::vector<std::vector<unsigned long>>
+							 pmvee_state_copies;
+	std::vector<std::vector<unsigned long>>
+							 pmvee_state_migrations;
+	struct pmvee_state_copy_zone_t
+	{
+		unsigned long state_copy_start;
+		unsigned long state_alter_start;
+		unsigned long state_copy_end;
+	};
+	pmvee_state_copy_zone_t pmvee_state_copy_zone;
     // pmvee ===========================================================================================================
 };
 

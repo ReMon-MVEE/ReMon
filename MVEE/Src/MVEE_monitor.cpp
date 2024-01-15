@@ -90,6 +90,7 @@ variantstate::variantstate()
     , config (NULL)
     , instruction (&this->variantpid, &this->variant_num)
     , replaced_iovec(0)
+    , rollback_rsp(-1)
 #ifdef __NR_socketcall
     , orig_arg1 (0)
 #endif
@@ -240,6 +241,17 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
 
     mp_start = parent_monitor->mp_start;
     poly_exec = parent_monitor->poly_exec;
+    pmvee_zone_pt = parent_monitor->pmvee_zone_pt;
+    pmvee_jump_addresses = std::vector<std::vector<unsigned long>>();
+    for (std::vector<unsigned long> jumps: parent_monitor->pmvee_jump_addresses)
+        pmvee_jump_addresses.push_back(std::vector<unsigned long>(jumps));
+    pmvee_state_copies = std::vector<std::vector<unsigned long>>();
+    for (std::vector<unsigned long> state_copies: parent_monitor->pmvee_state_copies)
+        pmvee_state_copies.push_back(std::vector<unsigned long>(state_copies));
+    pmvee_state_migrations = std::vector<std::vector<unsigned long>>();
+    for (std::vector<unsigned long> state_copies: parent_monitor->pmvee_state_migrations)
+        pmvee_state_migrations.push_back(std::vector<unsigned long>(state_copies));
+    pmvee_state_copy_zone = parent_monitor->pmvee_state_copy_zone;
 
     for (int i = 0; i < mvee::numvariants; ++i)
     {
@@ -250,6 +262,8 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
         variants[i].syscall_pointer = parent_monitor->variants[i].syscall_pointer;
 #endif
         variants[i].shm_tag                  = parent_monitor->variants[i].shm_tag;
+        variants[i].pmvee_libc_state_copy_leader_addr = parent_monitor->variants[i].pmvee_libc_state_copy_leader_addr;
+        variants[i].pmvee_libc_state_copy_follower_addr = parent_monitor->variants[i].pmvee_libc_state_copy_follower_addr;
 
         // If this is a fork: Copy over the list of variables to reset
         if (!shares_mmap_table)
@@ -1554,6 +1568,9 @@ void monitor::handle_exit_event(int index)
             break;
         }
     }
+
+    if (!index && !poly_exec)
+        bAllTerminated = true;
 
     if (bAllTerminated)
     {
@@ -3393,9 +3410,12 @@ void* monitor::thread(void* param)
 				}			
 			}
 			else
+            {
 				debugf("wait failed - error: %s - status: %s\n", 
 					   getTextualErrno(errno),
 					   getTextualMVEEWaitStatus(status).c_str());
+                mon->log_backtraces();
+            }
 		}
 	}
 	catch (MVEEBaseException& e)

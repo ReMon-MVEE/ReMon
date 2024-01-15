@@ -436,7 +436,10 @@ public:
     // pmvee
     //
     unsigned long      init_mp                      (size_t mp_size);
-    unsigned long      calculate_joint_base         (unsigned long size);
+    unsigned long      calculate_joint_base         (unsigned long size, bool allow_writes);
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
+    void               diff_memory                  (int leader_pid, int follower, int follower_pid, int include_exec);
+#endif
 
 private:
     void init();

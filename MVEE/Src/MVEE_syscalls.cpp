@@ -35,6 +35,9 @@
 #include "MVEE_signals.h"
 #include "MVEE_interaction.h"
 #include "MVEE_numcalls.h"
+#define PMVEE_LEADER
+#define PMVEE_COPY_STATE
+#include "PMVEE.h"
 
 /*-----------------------------------------------------------------------------
   handler and logger table
@@ -265,10 +268,29 @@ unsigned char monitor::call_precall_get_call_type (int variantnum, long callnum)
 #ifdef MVEE_ENABLE_PMVEE
             case __NR_pmvee_switch:
             {
+                if (ARG1(variantnum) == PMVEE_LIBC_REQUEST ||
+                        ARG1(variantnum) == PMVEE_LIBC_SET ||
+                        ARG1(variantnum) == PMVEE_HANDLER_REQUEST)
+                {
+                    result = MVEE_CALL_TYPE_UNSYNCED;
+                    break;
+                }
+                else if (ARG1(variantnum) == PMVEE_PRINT_BACKTRACE || ARG1(variantnum) == PMVEE_DIFF_MEMORY)
+                {
+                    result = MVEE_CALL_TYPE_NORMAL;
+                    break;
+                }
+
                 if (!variantnum)
                 {
+                    if (ARG1(0) == PMVEE_REGION_REQUEST)
+                    {
+                        result = MVEE_CALL_TYPE_UNSYNCED;
+                        break;
+                    }
                     call_jump_to_equivalent_function_addresses();
                     poly_exec = 1;
+                    debugf("MULTI-VARIANT ENTER\n");
                     for (int variant_i = 1; variant_i < mvee::numvariants; variant_i++)
                         call_resume(variant_i);
                 }
@@ -612,6 +634,69 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 				result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(1);
 				break;
 			}
+
+#ifdef MVEE_ENABLE_PMVEE
+            case __NR_pmvee_switch:
+            {
+                if (ARG1(variantnum) == PMVEE_REGION_REQUEST)
+                {
+                    result = MVEE_CALL_DENY | MVEE_CALL_RETURN_EXTENDED_VALUE;
+                    variants[variantnum].extended_value = mp_start;
+                }
+                else if (ARG1(variantnum) == PMVEE_LIBC_REQUEST)
+                {
+                    result = MVEE_CALL_DENY | MVEE_CALL_RETURN_EXTENDED_VALUE;
+                    variants[variantnum].extended_value = variantnum ? variants[variantnum].pmvee_libc_state_copy_follower_addr : variants[variantnum].pmvee_libc_state_copy_leader_addr;
+                }
+                else if (ARG1(variantnum) == PMVEE_LIBC_SET)
+                {
+                    result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
+                    variants[variantnum].pmvee_libc_state_copy_leader_addr = ARG2(variantnum);
+                    variants[variantnum].pmvee_libc_state_copy_follower_addr = ARG3(variantnum);
+                }
+                else if (ARG1(variantnum) == PMVEE_PRINT_BACKTRACE)
+                {
+                    log_variant_backtrace(variantnum);
+                    result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
+                }
+                else if (ARG1(variantnum) == PMVEE_HANDLER_REQUEST)
+                {
+                    struct __pmvee_state_copies_t variant_state_copies  =
+                    {
+                        (int)0,
+                        {},
+                        (int)0,
+                        {}
+                    };
+
+                    for (std::vector<long unsigned int> state_copy: pmvee_state_copies)
+                    {
+                        if (variant_state_copies.copy_count >= PMVEE_COPY_COUNT)
+                            shutdown(false);
+                        variant_state_copies.__pmvee_state_copies[variant_state_copies.copy_count] =
+                                (void (*) (char*, size_t*, void*))state_copy[variantnum];
+                        variant_state_copies.copy_count++;
+                    }
+                    for (std::vector<long unsigned int> state_migration: pmvee_state_migrations)
+                    {
+                        if (variant_state_copies.migration_count >= PMVEE_COPY_COUNT)
+                            shutdown(false);
+                        variant_state_copies.__pmvee_state_migrations[variant_state_copies.migration_count] =
+                                (void (*) (char*, size_t*, void*))state_migration[variantnum];
+                        variant_state_copies.migration_count++;
+                    }
+
+                    result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
+                    if (!interaction::write_memory(variants[variantnum].variantpid, (void*)ARG2(variantnum), sizeof(__pmvee_state_copies_t), &variant_state_copies))
+                    {
+                        shutdown(false);
+                    }
+                }
+                else
+                    shutdown(false);
+                break;
+            }
+#endif
 
 			//
 			// 
@@ -1044,15 +1129,51 @@ long monitor::call_call_dispatch ()
 #ifdef MVEE_ENABLE_PMVEE
             case __NR_pmvee_switch:
             {
+                if (ARG1(0) == PMVEE_REGION_REQUEST)
+                {
+                    warnf(" > shutting down\n");
+                    shutdown(false);
+                    break;
+                }
+                else if (ARG1(0) == PMVEE_PRINT_BACKTRACE)
+                {
+                    warnf(">PMVEE_PRINT_BACKTRACE\n");
+                    log_backtraces();
+                    result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
+                    break;
+                }
+                else if (ARG1(0) == PMVEE_DIFF_MEMORY)
+                {
+                    warnf(">PMVEE_DIFF_MEMORY\n");
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
+                    set_mmap_table->diff_memory(variants[0].variantpid, 1, variants[1].variantpid, 0);
+#else
+                    warnf("PMVEE_DIFF_MEMORY requires MVEE_CONNECTED_MMAP_REGIONS.\n");
+#endif
+                    result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
+                    break;
+                }
+
+                if (pmvee_zone_pt == (unsigned long) -1)
+                    pmvee_zone_pt = variants[0].regs.rdi;
+                pmvee_state_copy_zone.state_copy_start = variants[0].regs.rsi;
+                pmvee_state_copy_zone.state_alter_start = variants[0].regs.rdx;
+                pmvee_state_copy_zone.state_copy_end = variants[0].regs.r10;
+
                 for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
                 {
                     debugf(" [%d] swtich <%d> [ 0x%lx ; 0x%lx )\n", variant_i, variants[0].variantpid,
                             (unsigned long) mp_start, (unsigned long) (mp_start + mp_size));
                     variants[variant_i].regs.rdi = variants[0].variantpid;
                     variants[variant_i].regs.rsi = mp_start;
-                    variants[variant_i].regs.rdx = mp_start + mp_size;
-                    // if (variant_i)
-                    //     variants[variant_i].regs.rsp = variants[variant_i].rollback_rsp;
+                    variants[variant_i].regs.rdx = PMVEE_ZONE_ONE_DEFAULT_SIZE;
+                    variants[variant_i].regs.r10 = PMVEE_ZONE_TWO_DEFAULT_SIZE;
+                    #ifdef PMVEE_CONFIG_REMOVE_PERMISSIONS
+                    variants[variant_i].regs.r8 = PMVEE_FLAGS_DUP_EXEC;
+                    #else
+                    variants[variant_i].regs.r8 = 0;
+                    #endif
+
                     interaction::write_all_regs(variants[variant_i].variantpid, &variants[variant_i].regs);
                 }
                 poly_exec = 1;
@@ -1068,11 +1189,17 @@ long monitor::call_call_dispatch ()
                             (unsigned long) mp_start, (unsigned long) (mp_start + mp_size));
                     variants[variant_i].regs.rdi = variants[0].variantpid;
                     variants[variant_i].regs.rsi = mp_start;
-                    variants[variant_i].regs.rdx = mp_start + mp_size;
-                    interaction::write_all_regs(variants[variant_i].variantpid, &variants[variant_i].regs);
+                    variants[variant_i].regs.rdx = PMVEE_ZONE_ONE_DEFAULT_SIZE;
+                    variants[variant_i].regs.r10 = PMVEE_ZONE_TWO_DEFAULT_SIZE;
+                    #ifdef PMVEE_CONFIG_REMOVE_PERMISSIONS
+                    variants[variant_i].regs.r8 = PMVEE_FLAGS_REMOVE_PERMISSIONS;
+                    #else
+                    variants[variant_i].regs.r8 = 0;
+                    #endif
 
                     if (variants[variant_i].rollback_rsp == (unsigned long) -1)
                         variants[variant_i].rollback_rsp = variants[variant_i].regs.rsp;
+                    interaction::write_all_regs(variants[variant_i].variantpid, &variants[variant_i].regs);
                 }
 
                 result = MVEE_CALL_ALLOW;
@@ -1202,9 +1329,22 @@ long monitor::call_postcall_return ()
     else
     {
 #ifdef MVEE_ENABLE_PMVEE
+        if (callnum == __NR_pmvee_switch)
+        {
+            for (int variant_i = 1; variant_i < mvee::numvariants; variant_i++)
+            {
+                variants[variant_i].regs.rdi = pmvee_state_copy_zone.state_copy_start - pmvee_zone_pt;
+                convert_equivalent_pointer_array();
+
+                variants[variant_i].regs.rax = pmvee_zone_pt;
+                variants[variant_i].regs.orig_rax = pmvee_zone_pt;
+                interaction::write_all_regs(variants[variant_i].variantpid, &variants[variant_i].regs);
+            }
+        }
         if (callnum == __NR_pmvee_check)
         {
             poly_exec = 0;
+            debugf("SINGLE-VARIANT ENTER\n");
         }
 #endif
     }
