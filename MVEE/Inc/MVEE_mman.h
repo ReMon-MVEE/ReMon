@@ -150,6 +150,24 @@ public:
 };
 
 //
+// Info about connected mmap'ed regions
+//
+class connected_region_info
+{
+public:
+    std::vector<mmap_region_info*> regions;
+    std::vector<connected_region_info*> split_regions;
+    int split;
+    connected_region_info* new_region;
+
+
+    connected_region_info();
+    connected_region_info(connected_region_info* previous);
+    ~connected_region_info();
+};
+
+
+//
 // Info about an mmap'ed region
 //
 class mmap_region_info
@@ -189,7 +207,7 @@ public:
     // connection, if exists
     //
 #ifdef MVEE_CONNECTED_MMAP_REGIONS
-    std::shared_ptr<mmap_region_info*[]> connected_regions;
+    connected_region_info* connected_regions;
 #endif
 
 
@@ -295,7 +313,7 @@ public:
     std::string         get_textual_prot_flags      (unsigned int prot_flags);
 #ifdef MVEE_CONNECTED_MMAP_REGIONS
     void                refresh_variant_maps        (int variantnum, pid_t variantpid,
-                                                     std::shared_ptr<mmap_region_info*[]> &stack_regions);
+                                                     connected_region_info* stack_regions);
 #else
     void                refresh_variant_maps        (int variantnum, pid_t variantpid);
 #endif

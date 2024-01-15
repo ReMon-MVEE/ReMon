@@ -1259,7 +1259,7 @@ POSTCALL(execve)
 		set_mmap_table->truncate_table();
 
 #ifdef MVEE_CONNECTED_MMAP_REGIONS
-        std::shared_ptr<mmap_region_info*[]> initial_stack_regions(new mmap_region_info*[mvee::numvariants]);
+        connected_region_info* initial_stack_regions = new connected_region_info();
         for (i = 0; i < mvee::numvariants; ++i)
             set_mmap_table->refresh_variant_maps(i, variants[i].variantpid, initial_stack_regions);
 #else
@@ -7882,7 +7882,7 @@ POSTCALL(mmap)
 #endif
 
 #ifdef MVEE_CONNECTED_MMAP_REGIONS
-        std::shared_ptr<mmap_region_info*[]> connected_regions(new mmap_region_info*[mvee::numvariants]);
+        connected_region_info* connected_regions = new connected_region_info();
 #endif
 		for (int i = 0; i < mvee::numvariants; ++i)
 		{
@@ -7892,9 +7892,9 @@ POSTCALL(mmap)
 				actual_offset *= 4096;
 #endif
 #ifdef MVEE_CONNECTED_MMAP_REGIONS
-            mmap_region_info* new_region = set_mmap_table->map_range(i, results[i], ARG2(0),
+            mmap_region_info* new_region = set_mmap_table->map_range(i, results[i], ARG2(i),
                     ARG4(0), ARG3(0), info, actual_offset, current_shadow);
-            connected_regions[i] = new_region;
+            connected_regions->regions[i] = new_region;
             new_region->connected_regions = connected_regions;
 #else
             set_mmap_table->map_range(i, results[i], ARG2(0), ARG4(0), ARG3(0), info, actual_offset, current_shadow);
