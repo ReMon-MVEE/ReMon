@@ -178,12 +178,30 @@ static long actual_pmvee_switch(
         goto cleanup;
 	}
 
-    while (leader_mapping && find_vma_links(follower_mm, from, leader_mapping->vm_start, &prev, &rb_link, &rb_parent))
+    #if 0
+    printk("before:\n");
+    struct vm_area_struct * temptemptemp = leader_mm->mmap;
+    while (temptemptemp)
     {
-        int ret = 0;
+        if (temptemptemp->vm_start >= from && temptemptemp->vm_end < from + size_one + size_two)
+            printk("   > leader:   [ 0x%lx ; 0x%lx )\n", temptemptemp->vm_start, temptemptemp->vm_end);
+        temptemptemp = temptemptemp->vm_next;
+    }
+    temptemptemp = follower_mm->mmap;
+    while (temptemptemp)
+    {
+        if (temptemptemp->vm_start >= from && temptemptemp->vm_end < from + size_one + size_two)
+            printk("   > follower: [ 0x%lx ; 0x%lx )\n", temptemptemp->vm_start, temptemptemp->vm_end);
+        temptemptemp = temptemptemp->vm_next;
+    }
+    printk("done.\n");
+    #endif
+
+    if (leader_mapping && prev && prev->vm_next && prev->vm_next->vm_start < leader_mapping->vm_start)
+    {
         if ((ret = __do_munmap(follower_mm, from, leader_mapping->vm_start - from, &uf, false)))
         {
-            printk(" > got return code %d while performing unmapping\n", ret);
+            printk(" > got return code %ld while performing unmapping\n", ret);
             ret = -ENOMEM;
             goto cleanup;
         }
@@ -197,17 +215,18 @@ static long actual_pmvee_switch(
         while (leader_mapping && leader_mapping->vm_end <= to)
         {
             if (!(flags & PMVEE_FLAGS_DUP_EXEC) && (leader_mapping->vm_flags & VM_EXEC))
-                goto __pmvee_next_mapping;
+                goto __pmvee_switch_next_mapping;
 
             if(leader_mapping->vm_flags & VM_SHARED)
             {
                 printk("Currently not supporting shared mappings in mp.");
-                return -EFAULT;
+                ret = -EFAULT;
+                goto cleanup;
             }
 
-            if (prev->vm_next && (
+            if (!prev || !prev->vm_next ||
                     prev->vm_next->vm_start != leader_mapping->vm_start ||
-                    prev->vm_next->vm_end != leader_mapping->vm_end))
+                    prev->vm_next->vm_end != leader_mapping->vm_end)
             {
                 tmp = vm_area_dup(leader_mapping);
                 if (!tmp)
@@ -243,17 +262,14 @@ static long actual_pmvee_switch(
                 }
 
                 unsigned long next_start = leader_mapping->vm_next ? leader_mapping->vm_next->vm_start : leader_mapping->vm_end;
-                while (find_vma_links(follower_mm, tmp->vm_start, next_start, &prev, &rb_link, &rb_parent))
+                if ((ret = __do_munmap(follower_mm, tmp->vm_start, next_start - tmp->vm_start, &uf, false)))
                 {
-                    int ret = 0;
-                    if ((ret = __do_munmap(follower_mm, tmp->vm_start, next_start - tmp->vm_start, &uf, false)))
-                    {
-                        printk(" > got return code %d while performing unmapping\n", ret);
-                        goto cleanup;
-                    }
+                    printk(" > got return code %ld while performing unmapping\n", ret);
+                    goto cleanup;
                 }
 
                 // link it in >
+                find_vma_links(follower_mm, tmp->vm_start, tmp->vm_end, &prev, &rb_link, &rb_parent);
                 tmp->vm_prev = prev;
                 if (!prev)
                 {
@@ -269,13 +285,17 @@ static long actual_pmvee_switch(
                 }
 
                 __vma_link_rb(follower_mm, tmp, rb_link, rb_parent);
-                if (tmp->vm_ops && tmp->vm_ops->open)
-                    tmp->vm_ops->open(tmp);
+                follower_mm->map_count++;
                 // link it in <
             }
             else
+            {
                 tmp = prev->vm_next;
+                zap_page_range(tmp, tmp->vm_start, tmp->vm_end - tmp->vm_start);
+            }
 
+            if (tmp->vm_ops && tmp->vm_ops->open)
+                tmp->vm_ops->open(tmp);
             // remove unwanted permissions >
             if (tmp->vm_flags & ~remove)
             {
@@ -294,22 +314,39 @@ static long actual_pmvee_switch(
             }
             // copy pages <
             
-            __pmvee_next_mapping:
+            __pmvee_switch_next_mapping:
             prev = tmp;
             leader_mapping = leader_mapping->vm_next;
         }
         to = to + size_two;
         // remove = ~(VM_EXEC | VM_MAYEXEC | VM_WRITE | VM_MAYWRITE);
     }
-    while (leader_mapping && find_vma_links(follower_mm, leader_mapping->vm_start, from + size_one + size_two, &prev, &rb_link, &rb_parent))
+    if (prev && prev->vm_next && prev->vm_next->vm_start < to)
     {
-        int ret = 0;
-        if ((ret = __do_munmap(follower_mm, leader_mapping->vm_start, size_one + size_two, &uf, false)))
+        if ((ret = __do_munmap(follower_mm, prev->vm_end, prev->vm_next->vm_end - prev->vm_end, &uf, false)))
         {
-            printk(" > got return code %d while performing unmapping\n", ret);
+            printk(" > got return code %ld while performing unmapping\n", ret);
             goto cleanup;
         }
     }
+
+    #if 0
+    printk("after:\n");
+    temptemptemp = leader_mm->mmap;
+    while (temptemptemp)
+    {
+        // if (temptemptemp->vm_start >= from && temptemptemp->vm_end < from + size_one + size_two)
+            printk("   > leader:   [ 0x%lx ; 0x%lx )\n", temptemptemp->vm_start, temptemptemp->vm_end);
+        temptemptemp = temptemptemp->vm_next;
+    }
+    temptemptemp = follower_mm->mmap;
+    while (temptemptemp)
+    {
+        // if (temptemptemp->vm_start >= from && temptemptemp->vm_end < from + size_one + size_two)
+            printk("   > follower: [ 0x%lx ; 0x%lx )\n", temptemptemp->vm_start, temptemptemp->vm_end);
+        temptemptemp = temptemptemp->vm_next;
+    }
+    #endif
         
     cleanup:
     up_write(&follower_mm->mmap_sem);
@@ -439,7 +476,7 @@ unsigned char actual_pmvee_should_skip(struct pt_regs *regs, unsigned long enter
     {
         return 0;
     }
-    if (syscall == __NR_mmap || syscall == __NR_munmap || syscall == __NR_accept4)
+    if (syscall == __NR_mmap || syscall == __NR_munmap)
     {
         return 0;
     }
