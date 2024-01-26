@@ -228,6 +228,8 @@ static long actual_pmvee_switch(
                     prev->vm_next->vm_start != leader_mapping->vm_start ||
                     prev->vm_next->vm_end != leader_mapping->vm_end)
             {
+                unsigned long next_start;
+
                 tmp = vm_area_dup(leader_mapping);
                 if (!tmp)
                 {
@@ -261,7 +263,8 @@ static long actual_pmvee_switch(
                     i_mmap_unlock_write(mapping);
                 }
 
-                unsigned long next_start = leader_mapping->vm_next ? leader_mapping->vm_next->vm_start : leader_mapping->vm_end;
+                next_start = (leader_mapping->vm_next && leader_mapping->vm_next->vm_start < to) ?
+                        leader_mapping->vm_next->vm_start : to;
                 if ((ret = __do_munmap(follower_mm, tmp->vm_start, next_start - tmp->vm_start, &uf, false)))
                 {
                     printk(" > got return code %ld while performing unmapping\n", ret);
