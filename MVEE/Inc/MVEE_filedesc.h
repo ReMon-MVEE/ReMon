@@ -63,6 +63,7 @@ public:
     ssize_t                    original_file_size;    // for shared mappings that we changed to private, we need to know the original file size!!!
 	FileType                   file_type;
 	unsigned char              can_load_indirect_cache;
+	std::vector<unsigned long> mmapped_bases;
 
     void print_fd_info();
     fd_info();

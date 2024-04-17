@@ -36,7 +36,7 @@ diff --color -ruN linux-source-5.4.0/include/linux/sched.h custom-linux-source-5
 +
 +#ifndef __NR_syscalls
 +  /* this is the highest known syscall no for x86_64 in this kernel... */
-+  #define __NR_syscalls __NR_mlock2
++  #define __NR_syscalls 436
 +#endif
 +
 +/* MVEE IP-MON patch */
@@ -85,28 +85,31 @@ diff --color -ruN linux-source-5.4.0/include/linux/sched.h custom-linux-source-5
  struct task_struct {
  #ifdef CONFIG_THREAD_INFO_IN_TASK
  	/*
-@@ -726,6 +778,7 @@
+@@ -730,6 +782,8 @@
  
  	struct mm_struct		*mm;
  	struct mm_struct		*active_mm;
 +	struct ipmon_info		ipmon_info;
++	unsigned long			pmvee_last_call;
  
  	/* Per-thread vma caching: */
  	struct vmacache			vmacache;
-@@ -747,6 +800,7 @@
+@@ -751,6 +805,8 @@
  	/* Scheduler bits, serialized by scheduler locks: */
  	unsigned			sched_reset_on_fork:1;
  	unsigned			sched_contributes_to_load:1;
 +	unsigned			ptrace_ignored_current:1;
++	unsigned			pmvee_ignored_current:1;
  	unsigned			sched_migrated:1;
  	unsigned			sched_remote_wakeup:1;
  #ifdef CONFIG_PSI
-@@ -1285,6 +1339,9 @@
+@@ -1290,6 +1346,10 @@
  	 */
  };
  
 +/* Defined in kernel/sys.c */
 +unsigned char ipmon_handle_bypass(struct pt_regs *regs);
++unsigned char pmvee_should_skip(struct pt_regs *regs, int entering);
 +
  static inline struct pid *task_pid(struct task_struct *task)
  {
@@ -118,28 +121,35 @@ diff --color -ruN linux-source-5.4.0/include/linux/tracehook.h custom-linux-sour
  static inline __must_check int tracehook_report_syscall_entry(
  	struct pt_regs *regs)
  {
-+	if ((current->ptrace & PT_PTRACED) && ipmon_handle_bypass(regs))
-+	{
-+		current->ptrace_ignored_current = 1;
-+		return 0;
-+	}
++    if ((current->ptrace & PT_PTRACED) && pmvee_should_skip(regs, 1))
++    {
++            return 0;
++    }
++    if ((current->ptrace & PT_PTRACED) && ipmon_handle_bypass(regs))
++    {
++            current->ptrace_ignored_current = 1;
++            return 0;
++    }
  	return ptrace_report_syscall(regs, PTRACE_EVENTMSG_SYSCALL_ENTRY);
  }
  
 @@ -125,8 +130,15 @@
- {
  	if (step)
  		user_single_step_report(regs);
--	else
-+	else {
-+		if (current->ptrace_ignored_current)
-+		{
-+			current->ptrace_ignored_current = 0;
-+			return;
-+		}
-+
- 		ptrace_report_syscall(regs, PTRACE_EVENTMSG_SYSCALL_EXIT);
-+	}
+ 	else
+-		ptrace_report_syscall(regs, PTRACE_EVENTMSG_SYSCALL_EXIT);
++    {
++        if ((current->ptrace & PT_PTRACED) && pmvee_should_skip(regs, 0))
++        {
++            return;
++        }
++        if (current->ptrace_ignored_current)
++        {
++            current->ptrace_ignored_current = 0;
++            return;
++        }
++        ptrace_report_syscall(regs, PTRACE_EVENTMSG_SYSCALL_EXIT);
++    }
  }
  
  /**
@@ -476,13 +486,13 @@ diff --color -ruN linux-source-5.4.0/kernel/sys.c custom-linux-source-5.4.0/kern
 +}
 +
 +
-+long (*pmvee_switch_stub) (pid_t leader, unsigned long from, unsigned long to, unsigned long flags) = NULL;
++long (*pmvee_switch_stub) pid_t source, pid_t destination, unsigned long from, unsigned long size_one, unsigned long size_two, unsigned long flags) = NULL;
 +EXPORT_SYMBOL(pmvee_switch_stub);
 +
-+SYSCALL_DEFINE4(pmvee_switch, pid_t, leader, unsigned long, from, unsigned long, to, unsigned long, flags)
++SYSCALL_DEFINE6(pmvee_switch, pmvee_switch, pid_t, source, pid_t, destination, unsigned long, from, unsigned long, size_one, unsigned long, size_two, unsigned long, flags)
 +{
 +	if (pmvee_switch_stub)
-+		return pmvee_switch_stub(leader, from, to, flags);
++		return pmvee_switch_stub(source, destination, from, size_one, size_two, flags);
 +	else
 +		printk("system call pmvee_switch not implemented.\n");
 +
@@ -490,17 +500,26 @@ diff --color -ruN linux-source-5.4.0/kernel/sys.c custom-linux-source-5.4.0/kern
 +}
 +
 +
-+long (*pmvee_check_stub) (pid_t leader, unsigned long from, unsigned long to, unsigned long flags) = NULL;
++long (*pmvee_check_stub) pid_t source, pid_t destination, unsigned long from, unsigned long size_one, unsigned long size_two, unsigned long flags) = NULL;
 +EXPORT_SYMBOL(pmvee_check_stub);
 +
-+SYSCALL_DEFINE4(pmvee_check, pid_t, leader, unsigned long, from, unsigned long, to, unsigned long, flags)
++SYSCALL_DEFINE6(pmvee_check, pmvee_switch, pid_t, source, pid_t, destination, unsigned long, from, unsigned long, size_one, unsigned long, size_two, unsigned long, flags)
 +{
 +	if (pmvee_check_stub)
-+		return pmvee_check_stub(leader, from, to, flags);
++		return pmvee_check_stub(source, destination, from, size_one, size_two, flags);
 +	else
 +		printk("system call pmvee_check not implemented.\n");
 +
 +	return ENOSYS;
++}
++
++
++unsigned char (*pmvee_should_skip_stub) (struct pt_regs *regs, int entering) = NULL;
++EXPORT_SYMBOL(pmvee_should_skip_stub);
++
++unsigned char pmvee_should_skip(struct pt_regs *regs, int entering)
++{
++	return (pmvee_should_skip_stub && pmvee_should_skip_stub(regs, entering));
 +}
 +
 +

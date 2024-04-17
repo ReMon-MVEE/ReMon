@@ -186,6 +186,31 @@ void monitor::call_write_denied_syscall_return(int variantnum)
 	}
 }
 
+#if 0
+static void print_migration_targets(char* pmvee_migration_mon_pt)
+{
+    unsigned long* current_migration_count = (unsigned long*) pmvee_migration_mon_pt;
+    unsigned long* current_pointer_count   = &((unsigned long*)pmvee_migration_mon_pt)[1];
+    warnf(" > <%p> current migration count: %ld\n", (void*)current_migration_count, *current_migration_count);
+    warnf(" > <%p> current pointer count:   %ld\n", (void*)current_pointer_count, *current_pointer_count);
+    auto variant_migration_infos = (mvee::pmvee_migration_info_t*)
+            (((char*)pmvee_migration_mon_pt) + 2*sizeof(unsigned long));
+    auto variant_pointer_infos = (unsigned long*) (
+            ((char*)pmvee_migration_mon_pt) +
+            (2*sizeof(unsigned long)) + ((*current_migration_count) * sizeof(mvee::pmvee_migration_info_t)));
+    for (unsigned long migration_i = 0; migration_i < *current_migration_count; migration_i++)
+        warnf( " > <%p> migration[%s%lu]: %p (%lu)\n",
+            (void*)&variant_migration_infos[migration_i],
+            migration_i < 100 ? (migration_i < 10 ? "00" : "0") : "", migration_i,
+            (void*)variant_migration_infos[migration_i].offset, variant_migration_infos[migration_i].size);
+    for (unsigned long pointer_i = 0; pointer_i < *current_pointer_count; pointer_i++)
+        warnf( " > <%p> pointer[%s%lu]: %p\n",
+            (void*)&variant_pointer_infos[pointer_i],
+            pointer_i < 100 ? (pointer_i < 10 ? "00" : "0") : "", pointer_i,
+            (void*)variant_pointer_infos[pointer_i]);
+}
+#endif
+
 /*-----------------------------------------------------------------------------
     call_precall_get_call_type - called at every syscall entrance. Determines
     whether or not a call is synchronized.
@@ -245,7 +270,18 @@ unsigned char monitor::call_precall_get_call_type (int variantnum, long callnum)
 			case MVEE_ENABLE_XCHECKS:
 			case MVEE_DISABLE_XCHECKS:
 			case MVEE_GET_LEADER_SHM_TAG:
+            case MVEE_GET_PMVEE_INFO:
+            case MVEE_GET_PMVEE_TRANSLATION_UNIT:
+            case MVEE_GET_PMVEE_SYNC:
+            case MVEE_GET_PMVEE_COMMUNICATION:
+            case MVEE_PMVEE_GET_JUMP_TABLE:
             {
+                result = MVEE_CALL_TYPE_UNSYNCED;
+                break;
+            }
+            case MVEE_PMVEE_REQUEST:
+            {
+                variants[variantnum].callnum = __NR_pmvee_switch;
                 result = MVEE_CALL_TYPE_UNSYNCED;
                 break;
             }
@@ -268,15 +304,22 @@ unsigned char monitor::call_precall_get_call_type (int variantnum, long callnum)
 #ifdef MVEE_ENABLE_PMVEE
             case __NR_pmvee_switch:
             {
+                variants[variantnum].pmvee_state = 0;
+
                 if (ARG1(variantnum) == PMVEE_LIBC_REQUEST ||
                         ARG1(variantnum) == PMVEE_LIBC_SET ||
-                        ARG1(variantnum) == PMVEE_HANDLER_REQUEST)
+                        ARG1(variantnum) == PMVEE_HANDLER_REQUEST ||
+                        ARG1(variantnum) == PMVEE_COMMUNICATION_REQUEST ||
+                        ARG1(variantnum) == PMVEE_MAPPINGS_REQUEST ||
+                        ARG1(variantnum) == PMVEE_MIGRATION_INFO_REQUEST)
                 {
+                    variants[variantnum].pmvee_state = ARG1(variantnum);
                     result = MVEE_CALL_TYPE_UNSYNCED;
                     break;
                 }
                 else if (ARG1(variantnum) == PMVEE_PRINT_BACKTRACE || ARG1(variantnum) == PMVEE_DIFF_MEMORY)
                 {
+                    variants[variantnum].pmvee_state = ARG1(variantnum);
                     result = MVEE_CALL_TYPE_NORMAL;
                     break;
                 }
@@ -285,14 +328,26 @@ unsigned char monitor::call_precall_get_call_type (int variantnum, long callnum)
                 {
                     if (ARG1(0) == PMVEE_REGION_REQUEST)
                     {
+                        variants[variantnum].pmvee_state = ARG1(variantnum);
                         result = MVEE_CALL_TYPE_UNSYNCED;
                         break;
                     }
                     call_jump_to_equivalent_function_addresses();
-                    poly_exec = 1;
+                    SET_MULTI_EXEC(1);
                     debugf("MULTI-VARIANT ENTER\n");
                     for (int variant_i = 1; variant_i < mvee::numvariants; variant_i++)
                         call_resume(variant_i);
+                    if (pmvee_zone_pt == (unsigned long) -1)
+                        pmvee_zone_pt = variants[0].regs.rdi;
+                    pmvee_state_copy_zone.state_copy_start = variants[0].regs.rsi;
+                    pmvee_state_copy_zone.state_alter_start = variants[0].regs.rdx;
+                    pmvee_state_copy_zone.state_copy_end = variants[0].regs.r10;
+                    copy_migration(); // TODO: Make this between two given variants.
+                }
+                else if (variants[variantnum].pmvee_communication_id != -1 &&
+                        !variants[variantnum].pmvee_communication_pt)
+                {
+                    variants[variantnum].pmvee_state = PMVEE_COMMUNICATION_REQUEST;
                 }
                 result = MVEE_CALL_TYPE_NORMAL;
                 break;
@@ -630,6 +685,100 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 				break;
 			}
 
+            case MVEE_GET_PMVEE_INFO:
+            {
+                struct ipmon_pmvee_info_t ipmon_pmvee_info =
+                {
+                    variants[0].variantpid,
+                    variants[variantnum].variantpid,
+                    (void*)mp_start,
+                    PMVEE_ZONE_ONE_DEFAULT_SIZE,
+                    PMVEE_ZONE_TWO_DEFAULT_SIZE,
+                };
+                if (!interaction::write_memory(variants[variantnum].variantpid, (void*)ARG1(variantnum), sizeof(struct ipmon_pmvee_info_t), &ipmon_pmvee_info))
+                    shutdown(false);
+                result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
+                break;
+            }
+
+            case MVEE_GET_PMVEE_TRANSLATION_UNIT:
+            {
+                if (variantnum)
+                    shutdown(false);
+                variants[variantnum].regs.orig_rax = __NR_shmat;
+                variants[variantnum].regs.rax = __NR_shmat;
+                variants[variantnum].regs.rdi = translation_id;
+                variants[variantnum].regs.rsi = 0;
+                variants[variantnum].regs.rdx = 0;
+
+                if (!interaction::write_all_regs(variants[variantnum].variantpid, &variants[variantnum].regs))
+                {
+                    warnf(" > Could not write registers to variant %d for injecting shmat call | erno: %d\n",
+                            variantnum, errno);
+                    shutdown(false);
+                }
+                result = MVEE_CALL_ALLOW;
+                break;
+            }
+
+#ifdef IPMON_PMVEE_HANDLING
+            case MVEE_GET_PMVEE_SYNC:
+            {
+                if (variantnum)
+                    shutdown(false);
+                variants[variantnum].regs.orig_rax = __NR_shmat;
+                variants[variantnum].regs.rax = __NR_shmat;
+                variants[variantnum].regs.rdi = multi_exec->pmvee_sync_id;
+                variants[variantnum].regs.rsi = 0;
+                variants[variantnum].regs.rdx = 0;
+
+                if (!interaction::write_all_regs(variants[variantnum].variantpid, &variants[variantnum].regs))
+                {
+                    warnf(" > Could not write registers to variant %d for injecting shmat call | erno: %d\n",
+                            variantnum, errno);
+                    shutdown(false);
+                }
+                result = MVEE_CALL_ALLOW;
+                break;
+            }
+#endif
+            case MVEE_GET_PMVEE_COMMUNICATION:
+            {
+                variants[variantnum].regs.orig_rax = __NR_shmat;
+                variants[variantnum].regs.rax = __NR_shmat;
+                variants[variantnum].regs.rdi = variants[!variantnum ? ARG1(0) : variantnum].pmvee_communication_id;
+                variants[variantnum].regs.rsi = 0;
+                variants[variantnum].regs.rdx = 0;
+
+                if (!interaction::write_all_regs(variants[variantnum].variantpid, &variants[variantnum].regs))
+                {
+                    warnf(" > Could not write registers to variant %d for injecting shmat call | erno: %d\n",
+                            variantnum, errno);
+                    shutdown(false);
+                }
+                result = MVEE_CALL_ALLOW;
+                break;
+            }
+            case MVEE_PMVEE_GET_JUMP_TABLE:
+            {
+                if (variantnum)
+                    shutdown(false);
+                variants[variantnum].regs.orig_rax = __NR_shmat;
+                variants[variantnum].regs.rax = __NR_shmat;
+                variants[variantnum].regs.rdi = pmvee_translations->jumps_id;
+                variants[variantnum].regs.rsi = 0;
+                variants[variantnum].regs.rdx = 0;
+
+                if (!interaction::write_all_regs(variants[variantnum].variantpid, &variants[variantnum].regs))
+                {
+                    warnf(" > Could not write registers to variant %d for injecting shmat call | erno: %d\n",
+                            variantnum, errno);
+                    shutdown(false);
+                }
+                result = MVEE_CALL_ALLOW;
+                break;
+            }
+
 			// This is only ever dispatched as unsynced if we have enabled relaxed_mman_xchecks
 			case MVEE_ALL_HEAPS_ALIGNED:
 			{
@@ -642,27 +791,32 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
             {
                 if (ARG1(variantnum) == PMVEE_REGION_REQUEST)
                 {
+                    debugf(">PMVEE_REGION_REQUEST\n\n");
                     result = MVEE_CALL_DENY | MVEE_CALL_RETURN_EXTENDED_VALUE;
                     variants[variantnum].extended_value = mp_start;
                 }
                 else if (ARG1(variantnum) == PMVEE_LIBC_REQUEST)
                 {
+                    debugf(">PMVEE_LIBC_REQUEST\n\n");
                     result = MVEE_CALL_DENY | MVEE_CALL_RETURN_EXTENDED_VALUE;
                     variants[variantnum].extended_value = variantnum ? variants[variantnum].pmvee_libc_state_copy_follower_addr : variants[variantnum].pmvee_libc_state_copy_leader_addr;
                 }
                 else if (ARG1(variantnum) == PMVEE_LIBC_SET)
                 {
+                    debugf(">PMVEE_LIBC_SET\n\n");
                     result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
                     variants[variantnum].pmvee_libc_state_copy_leader_addr = ARG2(variantnum);
                     variants[variantnum].pmvee_libc_state_copy_follower_addr = ARG3(variantnum);
                 }
                 else if (ARG1(variantnum) == PMVEE_PRINT_BACKTRACE)
                 {
+                    debugf(">PMVEE_PRINT_BACKTRACE\n\n");
                     log_variant_backtrace(variantnum);
                     result = MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
                 }
                 else if (ARG1(variantnum) == PMVEE_HANDLER_REQUEST)
                 {
+                    debugf(">PMVEE_HANDLER_REQUEST\n\n");
                     struct __pmvee_state_copies_t variant_state_copies  =
                     {
                         (int)0,
@@ -671,12 +825,14 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
                         {}
                     };
 
+                    debugf(" > passing handlers for %d\n", variantnum);
                     for (std::vector<long unsigned int> state_copy: pmvee_state_copies)
                     {
                         if (variant_state_copies.copy_count >= PMVEE_COPY_COUNT)
                             shutdown(false);
                         variant_state_copies.__pmvee_state_copies[variant_state_copies.copy_count] =
                                 (void (*) (char*, size_t*, void*))state_copy[variantnum];
+                        debugf(" > copy[%d] = %p\n", variant_state_copies.copy_count, (void*)variant_state_copies.__pmvee_state_copies[variant_state_copies.copy_count]);
                         variant_state_copies.copy_count++;
                     }
                     for (std::vector<long unsigned int> state_migration: pmvee_state_migrations)
@@ -685,6 +841,7 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
                             shutdown(false);
                         variant_state_copies.__pmvee_state_migrations[variant_state_copies.migration_count] =
                                 (void (*) (char*, size_t*, void*))state_migration[variantnum];
+                        debugf(" > state[%d] = %p\n", variant_state_copies.migration_count, (void*)variant_state_copies.__pmvee_state_migrations[variant_state_copies.migration_count]);
                         variant_state_copies.migration_count++;
                     }
 
@@ -694,8 +851,97 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
                         shutdown(false);
                     }
                 }
+                else if (variants[variantnum].pmvee_state == PMVEE_COMMUNICATION_REQUEST)
+                {
+                    debugf(">PMVEE_COMMUNICATION_REQUEST | %d\n\n", variants[variantnum].pmvee_communication_id);
+                    variants[variantnum].regs.orig_rax = __NR_shmat;
+                    variants[variantnum].regs.rax = __NR_shmat;
+                    variants[variantnum].regs.rdi = variants[variantnum].pmvee_communication_id;
+                    variants[variantnum].regs.rsi = 0;
+                    variants[variantnum].regs.rdx = variantnum ? SHM_RDONLY : 0;
+                    
+	                if (!interaction::write_all_regs(variants[variantnum].variantpid, &variants[variantnum].regs))
+                    {
+                        warnf(" > Could not write registers to variant %d for injecting shmat call | erno: %d\n",
+                                variantnum, errno);
+                        shutdown(false);
+                    }
+                    result = MVEE_CALL_ALLOW;
+                }
+                else if (variants[variantnum].pmvee_state == PMVEE_MAPPINGS_REQUEST)
+                {
+                    debugf(">PMVEE_MAPPINGS_REQUEST | %d\n\n", simple_mappings_id);
+                    variants[variantnum].regs.orig_rax = __NR_shmat;
+                    variants[variantnum].regs.rax = __NR_shmat;
+                    variants[variantnum].regs.rdi = simple_mappings_id;
+                    variants[variantnum].regs.rsi = 0;
+                    variants[variantnum].regs.rdx = variantnum ? SHM_RDONLY : 0;
+                    
+	                if (!interaction::write_all_regs(variants[variantnum].variantpid, &variants[variantnum].regs))
+                    {
+                        warnf(" > Could not write registers to variant %d for injecting shmat call | erno: %d\n",
+                                variantnum, errno);
+                        shutdown(false);
+                    }
+                    result = MVEE_CALL_ALLOW;
+                }
+                else if (variants[variantnum].pmvee_state == PMVEE_MIGRATION_INFO_REQUEST)
+                {
+                    debugf(">PMVEE_MIGRATION_INFO_REQUEST\n\n");
+                    variants[variantnum].regs.orig_rax = __NR_shmat;
+                    variants[variantnum].regs.rax = __NR_shmat;
+                    variants[variantnum].regs.rdi = variants[variantnum].pmvee_migration_id;
+                    variants[variantnum].regs.rsi = 0;
+                    variants[variantnum].regs.rdx = variantnum ? SHM_RDONLY : 0;
+                    
+	                if (!interaction::write_all_regs(variants[variantnum].variantpid, &variants[variantnum].regs))
+                    {
+                        warnf(" > Could not write registers to variant %d for injecting shmat call | erno: %d\n",
+                                variantnum, errno);
+                        shutdown(false);
+                    }
+                    result = MVEE_CALL_ALLOW;
+                }
                 else
+                {
+                    log_variant_backtrace(variantnum);
+                    warnf("unsynched switch not allowed!\n");
                     shutdown(false);
+
+                    if (!variantnum)
+                    {
+                        if (pmvee_zone_pt == (unsigned long) -1)
+                            pmvee_zone_pt = variants[0].regs.rdi;
+                        pmvee_state_copy_zone.state_copy_start = variants[0].regs.rsi;
+                        pmvee_state_copy_zone.state_alter_start = variants[0].regs.rdx;
+                        pmvee_state_copy_zone.state_copy_end = variants[0].regs.r10;
+                        copy_migration();
+                        SET_MULTI_EXEC(1);
+                    }
+
+                    debugf(" [%d] swtich <%d> [ 0x%lx ; 0x%lx )\n", variantnum, variants[0].variantpid,
+                            (unsigned long) mp_start, (unsigned long) (mp_start + mp_size));
+
+                    // rdi: source
+                    // rsi: destination
+                    // rdx: from
+                    // r10: size_one
+                    // r08: size_two
+                    // r09: flags
+                    variants[variantnum].regs.rdi = variants[0].variantpid;
+                    variants[variantnum].regs.rsi = variantnum ? 0 : (mvee::numvariants > 1 ? variants[1].variantpid : 0);
+                    variants[variantnum].regs.rdx = mp_start;
+                    variants[variantnum].regs.r10 = PMVEE_ZONE_ONE_DEFAULT_SIZE;
+                    variants[variantnum].regs.r8 = PMVEE_ZONE_TWO_DEFAULT_SIZE;
+                    #ifdef PMVEE_CONFIG_REMOVE_PERMISSIONS
+                    variants[variantnum].regs.r9 = PMVEE_FLAGS_DUP_EXEC;
+                    #else
+                    variants[variantnum].regs.r9 = 0;
+                    #endif
+
+                    interaction::write_all_regs(variants[variantnum].variantpid, &variants[variantnum].regs);
+                    result = MVEE_CALL_ALLOW;
+                }
                 break;
             }
 #endif
@@ -834,6 +1080,8 @@ long monitor::call_call_dispatch ()
 						result = MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(1);
 						break;
 					}
+                    // This is kinda needed for pmvee setup.
+                    ((struct ipmon_buffer*)ipmon_buffer->ptr)->ipmon_numvariants = mvee::numvariants;
 
 					// deny the call and return id of the buffer
 					for (i = 0; i < mvee::numvariants; ++i)
@@ -1148,7 +1396,7 @@ long monitor::call_call_dispatch ()
                 {
                     warnf(">PMVEE_DIFF_MEMORY\n");
 #ifdef MVEE_CONNECTED_MMAP_REGIONS
-                    set_mmap_table->diff_memory(variants[0].variantpid, 1, variants[1].variantpid, 0);
+                    set_mmap_table->diff_memory(variants[0].variantpid, 1, variants[1].variantpid, 1, 0);
 #else
                     warnf("PMVEE_DIFF_MEMORY requires MVEE_CONNECTED_MMAP_REGIONS.\n");
 #endif
@@ -1164,21 +1412,28 @@ long monitor::call_call_dispatch ()
 
                 for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
                 {
+                    // rdi: source
+                    // rsi: destination
+                    // rdx: from
+                    // r10: size_one
+                    // r08: size_two
+                    // r09: flags
                     debugf(" [%d] swtich <%d> [ 0x%lx ; 0x%lx )\n", variant_i, variants[0].variantpid,
                             (unsigned long) mp_start, (unsigned long) (mp_start + mp_size));
                     variants[variant_i].regs.rdi = variants[0].variantpid;
-                    variants[variant_i].regs.rsi = mp_start;
-                    variants[variant_i].regs.rdx = PMVEE_ZONE_ONE_DEFAULT_SIZE;
-                    variants[variant_i].regs.r10 = PMVEE_ZONE_TWO_DEFAULT_SIZE;
+                    variants[variant_i].regs.rsi = variants[variant_i].variantpid;
+                    variants[variant_i].regs.rdx = mp_start;
+                    variants[variant_i].regs.r10 = PMVEE_ZONE_ONE_DEFAULT_SIZE;
+                    variants[variant_i].regs.r8 = PMVEE_ZONE_TWO_DEFAULT_SIZE;
                     #ifdef PMVEE_CONFIG_REMOVE_PERMISSIONS
-                    variants[variant_i].regs.r8 = PMVEE_FLAGS_DUP_EXEC;
+                    variants[variant_i].regs.r9 = PMVEE_FLAGS_DUP_EXEC;
                     #else
-                    variants[variant_i].regs.r8 = 0;
+                    variants[variant_i].regs.r9 = 0;
                     #endif
 
                     interaction::write_all_regs(variants[variant_i].variantpid, &variants[variant_i].regs);
                 }
-                poly_exec = 1;
+                SET_MULTI_EXEC(1);
 
                 result = MVEE_CALL_ALLOW;
                 break;
@@ -1189,18 +1444,25 @@ long monitor::call_call_dispatch ()
                 {
                     debugf(" [%d] check  <%d> [ 0x%lx ; 0x%lx )\n", variant_i, variants[variant_i].variantpid,
                             (unsigned long) mp_start, (unsigned long) (mp_start + mp_size));
+                    // rdi: source
+                    // rsi: destination
+                    // rdx: from
+                    // r10: size_one
+                    // r08: size_two
+                    // r09: flags
+                    if (variants[variant_i].rollback_rsp == (unsigned long) -1)
+                        variants[variant_i].rollback_rsp = variants[variant_i].regs.rdi;
                     variants[variant_i].regs.rdi = variants[0].variantpid;
-                    variants[variant_i].regs.rsi = mp_start;
-                    variants[variant_i].regs.rdx = PMVEE_ZONE_ONE_DEFAULT_SIZE;
-                    variants[variant_i].regs.r10 = PMVEE_ZONE_TWO_DEFAULT_SIZE;
+                    variants[variant_i].regs.rsi = variants[variant_i].variantpid;
+                    variants[variant_i].regs.rdx = mp_start;
+                    variants[variant_i].regs.r10 = PMVEE_ZONE_ONE_DEFAULT_SIZE;
+                    variants[variant_i].regs.r8 = PMVEE_ZONE_TWO_DEFAULT_SIZE;
                     #ifdef PMVEE_CONFIG_REMOVE_PERMISSIONS
-                    variants[variant_i].regs.r8 = PMVEE_FLAGS_REMOVE_PERMISSIONS;
+                    variants[variant_i].regs.r9 = PMVEE_FLAGS_DUP_EXEC;
                     #else
-                    variants[variant_i].regs.r8 = 0;
+                    variants[variant_i].regs.r9 = 0;
                     #endif
 
-                    if (variants[variant_i].rollback_rsp == (unsigned long) -1)
-                        variants[variant_i].rollback_rsp = variants[variant_i].regs.rsp;
                     interaction::write_all_regs(variants[variant_i].variantpid, &variants[variant_i].regs);
                 }
 
@@ -1302,6 +1564,53 @@ long monitor::call_postcall_return_unsynced (int variantnum)
 			variants[variantnum].syscall_pointer = (void*) ARG3(variantnum);
 #endif
 		}
+#ifdef MVEE_ENABLE_PMVEE
+        else if (callnum == __NR_pmvee_switch)
+        {
+            if (variants[variantnum].pmvee_state == PMVEE_COMMUNICATION_REQUEST)
+            {
+                variants[variantnum].pmvee_communication_pt = call_postcall_get_variant_result(variantnum);
+                if (variants[variantnum].pmvee_communication_pt == (unsigned long)-1)
+                {
+                    warnf(" > Could not write registers to variant %d for injecting shmat call | erno: %d\n",
+                            variantnum, errno);
+                    shutdown(false);
+                }
+                SETARG1(variantnum, pmvee_state_copy_zone.state_copy_start - pmvee_zone_pt);
+            }
+            else if (variants[variantnum].pmvee_state == PMVEE_MAPPINGS_REQUEST)
+            {
+                simple_mappings_pt = call_postcall_get_variant_result(variantnum);
+                if (simple_mappings_pt == (unsigned long)-1)
+                {
+                    warnf(" > Could not write registers to variant %d for injecting shmat call | erno: %d\n",
+                            variantnum, errno);
+                    shutdown(false);
+                }
+            }
+            else if (variants[variantnum].pmvee_state == PMVEE_LIBC_REQUEST ||
+                        variants[variantnum].pmvee_state == PMVEE_LIBC_SET ||
+                        variants[variantnum].pmvee_state == PMVEE_HANDLER_REQUEST ||
+                        variants[variantnum].pmvee_state == PMVEE_REGION_REQUEST ||
+                        variants[variantnum].pmvee_state == PMVEE_MIGRATION_INFO_REQUEST)
+            {
+            }
+            else if (variantnum)
+            {
+                // warnf(" > assumed application size: %ld - %ld = %ld\n", pmvee_state_copy_zone.state_copy_start, pmvee_zone_pt, pmvee_state_copy_zone.state_copy_start - pmvee_zone_pt);
+                // warnf(" > assumed alter size: %ld - %ld = %ld\n", pmvee_state_copy_zone.state_alter_start, pmvee_state_copy_zone.state_copy_end, pmvee_state_copy_zone.state_copy_end - pmvee_state_copy_zone.state_alter_start);
+                // warnf(" > assumed total size: %ld - %ld = %ld\n", pmvee_state_copy_zone.state_copy_end, pmvee_zone_pt, pmvee_state_copy_zone.state_copy_end - pmvee_zone_pt);
+                // warnf(" > 0x%lx - 0x%lx - 0x%lx - 0x%lx\n", pmvee_zone_pt, pmvee_state_copy_zone.state_copy_start, pmvee_state_copy_zone.state_alter_start, pmvee_state_copy_zone.state_copy_end);
+                variants[variantnum].regs.rdi = pmvee_state_copy_zone.state_copy_start - pmvee_zone_pt;
+
+                variants[variantnum].regs.rax = variants[variantnum].pmvee_communication_pt;
+                variants[variantnum].regs.orig_rax = variants[variantnum].pmvee_communication_pt;
+                interaction::write_all_regs(variants[variantnum].variantpid, &variants[variantnum].regs);
+            }
+                warnf(" > hit\n");
+            result = MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+        }
+#endif
 	}
 
     call_release_syslocks(variantnum, callnum, MVEE_SYSLOCK_POSTCALL | MVEE_SYSLOCK_FULL);
@@ -1335,17 +1644,40 @@ long monitor::call_postcall_return ()
         {
             for (int variant_i = 1; variant_i < mvee::numvariants; variant_i++)
             {
-                variants[variant_i].regs.rdi = pmvee_state_copy_zone.state_copy_start - pmvee_zone_pt;
-                convert_equivalent_pointer_array();
+                if (variants[variant_i].pmvee_state == PMVEE_COMMUNICATION_REQUEST)
+                {
+                    variants[variant_i].regs.orig_rax = __NR_pmvee_switch;
+                    variants[variant_i].regs.rax = __NR_pmvee_switch;
+                    variants[variant_i].regs.rdi = PMVEE_COMMUNICATION_REQUEST;
+                    variants[variant_i].regs.rsi = 0;
+                    variants[variant_i].regs.rdx = 0;
+                    variants[variant_i].regs.rip -= 2;
 
-                variants[variant_i].regs.rax = pmvee_zone_pt;
-                variants[variant_i].regs.orig_rax = pmvee_zone_pt;
-                interaction::write_all_regs(variants[variant_i].variantpid, &variants[variant_i].regs);
+	                if (!interaction::write_all_regs(variants[variant_i].variantpid, &variants[variant_i].regs))
+                    {
+                        warnf(" > Could not write registers to variant %d for injecting shmat call | erno: %d\n",
+                                variant_i, errno);
+                        shutdown(false);
+                    }
+                }
+                else
+                {
+                    debugf(" > assumed application size: %ld - %ld = %ld\n", pmvee_state_copy_zone.state_copy_start, pmvee_zone_pt, pmvee_state_copy_zone.state_copy_start - pmvee_zone_pt);
+                    debugf(" > assumed aler size: %ld - %ld = %ld\n", pmvee_state_copy_zone.state_alter_start, pmvee_state_copy_zone.state_copy_start, pmvee_state_copy_zone.state_copy_start - pmvee_state_copy_zone.state_copy_start);
+                    debugf(" > assumed total size: %ld - %ld = %ld\n", pmvee_state_copy_zone.state_copy_end, pmvee_zone_pt, pmvee_state_copy_zone.state_copy_end - pmvee_zone_pt);
+                    debugf(" > 0x%lx - 0x%lx - 0x%lx - 0x%lx\n", pmvee_zone_pt, pmvee_state_copy_zone.state_copy_start, pmvee_state_copy_zone.state_alter_start, pmvee_state_copy_zone.state_copy_end);
+                    variants[variant_i].regs.rdi = pmvee_state_copy_zone.state_copy_start - pmvee_zone_pt;
+                    // convert_equivalent_pointer_array();
+
+                    variants[variant_i].regs.rax = variants[variant_i].pmvee_communication_pt;
+                    variants[variant_i].regs.orig_rax = variants[variant_i].pmvee_communication_pt;
+                    interaction::write_all_regs(variants[variant_i].variantpid, &variants[variant_i].regs);
+                }
             }
         }
         if (callnum == __NR_pmvee_check)
         {
-            poly_exec = 0;
+            SET_MULTI_EXEC(0);
             debugf("SINGLE-VARIANT ENTER\n");
         }
 #endif

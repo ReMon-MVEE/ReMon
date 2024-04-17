@@ -147,6 +147,18 @@ add_custom_target(
             -DShmReplayLeader=ON
 )
 
+add_custom_target(
+        enable-ipmon-pomvee
+        COMMAND "${CMAKE_COMMAND}" ..
+            -DIpmonPmveeHandling=ON
+)
+
+add_custom_target(
+        disable-ipmon-pomvee
+        COMMAND "${CMAKE_COMMAND}" ..
+            -DIpmonPmveeHandling=OFF
+)
+
 message("using:")
 message("\t- " ${CMAKE_CXX_COMPILER})
 message("\t- " ${CMAKE_LINKER})
@@ -212,12 +224,21 @@ if(DEPS_PRESENT_IN_SYSTEM)
                 PRIVATE z
         )
 else()
-        target_link_libraries(mvee PRIVATE
-                ${CMAKE_SOURCE_DIR}/deps/jsoncpp/build/src/lib_json/libjsoncpp.a
-                ${CMAKE_SOURCE_DIR}/deps/libdwarf/libdwarf/.libs/libdwarf.a
-                ${CMAKE_SOURCE_DIR}/deps/libelf/lib/libelf.a
-                ${CMAKE_SOURCE_DIR}/deps/binutils/build-tree/zlib/libz.a
-        )
+        if(${CMAKE_BUILD_TYPE} MATCHES "Debug")
+                target_link_libraries(mvee PRIVATE
+                        ${CMAKE_SOURCE_DIR}/deps/jsoncpp/build/src/lib_json/libjsoncpp.so
+                        ${CMAKE_SOURCE_DIR}/deps/libdwarf/libdwarf/.libs/libdwarf.a
+                        ${CMAKE_SOURCE_DIR}/deps/libelf/lib/libelf.a
+                        ${CMAKE_SOURCE_DIR}/deps/binutils/build-tree/zlib/libz.a
+                )
+        else()
+                target_link_libraries(mvee PRIVATE
+                        ${CMAKE_SOURCE_DIR}/deps/jsoncpp/build/src/lib_json/libjsoncpp.a
+                        ${CMAKE_SOURCE_DIR}/deps/libdwarf/libdwarf/.libs/libdwarf.a
+                        ${CMAKE_SOURCE_DIR}/deps/libelf/lib/libelf.a
+                        ${CMAKE_SOURCE_DIR}/deps/binutils/build-tree/zlib/libz.a
+                )
+        endif()
 endif()
 
 # system libraries
@@ -310,6 +331,8 @@ option(ShmInsLoggingFull "Log instructions using shared memory with more verbosi
 option(ShmReplayLeader "Modifies replaying of shared memory instructions to follow leader-follower principle." ON)
 cmake_dependent_option(UseMPK "Use MPK to enhance user-space protections in IP-MON." ON "BuildIpmon" OFF)
 option(EnablePMVEE "Enables PMVEE functionality." ON)
+option(IpmonPmveeHandling "Enables IP-MON's PMVEE functionality." OFF)
+
 target_compile_definitions(mvee PRIVATE
     $<$<BOOL:${BenchmarkMode}>:MVEE_BENCHMARK>
     $<$<BOOL:${EmulateCPUID}>:MVEE_EMULATE_CPUID>
@@ -324,6 +347,7 @@ target_compile_definitions(mvee PRIVATE
     $<$<BOOL:${UseMPK}>:MVEE_USE_MPK>
     $<$<BOOL:${EnablePMVEE}>:MVEE_ENABLE_PMVEE>
     $<$<BOOL:${EnablePMVEE}>:MVEE_CONNECTED_MMAP_REGIONS>
+    $<$<BOOL:${IpmonPmveeHandling}>:IPMON_PMVEE_HANDLING>
     #MVEE_LOG_ALL_SHM_INSTRUCTIONS
 )
 # ======================================================================================================================

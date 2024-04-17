@@ -214,6 +214,14 @@ enum mvee_shared_buffer_types
 #define MVEE_SEM_TIMEDWAIT             MVEE_FAKE_SYSCALL_BASE + 37
 #define MVEE_SEM_TRYWAIT               MVEE_FAKE_SYSCALL_BASE + 38
 
+
+#define MVEE_GET_PMVEE_INFO             MVEE_FAKE_SYSCALL_BASE + 39
+#define MVEE_GET_PMVEE_TRANSLATION_UNIT MVEE_FAKE_SYSCALL_BASE + 40
+#define MVEE_PMVEE_REQUEST              MVEE_FAKE_SYSCALL_BASE + 41
+#define MVEE_GET_PMVEE_SYNC             MVEE_FAKE_SYSCALL_BASE + 42
+#define MVEE_GET_PMVEE_COMMUNICATION    MVEE_FAKE_SYSCALL_BASE + 43
+#define MVEE_PMVEE_GET_JUMP_TABLE       MVEE_FAKE_SYSCALL_BASE + 44
+
 //
 // MVEE_IPMON_INVOKE: This is an actual syscall we add to the kernel.
 // The only time it is invoked directly is when IP-MON checks if it

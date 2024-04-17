@@ -367,6 +367,7 @@ void monitor::log_backtraces()
     warnf("Backtrace requested. current monitor state: %s\n",
                 getTextualState(state));
 
+    // TODO: fixme
 	if (set_mmap_table->mmap_startup_info[0].image.length() == 0)
 	{
 		warnf("Can't backtrace because variants haven't been fully initialized yet\n");
@@ -1115,6 +1116,8 @@ void monitor::log_call_mismatch(int index1, int index2)
     if (set_mmap_table->thread_group_shutting_down)
         return;
 
+    if (mvee::numvariants > 1)
+        set_mmap_table->diff_memory(variants[0].variantpid, 1, variants[1].variantpid, 0, 0);
     warnf("==================================\n");
     warnf("ERROR: Callnumber mismatch\n");
     warnf("pid1     : %d\n",       variants[index1].variantpid);
@@ -1147,6 +1150,8 @@ void monitor::log_callargs_mismatch()
     if (set_mmap_table->thread_group_shutting_down)
         return;
 
+    if (mvee::numvariants > 1)
+        set_mmap_table->diff_memory(variants[0].variantpid, 1, variants[1].variantpid, 0, 0);
     warnf("==================================\n");
     warnf("ERROR: Call arguments mismatch\n");
     warnf("call     : %ld (%s)\n",
@@ -1425,6 +1430,8 @@ void monitor::log_segfault(int variantnum)
 //    set_mmap_table->print_mmap_table(mvee::logf);
 #if !defined(MVEE_BENCHMARK) || defined(MVEE_FORCE_ENABLE_BACKTRACING)
     log_variant_backtrace(variantnum, 0, 1, 1);
+    if (mvee::numvariants > 1)
+        set_mmap_table->diff_memory(variants[0].variantpid, 1, variants[1].variantpid, 0, 0);
 #endif
 
 	log_ipmon_state();

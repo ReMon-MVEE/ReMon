@@ -35,6 +35,7 @@ fd_info::fd_info()
 	, unsynced_access(false)
 	, unlinked(false)
 	, original_file_size(0)
+	, mmapped_bases(mvee::numvariants)
 {
 	paths.resize(mvee::numvariants);
     fds.resize(mvee::numvariants);
@@ -62,6 +63,7 @@ fd_info::fd_info
 	, original_file_size(original_file_size)
     , file_type(type)
     , can_load_indirect_cache(0)
+	, mmapped_bases(mvee::numvariants)
 {
 #ifndef MVEE_BENCHMARK
 	if (!unsynced_access &&
@@ -74,6 +76,7 @@ fd_info::fd_info
 		warnf("Invalid fd_info creation: unsynced_access requested but file is only open in the master variant\n");
 	}
 #endif
+	mmapped_bases.resize(mvee::numvariants);
 }
 
 bool fd_info::can_load_indirect()

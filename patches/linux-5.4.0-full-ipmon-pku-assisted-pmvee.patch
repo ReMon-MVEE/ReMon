@@ -1,5 +1,5 @@
 diff -ur origarch/x86/entry/syscalls/syscall_64.tbl linux-source-5.4.0/arch/x86/entry/syscalls/syscall_64.tbl
---- origarch/x86/entry/syscalls/syscall_64.tbl	2023-01-06 13:39:51.898475202 +0100
+--- orig/arch/x86/entry/syscalls/syscall_64.tbl	2023-01-06 13:39:51.898475202 +0100
 +++ linux-source-5.4.0/arch/x86/entry/syscalls/syscall_64.tbl	2024-01-06 00:06:00.317679038 +0100
 @@ -364,6 +364,9 @@
  # on-the-fly for compat_sys_*() compatibility system calls if X86_X32
@@ -12,7 +12,7 @@ diff -ur origarch/x86/entry/syscalls/syscall_64.tbl linux-source-5.4.0/arch/x86/
  513	x32	rt_sigreturn		sys32_x32_rt_sigreturn
  514	x32	ioctl			__x32_compat_sys_ioctl
 diff -ur origarch/x86/mm/tlb.c linux-source-5.4.0/arch/x86/mm/tlb.c
---- origarch/x86/mm/tlb.c	2022-11-23 21:19:00.000000000 +0100
+--- orig/arch/x86/mm/tlb.c	2022-11-23 21:19:00.000000000 +0100
 +++ linux-source-5.4.0/arch/x86/mm/tlb.c	2024-01-06 00:06:00.318679042 +0100
 @@ -806,6 +806,7 @@
  	put_flush_tlb_info();
@@ -23,7 +23,7 @@ diff -ur origarch/x86/mm/tlb.c linux-source-5.4.0/arch/x86/mm/tlb.c
  
  static void do_flush_tlb_all(void *info)
 diff -ur origfs/exec.c linux-source-5.4.0/fs/exec.c
---- origfs/exec.c	2022-11-23 21:19:00.000000000 +0100
+--- orig/fs/exec.c	2022-11-23 21:19:00.000000000 +0100
 +++ linux-source-5.4.0/fs/exec.c	2024-01-06 00:06:00.319679045 +0100
 @@ -1899,6 +1899,8 @@
  		putname(filename);
@@ -35,7 +35,7 @@ diff -ur origfs/exec.c linux-source-5.4.0/fs/exec.c
  
  out:
 diff -ur originclude/linux/sched.h linux-source-5.4.0/include/linux/sched.h
---- originclude/linux/sched.h	2022-11-23 21:19:00.000000000 +0100
+--- orig/include/linux/sched.h	2022-11-23 21:19:00.000000000 +0100
 +++ linux-source-5.4.0/include/linux/sched.h	2024-01-06 00:06:00.320679049 +0100
 @@ -625,6 +625,58 @@
  	struct wake_q_node *next;
@@ -59,7 +59,7 @@ diff -ur originclude/linux/sched.h linux-source-5.4.0/include/linux/sched.h
 +     1) The syscall must have originated from IP-MON
 +     2) IP-MON must pass the IP-MON key as the 7th syscall argument
 +  */
-+  unsigned char ipmon_masked_syscalls[ROUND_UP(__NR_syscalls, 8) / 8];
++  unsigned char ipmon_masked_syscalls[ROUND_UP(510, 8) / 8];
 +
 +  /* Is IP-MON enabled within this thread */
 +  unsigned char ipmon_enabled;
@@ -126,13 +126,13 @@ diff -ur originclude/linux/sched.h linux-source-5.4.0/include/linux/sched.h
  {
  	return task->thread_pid;
 diff -ur originclude/linux/tracehook.h linux-source-5.4.0/include/linux/tracehook.h
---- originclude/linux/tracehook.h	2019-11-25 01:32:01.000000000 +0100
+--- orig/include/linux/tracehook.h	2019-11-25 01:32:01.000000000 +0100
 +++ linux-source-5.4.0/include/linux/tracehook.h	2024-01-06 00:06:00.320679049 +0100
 @@ -101,6 +101,15 @@
  static inline __must_check int tracehook_report_syscall_entry(
  	struct pt_regs *regs)
  {
-+    if (pmvee_should_skip(regs, 1))
++    if ((current->ptrace & PT_PTRACED) && pmvee_should_skip(regs, 1))
 +    {
 +            return 0;
 +    }
@@ -150,7 +150,7 @@ diff -ur originclude/linux/tracehook.h linux-source-5.4.0/include/linux/tracehoo
  	else
 -		ptrace_report_syscall(regs, PTRACE_EVENTMSG_SYSCALL_EXIT);
 +    {
-+        if (pmvee_should_skip(regs, 0))
++        if ((current->ptrace & PT_PTRACED) && pmvee_should_skip(regs, 0))
 +        {
 +            return;
 +        }
@@ -165,7 +165,7 @@ diff -ur originclude/linux/tracehook.h linux-source-5.4.0/include/linux/tracehoo
  
  /**
 diff -ur originclude/uapi/asm-generic/errno.h linux-source-5.4.0/include/uapi/asm-generic/errno.h
---- originclude/uapi/asm-generic/errno.h	2019-11-25 01:32:01.000000000 +0100
+--- orig/include/uapi/asm-generic/errno.h	2019-11-25 01:32:01.000000000 +0100
 +++ linux-source-5.4.0/include/uapi/asm-generic/errno.h	2024-01-06 00:06:00.320679049 +0100
 @@ -120,4 +120,6 @@
  
@@ -175,7 +175,7 @@ diff -ur originclude/uapi/asm-generic/errno.h linux-source-5.4.0/include/uapi/as
 +
  #endif
 diff -ur originclude/uapi/linux/prctl.h linux-source-5.4.0/include/uapi/linux/prctl.h
---- originclude/uapi/linux/prctl.h	2019-11-25 01:32:01.000000000 +0100
+--- orig/include/uapi/linux/prctl.h	2019-11-25 01:32:01.000000000 +0100
 +++ linux-source-5.4.0/include/uapi/linux/prctl.h	2024-01-06 00:06:00.321679052 +0100
 @@ -234,4 +234,6 @@
  #define PR_GET_TAGGED_ADDR_CTRL		56
@@ -185,7 +185,7 @@ diff -ur originclude/uapi/linux/prctl.h linux-source-5.4.0/include/uapi/linux/pr
 +
  #endif /* _LINUX_PRCTL_H */
 diff -ur origkernel/events/uprobes.c linux-source-5.4.0/kernel/events/uprobes.c
---- origkernel/events/uprobes.c	2022-11-23 21:19:00.000000000 +0100
+--- orig/kernel/events/uprobes.c	2022-11-23 21:19:00.000000000 +0100
 +++ linux-source-5.4.0/kernel/events/uprobes.c	2024-01-06 00:06:00.321679052 +0100
 @@ -1569,11 +1569,13 @@
  {
@@ -210,7 +210,7 @@ diff -ur origkernel/events/uprobes.c linux-source-5.4.0/kernel/events/uprobes.c
  /*
   *  - search for a free slot.
 diff -ur origkernel/fork.c linux-source-5.4.0/kernel/fork.c
---- origkernel/fork.c	2022-11-23 21:19:00.000000000 +0100
+--- orig/kernel/fork.c	2022-11-23 21:19:00.000000000 +0100
 +++ linux-source-5.4.0/kernel/fork.c	2024-01-06 00:06:00.322679056 +0100
 @@ -366,6 +366,7 @@
  	}
@@ -233,7 +233,7 @@ diff -ur origkernel/fork.c linux-source-5.4.0/kernel/fork.c
  	 * This _must_ happen before we call free_task(), i.e. before we jump
  	 * to any of the bad_fork_* labels. This is to avoid freeing
 diff -ur origkernel/sys.c linux-source-5.4.0/kernel/sys.c
---- origkernel/sys.c	2022-11-23 21:19:00.000000000 +0100
+--- orig/kernel/sys.c	2022-11-23 21:19:00.000000000 +0100
 +++ linux-source-5.4.0/kernel/sys.c	2024-01-06 00:06:00.323679059 +0100
 @@ -61,6 +61,8 @@
  #include <linux/uidgid.h>
@@ -269,7 +269,7 @@ diff -ur origkernel/sys.c linux-source-5.4.0/kernel/sys.c
 +  unsigned long no_to_byte, bit_in_byte;
 +
 +  /* This is not very concise but the compiler will optimize it anyway... */
-+  if (syscall_no > ROUND_UP(__NR_syscalls, 8))
++  if (syscall_no > ROUND_UP(__NR_pmvee_check, 8))
 +    return 0;
 +
 +  no_to_byte  = syscall_no / 8;
@@ -284,7 +284,7 @@ diff -ur origkernel/sys.c linux-source-5.4.0/kernel/sys.c
 +{
 +  unsigned long no_to_byte, bit_in_byte;
 +
-+  if (syscall_no > ROUND_UP(__NR_syscalls, 8))
++  if (syscall_no > ROUND_UP(__NR_pmvee_check, 8))
 +    return;
 +
 +  no_to_byte  = syscall_no / 8;
@@ -416,7 +416,7 @@ diff -ur origkernel/sys.c linux-source-5.4.0/kernel/sys.c
 +{
 +	int error = 0;
 +	struct vm_area_struct *ipmon_vma = NULL, *ipmon_rb_vma = NULL;
-+	unsigned long kernel_syscall_mask_size = ROUND_UP(__NR_syscalls, 8) / 8;
++	unsigned long kernel_syscall_mask_size = ROUND_UP(__NR_pmvee_check, 8) / 8;
 +	unsigned char syscall_mask_copy[kernel_syscall_mask_size];
 +	unsigned char syscall_mask_check[kernel_syscall_mask_size];
 +	unsigned long program_counter;
@@ -514,13 +514,13 @@ diff -ur origkernel/sys.c linux-source-5.4.0/kernel/sys.c
 +}
 +
 +
-+long (*pmvee_switch_stub) (pid_t leader, unsigned long from, unsigned long size_one, unsigned long size_two, unsigned long flags) = NULL;
++long (*pmvee_switch_stub) (pid_t source, pid_t destination, unsigned long from, unsigned long size_one, unsigned long size_two, unsigned long flags) = NULL;
 +EXPORT_SYMBOL(pmvee_switch_stub);
 +
-+SYSCALL_DEFINE5(pmvee_switch, pid_t, leader, unsigned long, from, unsigned long, size_one, unsigned long, size_two, unsigned long, flags)
++SYSCALL_DEFINE6(pmvee_switch, pid_t, source, pid_t, destination, unsigned long, from, unsigned long, size_one, unsigned long, size_two, unsigned long, flags)
 +{
 +	if (pmvee_switch_stub)
-+		return pmvee_switch_stub(leader, from, size_one, size_two, flags);
++		return pmvee_switch_stub(source, destination, from, size_one, size_two, flags);
 +	else
 +		printk("system call pmvee_switch not implemented.\n");
 +
@@ -528,13 +528,13 @@ diff -ur origkernel/sys.c linux-source-5.4.0/kernel/sys.c
 +}
 +
 +
-+long (*pmvee_check_stub) (pid_t leader, unsigned long from, unsigned long size_one, unsigned long size_two, unsigned long flags) = NULL;
++long (*pmvee_check_stub) (pid_t source, pid_t destination, unsigned long from, unsigned long size_one, unsigned long size_two, unsigned long flags) = NULL;
 +EXPORT_SYMBOL(pmvee_check_stub);
 +
-+SYSCALL_DEFINE5(pmvee_check, pid_t, leader, unsigned long, from, unsigned long, size_one, unsigned long, size_two, unsigned long, flags)
++SYSCALL_DEFINE6(pmvee_check, pid_t, source, pid_t, destination, unsigned long, from, unsigned long, size_one, unsigned long, size_two, unsigned long, flags)
 +{
 +	if (pmvee_check_stub)
-+		return pmvee_check_stub(leader, from, size_one, size_two, flags);
++		return pmvee_check_stub(source, destination, from, size_one, size_two, flags);
 +	else
 +		printk("system call pmvee_check not implemented.\n");
 +
@@ -565,7 +565,7 @@ diff -ur origkernel/sys.c linux-source-5.4.0/kernel/sys.c
  		error = -EINVAL;
  		break;
 diff -ur origmm/interval_tree.c linux-source-5.4.0/mm/interval_tree.c
---- origmm/interval_tree.c	2023-01-24 17:04:29.471654623 +0100
+--- orig/mm/interval_tree.c	2023-01-24 17:04:29.471654623 +0100
 +++ linux-source-5.4.0/mm/interval_tree.c	2024-01-06 00:06:00.324679062 +0100
 @@ -57,6 +57,7 @@
  	rb_insert_augmented(&node->shared.rb, &root->rb_root,
@@ -576,7 +576,7 @@ diff -ur origmm/interval_tree.c linux-source-5.4.0/mm/interval_tree.c
  static inline unsigned long avc_start_pgoff(struct anon_vma_chain *avc)
  {
 diff -ur origmm/memory.c linux-source-5.4.0/mm/memory.c
---- origmm/memory.c	2022-11-23 21:19:00.000000000 +0100
+--- orig/mm/memory.c	2022-11-23 21:19:00.000000000 +0100
 +++ linux-source-5.4.0/mm/memory.c	2024-01-06 00:06:00.325679066 +0100
 @@ -1012,6 +1012,7 @@
  		mmu_notifier_invalidate_range_end(&range);
@@ -587,7 +587,7 @@ diff -ur origmm/memory.c linux-source-5.4.0/mm/memory.c
  /* Whether we should zap all COWed (private) pages too */
  static inline bool should_zap_cows(struct zap_details *details)
 diff -ur origmm/mmap.c linux-source-5.4.0/mm/mmap.c
---- origmm/mmap.c	2022-11-23 21:19:00.000000000 +0100
+--- orig/mm/mmap.c	2022-11-23 21:19:00.000000000 +0100
 +++ linux-source-5.4.0/mm/mmap.c	2024-01-06 00:06:00.327679072 +0100
 @@ -132,6 +132,7 @@
  	/* remove_protection_ptes reads vma->vm_page_prot without mmap_sem */
@@ -622,7 +622,7 @@ diff -ur origmm/mmap.c linux-source-5.4.0/mm/mmap.c
  int do_munmap(struct mm_struct *mm, unsigned long start, size_t len,
  	      struct list_head *uf)
 diff -ur origmm/mprotect.c linux-source-5.4.0/mm/mprotect.c
---- origmm/mprotect.c	2022-11-23 21:19:00.000000000 +0100
+--- orig/mm/mprotect.c	2022-11-23 21:19:00.000000000 +0100
 +++ linux-source-5.4.0/mm/mprotect.c	2024-01-06 00:06:00.327679072 +0100
 @@ -327,6 +327,7 @@
  
@@ -633,7 +633,7 @@ diff -ur origmm/mprotect.c linux-source-5.4.0/mm/mprotect.c
  unsigned long change_protection(struct vm_area_struct *vma, unsigned long start,
  		       unsigned long end, pgprot_t newprot,
 diff -ur origmm/prfile.c linux-source-5.4.0/mm/prfile.c
---- origmm/prfile.c	2023-01-24 17:04:27.280645615 +0100
+--- orig/mm/prfile.c	2023-01-24 17:04:27.280645615 +0100
 +++ linux-source-5.4.0/mm/prfile.c	2024-01-06 00:06:00.327679072 +0100
 @@ -53,6 +53,7 @@
  	if (f && pr)
@@ -644,7 +644,7 @@ diff -ur origmm/prfile.c linux-source-5.4.0/mm/prfile.c
  void vma_do_fput(struct vm_area_struct *vma, const char func[], int line)
  {
 diff -ur origmm/rmap.c linux-source-5.4.0/mm/rmap.c
---- origmm/rmap.c	2022-11-23 21:19:00.000000000 +0100
+--- orig/mm/rmap.c	2022-11-23 21:19:00.000000000 +0100
 +++ linux-source-5.4.0/mm/rmap.c	2024-01-06 00:06:00.328679075 +0100
 @@ -381,6 +381,7 @@
  	unlink_anon_vmas(vma);

@@ -826,6 +826,13 @@ POSTCALL(open)
 		std::vector<std::string> resolved_paths(mvee::numvariants);
 		std::vector<unsigned long> path_ptrs(mvee::numvariants);
 
+		for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+		{
+			variants[variant_i].ld_current_fd = fds[variant_i];
+			variants[variant_i].ld_current_base = 0;
+			variants[variant_i].ld_current_end = 0;
+		}
+
 		FILLARGARRAY(1, path_ptrs);
 
 		if (!call_resolve_open_paths(fds, path_ptrs, resolved_paths, unsynced_access))
@@ -901,6 +908,21 @@ POSTCALL(close)
 			set_fd_table->free_fd_info(ARG1(0));
 #ifdef MVEE_FD_DEBUG
 		set_fd_table->verify_fd_table(getpids());
+#endif
+#ifdef MVEE_ENABLE_PMVEE
+		int variant_i;
+		for (variant_i = 1; variant_i < mvee::numvariants; variant_i++)
+			if (ARG1(variant_i) != ARG1(0)) break;
+		if (variant_i == mvee::numvariants)
+			for (variant_i = 1; variant_i < mvee::numvariants; variant_i++)
+				call_postcall_set_variant_result(variant_i, variants[0].return_value);
+
+		for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+		{
+			variants[variant_i].ld_current_fd = -1;
+			variants[variant_i].ld_current_base = -1;
+			variants[variant_i].ld_current_end = -1;
+		}
 #endif
 	}
 	else
@@ -1374,6 +1396,9 @@ POSTCALL(execve)
     // create a new shm table...
     // man page: "Attached System V shared memory segments are detached (shmat(2))."
     call_release_syslocks(variantnum, __NR_execve, MVEE_SYSLOCK_FULL);
+	mp_start = (unsigned long) set_mmap_table->init_mp(mp_size);
+	pmvee_state_copies.clear();
+	pmvee_state_migrations.clear();
     set_shm_table.reset();
     set_shm_table = std::shared_ptr<shm_table>(new shm_table);
     call_grab_syslocks(variantnum, __NR_execve, MVEE_SYSLOCK_FULL);
@@ -2909,8 +2934,19 @@ POSTCALL(ioctl)
 
     man(2): (const void *shmaddr)
 -----------------------------------------------------------------------------*/
+GET_CALL_TYPE(shmdt)
+{
+	// The translation unit only exists in the leader, so allow it to detach this unsynced
+	if (!ipmon_initialized)
+		return MVEE_CALL_TYPE_UNSYNCED;
+	return MVEE_CALL_TYPE_NORMAL;
+}
+
 PRECALL(shmdt)
 {
+	if (IS_UNSYNCED_CALL)
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+
     call_check_regs(0);
     auto caller_info = set_mmap_table->get_caller_info(0, variants[0].variantpid, variants[0].regs.rip);
 
@@ -2948,6 +2984,9 @@ PRECALL(shmdt)
 
 POSTCALL(shmdt)
 {
+	if (IS_UNSYNCED_CALL)
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+
     if (!call_succeeded || !IS_TAGGED_ADDRESS(ARG1(0)))
         return MVEE_POSTCALL_RESUME;
 
@@ -3473,7 +3512,7 @@ PRECALL(rt_sigaction)
     CHECKARG(4);
     CHECKPOINTER(2);
     CHECKPOINTER(3);
-    CHECKSIGACTION(2, OLDCALLIFNOT(__NR_rt_sigaction));
+    // CHECKSIGACTION(3, OLDCALLIFNOT(__NR_rt_sigaction));
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
@@ -3969,6 +4008,9 @@ POSTCALL(munmap)
 			}
 
             set_mmap_table->munmap_range(variantnum, address, ARG2(variantnum));
+			if (!IS_MULTI_EXEC && address >= mp_start && address < mp_start + mp_size)
+				for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+					set_mmap_table->munmap_range(variant_i, address, ARG2(variantnum));
 			set_mmap_table->verify_mman_table(variantnum, variants[variantnum].variantpid);
 		}
 		else
@@ -5047,7 +5089,7 @@ POSTCALL(recvmmsg)
 -----------------------------------------------------------------------------*/
 GET_CALL_TYPE(accept4)
 {
-	if (!poly_exec)
+	if (!IS_MULTI_EXEC)
 	    return MVEE_CALL_TYPE_UNSYNCED;
     return MVEE_CALL_TYPE_NORMAL;
 }
@@ -6074,8 +6116,12 @@ POSTCALL(mprotect)
 	if IS_SYNCED_CALL
 	{
 		if (call_succeeded)
+		{
 			for (int i = 0; i < mvee::numvariants; ++i)
 				set_mmap_table->mprotect_range(i, ARG1(i), ARG2(i), ARG3(i));
+			for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+				remove_migration_targets(variant_i, ARG1(variant_i), ARG2(variant_i));
+		}
 
 		for (int i = 0; i < mvee::numvariants; ++i)
 			set_mmap_table->verify_mman_table(i, variants[i].variantpid);
@@ -6241,7 +6287,10 @@ POSTCALL(mprotect)
 	else
 	{
 		if (call_succeeded)
+		{
 			set_mmap_table->mprotect_range(variantnum, ARG1(variantnum), ARG2(variantnum), ARG3(variantnum));
+			remove_migration_targets(variantnum, ARG1(variantnum), ARG2(variantnum));
+		}
 
 		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
 	}
@@ -7074,7 +7123,7 @@ PRECALL(rt_sigprocmask)
 {
     CHECKARG(1);
     CHECKPOINTER(2);
-    CHECKSIGSET(2, OLDCALLIFNOT(__NR_rt_sigprocmask));
+    // CHECKSIGSET(3, OLDCALLIFNOT(__NR_rt_sigprocmask));
     CHECKPOINTER(3);    
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
@@ -7364,7 +7413,7 @@ GET_CALL_TYPE(mmap)
 		}
 	}
 
-	if (!poly_exec)
+	if (!IS_MULTI_EXEC)
 	    return MVEE_CALL_TYPE_UNSYNCED;
 	return MVEE_CALL_TYPE_NORMAL;
 }
@@ -7534,7 +7583,7 @@ CALL(mmap)
             SETARG1(0, address);
             SETARG4(0, (ARG4(0) & (~MAP_SHARED)) | MAP_PRIVATE);
         }
-        else if (!poly_exec)
+        else if (!IS_MULTI_EXEC)
         {
             unsigned long address = set_mmap_table->calculate_joint_base(ARG2(0), true);
             if (address == (unsigned long)-1)
@@ -7698,7 +7747,6 @@ CALL(mmap)
 
 #ifndef MVEE_BENCHMARK
 			set_fd_table->print_fd_table_proc(variants[0].variantpid);
-			log_variant_backtrace(0);
 #endif
 
 #ifndef MVEE_ALLOW_SHM
@@ -7931,6 +7979,37 @@ POSTCALL(mmap)
 				shutdown(false);
 				return 0;
 			}
+
+			if (variants[0].ld_current_fd >= 0 && variants[0].ld_current_base == 0)
+			{
+				int variant_i;
+				for (variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+				{
+					if ((unsigned long)variants[variant_i].ld_current_fd != ARG5(variant_i))
+						break;
+				}
+				if (variant_i < mvee::numvariants)
+				{
+					warnf("loader heuristic failure.\n");
+					shutdown(false);
+					return 0;
+				}
+				for (variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+				{
+					variants[variant_i].ld_current_base = results[variant_i];
+					variants[variant_i].ld_current_end = results[variant_i] + ARG2(variant_i);
+				}
+			}
+
+			if (!info->mmapped_bases[0])
+				info->mmapped_bases = std::vector<unsigned long>(results);
+			if (ARG3(0) & PROT_WRITE)
+			{
+				// std::vector<unsigned long> bases = std::vector<unsigned long>();
+				// for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+				// 	bases.push_back(variants[variant_i].ld_current_base);
+				insert_migration_targets(info, results, ARG2(0));
+			}
 			if (ARG4(0) & MAP_MVEE_WASSHARED)
 			{
 				/* from mmap2 manpages:
@@ -7965,6 +8044,23 @@ POSTCALL(mmap)
                         offsets.push_back(ARG6(variant_i));
                 insert_jump_targets(info, results, offsets);
             }
+		}
+		else if (ARG4(0) & MAP_FIXED)
+		{
+			if (variants[0].ld_current_fd >= 0 && variants[0].ld_current_base != (unsigned long)-1)
+			{
+				int variant_i;
+				for (variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+				{
+					if (!(results[variant_i] >= variants[variant_i].ld_current_base && 
+							(results[variant_i] + ARG2(variant_i)) <= variants[variant_i].ld_current_end))
+						break;
+				}
+				if (variant_i >= mvee::numvariants)
+					info = set_fd_table->get_fd_info(variants[0].ld_current_fd);
+			}
+			if (info && (ARG3(0) & PROT_WRITE))
+				insert_migration_targets(info, results, ARG2(0));
 		}
 
 #if defined(MVEE_EMULATE_SHARED_MEMORY) && defined(MVEE_ALLOW_SHM)
@@ -8014,6 +8110,9 @@ POSTCALL(mmap)
             set_mmap_table->map_range(i, results[i], ARG2(0), ARG4(0), ARG3(0), info, actual_offset, current_shadow);
 #endif
 		}
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
+		add_connected_regions_to_map(connected_regions);
+#endif
 
 		//
 		// Check if this is an aligned mmap request
@@ -8121,7 +8220,7 @@ POSTCALL(mmap)
 		if (variants[variantnum].prevcallnum == __NR_mmap2)
 			actual_offset *= 4096;
 #endif
-        set_mmap_table->map_range(variantnum, result, ARG2(variantnum) + (!poly_exec ? 0x1000 : 0x00),
+        set_mmap_table->map_range(variantnum, result, ARG2(variantnum), //  + (!poly_exec ? 0x1000 : 0x00),
 				ARG4(variantnum), ARG3(variantnum), info, actual_offset);
         set_mmap_table->verify_mman_table(variantnum, variants[variantnum].variantpid);
 
@@ -9371,7 +9470,7 @@ LOG_ARGS(exit_group)
 
 GET_CALL_TYPE(exit_group)
 {
-	if (!poly_exec)
+	if (!IS_MULTI_EXEC)
 	{
 		for (int variant_i = 1; variant_i < mvee::numvariants; variant_i++)
 		{
@@ -9387,7 +9486,7 @@ GET_CALL_TYPE(exit_group)
 			}
 			call_resume(variant_i);
 		}
-		poly_exec = -1;
+		SET_MULTI_EXEC(-1);
 	}
 	return MVEE_CALL_TYPE_NORMAL;
 }
@@ -10122,7 +10221,7 @@ PRECALL(inotify_rm_watch)
 -----------------------------------------------------------------------------*/
 GET_CALL_TYPE(openat)
 {
-	return poly_exec ? MVEE_CALL_TYPE_NORMAL : MVEE_CALL_TYPE_UNSYNCED;
+	return IS_MULTI_EXEC ? MVEE_CALL_TYPE_NORMAL : MVEE_CALL_TYPE_UNSYNCED;
 }
 
 LOG_ARGS(openat)
@@ -10225,6 +10324,13 @@ POSTCALL(openat)
 		std::vector<unsigned long> fds = call_postcall_get_result_vector();
 		std::vector<std::string> resolved_paths(mvee::numvariants);
 		std::vector<unsigned long> path_ptrs(mvee::numvariants);
+
+		for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+		{
+			variants[variant_i].ld_current_fd = fds[variant_i];
+			variants[variant_i].ld_current_base = 0;
+			variants[variant_i].ld_current_end = 0;
+		}
 
 		FILLARGARRAY(2, path_ptrs);
 
@@ -11709,6 +11815,19 @@ POSTCALL(memfd_create)
     }
 
     return 0;
+}
+
+/*-----------------------------------------------------------------------------
+  sys_rseq - (struct rseq *rseq, uint32_t rseq_len, int flags, uint32_t sig)
+-----------------------------------------------------------------------------*/
+PRECALL(rseq)
+{
+	CHECKPOINTER(1);
+	CHECKARG(2);
+	CHECKARG(3);
+	CHECKARG(4);
+
+	return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 }
 
 /*-----------------------------------------------------------------------------

@@ -172,6 +172,7 @@ public:
 	static bool process_opts                (int argc, char** argv, bool add_args);
 	static void add_argv                    (const char* arg, bool first_extra_arg);
 	static void init_pmvee_mappings         (const char* file);
+	static void init_pmvee_migrations       (const char* file);
 
 
 	//
@@ -625,6 +626,22 @@ public:
 		int			  type;
 	} pmvee_mapping_t;
 	static std::vector<pmvee_mapping_t> mappings;
+	struct pmvee_migration_info_t
+	{
+		unsigned long offset;
+		unsigned long size;
+	};
+	typedef struct pmvee_migration_t
+	{
+		std::string file_name;
+		std::vector<struct pmvee_migration_info_t> migration;
+		std::vector<unsigned long> pointers;
+	} pmvee_migration_t;
+	static std::vector<pmvee_migration_t> migrations;
+	static unsigned long pmvee_migration_count;
+	static unsigned long pmvee_pointer_count;
+	static unsigned long pmvee_migration_size;
+	static unsigned long pmvee_pointer_size;
 private:
 
 	// *************************************************************************

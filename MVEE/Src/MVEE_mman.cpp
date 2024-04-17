@@ -194,6 +194,7 @@ mmap_table::mmap_table()
 	std::mt19937_64 mt(rd());
 	std::uniform_int_distribution<> distr(1, 254);
 	mmap_base = distr(mt) * (HIGHEST_USERMODE_ADDRESS >> 8);
+	simple_mappings = 0;
 //	warnf("mmap_base is 0x" PTRSTR "\n", mmap_base);
 #ifdef MVEE_MMAN_DEBUG
     print_mmap_table(mvee::logf);
@@ -218,6 +219,7 @@ mmap_table::mmap_table(const mmap_table& parent)
 	mmap_base                  = parent.mmap_base;
     mp_start                   = parent.mp_start;
     mp_end                     = parent.mp_end;
+	simple_mappings            = parent.simple_mappings;
 
     full_map.resize(mvee::numvariants);
 
@@ -338,11 +340,25 @@ void mmap_table::print_mmap_table(void (*logfunc)(const char* format, ...))
 				mmap_startup_info[i].serialized_argv.c_str());
 	}
 
+    bool mp_seen = false;
     for (int i = 0; i < mvee::numvariants; ++i)
     {
         for (std::set<mmap_region_info*, region_sort>::iterator it = full_map[i].begin();
              it != full_map[i].end(); ++it)
         {
+            if ((*it)->region_base_address >= mp_start && ((*it)->region_base_address + (*it)->region_size) <= mp_end)
+            {
+                if (!mp_seen)
+                {
+                    logfunc("mp >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
+                    mp_seen = true;
+                }
+            }
+            else if (mp_seen)
+            {
+                logfunc("mp >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
+                mp_seen = false;
+            }
             char prefix[100];
             sprintf(prefix, "variant %d ->", i);
             (*it)->print_region_info(prefix, logfunc);
@@ -1077,6 +1093,9 @@ bool mmap_table::munmap_range (int variantnum, unsigned long base, unsigned long
     __munmap_variantnum = variantnum;
     __munmap_base     = base;
     __munmap_size     = size;
+
+    if (!variantnum)
+        remove_address_from_mmap(base, size);
     //    warnf("munmapping range: 0x%08x-0x%08x for variant: %d\n", base, base+size, variantnum);
     if (foreach_region_one_variant(variantnum, base, size, (void*)(unsigned long)variantnum, mmap_table::mman_munmap_range_callback) != 0)
         return false;
@@ -1100,6 +1119,8 @@ mmap_region_info* mmap_table::map_range (int variantnum, unsigned long address, 
 
     // munmap the range first
     munmap_range(variantnum, address, size);
+    if (!variantnum)
+        add_address_to_mmap(address, size, prot_flags);
 
     // now we can just create a new region without having to deal with
     // overlap scenarios
@@ -1407,9 +1428,9 @@ unsigned long mmap_table::calculate_joint_base (unsigned long size, bool allow_w
     // warnf("> getting joint address\n");
 #ifdef MVEE_ENABLE_PMVEE
     if (allow_writes)
-        merged_map.push_back({ mp_start, mp_start + PMVEE_ZONE_ONE_DEFAULT_SIZE });
+        merged_map.push_back({ mp_start + 4096, mp_start + PMVEE_ZONE_ONE_DEFAULT_SIZE });
     else
-        merged_map.push_back({ mp_start + PMVEE_ZONE_ONE_DEFAULT_SIZE, mp_end });
+        merged_map.push_back({ mp_start + 4096 + PMVEE_ZONE_TWO_DEFAULT_SIZE, mp_end - 4096 });
 #else
     merged_map.push_back({ 0, HIGHEST_USERMODE_ADDRESS });
 #endif
@@ -1498,8 +1519,8 @@ unsigned long mmap_table::calculate_joint_base (unsigned long size, bool allow_w
             {
                 continue;
             }
-            else if ((region_start < mp_start && region_end <= mp_end) ||
-                     (region_start >= mp_start && region_end > mp_end))
+            else if ((region_start < mp_start && region_end <= mp_end && region_end > mp_start) ||
+                     (region_start >= mp_start && region_start < region_end && region_end > mp_end))
             {
                 warnf("Some NUTJOB managed to map a region over the mp boundary...\n");
                 goto cleanup;
@@ -1561,6 +1582,8 @@ unsigned long mmap_table::calculate_joint_base (unsigned long size, bool allow_w
     merged_map.clear();
     if (ret == (unsigned long) -1)
         warnf(" > woopsiedoopsie ran out of space!\n");
+
+    debugf(" > got joint address %p\n", (void*)ret);
 
     return ret;
 }
@@ -1756,6 +1779,18 @@ unsigned long  mmap_table::init_mp (size_t mp_size)
     mp_end   = mp_start + mp_size;
 
     warnf(" > set MP to [ %p ; %p )\n", (void*) mp_start, (void*) mp_end);
+
+    // TODO: This is pretty ugly, probably should fix this.
+    for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+    {
+        if (!insert_region(variant_i, new mmap_region_info(variant_i, mp_start, 4096, PROT_NONE, nullptr, 0, 0)))
+            warnf(" > init what? 1\n");
+        if (!insert_region(variant_i, new mmap_region_info(variant_i, mp_start + PMVEE_ZONE_ONE_DEFAULT_SIZE - 4096, 4096, PROT_NONE, nullptr, 0, 0)))
+            warnf(" > init what? 2\n");
+        if (!insert_region(variant_i, new mmap_region_info(variant_i, mp_start + PMVEE_ZONE_ONE_DEFAULT_SIZE + PMVEE_ZONE_TWO_DEFAULT_SIZE- 4096, 4096, PROT_NONE, nullptr, 0, 0)))
+            warnf(" > init what? 3\n");
+    }
+    print_mmap_table();
 
     return address;
 }

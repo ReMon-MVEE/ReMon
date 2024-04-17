@@ -699,6 +699,40 @@ STATIC INLINE struct ipmon_syscall_data* ipmon_get_data_at (struct ipmon_syscall
 		}																\
 	}																	
 
+
+// Called from the PRECALL handlers
+//
+// The master copies <sz> bytes from <ptr> into the IP-MON buffer
+// as the <num>'th argument for the ipmon_syscall_entry at <entry_offset>
+// Copying is done using the <cpy> function
+//
+// The slaves compare the <num>'th argument of the ipmon_syscall_entry at <entry_offset>
+// with their own argument at <ptr>.
+// The comparison is done using cmpfunc <cmp>
+#define ipmon_replace(__entry, __num, __ptr, __size_in_buffer, __size_for_cpyfunc, __cpy) \
+	{																	\
+		unsigned long __arg_offset = sizeof(struct ipmon_syscall_entry); \
+		struct ipmon_syscall_data* __arg = ipmon_get_data_at(__entry, __arg_offset); \
+																		\
+		/* skip to the argument we're checking. - We start counting at 1 */ \
+		for (unsigned char __i = 1; __i < __num; ++__i)					\
+		{																\
+			__arg_offset += __arg->len;									\
+			__arg = ipmon_get_data_at(__entry, __arg_offset);			\
+		}																\
+																		\
+		/* The master records the length and then copies the data*/		\
+		if (ipmon_variant_num == 0)										\
+		{																\
+			__arg->len = DATASIZE(__size_in_buffer);					\
+			__cpy(__arg, __ptr, __size_for_cpyfunc);					\
+		}																\
+		else															\
+		{																\
+			__cpy(__ptr, __arg, __size_for_cpyfunc);					\
+		}																\
+	}																	
+
 // Called from the POSTCALL handlers
 //
 // The master copies its data to the IP-MON buffer
