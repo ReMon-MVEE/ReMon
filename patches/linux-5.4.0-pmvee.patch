@@ -55,13 +55,13 @@ diff -ur orig/kernel/sys.c linux-source-5.4.0/kernel/sys.c
  }
  
 +
-+long (*pmvee_switch_stub) (pid_t leader, unsigned long from, unsigned long to, unsigned long flags) = NULL;
++long (*pmvee_switch_stub) (pid_t leader, unsigned long from, unsigned long size_one, unsigned long size_two, unsigned long flags) = NULL;
 +EXPORT_SYMBOL(pmvee_switch_stub);
 +
-+SYSCALL_DEFINE4(pmvee_switch, pid_t, leader, unsigned long, from, unsigned long, to, unsigned long, flags)
++SYSCALL_DEFINE5(pmvee_switch, pid_t, leader, unsigned long, from, unsigned long, size_one, unsigned long, size_two, unsigned long, flags)
 +{
 +	if (pmvee_switch_stub)
-+		return pmvee_switch_stub(leader, from, to, flags);
++		return pmvee_switch_stub(leader, from, size_one, size_two, flags);
 +	else
 +		printk("system call pmvee_switch not implemented.\n");
 +
@@ -69,13 +69,13 @@ diff -ur orig/kernel/sys.c linux-source-5.4.0/kernel/sys.c
 +}
 +
 +
-+long (*pmvee_check_stub) (pid_t leader, unsigned long from, unsigned long to, unsigned long flags) = NULL;
++long (*pmvee_check_stub) (pid_t leader, unsigned long from, unsigned long size_one, unsigned long size_two, unsigned long flags) = NULL;
 +EXPORT_SYMBOL(pmvee_check_stub);
 +
-+SYSCALL_DEFINE4(pmvee_check, pid_t, leader, unsigned long, from, unsigned long, to, unsigned long, flags)
++SYSCALL_DEFINE5(pmvee_check, pid_t, leader, unsigned long, from, unsigned long, size_one, unsigned long, size_two, unsigned long, flags)
 +{
 +	if (pmvee_check_stub)
-+		return pmvee_check_stub(leader, from, to, flags);
++		return pmvee_check_stub(leader, from, size_one, size_two, flags);
 +	else
 +		printk("system call pmvee_check not implemented.\n");
 +

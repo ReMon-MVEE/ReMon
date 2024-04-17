@@ -65,7 +65,7 @@ extern "C" {
 // Allow all supported calls
 #define FULL_SYSCALLS        6
 
-#define CURRENT_POLICY       FULL_SYSCALLS
+#define CURRENT_POLICY       SOCKET_RW_POLICY
 
 /*-----------------------------------------------------------------------------
     Definitions and Generic Macros
@@ -198,6 +198,12 @@ typedef unsigned long rb_pointer;
 //
 #define IPMON_WAIT_FOR_SIGNAL_CALL 512 // Don't actually execute the call. Just wait for a signal delivery isntead
 
+//
+// PMVEE
+//
+#define IPMON_PMVEE_WAIT     1024
+#define IPMON_PMVEE_WAKE     2048
+
 #define IPMON_MAYBE_BLOCKING(fd) ((ipmon_get_file_type(fd) & MVEE_BLOCKING_FD) ? IPMON_BLOCKING_CALL : 0)
 #define IPMON_MAYBE_DISPATCH_MASTER(fd)							\
 	if (ipmon_variant_num == 0)									\
@@ -235,8 +241,13 @@ enum FileType
 /*-----------------------------------------------------------------------------
     IP-MON Mask Macros
 -----------------------------------------------------------------------------*/
+#ifdef IPMON_PMVEE_HANDLING
+#define IPMON_MASK(mask) 				    unsigned char mask[ROUND_UP(__NR_pmvee_check, 8) / 8]
+#define IPMON_MASK_CLEAR(mask) 			    memset(mask, 0, ROUND_UP(__NR_pmvee_check, 8) / 8)
+#else
 #define IPMON_MASK(mask) 				    unsigned char mask[ROUND_UP(__NR_syscalls, 8) / 8]
 #define IPMON_MASK_CLEAR(mask) 			    memset(mask, 0, ROUND_UP(__NR_syscalls, 8) / 8)
+#endif
 #define IPMON_MASK_SET(mask, syscall) 	    ipmon_set_unchecked_syscall(mask, syscall, 1)
 #define IPMON_MASK_UNSET(mask, syscall)     ipmon_set_unchecked_syscall(mask, syscall, 0)
 #define IPMON_MASK_ISSET(mask, syscall) 	ipmon_is_unchecked_syscall(mask, syscall)
@@ -330,6 +341,38 @@ struct ipmon_variant_info
 	unsigned char padding[64 - 2 * sizeof(unsigned int)];
 };
 
+#define PMVEE_SCANNINGG_START           0x6969696969696969l
+struct pmvee_mappings_info_t
+{
+    char* start;
+    char* end;
+    unsigned long prot;
+};
+
+struct ipmon_pmvee_info_t
+{
+	pid_t source_pid;
+	pid_t my_pid;
+	void* mp_base;
+	size_t size_one;
+	size_t size_two;
+};
+
+struct pmvee_sync_t
+{
+	int multi;
+	int pmvee_sync_id;
+};
+
+struct pmvee_translation_unit_t
+{
+	int communication_ids[10];
+	int jumps_id;
+	size_t mapping_count;
+	size_t full_size;
+	// translation info
+};
+
 struct ipmon_buffer
 {
 	// Cacheline 0
@@ -339,7 +382,13 @@ struct ipmon_buffer
 	struct ipmon_barrier pre_flush_barrier;
 	struct ipmon_barrier post_flush_barrier;
 	unsigned long flush_count;
+	#ifdef IPMON_PMVEE_HANDLING
+	int multi;
+	struct ipmon_barrier pmvee_barrier;
+	unsigned char padding[64 - 2*sizeof(unsigned long) - sizeof(int)*2 - sizeof(struct ipmon_barrier) * 3 - sizeof(int)];
+	#else
 	unsigned char padding[64 - 2*sizeof(unsigned long) - sizeof(int)*2 - sizeof(struct ipmon_barrier) * 2];
+	#endif
 
 	// Cachelines 1-n
 	struct ipmon_variant_info variant_info[1];

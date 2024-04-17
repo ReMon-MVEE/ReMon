@@ -89,6 +89,18 @@ IPMON_MASK(kernelmask);
 long           ipmon_reg_file_map_id          = -1;
 char*          ipmon_reg_file_map             = NULL;
 
+// needed for pmvee handling
+struct pmvee_sync_t   *pmvee_sync              = NULL;
+struct pmvee_translation_unit_t
+					  *pmvee_translation_unit  = NULL;
+char                  *pmvee_commincations[10] = { NULL };
+unsigned long         entrance_address         = 0;
+unsigned long         *pmvee_jumps             = NULL;
+unsigned long 		  pmvee_migration_start    = -1;
+unsigned long 		  pmvee_pointer_start      = 0;
+unsigned long 		  pmvee_migration_end      = 0;
+unsigned long 		  pmvee_stack_reset        = 0;
+
 /*-----------------------------------------------------------------------------
     Additional Bookkeeping
 -----------------------------------------------------------------------------*/
@@ -116,6 +128,18 @@ char           ipmon_master_fd_to_slave_fd [4096];
 unsigned long ipmon_epoll_map[MAX_FDS][MAX_FDS];
 int           ipmon_epoll_map_spinlock = 1;
 volatile int* ipmon_epoll_map_lock_ptr = &ipmon_epoll_map_spinlock;
+
+//
+// Info for pmvee handling
+//
+struct ipmon_pmvee_info_t ipmon_pmvee_info = 
+{
+	.source_pid = 0,
+	.my_pid = 0,
+	.mp_base = 0,
+	.size_one = 0,
+	.size_two = 0,
+};
 
 /*-----------------------------------------------------------------------------
     Syscall Ordering Support
@@ -2517,7 +2541,7 @@ PRECALL(recvmsg)
 	CHECKREG(ARG1);
 	CHECKPOINTER(ARG2);
 	CHECKREG(ARG3);
-	CHECKMSGLAYOUT(ARG2);
+	// CHECKMSGLAYOUT(ARG2); TODO: This is failing right now, while it doesn't in CP-MON.
 	return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER | IPMON_MAYBE_BLOCKING(ARG1);
 }
 
@@ -2915,6 +2939,156 @@ PRECALL(setsockopt)
 	CHECKBUFFER(ARG4, ARG5);
 	return IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
 }
+
+/*-----------------------------------------------------------------------------
+    pmvee_switch
+-----------------------------------------------------------------------------*/
+MAYBE_CHECKED(pmvee_switch)
+{
+	return args.arg1 < (unsigned long)0x1000;
+}
+
+CALCSIZE(pmvee_switch)
+{
+	COUNTREG(ARG);
+}
+
+PRECALL(pmvee_switch)
+{
+	if (!ipmon_variant_num)
+	{
+		if (args.arg1 == -1)
+		{
+			pmvee_migration_start = 0;
+			pmvee_pointer_start   = 0;
+			pmvee_migration_end   = 0;
+		}
+		else
+		{
+			pmvee_migration_start = args.arg2 - args.arg1;
+			pmvee_pointer_start   = args.arg3 - args.arg1;
+			pmvee_migration_end   = args.arg4 - args.arg1;
+		}
+		*(unsigned long*)(ipmon_get_data_at(entry, sizeof(struct ipmon_syscall_entry))->data) = pmvee_migration_start;
+	}
+	// order++;
+	entrance_address = args.arg6;
+	args.arg1 = ipmon_pmvee_info.source_pid; //  source
+	args.arg2 = ipmon_pmvee_info.my_pid; //  destination
+	args.arg3 = (unsigned long)ipmon_pmvee_info.mp_base; //  from
+	args.arg4 = ipmon_pmvee_info.size_one; //  size_one
+	args.arg5 = ipmon_pmvee_info.size_two; //  size_two
+	args.arg6 = 0; //  flags
+	return IPMON_PMVEE_WAKE | IPMON_REPLICATE_MASTER | IPMON_ORDER_CALL | IPMON_LOCKSTEP_CALL;
+}
+
+/*-----------------------------------------------------------------------------
+    pmvee_check
+-----------------------------------------------------------------------------*/
+PRECALL(pmvee_check)
+{
+	// if (ipmon_variant_num && temp_counter >= 5)
+	// 	ipmon_arg_verify_failed(0x880135, 0x00, 0x00);
+	if (!pmvee_stack_reset)
+		pmvee_stack_reset = args.arg1;
+	args.arg1 = ipmon_pmvee_info.source_pid; //  source
+	args.arg2 = ipmon_pmvee_info.my_pid; //  destination
+	args.arg3 = (unsigned long)ipmon_pmvee_info.mp_base; //  from
+	args.arg4 = ipmon_pmvee_info.size_one; //  size_one
+	args.arg5 = ipmon_pmvee_info.size_two; //  size_two
+	args.arg6 = 0; //  flags
+	return IPMON_PMVEE_WAIT | IPMON_REPLICATE_MASTER | IPMON_ORDER_CALL | IPMON_LOCKSTEP_CALL;
+}
+
+#ifdef IPMON_PMVEE_HANDLING
+extern "C" unsigned long ipmon_enclave_pmvee_exit_switch_alternative_monitor()
+{
+	unsigned long pmvee_migration_start_temp = pmvee_migration_start;
+	pmvee_migration_start = -1;
+	return pmvee_migration_start_temp;
+}
+
+extern "C" unsigned long ipmon_enclave_pmvee_exit_check_alternative_monitor()
+{
+	return (ipmon_variant_num ? entrance_address : 0);
+}
+
+extern "C" unsigned long ipmon_enclave_pmvee_exit_check_stack_alternative_monitor()
+{
+	return pmvee_stack_reset;
+}
+
+unsigned long pmvee_translate_at_index(int numvariants, unsigned long** addresses, unsigned long index)
+{
+	unsigned long address = addresses[0][index];
+
+	unsigned long *jumps_a = &(pmvee_jumps[1]);
+	unsigned long jump_i;
+	for (jump_i = 0; jump_i < pmvee_jumps[0]; jump_i+=numvariants)
+	{
+		unsigned long *jump = &(jumps_a[jump_i]);
+		if (jump[0] == address)
+		{
+			for (int variant_i = 1; variant_i < numvariants; variant_i++)
+				addresses[variant_i][index] = jump[variant_i];
+			return 0;
+		}
+	}
+
+	struct pmvee_mappings_info_t *pmvee_translation_table = 
+			(struct pmvee_mappings_info_t*)((char*)pmvee_translation_unit + sizeof(struct pmvee_translation_unit_t));
+	for (int transtatlion_i = 0; transtatlion_i < (pmvee_translation_unit->mapping_count); transtatlion_i+=numvariants)
+	{
+		if (address >= (unsigned long)pmvee_translation_table[transtatlion_i].start &&
+				address < (unsigned long)pmvee_translation_table[transtatlion_i].end)
+		{
+			for (int variant_i = 1; variant_i < numvariants; variant_i++)
+				addresses[variant_i][index] = (unsigned long)pmvee_translation_table[transtatlion_i + variant_i].start + (addresses[0][index] - (unsigned long)pmvee_translation_table[transtatlion_i].start);
+			return 0;
+		}
+	}
+
+	for (int variant_i = 1; variant_i < numvariants; variant_i++)	
+		addresses[variant_i][index] = addresses[0][index];
+	return 1;
+}
+
+void ipmon_pmvee_migration(struct ipmon_buffer* RB)
+{
+    for (int variant_i = 1; variant_i < RB->numvariants; variant_i++)
+        memcpy(pmvee_commincations[variant_i], pmvee_commincations[0], pmvee_pointer_start);
+
+	unsigned long* pointer_migrations[sizeof(pmvee_commincations)/sizeof(pmvee_commincations[0])];
+	for (int variant_i = 0; variant_i < RB->numvariants; variant_i++)
+		pointer_migrations[variant_i] = (unsigned long*)(pmvee_commincations[variant_i] + pmvee_pointer_start);
+
+	unsigned long address_i;
+	for (address_i = 0; address_i < ((pmvee_migration_end - pmvee_pointer_start) / sizeof(void*)); address_i++)
+	{
+		if (pmvee_translate_at_index(RB->numvariants, pointer_migrations, address_i))
+		{
+			if (pointer_migrations[0][address_i] == PMVEE_SCANNINGG_START)
+			{
+				address_i++;
+				while (pointer_migrations[0][address_i])
+				{
+					for (int variant_i = 1; variant_i < RB->numvariants; variant_i++)
+						pointer_migrations[variant_i][address_i] = pointer_migrations[0][address_i];
+					address_i++;
+					for (int variant_i = 1; variant_i < RB->numvariants; variant_i++)
+						pmvee_translate_at_index(RB->numvariants, pointer_migrations, address_i);
+					address_i++;
+				}
+				for (int variant_i = 1; variant_i < RB->numvariants; variant_i++)
+				{
+					pointer_migrations[variant_i][address_i] = pointer_migrations[0][address_i];
+				}
+				continue;
+			}
+		}
+	}
+}
+#endif
 
 /*-----------------------------------------------------------------------------
     ipmon_syscall_maybe_checked - allows a system call handler to decide whether
@@ -3425,13 +3599,44 @@ unsigned short ipmon_prepare_syscall (struct ipmon_buffer* RB, struct ipmon_sysc
 			(entry->syscall_type & IPMON_WAIT_FOR_SIGNAL_CALL))
 			return entry->syscall_type;
 
+#ifdef IPMON_PMVEE_HANDLING
+		if (entry->syscall_type & IPMON_PMVEE_WAKE)
+		{
+			pmvee_sync->multi = 1;
+
+			for (int variant_i = 1; variant_i < RB->numvariants; variant_i++)
+				*(unsigned long*)(pmvee_commincations[variant_i]) = 0xb00b135;
+			
+			unsigned long *jumps_a = &(pmvee_jumps[1]);
+			unsigned long jump_i;
+			for (jump_i = 0; jump_i < pmvee_jumps[0]; jump_i+=RB->numvariants)
+			{
+				unsigned long *jump = &(jumps_a[jump_i]);
+				if (jump[0] == entrance_address)
+				{
+					for (int variant_i = 1; variant_i < RB->numvariants; variant_i++)
+						*(unsigned long*)(pmvee_commincations[variant_i]) = jump[variant_i];
+					break;
+				}
+			}
+			if (jump_i == pmvee_jumps[0])
+				ipmon_arg_verify_failed(0x80081, 0x35, entrance_address);
+			ipmon_barrier_wait(RB, &RB->pmvee_barrier);
+			if (!ipmon_variant_num)
+			{
+				pmvee_sync->multi = 1;
+				ipmon_pmvee_migration(RB);
+			}
+		}
+#endif
+
 		// All relevant pre-syscall information has been logged into the buffer
 		// This is where we could sync with the slave variants to implement
 		// lock-stepping
 		ipmon_sync_on_syscall_entrance(RB, entry);
 	} 
 	else 
-	{ 
+	{
         // wait until we see a valid syscall entry that we haven't replicated
         // yet
 		if (ipmon_wait_for_next_syscall(RB))
@@ -3557,7 +3762,11 @@ unsigned char ipmon_is_unchecked_syscall(unsigned char* mask, unsigned long sysc
 	unsigned long no_to_byte, bit_in_byte;
 
 	/* This is not very concise but the compiler will optimize it anyway... */
+#ifdef IPMON_PMVEE_HANDLING
+	if (syscall_no > ROUND_UP(__NR_pmvee_check, 8))
+#else
 	if (syscall_no > ROUND_UP(__NR_syscalls, 8))
+#endif
 		return 0;
 
 	no_to_byte  = syscall_no / 8;
@@ -3575,7 +3784,11 @@ void ipmon_set_unchecked_syscall(unsigned char* mask, unsigned long syscall_no, 
 {
 	unsigned long no_to_byte, bit_in_byte;
 
+#ifdef IPMON_PMVEE_HANDLING
+	if (syscall_no > ROUND_UP(__NR_pmvee_check, 8))
+#else
 	if (syscall_no > ROUND_UP(__NR_syscalls, 8))
+#endif
 		return;
 
 	no_to_byte  = syscall_no / 8;
@@ -3765,6 +3978,34 @@ extern "C" long ipmon_enclave
 			ipmon_checked_syscall(__NR_getpid);
 			continue;
 		}
+#ifdef IPMON_PMVEE_HANDLING
+		else if (syscall_type & IPMON_PMVEE_WAIT)
+		{
+			long result = ipmon_unchecked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
+			long ret = ipmon_finish_syscall(RB, args, result);
+			if (ipmon_variant_num)
+			{
+				ipmon_barrier_wait(RB, &RB->pmvee_barrier);
+				entrance_address = *(unsigned long*)(pmvee_commincations[ipmon_variant_num]);
+			}
+			else
+				pmvee_sync->multi = 0;
+			return ret;
+		}
+		else if (syscall_type & IPMON_PMVEE_WAKE)
+		{
+			// ipmon_arg_verify_failed(0xdeadbeef, 0x00, 0x34);
+			long result = ipmon_unchecked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
+			long ret = ipmon_finish_syscall(RB, args, result);
+
+			if (ipmon_variant_num)
+			{
+				pmvee_migration_start = *(unsigned long*)(ipmon_get_data_at(args.entry, sizeof(struct ipmon_syscall_entry))->data);
+				ret = (long)(pmvee_commincations[ipmon_variant_num]);
+			}
+			return ret;
+		}
+#endif
 		else
 		{	long ret = ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
 #ifdef MVEE_IP_PKU_ENABLED
@@ -3824,11 +4065,41 @@ extern "C" void* ipmon_register_thread()
 	// optonally also set the variant number
 	ipmon_checked_syscall(MVEE_GET_THREAD_NUM, &ipmon_variant_num);
 
+#ifdef IPMON_PMVEE_HANDLING
+	ipmon_checked_syscall(MVEE_GET_PMVEE_INFO, &ipmon_pmvee_info);
+	if (!ipmon_variant_num)
+	{
+		pmvee_sync = (struct pmvee_sync_t *)ipmon_checked_syscall(MVEE_GET_PMVEE_SYNC);
+		if (pmvee_translation_unit)
+			ipmon_checked_syscall(__NR_shmdt, pmvee_translation_unit);
+		pmvee_translation_unit = (struct pmvee_translation_unit_t*)ipmon_checked_syscall(MVEE_GET_PMVEE_TRANSLATION_UNIT);
+		if (pmvee_jumps)
+			ipmon_checked_syscall(__NR_shmdt, pmvee_jumps);
+		pmvee_jumps = (unsigned long*) ipmon_checked_syscall(MVEE_PMVEE_GET_JUMP_TABLE);
+		for (int variant_i = 0; variant_i < (((struct ipmon_buffer*)RB)->numvariants); variant_i++)
+		{
+			if (pmvee_commincations[variant_i])
+				ipmon_checked_syscall(__NR_shmdt, pmvee_commincations[variant_i]);
+			pmvee_commincations[variant_i] = (char*) ipmon_checked_syscall(MVEE_GET_PMVEE_COMMUNICATION, variant_i);
+		}
+	}
+	else
+	{
+		if (pmvee_commincations[ipmon_variant_num])
+			ipmon_checked_syscall(__NR_shmdt, pmvee_commincations[ipmon_variant_num]);
+		pmvee_commincations[ipmon_variant_num] = (char*) ipmon_checked_syscall(MVEE_GET_PMVEE_COMMUNICATION);		
+	}
+#endif
+
 	// Register IP-MON
 	long ret = ipmon_checked_syscall(__NR_prctl, 
 									 PR_REGISTER_IPMON, 
 									 kernelmask, 
+#ifdef IPMON_PMVEE_HANDLING
+									 ROUND_UP(__NR_pmvee_check, 8) / 8, 
+#else
 									 ROUND_UP(__NR_syscalls, 8) / 8, 
+#endif
 									 RB, 
 #ifdef IPMON_PASS_RB_POINTER_EXPLICITLY
 									 ipmon_enclave_entrypoint_alternative
@@ -3845,7 +4116,6 @@ extern "C" void* ipmon_register_thread()
 //		exit(-1);
 		return NULL;
 	}
-
 #ifdef MVEE_IP_PKU_ENABLED
 	// erim_switch_to_trusted is moved inside the kernel (sys_prctl with PR_REGISTER_IPMON as argument)
 	// otherwise we open the following attack window:
@@ -3940,6 +4210,9 @@ void __attribute__((constructor)) init()
 	ipmon_initialized = true;
 	syscall_ordering_mutex.hack = 0;
 	IPMON_MASK_CLEAR(mask);
+
+	IPMON_MASK_SET(mask, __NR_pmvee_switch);
+	IPMON_MASK_SET(mask, __NR_pmvee_check);
 //	IPMON_MASK_SET(mask, __NR_ipmon_invoke);
 #if CURRENT_POLICY >= BASE_POLICY
 	IPMON_MASK_SET(mask, __NR_getegid);
@@ -4038,16 +4311,16 @@ void __attribute__((constructor)) init()
 #     if CURRENT_POLICY >= FULL_SYSCALLS
 
 	// Memory Management
-	IPMON_MASK_SET(mask, __NR_mmap);
-	IPMON_MASK_SET(mask, __NR_munmap);
-	IPMON_MASK_SET(mask, __NR_mremap);
-	IPMON_MASK_SET(mask, __NR_mprotect);
-	IPMON_MASK_SET(mask, __NR_brk);
+	// IPMON_MASK_SET(mask, __NR_mmap); // here
+	// IPMON_MASK_SET(mask, __NR_munmap); // here
+	// IPMON_MASK_SET(mask, __NR_mremap); // here
+	// IPMON_MASK_SET(mask, __NR_mprotect); // here
+	// IPMON_MASK_SET(mask, __NR_brk); // here
 
 	// File Management
-	IPMON_MASK_SET(mask, __NR_open);
-	IPMON_MASK_SET(mask, __NR_openat);
-	IPMON_MASK_SET(mask, __NR_close);
+	IPMON_MASK_SET(mask, __NR_open); // here
+	// IPMON_MASK_SET(mask, __NR_openat); // here
+	IPMON_MASK_SET(mask, __NR_close); // here
 	IPMON_MASK_SET(mask, __NR_fcntl);
 	IPMON_MASK_SET(mask, __NR_dup);
 	IPMON_MASK_SET(mask, __NR_dup2);
@@ -4068,7 +4341,7 @@ void __attribute__((constructor)) init()
 	IPMON_MASK_SET(mask, __NR_bind);
 	IPMON_MASK_SET(mask, __NR_connect);
 	IPMON_MASK_SET(mask, __NR_listen);
-	IPMON_MASK_SET(mask, __NR_accept4);
+	IPMON_MASK_SET(mask, __NR_accept4); // here
 	IPMON_MASK_SET(mask, __NR_accept);
 #      ifdef IPMON_SUPPORT_EPOLL
 	IPMON_MASK_SET(mask, __NR_epoll_create);

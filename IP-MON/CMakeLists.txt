@@ -31,6 +31,7 @@ add_dependencies(ipmon
 
 target_compile_definitions(ipmon PRIVATE
     $<$<BOOL:${PassRbPointerExplicitly}>:IPMON_PASS_RB_POINTER_EXPLICITLY>
+    $<$<BOOL:${IpmonPmveeHandling}>:IPMON_PMVEE_HANDLING>
 )
 
 target_compile_options(ipmon PRIVATE

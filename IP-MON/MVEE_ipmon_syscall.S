@@ -173,7 +173,7 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint)
 		mov rdx, rsi // arg2
 		mov rsi, rdi // arg1
 		mov rdi, rax // syscall no
-		
+
 		call ipmon_enclave
 
 		pop r9
@@ -251,7 +251,12 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint_alternative)
 		// align stack
 		sub rsp, 16
 		and rsp, 0xfffffffffffffff0
+
+#ifdef IPMON_PMVEE_HANDLING
+		push rax
+#else
 		sub rsp, 8
+#endif
 		
 		push r12
 		mov r12, rcx // IP-MON key
@@ -272,6 +277,13 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint_alternative)
 		pop r9
 		pop r12
 
+#ifdef IPMON_PMVEE_HANDLING
+		pop rcx
+		cmp rcx, 509
+		je ipmon_enclave_pmvee_switch_exit_alternative
+		cmp rcx, 510
+		je ipmon_enclave_pmvee_check_exit_alternative
+#endif
 		mov rsp, rbp
 		.cfi_def_cfa_register rbp
 		pop rdi
@@ -286,6 +298,109 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint_alternative)
 		.cfi_adjust_cfa_offset -8
 		
 		retq
+
+#ifdef IPMON_PMVEE_HANDLING
+ipmon_enclave_pmvee_switch_exit_alternative:
+		push r12
+		push r9
+		push r8
+		push rax
+		call ipmon_enclave_pmvee_exit_switch_alternative_monitor
+		mov rcx, rax
+		pop rax
+
+		pop r8
+		pop r9
+		pop r12
+
+		mov rsp, rbp
+		.cfi_def_cfa_register rbp
+		pop rdi
+		.cfi_adjust_cfa_offset -8
+		pop r10
+		.cfi_adjust_cfa_offset -8
+		pop rsi
+		.cfi_adjust_cfa_offset -8
+		pop rdx
+		.cfi_adjust_cfa_offset -8
+		pop rbp
+		.cfi_adjust_cfa_offset -8
+
+		cmp rcx, -1
+		je ipmon_enclave_pmvee_switch_exit_alternative_ret
+		mov rdi, rcx
+
+ipmon_enclave_pmvee_switch_exit_alternative_ret:
+		retq
+
+
+
+ipmon_enclave_pmvee_check_exit_alternative:
+		push r12
+		push r9
+		push r8
+		push rax
+		call ipmon_enclave_pmvee_exit_check_alternative_monitor
+		mov rcx, rax
+		test rcx, rcx
+		jz ipmon_enclave_pmvee_check_exit_alternative_keep_stack
+
+		push rcx
+		call ipmon_enclave_pmvee_exit_check_stack_alternative_monitor
+		mov r11, rax
+		pop rcx
+
+		pop rax
+
+		pop r8
+		pop r9
+		pop r12
+
+		mov rsp, rbp
+		.cfi_def_cfa_register rbp
+		pop rdi
+		.cfi_adjust_cfa_offset -8
+		pop r10
+		.cfi_adjust_cfa_offset -8
+		pop rsi
+		.cfi_adjust_cfa_offset -8
+		pop rdx
+		.cfi_adjust_cfa_offset -8
+		pop rbp
+		.cfi_adjust_cfa_offset -8
+		
+		mov rsp, r11
+		mov rbp, r11
+		jmp ipmon_enclave_pmvee_check_exit_alternative_replaced_stack
+ipmon_enclave_pmvee_check_exit_alternative_keep_stack:
+		pop rax
+
+		pop r8
+		pop r9
+		pop r12
+
+		mov rsp, rbp
+		.cfi_def_cfa_register rbp
+		pop rdi
+		.cfi_adjust_cfa_offset -8
+		pop r10
+		.cfi_adjust_cfa_offset -8
+		pop rsi
+		.cfi_adjust_cfa_offset -8
+		pop rdx
+		.cfi_adjust_cfa_offset -8
+		pop rbp
+		.cfi_adjust_cfa_offset -8
+
+		test rcx, rcx
+		jz ipmon_enclave_pmvee_check_exit_alternative_no_overwrite
+ipmon_enclave_pmvee_check_exit_alternative_replaced_stack:
+		mov r11, 0x8008135
+		jmp rcx
+ipmon_enclave_pmvee_check_exit_alternative_no_overwrite:
+		retq
+#endif
+
 
 FUNCTION_END(ipmon_enclave_entrypoint_alternative)
 

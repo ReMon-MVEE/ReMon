@@ -279,7 +279,19 @@ public:
 	unsigned long pmvee_libc_state_copy_follower_addr;
     // -----------------------------------------------------------------------------------------------------------------
 
-    unsigned long rollback_rsp = -1;
+    unsigned long rollback_rsp;
+	int           pmvee_state;
+	int           pmvee_communication_id;
+	unsigned long pmvee_communication_pt;
+	void*         pmvee_communication_mon_pt;
+	int           pmvee_migration_id;
+	void*         pmvee_migration_mon_pt;
+
+	// This exists to make sure ALL regions relating to a mapped binary are attached to it.
+	// As long as this is here, it has not failed me.
+	int 		  ld_current_fd;
+	unsigned long ld_current_base;
+	unsigned long ld_current_end;
 
     variantstate();
 	~variantstate();
@@ -518,9 +530,27 @@ private:
     //
     void             call_jump_to_equivalent_function_addresses ();
 	void 	         convert_equivalent_pointer_array           ();
+	unsigned long	 get_equivalent_address                     (int variant_i,
+																 unsigned long address,
+																 mmap_region_info* region);
+	void             copy_migration                             ();
+	void             copy_migration_ipmon                       ();
+	unsigned long 	 pmvee_translate_at_index                   (int numvariants,
+																 unsigned long** addresses,
+																 unsigned long index);
+	void 			 setup_pmvee_communication					(monitor *parent);
+	void             insert_migration_targets                   (fd_info* info,
+                                                                 std::vector<unsigned long> base_addresses,
+																 size_t size);
+	void 			 remove_migration_targets                   (int variantnum,
+																 unsigned long base_addresses,
+																 size_t size);
 	void             insert_jump_targets                        (fd_info* info,
                                                                  std::vector<unsigned long> base_addresses,
                                                                  std::vector<unsigned long> offsets);
+    void             add_connected_regions_to_map 				(connected_region_info* connected_regions);
+	void add_connected_region_at_index							(unsigned long index,
+																 connected_region_info* connected_regions);
 
 	//
 	// Comparison functions. These are pretty self-explanatory.  They generally
@@ -1236,11 +1266,14 @@ private:
     // pmvee ===========================================================================================================
     size_t                   mp_size = PMVEE_MP_SIZE;
     unsigned long            mp_start;
-    int                      poly_exec;
+#ifdef IPMON_PMVEE_HANDLING
+    struct pmvee_sync_t      *multi_exec;
+#else
+	int						 multi_exec;
+#endif
 	unsigned long            pmvee_zone_pt;
     std::vector<std::string> mp_binaries = PMVEE_MP_BINARIES;
-	std::vector<std::vector<unsigned long>>
-                             pmvee_jump_addresses;
+	unsigned long*           pmvee_jump_addresses;
 	std::vector<std::vector<unsigned long>>
 							 pmvee_state_copies;
 	std::vector<std::vector<unsigned long>>
@@ -1252,6 +1285,11 @@ private:
 		unsigned long state_copy_end;
 	};
 	pmvee_state_copy_zone_t pmvee_state_copy_zone;
+	int                     simple_mappings_id;
+	unsigned long           simple_mappings_pt;
+	int 					translation_id;
+	struct pmvee_translation_unit_t
+							*pmvee_translations;
     // pmvee ===========================================================================================================
 };
 
@@ -1349,13 +1387,43 @@ struct ipmon_buffer
 	struct ipmon_barrier pre_flush_barrier;
 	struct ipmon_barrier post_flush_barrier;
 	unsigned long flush_count;
-	unsigned char ipmon_padding[64 - 2*sizeof(unsigned long) - sizeof(int)*2 - sizeof(struct ipmon_barrier) * 2];
+	#ifdef IPMON_PMVEE_HANDLING
+	int multi;
+	struct ipmon_barrier pmvee_barrier;
+	unsigned char padding[64 - 2*sizeof(unsigned long) - sizeof(int)*2 - sizeof(struct ipmon_barrier) * 3 - sizeof(int)];
+	#else
+	unsigned char padding[64 - 2*sizeof(unsigned long) - sizeof(int)*2 - sizeof(struct ipmon_barrier) * 2];
+	#endif
 
 	// Cachelines 1-n
 	struct ipmon_variant_info ipmon_variant_info[1];
 
 	// And the actual syscall data
 //	struct ipmon_syscall_entry ipmon_syscall_entry[1];
+};
+
+struct ipmon_pmvee_info_t
+{
+	pid_t source_pid;
+	pid_t my_pid;
+	void* mp_base;
+	size_t size_one;
+	size_t size_two;
+};
+
+struct pmvee_sync_t
+{
+	int multi;
+	int pmvee_sync_id;
+};
+
+struct pmvee_translation_unit_t
+{
+	int communication_ids[10];
+	int jumps_id;
+	size_t mapping_count;
+	size_t full_size;
+	// translation info
 };
 
 //

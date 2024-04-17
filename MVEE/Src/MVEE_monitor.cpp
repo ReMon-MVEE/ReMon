@@ -91,6 +91,15 @@ variantstate::variantstate()
     , instruction (&this->variantpid, &this->variant_num)
     , replaced_iovec(0)
     , rollback_rsp(-1)
+    , pmvee_state(0)
+    , pmvee_communication_id(-1)
+    , pmvee_communication_pt(0)
+    , pmvee_communication_mon_pt(0)
+    , pmvee_migration_id(-1)
+    , pmvee_migration_mon_pt(0)
+    , ld_current_fd (-1)
+	, ld_current_base (-1)
+	, ld_current_end (-1)
 #ifdef __NR_socketcall
     , orig_arg1 (0)
 #endif
@@ -119,6 +128,13 @@ variantstate::~variantstate()
 	unw_destroy_addr_space(unwind_as);
 	if (unwind_info)
 		_UPT_destroy(unwind_info);
+    if (pmvee_communication_mon_pt)
+    {
+        shmdt(pmvee_communication_mon_pt);
+        pmvee_communication_id = -1;
+        pmvee_communication_pt = 0;
+        pmvee_communication_mon_pt = 0;
+    }
 #endif
 }
 
@@ -240,11 +256,7 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
                         std::shared_ptr<sighand_table> (new sighand_table(*parent_monitor->set_sighand_table));
 
     mp_start = parent_monitor->mp_start;
-    poly_exec = parent_monitor->poly_exec;
     pmvee_zone_pt = parent_monitor->pmvee_zone_pt;
-    pmvee_jump_addresses = std::vector<std::vector<unsigned long>>();
-    for (std::vector<unsigned long> jumps: parent_monitor->pmvee_jump_addresses)
-        pmvee_jump_addresses.push_back(std::vector<unsigned long>(jumps));
     pmvee_state_copies = std::vector<std::vector<unsigned long>>();
     for (std::vector<unsigned long> state_copies: parent_monitor->pmvee_state_copies)
         pmvee_state_copies.push_back(std::vector<unsigned long>(state_copies));
@@ -252,6 +264,8 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
     for (std::vector<unsigned long> state_copies: parent_monitor->pmvee_state_migrations)
         pmvee_state_migrations.push_back(std::vector<unsigned long>(state_copies));
     pmvee_state_copy_zone = parent_monitor->pmvee_state_copy_zone;
+    setup_pmvee_communication(parent_monitor);
+    SET_MULTI_EXEC(PARENT_MULTI_EXEC);
 
     for (int i = 0; i < mvee::numvariants; ++i)
     {
@@ -264,6 +278,8 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
         variants[i].shm_tag                  = parent_monitor->variants[i].shm_tag;
         variants[i].pmvee_libc_state_copy_leader_addr = parent_monitor->variants[i].pmvee_libc_state_copy_leader_addr;
         variants[i].pmvee_libc_state_copy_follower_addr = parent_monitor->variants[i].pmvee_libc_state_copy_follower_addr;
+        variants[i].pmvee_migration_id = parent_monitor->variants[i].pmvee_migration_id;
+        variants[i].pmvee_migration_mon_pt = parent_monitor->variants[i].pmvee_migration_mon_pt;
 
         // If this is a fork: Copy over the list of variables to reset
         if (!shares_mmap_table)
@@ -298,12 +314,12 @@ monitor::monitor(std::vector<pid_t>& pids)
         shutdown(false);
         // ignore, for now.
     }
-    poly_exec = 1;
     pmvee_zone_pt = (unsigned long) -1;
-    pmvee_jump_addresses = std::vector<std::vector<unsigned long>>();
     pmvee_state_copies = std::vector<std::vector<unsigned long>>();
     pmvee_state_migrations = std::vector<std::vector<unsigned long>>();
     pmvee_state_copy_zone = { 0, 0, 0 };
+    setup_pmvee_communication(NULL);
+    SET_MULTI_EXEC(1);
 
     // Monitor 0 runs in a seperate thread IF we do not run in singlethreaded mode
     // Consequently, monitor 0 starts in STATE_WAITING_ATTACH if we run in multithreaded mode
@@ -1575,7 +1591,7 @@ void monitor::handle_exit_event(int index)
         }
     }
 
-    if (!index && !poly_exec)
+    if (!index && !IS_MULTI_EXEC)
         bAllTerminated = true;
 
     if (bAllTerminated)
@@ -1800,7 +1816,7 @@ void monitor::handle_syscall_entrance_event(int index)
         return;
     }
 
-    if (!poly_exec)
+    if (!IS_MULTI_EXEC)
     {
         call_resume(index);
         return;
@@ -1991,7 +2007,7 @@ void monitor::handle_syscall_exit_event(int index)
         return;
     }
 
-    if (!poly_exec)
+    if (!IS_MULTI_EXEC)
     {
         call_resume(index);
         return;
@@ -2022,8 +2038,8 @@ void monitor::handle_syscall_exit_event(int index)
     // Sync point reached... It's safe to let the variants return now
     if (all_synced_at_exit)
     {
-       if (poly_exec < 0)
-           poly_exec = 0;
+       if (IS_MULTI_EXEC < 0)
+           SET_MULTI_EXEC(0);
 
         if (in_signal_handler() && !current_signal_sent)
         {
@@ -2042,7 +2058,7 @@ void monitor::handle_syscall_exit_event(int index)
 			for (i = 0; i < mvee::numvariants; ++i)
 				if (variants[i].have_overwritten_args)
 					call_restore_args(i);
-            if (!poly_exec)
+            if (!IS_MULTI_EXEC)
                 call_resume(0);
             else
                 call_resume_all();
@@ -2077,7 +2093,7 @@ void monitor::handle_syscall_exit_event(int index)
 			for (i = 0; i < mvee::numvariants; ++i)
 				if (variants[i].have_overwritten_args)
 					call_restore_args(i);
-            if (!poly_exec)
+            if (!IS_MULTI_EXEC)
                 call_resume(0);
             else
                 call_resume_all();
@@ -2253,11 +2269,11 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
 
             call_check_regs(variantnum);
 
-			if (!variant->regs.rip)
-				throw RwRegsFailure(variantnum, "get trap location");
 			ip = variant->regs.rip;
-
 #if defined(MVEE_ALLOW_SHM) && defined(MVEE_EMULATE_SHARED_MEMORY)
+			if (!variant->regs.rip)
+				throw RwRegsFailure(variantnum, "get trap location - 1");
+
             // shared memory access ====================================================================================
             // check if this SIGSEGV was caused by a genuine shared memory access
             if IS_SHARED_MEMORY_ACCESS(variantnum, siginfo)
@@ -2378,7 +2394,7 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
 		else
 		{
 			if (!ip && !interaction::fetch_ip(variants[variantnum].variantpid, ip))
-				throw RwRegsFailure(variantnum, "get trap location");
+				throw RwRegsFailure(variantnum, "get trap location - 2");
 
 			std::string caller_info = set_mmap_table->get_caller_info(variantnum, variants[variantnum].variantpid, ip, 0);
 			debugf("%s - signal arrived while variant was executing ins: %s\n", 
@@ -2544,7 +2560,7 @@ void monitor::handle_signal_event(int variantnum, interaction::mvee_wait_status&
 			if (variantnum == 0 && (*mvee::config_variant_global)["use_ipmon"].asBool())
 			{
 				if (!ip && !interaction::fetch_ip(variants[variantnum].variantpid, ip))
-					throw RwRegsFailure(variantnum, "get trap location");
+					throw RwRegsFailure(variantnum, "get trap location - 3");
 
 				if (in_ipmon(0, ip))
 				{

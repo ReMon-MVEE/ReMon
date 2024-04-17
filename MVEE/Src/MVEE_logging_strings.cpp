@@ -227,6 +227,11 @@ const char* getTextualSyscall(long int syscallnum)
             DEF_CASE(__NR_pmvee_switch)
             DEF_CASE(__NR_pmvee_check)
 #endif
+            DEF_CASE(MVEE_GET_PMVEE_INFO);
+            DEF_CASE(MVEE_GET_PMVEE_TRANSLATION_UNIT);
+            DEF_CASE(MVEE_GET_PMVEE_SYNC);
+            DEF_CASE(MVEE_GET_PMVEE_COMMUNICATION);
+            DEF_CASE(MVEE_PMVEE_GET_JUMP_TABLE);
         }
     }
 
@@ -1696,6 +1701,7 @@ std::string getTextualMapType(int mode)
     TEST_FLAG(mode, MAP_NONBLOCK,       result);
     TEST_FLAG(mode, MAP_STACK,          result);
     TEST_FLAG(mode, MAP_MVEE_WASSHARED, result);
+    TEST_FLAG(mode, MAP_PMVEE,          result);
 
     return result;
 }

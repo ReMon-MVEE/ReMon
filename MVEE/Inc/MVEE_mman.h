@@ -438,8 +438,14 @@ public:
     unsigned long      init_mp                      (size_t mp_size);
     unsigned long      calculate_joint_base         (unsigned long size, bool allow_writes);
 #ifdef MVEE_CONNECTED_MMAP_REGIONS
-    void               diff_memory                  (int leader_pid, int follower, int follower_pid, int include_exec);
+    void               diff_memory                  (int leader_pid, int follower, int follower_pid, int initial, int include_exec);
 #endif
+    void               add_address_to_mmap          (unsigned long address,
+                                                     size_t size,
+                                                     unsigned long prot);
+    void               remove_address_from_mmap     (unsigned long address,
+                                                     size_t size);
+    void               reset_simple_mappings        (unsigned long* new_mappings);
 
 private:
     void init();
@@ -461,6 +467,7 @@ private:
     std::vector<shared_monitor_map_info*>
                     variant_mappings;
     unsigned long   mp_start = -1, mp_end = -1;
+	unsigned long*  simple_mappings;
 };
 
 #endif /* MVEE_MMAN_H_INCLUDED */
