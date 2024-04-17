@@ -8,22 +8,53 @@
 #define PMVEE_CONFIG_REMOVE_PERMISSIONS
 #define PMVEE_FLAGS_REMOVE_PERMISSIONS  0b01
 #define PMVEE_FLAGS_DUP_EXEC            0b10
-#define PMVEE_REGION_REQUEST            0x01
-#define PMVEE_LIBC_REQUEST              0x02
-#define PMVEE_LIBC_SET                  0x04
-#define PMVEE_HANDLER_REQUEST           0x08
-#define PMVEE_PRINT_BACKTRACE           0x10
-#define PMVEE_DIFF_MEMORY               0x20
+#define PMVEE_REGION_REQUEST            0x001
+#define PMVEE_LIBC_REQUEST              0x002
+#define PMVEE_LIBC_SET                  0x004
+#define PMVEE_HANDLER_REQUEST           0x008
+#define PMVEE_PRINT_BACKTRACE           0x010
+#define PMVEE_DIFF_MEMORY               0x020
+#define PMVEE_COMMUNICATION_REQUEST     0x040
+#define PMVEE_MIGRATION_INFO_REQUEST    0x080
+#define PMVEE_MAPPINGS_REQUEST          0x100
+
+#define PMVEE_SCANNINGG_START           0x6969696969696969l
+
 #define PMVEE_COPY_COUNT                64
 
 #define MAP_PMVEE 0x2000000
 
-#define PMVEE_ZONE_ONE_DEFAULT_SIZE 0xe0000000
-#define PMVEE_ZONE_TWO_DEFAULT_SIZE 0xe0000000
-#define PMVEE_COPY_DEFAULT_SIZE     0x4000 * 80
-#define PMVEE_DICT_DEFAULT_SIZE     0x4000 * 80
+#define PMVEE_ZONE_ONE_DEFAULT_SIZE 0xe0000000l
+#define PMVEE_ZONE_TWO_DEFAULT_SIZE 0xe0000000l
+#define PMVEE_COPY_DEFAULT_SIZE     0x4000 * 8
+#define PMVEE_DICT_DEFAULT_SIZE     0x4000 * 8
+
+
+#ifdef IPMON_PMVEE_HANDLING
+#define IS_MULTI_EXEC           (multi_exec->multi)
+#define PARENT_MULTI_EXEC       (parent_monitor->multi_exec->multi)
+#define SET_MULTI_EXEC(__multi) (multi_exec->multi = __multi)
+#else
+#define IS_MULTI_EXEC           (multi_exec)
+#define PARENT_MULTI_EXEC       (parent_monitor->multi_exec)
+#define SET_MULTI_EXEC(__multi) (multi_exec = __multi)
+#endif
 // =====================================================================================================================
 
+
+struct pmvee_mappings_info_t
+{
+    char* start;
+    char* end;
+    unsigned long prot;
+};
+#ifndef __cplusplus
+struct pmvee_mappings_t
+{
+    unsigned long mapping_count;
+    struct pmvee_mappings_info_t mappings[];
+};
+#endif
 
 // =====================================================================================================================
 // Define these if they aren't yet, just in case people compile this on machines that do not have the kernel patch.
@@ -38,7 +69,7 @@
 
 // =====================================================================================================================
 // This one can be generally defined, as it is basically "single-variant enter".
-#define PMVEE_EXIT __asm__("syscall;" : : "a" (__NR_pmvee_check ), "D" (-1) : "rsi", "rdx", "rcx", "r8", "r9", "r10", "r11");
+#define PMVEE_EXIT __asm__("mov %%rsp, %%rdi; syscall;" : : "a" (__NR_pmvee_check ) : "rsi", "rdx", "rcx", "r8", "r9", "r10", "r11", "memory", "cc" );
 // =====================================================================================================================
 
 struct __pmvee_state_copies_t
@@ -68,6 +99,14 @@ static void (*__pmvee_copy_libc_state_follower) (char*, size_t*);
 
 #ifdef PMVEE_COPY_STATE
 static struct __pmvee_state_copies_t __pmvee_state_copies;
+struct pmvee_migration_info_t
+{
+    unsigned long migration_count;
+    unsigned long pointer_count;
+    unsigned long info[];
+};
+static struct pmvee_migration_info_t* __pmvee_migration_info;
+static struct pmvee_mappings_t* simple_mappings;
 #endif
 
 struct __pmvee_FILE_copy_t
@@ -177,16 +216,17 @@ extern __pmvee_dict_t* pmvee_dict;
 extern __pmvee_dict_t* pmvee_dict_head;
 extern __pmvee_dict_t* pmvee_dict_tail;
 extern int lookup_pointer(void* original, void** new);
+extern void clear_pointer_lookup();
 
-extern char* pmvee_copy;
 extern char* get_pmvee_copy();
+extern void __pmvee_copy_all(size_t size);
 
 // Leader enter into multi-exec.
 #define PMVEE_GET_ZONE "D" (__pmvee_zone)
 #define PMVEE_VOID_ZONE "D" ((unsigned long)-1)
 #define PMVEE_ENTER(x, y, __full_start, __start, __end)    \
 __asm (                                                    \
-    "movq %[end], %%r10; movl %[index], %%r8d; syscall;" : \
+    "movq %[end], %%r10; leaq (%%rip), %%r9; add $12, %%r9; movl %[index], %%r8d; syscall;" : \
     :                                                      \
     "a" (__NR_pmvee_switch),                               \
     y ,                                                    \
@@ -194,8 +234,7 @@ __asm (                                                    \
     "S" ((unsigned long) __full_start),                    \
     "d" ((unsigned long) __start),                         \
     [end] "R" ((unsigned long) __end) :                    \
-    "rcx", "r8", "r9", "r10", "r11"                        \
-);
+    "rcx", "r8", "r9", "r10", "r11", "memory", "cc");
 
 
 // For people that might want to quickly manually write void function wrappers with 0-7 arguments.
@@ -345,15 +384,15 @@ void __pmvee_real##__name(__type1 __arg1, __type2 __arg2, __type3 __arg3,       
 
 
 // Follower enter into multi-exec.
-#define PMVEE_GET_ZONE "=a" (__pmvee_zone), "+D" (__pmvee_args_size)
+#define PMVEE_GET_ZONE "=a" (__pmvee_zone), "=D" (__pmvee_args_size)
 #define PMVEE_VOID_ZONE
 #define PMVEE_ENTER(x, y)                      \
-char* __pmvee_zone = (char*) 0x420;            \
+char* __pmvee_zone = (char*)0;                 \
 __asm__(                                       \
     "movl %[index], %%r8d; syscall;"           \
     : y                                        \
     : "a" (__NR_pmvee_switch), [index] "i" (x) \
-    : "rdx", "rcx", "r8", "r9", "r10", "r11");
+    : "rsi", "rdx", "rcx", "r8", "r9", "r10", "r11", "memory", "cc");
 
 
 // For people that might want to quickly manually write void function wrappers with 0-7 arguments.

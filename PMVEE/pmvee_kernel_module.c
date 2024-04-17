@@ -21,22 +21,828 @@ MODULE_DESCRIPTION("PMVEE project kernel module");
 MODULE_VERSION("0.1");
 
 
+#define DEBUG_ME
+#ifdef DEBUG_ME
+#define debugk(...) printk(__VA_ARGS__);
+
+static void debug_print_mappings(
+        struct mm_struct *from_mm,
+        struct mm_struct *to_mm,
+        unsigned long from,
+        unsigned long size_one,
+        unsigned long size_two)
+{
+    int mp_seen = 0;
+    struct vm_area_struct * temptemptemp = from_mm->mmap;
+    printk("before:\n");
+    while (temptemptemp)
+    {
+        if (temptemptemp->vm_start >= from && temptemptemp->vm_end <= from + size_one + size_two)
+        {
+            if (!mp_seen)
+            {
+                mp_seen = 1;
+                printk("mp start >>>>>>>>>>>>>>>>>>>>>");
+            }
+        }
+        else if (mp_seen)
+        {
+            mp_seen = 0;
+            printk("mp end >>>>>>>>>>>>>>>>>>>>>>>");
+        }
+        printk("   > leader:   [ 0x%lx ; 0x%lx )\n", temptemptemp->vm_start, temptemptemp->vm_end);
+        temptemptemp = temptemptemp->vm_next;
+    }
+
+    temptemptemp = to_mm->mmap;
+    while (temptemptemp)
+    {
+        if (temptemptemp->vm_start >= from && temptemptemp->vm_end <= from + size_one + size_two)
+        {
+            if (!mp_seen)
+            {
+                mp_seen = 1;
+                printk("mp start >>>>>>>>>>>>>>>>>>>>>");
+            }
+        }
+        else if (mp_seen)
+        {
+            mp_seen = 0;
+            printk("mp end >>>>>>>>>>>>>>>>>>>>>>>");
+        }
+            printk("   > follower: [ 0x%lx ; 0x%lx )\n", temptemptemp->vm_start, temptemptemp->vm_end);
+        temptemptemp = temptemptemp->vm_next;
+    }
+    printk("done.\n");
+}
+#else
+
 #define debugk(...) ; // printk(__VA_ARGS__);
+
+#endif
 
 
 extern long (*pmvee_switch_stub) (
-    pid_t leader,
+    pid_t source,
+    pid_t destination,
     unsigned long from,
     unsigned long size_one,
     unsigned long size_two,
     unsigned long flags);
 extern long (*pmvee_check_stub)  (
-    pid_t leader,
+    pid_t source,
+    pid_t destination,
     unsigned long from,
     unsigned long size_one,
     unsigned long size_two,
     unsigned long flags);
 extern unsigned char (*pmvee_should_skip_stub) (struct pt_regs *regs, unsigned long entering);
+
+
+#include <asm/pgtable.h>
+#include <linux/swapops.h>
+#include <linux/sched/task.h>
+#include <linux/mmu_notifier.h>
+
+/*
+requires symbol: __mmu_notifier_invalidate_range_end
+requires symbol: pgd_clear_bad
+requires symbol: __mmu_notifier_invalidate_range_start
+requires symbol: track_pfn_copy
+requires symbol: p4d_clear_bad
+requires symbol: __pud_alloc
+requires symbol: __pmd_alloc
+requires symbol: pmd_clear_bad
+requires symbol: mmlist_lock
+requires symbol: pud_clear_bad
+requires symbol: __pte_alloc
+requires symbol: sync_mm_rss
+requires symbol: copy_huge_pmd
+requires symbol: add_swap_count_continuation
+requires symbol: swap_duplicate
+requires symbol: __p4d_alloc
+requires symbol: vm_normal_page
+requires symbol: copy_huge_pud
+requires symbol: tlb_finish_mmu
+requires symbol: tlb_gather_mmu
+requires: __mmu_notifier_invalidate_range
+requires: tlb_flush_mmu
+requires: free_swap_and_cache
+requires: __tlb_remove_page_size
+requires: page_remove_rmap
+ERROR: "untrack_pfn" [/home/jonas/repos/ReMon-private/PMVEE/pmvee_kernel_module.ko] undefined!
+ERROR: "uprobe_munmap" [/home/jonas/repos/ReMon-private/PMVEE/pmvee_kernel_module.ko] undefined!
+ERROR: "lru_add_drain" [/home/jonas/repos/ReMon-private/PMVEE/pmvee_kernel_module.ko] undefined!
+ERROR: "page_rmapping" [/home/jonas/repos/ReMon-private/PMVEE/pmvee_kernel_module.ko] undefined!
+*/
+
+static inline bool is_cow_mapping(vm_flags_t flags)
+{
+	return (flags & (VM_SHARED | VM_MAYWRITE)) == VM_MAYWRITE;
+}
+
+static inline void add_mm_rss_vec(struct mm_struct *mm, int *rss)
+{
+	int i;
+
+	if (current->mm == mm)
+		sync_mm_rss(mm);
+	for (i = 0; i < NR_MM_COUNTERS; i++)
+		if (rss[i])
+			add_mm_counter(mm, i, rss[i]);
+}
+
+static inline void init_rss_vec(int *rss)
+{
+	memset(rss, 0, sizeof(int) * NR_MM_COUNTERS);
+}
+
+static inline bool should_zap_cows(struct zap_details *details)
+{
+	/* By default, zap all pages */
+	if (!details)
+		return true;
+
+	/* Or, we zap COWed pages only if the caller wants to */
+	return !details->check_mapping;
+}
+
+static void flush_tlb_batched_pending(struct mm_struct *mm)
+{
+	if (mm->tlb_flush_batched) {
+		flush_tlb_mm(mm);
+
+		/*
+		 * Do not allow the compiler to re-order the clearing of
+		 * tlb_flush_batched before the tlb is flushed.
+		 */
+		barrier();
+		mm->tlb_flush_batched = false;
+	}
+}
+
+static inline unsigned long
+pmvee_copy_one_pte(struct mm_struct *dst_mm, struct mm_struct *src_mm,
+		pte_t *dst_pte, pte_t *src_pte, struct vm_area_struct *vma,
+		unsigned long addr, int *rss)
+{
+	unsigned long vm_flags = vma->vm_flags;
+	pte_t pte = *src_pte;
+	struct page *page;
+
+	/* pte contains position in swap or file, so copy. */
+	if (unlikely(!pte_present(pte))) {
+		swp_entry_t entry = pte_to_swp_entry(pte);
+
+		if (likely(!non_swap_entry(entry))) {
+			if (swap_duplicate(entry) < 0)
+				return entry.val;
+
+			/* make sure dst_mm is on swapoff's mmlist. */
+			if (unlikely(list_empty(&dst_mm->mmlist))) {
+				spin_lock(&mmlist_lock);
+				if (list_empty(&dst_mm->mmlist))
+					list_add(&dst_mm->mmlist,
+							&src_mm->mmlist);
+				spin_unlock(&mmlist_lock);
+			}
+			rss[MM_SWAPENTS]++;
+		} else if (is_migration_entry(entry)) {
+			page = migration_entry_to_page(entry);
+
+			rss[mm_counter(page)]++;
+
+			if (is_write_migration_entry(entry) &&
+					is_cow_mapping(vm_flags)) {
+				/*
+				 * COW mappings require pages in both
+				 * parent and child to be set to read.
+				 */
+				make_migration_entry_read(&entry);
+				pte = swp_entry_to_pte(entry);
+				if (pte_swp_soft_dirty(*src_pte))
+					pte = pte_swp_mksoft_dirty(pte);
+				set_pte_at(src_mm, addr, src_pte, pte);
+			}
+		} else if (is_device_private_entry(entry)) {
+			page = device_private_entry_to_page(entry);
+
+			/*
+			 * Update rss count even for unaddressable pages, as
+			 * they should treated just like normal pages in this
+			 * respect.
+			 *
+			 * We will likely want to have some new rss counters
+			 * for unaddressable pages, at some point. But for now
+			 * keep things as they are.
+			 */
+			get_page(page);
+			rss[mm_counter(page)]++;
+			page_dup_rmap(page, false);
+
+			/*
+			 * We do not preserve soft-dirty information, because so
+			 * far, checkpoint/restore is the only feature that
+			 * requires that. And checkpoint/restore does not work
+			 * when a device driver is involved (you cannot easily
+			 * save and restore device driver state).
+			 */
+			if (is_write_device_private_entry(entry) &&
+			    is_cow_mapping(vm_flags)) {
+				make_device_private_entry_read(&entry);
+				pte = swp_entry_to_pte(entry);
+				set_pte_at(src_mm, addr, src_pte, pte);
+			}
+		}
+		goto out_set_pte;
+	}
+
+	/*
+	 * If it's a COW mapping, write protect it both
+	 * in the parent and the child
+	 */
+	if (is_cow_mapping(vm_flags) && pte_write(pte)) {
+		ptep_set_wrprotect(src_mm, addr, src_pte);
+		pte = pte_wrprotect(pte);
+	}
+
+	/*
+	 * If it's a shared mapping, mark it clean in
+	 * the child
+	 */
+	if (vm_flags & VM_SHARED)
+		pte = pte_mkclean(pte);
+	pte = pte_mkold(pte);
+
+	page = vm_normal_page(vma, addr, pte);
+	if (page) {
+		get_page(page);
+		page_dup_rmap(page, false);
+		rss[mm_counter(page)]++;
+	} else if (pte_devmap(pte)) {
+		page = pte_page(pte);
+	}
+
+out_set_pte:
+	set_pte_at(dst_mm, addr, dst_pte, pte);
+	return 0;
+}
+
+static int pmvee_copy_pte_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
+		   pmd_t *dst_pmd, pmd_t *src_pmd, struct vm_area_struct *vma,
+		   unsigned long addr, unsigned long end)
+{
+	pte_t *orig_src_pte, *orig_dst_pte;
+	pte_t *src_pte, *dst_pte;
+	spinlock_t *src_ptl, *dst_ptl;
+	int progress = 0;
+	int rss[NR_MM_COUNTERS];
+	swp_entry_t entry = (swp_entry_t){0};
+
+again:
+	init_rss_vec(rss);
+
+	dst_pte = pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
+	if (!dst_pte)
+		return -ENOMEM;
+	src_pte = pte_offset_map(src_pmd, addr);
+	src_ptl = pte_lockptr(src_mm, src_pmd);
+	spin_lock_nested(src_ptl, SINGLE_DEPTH_NESTING);
+	orig_src_pte = src_pte;
+	orig_dst_pte = dst_pte;
+	arch_enter_lazy_mmu_mode();
+
+	do {
+		/*
+		 * We are holding two locks at this point - either of them
+		 * could generate latencies in another task on another CPU.
+		 */
+		if (progress >= 32) {
+			progress = 0;
+			if (need_resched() ||
+			    spin_needbreak(src_ptl) || spin_needbreak(dst_ptl))
+				break;
+		}
+		if (pte_none(*src_pte)) {
+			progress++;
+			continue;
+		}
+		entry.val = pmvee_copy_one_pte(dst_mm, src_mm, dst_pte, src_pte,
+							vma, addr, rss);
+		if (entry.val)
+			break;
+		progress += 8;
+	} while (dst_pte++, src_pte++, addr += PAGE_SIZE, addr != end);
+
+	arch_leave_lazy_mmu_mode();
+	spin_unlock(src_ptl);
+	pte_unmap(orig_src_pte);
+	add_mm_rss_vec(dst_mm, rss);
+	pte_unmap_unlock(orig_dst_pte, dst_ptl);
+	cond_resched();
+
+	if (entry.val) {
+		if (add_swap_count_continuation(entry, GFP_KERNEL) < 0)
+			return -ENOMEM;
+		progress = 0;
+	}
+	if (addr != end)
+		goto again;
+	return 0;
+}
+
+static inline int pmvee_copy_pmd_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
+		pud_t *dst_pud, pud_t *src_pud, struct vm_area_struct *vma,
+		unsigned long addr, unsigned long end)
+{
+	pmd_t *src_pmd, *dst_pmd;
+	unsigned long next;
+
+	dst_pmd = pmd_alloc(dst_mm, dst_pud, addr);
+	if (!dst_pmd)
+		return -ENOMEM;
+	src_pmd = pmd_offset(src_pud, addr);
+	do {
+		next = pmd_addr_end(addr, end);
+		if (is_swap_pmd(*src_pmd) || pmd_trans_huge(*src_pmd)
+			|| pmd_devmap(*src_pmd)) {
+            printk("Not supporting this right now.\n");
+            continue;
+			// int err;
+			// VM_BUG_ON_VMA(next-addr != HPAGE_PMD_SIZE, vma);
+			// err = copy_huge_pmd(dst_mm, src_mm,
+			// 		    dst_pmd, src_pmd, addr, vma);
+			// if (err == -ENOMEM)
+			// 	return -ENOMEM;
+			// if (!err)
+			// 	continue;
+			/* fall through */
+		}
+		if (pmd_none_or_clear_bad(src_pmd))
+			continue;
+		if (pmvee_copy_pte_range(dst_mm, src_mm, dst_pmd, src_pmd,
+						vma, addr, next))
+			return -ENOMEM;
+	} while (dst_pmd++, src_pmd++, addr = next, addr != end);
+	return 0;
+}
+
+static inline int pmvee_copy_pud_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
+		p4d_t *dst_p4d, p4d_t *src_p4d, struct vm_area_struct *vma,
+		unsigned long addr, unsigned long end)
+{
+	pud_t *src_pud, *dst_pud;
+	unsigned long next;
+
+	dst_pud = pud_alloc(dst_mm, dst_p4d, addr);
+	if (!dst_pud)
+		return -ENOMEM;
+	src_pud = pud_offset(src_p4d, addr);
+	do {
+		next = pud_addr_end(addr, end);
+		if (pud_trans_huge(*src_pud) || pud_devmap(*src_pud)) {
+            printk("No supporting this right now.\n");
+            continue;
+			// int err;
+// 
+			// VM_BUG_ON_VMA(next-addr != HPAGE_PUD_SIZE, vma);
+			// err = copy_huge_pud(dst_mm, src_mm,
+			// 		    dst_pud, src_pud, addr, vma);
+			// if (err == -ENOMEM)
+			// 	return -ENOMEM;
+			// if (!err)
+			// 	continue;
+			/* fall through */
+		}
+		if (pud_none_or_clear_bad(src_pud))
+			continue;
+		if (pmvee_copy_pmd_range(dst_mm, src_mm, dst_pud, src_pud,
+						vma, addr, next))
+			return -ENOMEM;
+	} while (dst_pud++, src_pud++, addr = next, addr != end);
+	return 0;
+}
+
+static inline int pmvee_copy_p4d_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
+		pgd_t *dst_pgd, pgd_t *src_pgd, struct vm_area_struct *vma,
+		unsigned long addr, unsigned long end)
+{
+	p4d_t *src_p4d, *dst_p4d;
+	unsigned long next;
+
+	dst_p4d = p4d_alloc(dst_mm, dst_pgd, addr);
+	if (!dst_p4d)
+		return -ENOMEM;
+	src_p4d = p4d_offset(src_pgd, addr);
+	do {
+		next = p4d_addr_end(addr, end);
+		if (p4d_none_or_clear_bad(src_p4d))
+			continue;
+		if (pmvee_copy_pud_range(dst_mm, src_mm, dst_p4d, src_p4d,
+						vma, addr, next))
+			return -ENOMEM;
+	} while (dst_p4d++, src_p4d++, addr = next, addr != end);
+	return 0;
+}
+
+int pmvee_copy_page_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
+		struct vm_area_struct *vma)
+{
+	pgd_t *src_pgd, *dst_pgd;
+	unsigned long next;
+	unsigned long addr = vma->vm_start;
+	unsigned long end = vma->vm_end;
+	struct mmu_notifier_range range;
+	bool is_cow;
+	int ret;
+
+	/*
+	 * Don't copy ptes where a page fault will fill them correctly.
+	 * Fork becomes much lighter when there are big shared or private
+	 * readonly mappings. The tradeoff is that copy_page_range is more
+	 * efficient than faulting.
+	 */
+	if (!(vma->vm_flags & (VM_HUGETLB | VM_PFNMAP | VM_MIXEDMAP)) &&
+			!vma->anon_vma)
+		return 0;
+
+	if (is_vm_hugetlb_page(vma))
+    {
+        printk("No supporting this right now.\n");
+        return -ENOMEM;
+		// return copy_hugetlb_page_range(dst_mm, src_mm, vma);
+    }
+
+	if (unlikely(vma->vm_flags & VM_PFNMAP)) {
+		/*
+		 * We do not free on error cases below as remove_vma
+		 * gets called on error from higher level routine
+		 */
+		ret = track_pfn_copy(vma);
+		if (ret)
+			return ret;
+	}
+
+	/*
+	 * We need to invalidate the secondary MMU mappings only when
+	 * there could be a permission downgrade on the ptes of the
+	 * parent mm. And a permission downgrade will only happen if
+	 * is_cow_mapping() returns true.
+	 */
+	is_cow = is_cow_mapping(vma->vm_flags);
+
+	if (is_cow) {
+		mmu_notifier_range_init(&range, MMU_NOTIFY_PROTECTION_PAGE,
+					0, vma, src_mm, addr, end);
+		mmu_notifier_invalidate_range_start(&range);
+	}
+
+	ret = 0;
+	dst_pgd = pgd_offset(dst_mm, addr);
+	src_pgd = pgd_offset(src_mm, addr);
+	do {
+		next = pgd_addr_end(addr, end);
+		if (pgd_none_or_clear_bad(src_pgd))
+			continue;
+		if (unlikely(pmvee_copy_p4d_range(dst_mm, src_mm, dst_pgd, src_pgd,
+					    vma, addr, next))) {
+			ret = -ENOMEM;
+			break;
+		}
+	} while (dst_pgd++, src_pgd++, addr = next, addr != end);
+
+	if (is_cow)
+		mmu_notifier_invalidate_range_end(&range);
+	return ret;
+}
+
+static unsigned long pmvee_zap_pte_range(struct mmu_gather *tlb,
+				struct vm_area_struct *vma, pmd_t *pmd,
+				unsigned long addr, unsigned long end,
+				struct zap_details *details)
+{
+	struct mm_struct *mm = tlb->mm;
+	int force_flush = 0;
+	int rss[NR_MM_COUNTERS];
+	spinlock_t *ptl;
+	pte_t *start_pte;
+	pte_t *pte;
+	swp_entry_t entry;
+
+	tlb_change_page_size(tlb, PAGE_SIZE);
+again:
+	init_rss_vec(rss);
+	start_pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
+	pte = start_pte;
+	flush_tlb_batched_pending(mm);
+	arch_enter_lazy_mmu_mode();
+	do {
+		pte_t ptent = *pte;
+		if (pte_none(ptent))
+			continue;
+
+		if (need_resched())
+			break;
+
+		if (pte_present(ptent)) {
+			struct page *page;
+
+			page = vm_normal_page(vma, addr, ptent);
+			if (unlikely(details) && page) {
+				/*
+				 * unmap_shared_mapping_pages() wants to
+				 * invalidate cache without truncating:
+				 * unmap shared but keep private pages.
+				 */
+				if (details->check_mapping &&
+				    details->check_mapping != page_rmapping(page))
+					continue;
+			}
+			ptent = ptep_get_and_clear_full(mm, addr, pte,
+							tlb->fullmm);
+			tlb_remove_tlb_entry(tlb, pte, addr);
+			if (unlikely(!page))
+				continue;
+
+			if (!PageAnon(page)) {
+				if (pte_dirty(ptent)) {
+					force_flush = 1;
+					set_page_dirty(page);
+				}
+				if (pte_young(ptent) &&
+				    likely(!(vma->vm_flags & VM_SEQ_READ)))
+					mark_page_accessed(page);
+			}
+			rss[mm_counter(page)]--;
+			page_remove_rmap(page, false);
+			if (unlikely(page_mapcount(page) < 0))
+				printk(" > bad pte?\n");
+			if (unlikely(__tlb_remove_page(tlb, page))) {
+				force_flush = 1;
+				addr += PAGE_SIZE;
+				break;
+			}
+			continue;
+		}
+
+		entry = pte_to_swp_entry(ptent);
+		if (non_swap_entry(entry) && is_device_private_entry(entry)) {
+			struct page *page = device_private_entry_to_page(entry);
+
+			if (unlikely(details && details->check_mapping)) {
+				/*
+				 * unmap_shared_mapping_pages() wants to
+				 * invalidate cache without truncating:
+				 * unmap shared but keep private pages.
+				 */
+				if (details->check_mapping !=
+				    page_rmapping(page))
+					continue;
+			}
+
+			pte_clear_not_present_full(mm, addr, pte, tlb->fullmm);
+			rss[mm_counter(page)]--;
+			page_remove_rmap(page, false);
+			put_page(page);
+			continue;
+		}
+
+		if (!non_swap_entry(entry)) {
+			/* Genuine swap entry, hence a private anon page */
+			if (!should_zap_cows(details))
+				continue;
+			rss[MM_SWAPENTS]--;
+		} else if (is_migration_entry(entry)) {
+			struct page *page;
+
+			page = migration_entry_to_page(entry);
+			if (details && details->check_mapping &&
+			    details->check_mapping != page_rmapping(page))
+				continue;
+			rss[mm_counter(page)]--;
+		}
+		if (unlikely(!free_swap_and_cache(entry)))
+			printk(" > bad pte?\n");
+		pte_clear_not_present_full(mm, addr, pte, tlb->fullmm);
+	} while (pte++, addr += PAGE_SIZE, addr != end);
+
+	add_mm_rss_vec(mm, rss);
+	arch_leave_lazy_mmu_mode();
+
+	/* Do the actual TLB flush before dropping ptl */
+	if (force_flush)
+		tlb_flush_mmu_tlbonly(tlb);
+	pte_unmap_unlock(start_pte, ptl);
+
+	/*
+	 * If we forced a TLB flush (either due to running out of
+	 * batch buffers or because we needed to flush dirty TLB
+	 * entries before releasing the ptl), free the batched
+	 * memory too. Restart if we didn't do everything.
+	 */
+	if (force_flush) {
+		force_flush = 0;
+		tlb_flush_mmu(tlb);
+	}
+
+	if (addr != end) {
+		cond_resched();
+		goto again;
+	}
+
+	return addr;
+}
+
+static inline unsigned long pmvee_zap_pmd_range(struct mmu_gather *tlb,
+				struct vm_area_struct *vma, pud_t *pud,
+				unsigned long addr, unsigned long end,
+				struct zap_details *details)
+{
+	pmd_t *pmd;
+	unsigned long next;
+
+	pmd = pmd_offset(pud, addr);
+	do {
+		next = pmd_addr_end(addr, end);
+		if (is_swap_pmd(*pmd) || pmd_trans_huge(*pmd) || pmd_devmap(*pmd)) {
+            printk(" > not supporting this right now.\n");
+            continue;
+			// if (next - addr != HPAGE_PMD_SIZE)
+			// 	__split_huge_pmd(vma, pmd, addr, false, NULL);
+			// else if (zap_huge_pmd(tlb, vma, pmd, addr))
+			// 	goto next;
+			// /* fall through */
+		} else if (details && details->single_page &&
+			   PageTransCompound(details->single_page) &&
+			   next - addr == HPAGE_PMD_SIZE && pmd_none(*pmd)) {
+            printk(" > should never be hit.\n");
+            continue;
+			// spinlock_t *ptl = pmd_lock(tlb->mm, pmd);
+			// /*
+			//  * Take and drop THP pmd lock so that we cannot return
+			//  * prematurely, while zap_huge_pmd() has cleared *pmd,
+			//  * but not yet decremented compound_mapcount().
+			//  */
+			// spin_unlock(ptl);
+		}
+
+		/*
+		 * Here there can be other concurrent MADV_DONTNEED or
+		 * trans huge page faults running, and if the pmd is
+		 * none or trans huge it can change under us. This is
+		 * because MADV_DONTNEED holds the mmap_sem in read
+		 * mode.
+		 */
+		if (pmd_none_or_trans_huge_or_clear_bad(pmd))
+			goto next;
+		next = pmvee_zap_pte_range(tlb, vma, pmd, addr, next, details);
+next:
+		cond_resched();
+	} while (pmd++, addr = next, addr != end);
+
+	return addr;
+}
+
+static inline unsigned long pmvee_zap_pud_range(struct mmu_gather *tlb,
+				struct vm_area_struct *vma, p4d_t *p4d,
+				unsigned long addr, unsigned long end,
+				struct zap_details *details)
+{
+	pud_t *pud;
+	unsigned long next;
+
+	pud = pud_offset(p4d, addr);
+	do {
+		next = pud_addr_end(addr, end);
+		if (pud_trans_huge(*pud) || pud_devmap(*pud)) {
+            printk(" > not supporting this right now.\n");
+            continue;
+			// if (next - addr != HPAGE_PUD_SIZE) {
+			// 	VM_BUG_ON_VMA(!rwsem_is_locked(&tlb->mm->mmap_sem), vma);
+			// 	split_huge_pud(vma, pud, addr);
+			// } else if (zap_huge_pud(tlb, vma, pud, addr))
+			// 	goto next;
+			// /* fall through */
+		}
+		if (pud_none_or_clear_bad(pud))
+			continue;
+		next = pmvee_zap_pmd_range(tlb, vma, pud, addr, next, details);
+next:
+		cond_resched();
+	} while (pud++, addr = next, addr != end);
+
+	return addr;
+}
+
+static inline unsigned long pmvee_zap_p4d_range(struct mmu_gather *tlb,
+				struct vm_area_struct *vma, pgd_t *pgd,
+				unsigned long addr, unsigned long end,
+				struct zap_details *details)
+{
+	p4d_t *p4d;
+	unsigned long next;
+
+	p4d = p4d_offset(pgd, addr);
+	do {
+		next = p4d_addr_end(addr, end);
+		if (p4d_none_or_clear_bad(p4d))
+			continue;
+		next = pmvee_zap_pud_range(tlb, vma, p4d, addr, next, details);
+	} while (p4d++, addr = next, addr != end);
+
+	return addr;
+}
+
+void pmvee_unmap_page_range(struct mmu_gather *tlb,
+			     struct vm_area_struct *vma,
+			     unsigned long addr, unsigned long end,
+			     struct zap_details *details)
+{
+	pgd_t *pgd;
+	unsigned long next;
+
+	BUG_ON(addr >= end);
+	tlb_start_vma(tlb, vma);
+	pgd = pgd_offset(vma->vm_mm, addr);
+	do {
+		next = pgd_addr_end(addr, end);
+		if (pgd_none_or_clear_bad(pgd))
+			continue;
+		next = pmvee_zap_p4d_range(tlb, vma, pgd, addr, next, details);
+	} while (pgd++, addr = next, addr != end);
+	tlb_end_vma(tlb, vma);
+}
+
+
+static void pmvee_unmap_single_vma(struct mmu_gather *tlb,
+		struct vm_area_struct *vma, unsigned long start_addr,
+		unsigned long end_addr,
+		struct zap_details *details)
+{
+	unsigned long start = max(vma->vm_start, start_addr);
+	unsigned long end;
+
+	if (start >= vma->vm_end)
+		return;
+	end = min(vma->vm_end, end_addr);
+	if (end <= vma->vm_start)
+		return;
+
+	if (vma->vm_file)
+		uprobe_munmap(vma, start, end);
+
+	if (unlikely(vma->vm_flags & VM_PFNMAP))
+		untrack_pfn(vma, 0, 0);
+
+	if (start != end) {
+		if (unlikely(is_vm_hugetlb_page(vma))) {
+            printk("Not supported right now.\n");
+			/*
+			 * It is undesirable to test vma->vm_file as it
+			 * should be non-null for valid hugetlb area.
+			 * However, vm_file will be NULL in the error
+			 * cleanup path of mmap_region. When
+			 * hugetlbfs ->mmap method fails,
+			 * mmap_region() nullifies vma->vm_file
+			 * before calling this function to clean up.
+			 * Since no pte has actually been setup, it is
+			 * safe to do nothing in this case.
+			 */
+			// if (vma->vm_file) {
+			// 	i_mmap_lock_write(vma->vm_file->f_mapping);
+			// 	__unmap_hugepage_range_final(tlb, vma, start, end, NULL);
+			// 	i_mmap_unlock_write(vma->vm_file->f_mapping);
+			// }
+		} else
+			pmvee_unmap_page_range(tlb, vma, start, end, details);
+	}
+}
+
+/**
+ * zap_page_range - remove user pages in a given range
+ * @vma: vm_area_struct holding the applicable pages
+ * @start: starting address of pages to zap
+ * @size: number of bytes to zap
+ *
+ * Caller must protect the VMA list
+ */
+void pmvee_zap_page_range(struct vm_area_struct *vma, unsigned long start,
+		unsigned long size)
+{
+	struct mmu_notifier_range range;
+	struct mmu_gather tlb;
+
+	lru_add_drain();
+	mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, vma, vma->vm_mm,
+				start, start + size);
+	tlb_gather_mmu(&tlb, vma->vm_mm, start, range.end);
+	update_hiwater_rss(vma->vm_mm);
+	mmu_notifier_invalidate_range_start(&range);
+	for ( ; vma && vma->vm_start < range.end; vma = vma->vm_next)
+		pmvee_unmap_single_vma(&tlb, vma, start, range.end, NULL);
+	mmu_notifier_invalidate_range_end(&range);
+	tlb_finish_mmu(&tlb, start, range.end);
+}
 
 /*
  * Executable code area - executable, not writable, not stack
@@ -102,7 +908,8 @@ static int find_vma_links(struct mm_struct *mm, unsigned long addr,
 
 
 static long actual_pmvee_switch(
-        pid_t leader,
+        pid_t source,
+        pid_t destination,
         unsigned long from,
         unsigned long size_one,
         unsigned long size_two,
@@ -110,60 +917,91 @@ static long actual_pmvee_switch(
 {
     unsigned long ret = 0;
     unsigned long to, remove, i;
-    struct pid *leader_pid;
-    struct task_struct *leader_task;
-    struct mm_struct *follower_mm, *leader_mm;
-    struct vm_area_struct *leader_mapping, *tmp, *prev;
+    struct task_struct *source_task, *destination_task;
+    struct mm_struct *source_mm, *destination_mm;
+    struct vm_area_struct *source_mapping, *tmp, *prev;
     struct rb_node **rb_link, *rb_parent;
     struct file *file;
     LIST_HEAD(uf);
 
+    debugk("switching - %d >>> %d\n", source, destination);
+
 
     // checks >
     // early exit if we are the leader.
-    if (current->pid == leader)
+    if (current->pid == source)
     {
+        struct pid* destination_pid;
+
         current->pmvee_ignored_current = 0;
-        return 0;
+        if (!destination || destination == source)
+            return -421;
+        source_task = current;
+
+        if (!(destination_pid = find_get_pid(destination)))
+        {
+            printk(KERN_INFO "Trying to switch with non-existing destination %d\n", destination);
+            return -EINVAL;
+        }
+        if (!(destination_task = pid_task(destination_pid, PIDTYPE_PID)))
+        {
+            printk(KERN_INFO "Trying to switch with non-existing destination %d\n", destination);
+            return -EINVAL;
+        }    
+    }
+    else if (current->pid == destination)
+    {
+        struct pid* source_pid;
+
+        if (!source || source == destination)
+            return -422;
+
+        destination_task = current;
+
+        if (!(source_pid = find_get_pid(source)))
+        {
+            printk(KERN_INFO "Trying to switch with non-existing source %d\n", source);
+            return -EINVAL;
+        }
+        if (!(source_task = pid_task(source_pid, PIDTYPE_PID)))
+        {
+            printk(KERN_INFO "Trying to switch with non-existing source %d\n", source);
+            return -EINVAL;
+        }    
+    }
+    else
+    {
+        return -420;
     }
     // checks <
 
 
-    // Get relevant leader task struct >
-    if (!(leader_pid = find_get_pid(leader)))
-    {
-        printk(KERN_INFO "Trying to switch to non-existing leader %d\n", leader);
-        return EINVAL;
-    }
-
-    if (!(leader_task = pid_task(leader_pid, PIDTYPE_PID)))
-    {
-        printk(KERN_INFO "Trying to switch to non-existing leader %d\n", leader);
-        return EINVAL;
-    }    
-    // Get relevant leader task struct <
-
-
-    follower_mm = current->mm;
-    leader_mm = leader_task->mm;
+    destination_mm = destination_task->mm;
+    source_mm = source_task->mm;
 
     uprobe_start_dup_mmap();
-    uprobe_dup_mmap(leader_mm, follower_mm);
-    if (down_write_killable(&leader_mm->mmap_sem))
+    uprobe_dup_mmap(source_mm, destination_mm);
+    if (down_write_killable(&source_mm->mmap_sem))
         return -EINTR;
-    down_write_nested(&follower_mm->mmap_sem, SINGLE_DEPTH_NESTING);
-	flush_cache_dup_mm(leader_mm);
+    down_write_nested(&destination_mm->mmap_sem, SINGLE_DEPTH_NESTING);
+	flush_cache_dup_mm(source_mm);
 
 
-    leader_mapping = leader_mm->mmap;
-    prev = follower_mm->mmap;
-    while (leader_mapping && leader_mapping->vm_start < from)
+    source_mapping = source_mm->mmap;
+    prev = destination_mm->mmap;
+    while (source_mapping && source_mapping->vm_start < from)
     {
-        leader_mapping = leader_mapping->vm_next;
+        debugk(" > skipping [ %lx ; %lx )\n", source_mapping->vm_start, source_mapping->vm_end);
+        source_mapping = source_mapping->vm_next;
     }
-	if (!leader_mapping)
+    if (source_mapping->vm_start >= from + size_one + size_two)
 	{
-        printk(KERN_INFO "No mappings found in leader %d\n", leader);
+		ret = 0;
+        goto cleanup;
+	}
+	if (!source_mapping)
+	{
+        printk(KERN_INFO "No mappings found in source %d\n", source);
 		ret = -EINVAL;
         goto cleanup;
 	}
@@ -178,28 +1016,11 @@ static long actual_pmvee_switch(
         goto cleanup;
 	}
 
-    #if 0
-    printk("before:\n");
-    struct vm_area_struct * temptemptemp = leader_mm->mmap;
-    while (temptemptemp)
-    {
-        if (temptemptemp->vm_start >= from && temptemptemp->vm_end < from + size_one + size_two)
-            printk("   > leader:   [ 0x%lx ; 0x%lx )\n", temptemptemp->vm_start, temptemptemp->vm_end);
-        temptemptemp = temptemptemp->vm_next;
-    }
-    temptemptemp = follower_mm->mmap;
-    while (temptemptemp)
-    {
-        if (temptemptemp->vm_start >= from && temptemptemp->vm_end < from + size_one + size_two)
-            printk("   > follower: [ 0x%lx ; 0x%lx )\n", temptemptemp->vm_start, temptemptemp->vm_end);
-        temptemptemp = temptemptemp->vm_next;
-    }
-    printk("done.\n");
-    #endif
 
-    if (leader_mapping && prev && prev->vm_next && prev->vm_next->vm_start < leader_mapping->vm_start)
+    if (source_mapping && prev && prev->vm_next && prev->vm_next->vm_start < source_mapping->vm_start)
     {
-        if ((ret = __do_munmap(follower_mm, from, leader_mapping->vm_start - from, &uf, false)))
+        debugk(" > pre loop munmap(%llx, %llx)\n", from, source_mapping->vm_start - from);
+        if ((ret = __do_munmap(destination_mm, from, source_mapping->vm_start - from, &uf, false)))
         {
             printk(" > got return code %ld while performing unmapping\n", ret);
             ret = -ENOMEM;
@@ -210,14 +1031,16 @@ static long actual_pmvee_switch(
     // putting it in a separate function is annoying, hence this loop to run this twice.
     to = from + size_one;
     remove = ~(VM_EXEC | VM_MAYEXEC);
+    debugk(" > [ %lx ; %lx )\n", (unsigned long)from, (unsigned long)(from + size_one + size_two));
     for (i = 0; i < 2; i++)
     {
-        while (leader_mapping && leader_mapping->vm_end <= to)
+        while (source_mapping && source_mapping->vm_end <= to)
         {
-            if (!(flags & PMVEE_FLAGS_DUP_EXEC) && (leader_mapping->vm_flags & VM_EXEC))
+            debugk(" > doing [ %lx ; %lx )\n", source_mapping->vm_start, source_mapping->vm_end);
+            if (!(flags & PMVEE_FLAGS_DUP_EXEC) && (source_mapping->vm_flags & VM_EXEC))
                 goto __pmvee_switch_next_mapping;
 
-            if(leader_mapping->vm_flags & VM_SHARED)
+            if(source_mapping->vm_flags & VM_SHARED)
             {
                 printk("Currently not supporting shared mappings in mp.");
                 ret = -EFAULT;
@@ -225,19 +1048,19 @@ static long actual_pmvee_switch(
             }
 
             if (!prev || !prev->vm_next ||
-                    prev->vm_next->vm_start != leader_mapping->vm_start ||
-                    prev->vm_next->vm_end != leader_mapping->vm_end)
+                    prev->vm_next->vm_start != source_mapping->vm_start ||
+                    prev->vm_next->vm_end != source_mapping->vm_end)
             {
                 unsigned long next_start;
 
-                tmp = vm_area_dup(leader_mapping);
+                tmp = vm_area_dup(source_mapping);
                 if (!tmp)
                 {
                     ret = -ENOMEM;
                     goto cleanup;
                 }
-                tmp->vm_mm = follower_mm;
-                if (anon_vma_fork(tmp, leader_mapping))
+                tmp->vm_mm = destination_mm;
+                if (anon_vma_fork(tmp, source_mapping))
                 {
                     ret = -ENOMEM;
                     goto cleanup;
@@ -256,29 +1079,30 @@ static long actual_pmvee_switch(
                     if (tmp->vm_flags & VM_SHARED)
                         atomic_inc(&mapping->i_mmap_writable);
                     flush_dcache_mmap_lock(mapping);
-                    /* insert tmp into the share list, just after leader_mapping */
-                    vma_interval_tree_insert_after(tmp, leader_mapping,
+                    /* insert tmp into the share list, just after source_mapping */
+                    vma_interval_tree_insert_after(tmp, source_mapping,
                             &mapping->i_mmap);
                     flush_dcache_mmap_unlock(mapping);
                     i_mmap_unlock_write(mapping);
                 }
 
-                next_start = (leader_mapping->vm_next && leader_mapping->vm_next->vm_start < to) ?
-                        leader_mapping->vm_next->vm_start : to;
-                if ((ret = __do_munmap(follower_mm, tmp->vm_start, next_start - tmp->vm_start, &uf, false)))
+                next_start = (source_mapping->vm_next && source_mapping->vm_next->vm_start < to) ?
+                        source_mapping->vm_next->vm_start : to;
+                debugk(" > munmap(%llx, %llx)\n", tmp->vm_start, next_start - tmp->vm_start);
+                if ((ret = __do_munmap(destination_mm, tmp->vm_start, next_start - tmp->vm_start, &uf, false)))
                 {
                     printk(" > got return code %ld while performing unmapping\n", ret);
                     goto cleanup;
                 }
 
                 // link it in >
-                find_vma_links(follower_mm, tmp->vm_start, tmp->vm_end, &prev, &rb_link, &rb_parent);
+                find_vma_links(destination_mm, tmp->vm_start, tmp->vm_end, &prev, &rb_link, &rb_parent);
                 tmp->vm_prev = prev;
                 if (!prev)
                 {
-                    tmp->vm_next = follower_mm->mmap;
-                    follower_mm->mmap->vm_prev = tmp;
-                    follower_mm->mmap = tmp;
+                    tmp->vm_next = destination_mm->mmap;
+                    destination_mm->mmap->vm_prev = tmp;
+                    destination_mm->mmap = tmp;
                 }
                 else
                 {
@@ -287,14 +1111,33 @@ static long actual_pmvee_switch(
                     tmp->vm_next->vm_prev = tmp;
                 }
 
-                __vma_link_rb(follower_mm, tmp, rb_link, rb_parent);
-                follower_mm->map_count++;
+                __vma_link_rb(destination_mm, tmp, rb_link, rb_parent);
+                destination_mm->map_count++;
+
+                if (copy_page_range(destination_mm, source_mm, source_mapping))
+                {
+                    printk(" > couldn't copy pages\n");
+                    ret = -ENOMEM;
+                    goto cleanup;
+                }
                 // link it in <
             }
             else
             {
                 tmp = prev->vm_next;
-                zap_page_range(tmp, tmp->vm_start, tmp->vm_end - tmp->vm_start);
+                pmvee_zap_page_range(tmp, tmp->vm_start, tmp->vm_end - tmp->vm_start);
+                if (pmvee_copy_page_range(destination_mm, source_mm, source_mapping))
+                {
+                    printk(" > couldn't copy pages\n");
+                    ret = -ENOMEM;
+                    goto cleanup;
+                }
+                // if (pmvee_copy_page_range(destination_mm, source_mm, source_mapping, tmp))
+                // {
+                //     printk(" > couldn't copy pages\n");
+                //     ret = -ENOMEM;
+                //     goto cleanup;
+                // }
             }
 
             if (tmp->vm_ops && tmp->vm_ops->open)
@@ -302,110 +1145,118 @@ static long actual_pmvee_switch(
             // remove unwanted permissions >
             if (tmp->vm_flags & ~remove)
             {
-                tmp->vm_flags = leader_mapping->vm_flags & remove;
+                tmp->vm_flags = source_mapping->vm_flags & remove;
                 vma_set_page_prot(tmp);
                 change_protection(tmp, tmp->vm_start, tmp->vm_end, tmp->vm_page_prot, false, 0);
             }
             // remove unwanted permissions <
 
             // copy pages >
-            if (copy_page_range(follower_mm, leader_mm, leader_mapping))
-            {
-                printk(" > couldn't copy pages\n");
-                ret = -ENOMEM;
-                goto cleanup;
-            }
             // copy pages <
             
             __pmvee_switch_next_mapping:
             prev = tmp;
-            leader_mapping = leader_mapping->vm_next;
+            source_mapping = source_mapping->vm_next;
         }
         to = to + size_two;
         // remove = ~(VM_EXEC | VM_MAYEXEC | VM_WRITE | VM_MAYWRITE);
     }
+    debugk(" > done [ %lx ; %lx )\n", source_mapping->vm_start, source_mapping->vm_end);
     if (prev && prev->vm_next && prev->vm_next->vm_start < to)
     {
-        if ((ret = __do_munmap(follower_mm, prev->vm_end, prev->vm_next->vm_end - prev->vm_end, &uf, false)))
+        unsigned long unmap_start = prev->vm_end;
+        while (prev->vm_next && prev->vm_next->vm_start < to)
+            prev = prev->vm_next;
+        debugk("unmapping %lx -> %lx (%lx)\n", unmap_start, prev->vm_end, prev->vm_start);
+        if ((ret = __do_munmap(destination_mm, unmap_start, (prev->vm_end > to ? to : prev->vm_end) - unmap_start, &uf, false)))
         {
             printk(" > got return code %ld while performing unmapping\n", ret);
             goto cleanup;
         }
     }
 
-    #if 0
-    printk("after:\n");
-    temptemptemp = leader_mm->mmap;
-    while (temptemptemp)
-    {
-        // if (temptemptemp->vm_start >= from && temptemptemp->vm_end < from + size_one + size_two)
-            printk("   > leader:   [ 0x%lx ; 0x%lx )\n", temptemptemp->vm_start, temptemptemp->vm_end);
-        temptemptemp = temptemptemp->vm_next;
-    }
-    temptemptemp = follower_mm->mmap;
-    while (temptemptemp)
-    {
-        // if (temptemptemp->vm_start >= from && temptemptemp->vm_end < from + size_one + size_two)
-            printk("   > follower: [ 0x%lx ; 0x%lx )\n", temptemptemp->vm_start, temptemptemp->vm_end);
-        temptemptemp = temptemptemp->vm_next;
-    }
-    #endif
+
         
     cleanup:
-    up_write(&follower_mm->mmap_sem);
-    flush_tlb_mm(follower_mm);
-    flush_tlb_mm(leader_mm);
-    up_write(&leader_mm->mmap_sem);
+    up_write(&destination_mm->mmap_sem);
+    flush_tlb_mm(destination_mm);
+    flush_tlb_mm(source_mm);
+    up_write(&source_mm->mmap_sem);
     uprobe_end_dup_mmap();
 
-    debugk(" > pmvee switch done.\n");
-    return from;
+    return 0;
 }
 
 
 static long actual_pmvee_check (
-        pid_t leader,
+        pid_t source,
+        pid_t destination,
         unsigned long from,
         unsigned long size_one,
         unsigned long size_two,
         unsigned long flags)
 {
     unsigned long region_end;
-    struct pid *leader_pid;
-    struct task_struct *leader_task;
-	struct vm_area_struct *mpnt, *leader_mpnt;
-	struct mm_struct *follower_mm, *leader_mm;
+    struct task_struct *source_task;
+    struct task_struct *destination_task;
+	struct vm_area_struct *mpnt, *source_mpnt;
+	struct mm_struct *destination_mm, *source_mm;
 	LIST_HEAD(uf);
 
-    // get relevant leader task struct >
-    leader_pid = find_get_pid(leader);
-    if (!leader_pid)
-    {
-        printk(KERN_INFO "Trying to check with non-existing leader %d\n", leader);
-        return EINVAL;
-    }
+    debugk("checking <%d> - %d to %d\n", current->pid, source, destination);
 
-    leader_task = pid_task(leader_pid, PIDTYPE_PID);
-    if (!leader_task)
-    {
-        printk(KERN_INFO "Trying to check with non-existing leader %d\n", leader);
-        return EINVAL;
-    }
-    // get relevant leader task struct <
 
-    // early exit >
-    if (current->pid == leader)
-	{
-		// printk(" [switch] > in leader\n");
+    if (current->pid == source)
+    {
+        struct pid* destination_pid;
+
         current->pmvee_ignored_current = 1;
-		return 0;
-	}
+        if (!destination || destination == source)
+            return 0;
+        source_task = current;
 
-	follower_mm = current->mm;
-	leader_mm = leader_task->mm;
-    if (!leader_mm)
+        if (!(destination_pid = find_get_pid(destination)))
+        {
+            printk(KERN_INFO "Trying to switch with non-existing destination %d\n", destination);
+            return -EINVAL;
+        }
+        if (!(destination_task = pid_task(destination_pid, PIDTYPE_PID)))
+        {
+            printk(KERN_INFO "Trying to switch with non-existing destination %d\n", destination);
+            return -EINVAL;
+        }    
+    }
+    else if (current->pid == destination)
     {
-        printk(KERN_INFO "Seems like our leader has no memory to share | leader pid: %d\n", leader);
+        struct pid* source_pid;
+
+        if (!source || source == destination)
+            return 0;
+
+        destination_task = current;
+
+        if (!(source_pid = find_get_pid(source)))
+        {
+            printk(KERN_INFO "Trying to switch with non-existing source %d\n", source);
+            return -EINVAL;
+        }
+        if (!(source_task = pid_task(source_pid, PIDTYPE_PID)))
+        {
+            printk(KERN_INFO "Trying to switch with non-existing source %d\n", source);
+            return -EINVAL;
+        }
+    }
+    else
+    {
+        return -EINVAL;
+    }
+
+
+	destination_mm = destination_task->mm;
+	source_mm = source_task->mm;
+    if (!source_mm)
+    {
+        printk(KERN_INFO "Seems like our source has no memory to share | source pid: %d\n", source);
         return EINVAL;
     }
     // early exit <
@@ -414,15 +1265,15 @@ static long actual_pmvee_check (
 
 
     // check mappings for changes >
-	leader_mpnt = leader_mm->mmap;
-	while (leader_mpnt && leader_mpnt->vm_start < from)
-		leader_mpnt = leader_mpnt->vm_next;
-	if (!leader_mpnt)
+	source_mpnt = source_mm->mmap;
+	while (source_mpnt && source_mpnt->vm_start < from)
+		source_mpnt = source_mpnt->vm_next;
+	if (!source_mpnt)
 	{
-        printk(KERN_INFO "No mappings found in leader %d\n", leader);
+        printk(KERN_INFO "No mappings found in source %d\n", source);
 		return EINVAL;
 	}
-	mpnt = follower_mm->mmap;
+	mpnt = destination_mm->mmap;
 	while (mpnt && mpnt->vm_start < from)
 		mpnt = mpnt->vm_next;
 	if (!mpnt)
@@ -432,29 +1283,44 @@ static long actual_pmvee_check (
 	}
 
 	// assuming the two lists are in sync here. If they aren't... well, we're in a bit of trouble.
-	while (leader_mpnt && mpnt)
+	while (source_mpnt && mpnt)
 	{
 		if (mpnt->vm_end > region_end)
 			mpnt = NULL;
-		if (leader_mpnt->vm_end > region_end)
-			leader_mpnt = NULL;
-		if (!mpnt || !leader_mpnt)
+		if (source_mpnt->vm_end > region_end)
+			source_mpnt = NULL;
+		if (!mpnt || !source_mpnt)
 			break;
 
         // check to make sure these mappings are actually the same range
-        if (leader_mpnt->vm_start != mpnt->vm_start || leader_mpnt->vm_end != mpnt->vm_end)
+        if (source_mpnt->vm_start != mpnt->vm_start)
         {
             printk("   > mismatching mappings: [ 0x%lx ; 0x%lx ) != [ 0x%lx ; 0x%lx )\n",
-                    leader_mpnt->vm_start, leader_mpnt->vm_end, mpnt->vm_start, mpnt->vm_end);
+                    source_mpnt->vm_start, source_mpnt->vm_end, mpnt->vm_start, mpnt->vm_end);
             return -EFAULT;
+        }
+        if (source_mpnt->vm_end != mpnt->vm_end)
+        {
+            while(mpnt->vm_next && 
+                    mpnt->vm_next->vm_end <= source_mpnt->vm_end &&
+                    mpnt->vm_next->vm_start == mpnt->vm_end)
+                mpnt = mpnt->vm_next;
+            
+            if (source_mpnt->vm_end != mpnt->vm_end)
+            {
+                printk("   > mismatching mappings: [ 0x%lx ; 0x%lx ) != [ 0x%lx ; 0x%lx )\n",
+                        source_mpnt->vm_start, source_mpnt->vm_end, mpnt->vm_start, mpnt->vm_end);
+                return -EFAULT;
+            }
+            // else
+            //     zap_page_range(mpnt, mpnt->vm_start, mpnt->vm_end - mpnt->vm_start);
         }
 		
 		// next entries
 		mpnt = mpnt->vm_next;
-		leader_mpnt = leader_mpnt->vm_next;
+		source_mpnt = source_mpnt->vm_next;
 	}
     // check mappings for changes <
-    debugk(" > pmvee check done.\n")
     return 0;
 }
 

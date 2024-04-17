@@ -4,16 +4,23 @@ all: module lib
 
 clean: module-clean lib-clean
 
-lib-debug:
+lib-static-debug:
 	clang -DPMVEE_LEADER -DPMVEE_COPY_STATE -c -fPIC -g -O3 -o PMVEE.o PMVEE.c
 	ar r libpmvee.a PMVEE.o
 
-lib:
+lib-static:
 	clang -DPMVEE_LEADER -DPMVEE_COPY_STATE -c -fPIC -O3 -o PMVEE.o PMVEE.c
 	ar r libpmvee.a PMVEE.o
 
-lib-shared:
-	clang -DPMVEE_LEADER -DPMVEE_COPY_STATE -shared -fPIC -O3 -o libpmvee.so PMVEE.c
+lib:
+	clang -DPMVEE_LEADER -DPMVEE_COPY_STATE -DPMVEE_PRELOAD -shared -ldl -fPIC -O3 -lc -o libpmvee.preload.so PMVEE.c
+	clang -DPMVEE_LEADER -DPMVEE_COPY_STATE -shared -fPIC -O3 -lc -o libpmvee.so PMVEE.c
+	ln -fs $(shell readlink -f ./libpmvee.so) ../patched_binaries/gnomelibs/amd64/libpmvee.so
+
+lib-debug:
+	clang -DPMVEE_LEADER -DPMVEE_COPY_STATE -DPMVEE_PRELOAD -shared -ldl -fPIC -g -O3 -o libpmvee.preload.so PMVEE.c
+	clang -DPMVEE_LEADER -DPMVEE_COPY_STATE -shared -fPIC -g -O3 -o libpmvee.so PMVEE.c
+	ln -fs $(shell readlink -f ./libpmvee.so) ../patched_binaries/gnomelibs/amd64/libpmvee.so
 
 lib-test: debug
 	clang lookuptest.c -o lookuptest -L. -lpmvee
