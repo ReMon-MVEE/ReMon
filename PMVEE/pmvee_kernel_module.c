@@ -302,12 +302,12 @@ static int pmvee_copy_pte_range(struct mm_struct *dst_mm, struct mm_struct *src_
 again:
 	init_rss_vec(rss);
 
-	dst_pte = pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
-	if (!dst_pte)
-		return -ENOMEM;
+	dst_pte = pte_offset_map(dst_pmd, addr);
 	src_pte = pte_offset_map(src_pmd, addr);
 	src_ptl = pte_lockptr(src_mm, src_pmd);
+	dst_ptl = pte_lockptr(dst_mm, dst_pmd);
 	spin_lock_nested(src_ptl, SINGLE_DEPTH_NESTING);
+	spin_lock_nested(dst_ptl, SINGLE_DEPTH_NESTING);
 	orig_src_pte = src_pte;
 	orig_dst_pte = dst_pte;
 	arch_enter_lazy_mmu_mode();
@@ -327,8 +327,18 @@ again:
 			progress++;
 			continue;
 		}
+		if (pte_pfn(*src_pte) == pte_pfn(*dst_pte)) {
+			debugk(" > skipping copy\n");
+			progress++;
+			continue;
+		}
+		else
+		{
+			debugk(" > copy: %llx - %llx\n", pte_pfn(*dst_pte), pte_pfn(*src_pte));
+		}
 		entry.val = pmvee_copy_one_pte(dst_mm, src_mm, dst_pte, src_pte,
 							vma, addr, rss);
+		debugk(" > after copy: %llx - %llx\n", pte_pfn(*dst_pte), pte_pfn(*src_pte));
 		if (entry.val)
 			break;
 		progress += 8;
@@ -358,7 +368,7 @@ static inline int pmvee_copy_pmd_range(struct mm_struct *dst_mm, struct mm_struc
 	pmd_t *src_pmd, *dst_pmd;
 	unsigned long next;
 
-	dst_pmd = pmd_alloc(dst_mm, dst_pud, addr);
+	dst_pmd = pmd_offset(dst_pud, addr);
 	if (!dst_pmd)
 		return -ENOMEM;
 	src_pmd = pmd_offset(src_pud, addr);
@@ -394,7 +404,7 @@ static inline int pmvee_copy_pud_range(struct mm_struct *dst_mm, struct mm_struc
 	pud_t *src_pud, *dst_pud;
 	unsigned long next;
 
-	dst_pud = pud_alloc(dst_mm, dst_p4d, addr);
+	dst_pud = pud_offset(dst_p4d, addr);
 	if (!dst_pud)
 		return -ENOMEM;
 	src_pud = pud_offset(src_p4d, addr);
@@ -430,7 +440,7 @@ static inline int pmvee_copy_p4d_range(struct mm_struct *dst_mm, struct mm_struc
 	p4d_t *src_p4d, *dst_p4d;
 	unsigned long next;
 
-	dst_p4d = p4d_alloc(dst_mm, dst_pgd, addr);
+	dst_p4d = p4d_offset(dst_pgd, addr);
 	if (!dst_p4d)
 		return -ENOMEM;
 	src_p4d = p4d_offset(src_pgd, addr);
@@ -517,37 +527,49 @@ int pmvee_copy_page_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 }
 
 static unsigned long pmvee_zap_pte_range(struct mmu_gather *tlb,
-				struct vm_area_struct *vma, pmd_t *pmd,
+				struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma, pmd_t *dst_pmd, pmd_t *src_pmd,
 				unsigned long addr, unsigned long end,
 				struct zap_details *details)
 {
-	struct mm_struct *mm = tlb->mm;
+	struct mm_struct *dst_mm = tlb->mm;
+	struct mm_struct *src_mm = src_vma->vm_mm;
 	int force_flush = 0;
 	int rss[NR_MM_COUNTERS];
-	spinlock_t *ptl;
-	pte_t *start_pte;
-	pte_t *pte;
+	spinlock_t *dst_ptl, *src_ptl;
+	pte_t *dst_start_pte, *src_start_pte;
+	pte_t *dst_pte, *src_pte;
 	swp_entry_t entry;
 
 	tlb_change_page_size(tlb, PAGE_SIZE);
 again:
 	init_rss_vec(rss);
-	start_pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
-	pte = start_pte;
-	flush_tlb_batched_pending(mm);
+	dst_start_pte = pte_offset_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
+	src_start_pte = pte_offset_map_lock(src_mm, src_pmd, addr, &src_ptl);
+	dst_pte = dst_start_pte;
+	src_pte = src_start_pte;
+	flush_tlb_batched_pending(dst_mm);
 	arch_enter_lazy_mmu_mode();
 	do {
-		pte_t ptent = *pte;
-		if (pte_none(ptent))
+		if (pte_none(*dst_pte))
 			continue;
+
+		if (pte_pfn(*dst_pte) == pte_pfn(*src_pte))
+		{
+			debugk(" > skipping zap\n");
+			continue;
+		}
+		else
+		{
+			debugk(" > zap: %llx - %llx\n", pte_pfn(*dst_pte), pte_pfn(*src_pte));
+		}
 
 		if (need_resched())
 			break;
 
-		if (pte_present(ptent)) {
+		if (pte_present(*dst_pte)) {
 			struct page *page;
 
-			page = vm_normal_page(vma, addr, ptent);
+			page = vm_normal_page(dst_vma, addr, *dst_pte);
 			if (unlikely(details) && page) {
 				/*
 				 * unmap_shared_mapping_pages() wants to
@@ -558,19 +580,19 @@ again:
 				    details->check_mapping != page_rmapping(page))
 					continue;
 			}
-			ptent = ptep_get_and_clear_full(mm, addr, pte,
+			pte_t dst_ptent = ptep_get_and_clear_full(dst_mm, addr, dst_pte,
 							tlb->fullmm);
-			tlb_remove_tlb_entry(tlb, pte, addr);
+			tlb_remove_tlb_entry(tlb, dst_pte, addr);
 			if (unlikely(!page))
 				continue;
 
 			if (!PageAnon(page)) {
-				if (pte_dirty(ptent)) {
+				if (pte_dirty(dst_ptent)) {
 					force_flush = 1;
 					set_page_dirty(page);
 				}
-				if (pte_young(ptent) &&
-				    likely(!(vma->vm_flags & VM_SEQ_READ)))
+				if (pte_young(dst_ptent) &&
+				    likely(!(dst_vma->vm_flags & VM_SEQ_READ)))
 					mark_page_accessed(page);
 			}
 			rss[mm_counter(page)]--;
@@ -585,7 +607,7 @@ again:
 			continue;
 		}
 
-		entry = pte_to_swp_entry(ptent);
+		entry = pte_to_swp_entry(*dst_pte);
 		if (non_swap_entry(entry) && is_device_private_entry(entry)) {
 			struct page *page = device_private_entry_to_page(entry);
 
@@ -600,7 +622,7 @@ again:
 					continue;
 			}
 
-			pte_clear_not_present_full(mm, addr, pte, tlb->fullmm);
+			pte_clear_not_present_full(dst_mm, addr, dst_pte, tlb->fullmm);
 			rss[mm_counter(page)]--;
 			page_remove_rmap(page, false);
 			put_page(page);
@@ -623,16 +645,17 @@ again:
 		}
 		if (unlikely(!free_swap_and_cache(entry)))
 			printk(" > bad pte?\n");
-		pte_clear_not_present_full(mm, addr, pte, tlb->fullmm);
-	} while (pte++, addr += PAGE_SIZE, addr != end);
+		pte_clear_not_present_full(dst_mm, addr, dst_pte, tlb->fullmm);
+	} while (dst_pte++, src_pte++, addr += PAGE_SIZE, addr != end);
 
-	add_mm_rss_vec(mm, rss);
+	add_mm_rss_vec(dst_mm, rss);
 	arch_leave_lazy_mmu_mode();
 
 	/* Do the actual TLB flush before dropping ptl */
 	if (force_flush)
 		tlb_flush_mmu_tlbonly(tlb);
-	pte_unmap_unlock(start_pte, ptl);
+	pte_unmap_unlock(dst_start_pte, dst_ptl);
+	pte_unmap_unlock(src_start_pte, src_ptl);
 
 	/*
 	 * If we forced a TLB flush (either due to running out of
@@ -654,17 +677,18 @@ again:
 }
 
 static inline unsigned long pmvee_zap_pmd_range(struct mmu_gather *tlb,
-				struct vm_area_struct *vma, pud_t *pud,
+				struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma, pud_t *dst_pud, pud_t *src_pud,
 				unsigned long addr, unsigned long end,
 				struct zap_details *details)
 {
-	pmd_t *pmd;
+	pmd_t *dst_pmd, *src_pmd;
 	unsigned long next;
 
-	pmd = pmd_offset(pud, addr);
+	dst_pmd = pmd_offset(dst_pud, addr);
+	src_pmd = pmd_offset(src_pud, addr);
 	do {
 		next = pmd_addr_end(addr, end);
-		if (is_swap_pmd(*pmd) || pmd_trans_huge(*pmd) || pmd_devmap(*pmd)) {
+		if (is_swap_pmd(*dst_pmd) || pmd_trans_huge(*dst_pmd) || pmd_devmap(*dst_pmd)) {
             printk(" > not supporting this right now.\n");
             continue;
 			// if (next - addr != HPAGE_PMD_SIZE)
@@ -674,7 +698,7 @@ static inline unsigned long pmvee_zap_pmd_range(struct mmu_gather *tlb,
 			// /* fall through */
 		} else if (details && details->single_page &&
 			   PageTransCompound(details->single_page) &&
-			   next - addr == HPAGE_PMD_SIZE && pmd_none(*pmd)) {
+			   next - addr == HPAGE_PMD_SIZE && pmd_none(*dst_pmd)) {
             printk(" > should never be hit.\n");
             continue;
 			// spinlock_t *ptl = pmd_lock(tlb->mm, pmd);
@@ -693,28 +717,29 @@ static inline unsigned long pmvee_zap_pmd_range(struct mmu_gather *tlb,
 		 * because MADV_DONTNEED holds the mmap_sem in read
 		 * mode.
 		 */
-		if (pmd_none_or_trans_huge_or_clear_bad(pmd))
+		if (pmd_none_or_trans_huge_or_clear_bad(dst_pmd))
 			goto next;
-		next = pmvee_zap_pte_range(tlb, vma, pmd, addr, next, details);
+		next = pmvee_zap_pte_range(tlb, dst_vma, src_vma, dst_pmd, src_pmd, addr, next, details);
 next:
 		cond_resched();
-	} while (pmd++, addr = next, addr != end);
+	} while (dst_pmd++, src_pmd++, addr = next, addr != end);
 
 	return addr;
 }
 
 static inline unsigned long pmvee_zap_pud_range(struct mmu_gather *tlb,
-				struct vm_area_struct *vma, p4d_t *p4d,
+				struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma, p4d_t *dst_p4d, p4d_t *src_p4d,
 				unsigned long addr, unsigned long end,
 				struct zap_details *details)
 {
-	pud_t *pud;
+	pud_t *dst_pud, *src_pud;
 	unsigned long next;
 
-	pud = pud_offset(p4d, addr);
+	dst_pud = pud_offset(dst_p4d, addr);
+	src_pud = pud_offset(src_p4d, addr);
 	do {
 		next = pud_addr_end(addr, end);
-		if (pud_trans_huge(*pud) || pud_devmap(*pud)) {
+		if (pud_trans_huge(*dst_pud) || pud_devmap(*dst_pud)) {
             printk(" > not supporting this right now.\n");
             continue;
 			// if (next - addr != HPAGE_PUD_SIZE) {
@@ -724,78 +749,80 @@ static inline unsigned long pmvee_zap_pud_range(struct mmu_gather *tlb,
 			// 	goto next;
 			// /* fall through */
 		}
-		if (pud_none_or_clear_bad(pud))
+		if (pud_none_or_clear_bad(dst_pud))
 			continue;
-		next = pmvee_zap_pmd_range(tlb, vma, pud, addr, next, details);
+		next = pmvee_zap_pmd_range(tlb, dst_vma, src_vma, dst_pud, src_pud, addr, next, details);
 next:
 		cond_resched();
-	} while (pud++, addr = next, addr != end);
+	} while (dst_pud++, src_pud++, addr = next, addr != end);
 
 	return addr;
 }
 
 static inline unsigned long pmvee_zap_p4d_range(struct mmu_gather *tlb,
-				struct vm_area_struct *vma, pgd_t *pgd,
+				struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma, pgd_t *dst_pgd, pgd_t *src_pgd,
 				unsigned long addr, unsigned long end,
 				struct zap_details *details)
 {
-	p4d_t *p4d;
+	p4d_t *dst_p4d, *src_p4d;
 	unsigned long next;
 
-	p4d = p4d_offset(pgd, addr);
+	dst_p4d = p4d_offset(dst_pgd, addr);
+	src_p4d = p4d_offset(src_pgd, addr);
 	do {
 		next = p4d_addr_end(addr, end);
-		if (p4d_none_or_clear_bad(p4d))
+		if (p4d_none_or_clear_bad(dst_p4d))
 			continue;
-		next = pmvee_zap_pud_range(tlb, vma, p4d, addr, next, details);
-	} while (p4d++, addr = next, addr != end);
+		next = pmvee_zap_pud_range(tlb, dst_vma, src_vma, dst_p4d, src_p4d, addr, next, details);
+	} while (dst_p4d++, src_p4d++, addr = next, addr != end);
 
 	return addr;
 }
 
 void pmvee_unmap_page_range(struct mmu_gather *tlb,
-			     struct vm_area_struct *vma,
+			     struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
 			     unsigned long addr, unsigned long end,
 			     struct zap_details *details)
 {
-	pgd_t *pgd;
+	pgd_t *dst_pgd, *src_pgd;
 	unsigned long next;
 
 	BUG_ON(addr >= end);
 	tlb_start_vma(tlb, vma);
-	pgd = pgd_offset(vma->vm_mm, addr);
+	dst_pgd = pgd_offset(dst_vma->vm_mm, addr);
+	src_pgd = pgd_offset(src_vma->vm_mm, addr);
 	do {
 		next = pgd_addr_end(addr, end);
-		if (pgd_none_or_clear_bad(pgd))
+		if (pgd_none_or_clear_bad(dst_pgd))
 			continue;
-		next = pmvee_zap_p4d_range(tlb, vma, pgd, addr, next, details);
-	} while (pgd++, addr = next, addr != end);
+		next = pmvee_zap_p4d_range(tlb, dst_vma, src_vma, dst_pgd, src_pgd, addr, next, details);
+	} while (dst_pgd++, src_pgd++, addr = next, addr != end);
 	tlb_end_vma(tlb, vma);
 }
 
 
 static void pmvee_unmap_single_vma(struct mmu_gather *tlb,
-		struct vm_area_struct *vma, unsigned long start_addr,
+		struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma, unsigned long start_addr,
 		unsigned long end_addr,
 		struct zap_details *details)
 {
-	unsigned long start = max(vma->vm_start, start_addr);
+	unsigned long start = max(dst_vma->vm_start, start_addr);
 	unsigned long end;
 
-	if (start >= vma->vm_end)
+	if (start >= dst_vma->vm_end)
 		return;
-	end = min(vma->vm_end, end_addr);
-	if (end <= vma->vm_start)
+	end = min(dst_vma->vm_end, end_addr);
+	if (end <= dst_vma->vm_start)
 		return;
 
-	if (vma->vm_file)
-		uprobe_munmap(vma, start, end);
+	if (dst_vma->vm_file)
+		uprobe_munmap(dst_vma, start, end);
 
-	if (unlikely(vma->vm_flags & VM_PFNMAP))
-		untrack_pfn(vma, 0, 0);
+	if (unlikely(dst_vma->vm_flags & VM_PFNMAP))
+		untrack_pfn(dst_vma, 0, 0);
 
 	if (start != end) {
-		if (unlikely(is_vm_hugetlb_page(vma))) {
+		if (unlikely(is_vm_hugetlb_page(dst_vma))) {
             printk("Not supported right now.\n");
 			/*
 			 * It is undesirable to test vma->vm_file as it
@@ -814,7 +841,7 @@ static void pmvee_unmap_single_vma(struct mmu_gather *tlb,
 			// 	i_mmap_unlock_write(vma->vm_file->f_mapping);
 			// }
 		} else
-			pmvee_unmap_page_range(tlb, vma, start, end, details);
+			pmvee_unmap_page_range(tlb, dst_vma, src_vma, start, end, details);
 	}
 }
 
@@ -826,20 +853,20 @@ static void pmvee_unmap_single_vma(struct mmu_gather *tlb,
  *
  * Caller must protect the VMA list
  */
-void pmvee_zap_page_range(struct vm_area_struct *vma, unsigned long start,
+void pmvee_zap_page_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma, unsigned long start,
 		unsigned long size)
 {
 	struct mmu_notifier_range range;
 	struct mmu_gather tlb;
 
 	lru_add_drain();
-	mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, vma, vma->vm_mm,
+	mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, dst_vma, dst_vma->vm_mm,
 				start, start + size);
-	tlb_gather_mmu(&tlb, vma->vm_mm, start, range.end);
-	update_hiwater_rss(vma->vm_mm);
+	tlb_gather_mmu(&tlb, dst_vma->vm_mm, start, range.end);
+	update_hiwater_rss(dst_vma->vm_mm);
 	mmu_notifier_invalidate_range_start(&range);
-	for ( ; vma && vma->vm_start < range.end; vma = vma->vm_next)
-		pmvee_unmap_single_vma(&tlb, vma, start, range.end, NULL);
+	for ( ; dst_vma && dst_vma->vm_start < range.end; dst_vma = dst_vma->vm_next)
+		pmvee_unmap_single_vma(&tlb, dst_vma, src_vma, start, range.end, NULL);
 	mmu_notifier_invalidate_range_end(&range);
 	tlb_finish_mmu(&tlb, start, range.end);
 }
@@ -1125,14 +1152,15 @@ static long actual_pmvee_switch(
             else
             {
                 tmp = prev->vm_next;
-                pmvee_zap_page_range(tmp, tmp->vm_start, tmp->vm_end - tmp->vm_start);
+                pmvee_zap_page_range(tmp, source_mapping, tmp->vm_start, tmp->vm_end - tmp->vm_start);
                 if (pmvee_copy_page_range(destination_mm, source_mm, source_mapping))
                 {
                     printk(" > couldn't copy pages\n");
                     ret = -ENOMEM;
                     goto cleanup;
                 }
-                // if (pmvee_copy_page_range(destination_mm, source_mm, source_mapping, tmp))
+                // zap_page_range(tmp, tmp->vm_start, tmp->vm_end - tmp->vm_start);
+                // if (copy_page_range(destination_mm, source_mm, source_mapping))
                 // {
                 //     printk(" > couldn't copy pages\n");
                 //     ret = -ENOMEM;
