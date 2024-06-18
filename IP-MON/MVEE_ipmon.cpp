@@ -3938,14 +3938,12 @@ static void set_seccomp_bpf_filter()
 		const unsigned long long ipmon_enclave_entrypoint_ptr_bits_48_59 = (ipmon_enclave_entrypoint_ptr & 0x0FFF000000000000) >> 48;
 		const unsigned long long ipmon_enclave_entrypoint_ptr_bits_60_63 = (ipmon_enclave_entrypoint_ptr & 0xF000000000000000) >> 60;
 
-		// Define variables for jump instructions in the seccomp-bpf filter
-		const int upper = 4095;
-		const int lower = 2048;
-		const int number_of_values = upper - lower;
-		const int number_of_passes = 6;
-		const int mod_6_upper_bound = number_of_values / number_of_passes;
-		const int invoke_key_exchange_mod = (rand() % number_of_values) + 1;
-		const __u32 invoke_key_exchange = (__u32)(lower + (invoke_key_exchange_mod * number_of_passes));
+		// The parameters for the key exchange. We choose a random value that invokes the key exchange.
+		// This is hardcoded in the filter, and every increment triggers another step.
+		const unsigned upper_limit = 4095;
+		const unsigned lower_limit = 2048;
+		const unsigned nr_of_available_values = upper_limit - lower_limit;
+		const unsigned invoke_key_exchange = lower_limit + (rand() % (nr_of_available_values +1));
 
 		// Define seccomp-bpf filter
 		struct sock_filter filter[] = {
