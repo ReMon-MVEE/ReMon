@@ -56,9 +56,8 @@
 #include <net/if.h>
 #include "MVEE_ipmon.h"
 #include "MVEE_ipmon_memory.h"
+#include "MVEE_erim.h"
 #include "../MVEE/Inc/MVEE_fake_syscall.h"
-#include "../MVEE/Inc/MVEE_build_pku_config.h"
-#include "../MVEE/Inc/MVEE_erim.h"
 
 /*-----------------------------------------------------------------------------
     Global Variables
@@ -3720,7 +3719,7 @@ extern "C" long ipmon_enclave
 	args.arg6 = arg6;
 	args.entry = NULL;
 
-#ifdef MVEE_IP_PKU_ENABLED
+#ifdef IPMON_USE_MPK
 	// erim_switch_to_trusted is moved inside the kernel (sys_ipmon_invoke)
 	// otherwise we open the following attack window:
 	//     1) attacker jumps before the domain switch
@@ -3750,7 +3749,8 @@ extern "C" long ipmon_enclave
 	}
 
 	long ret = ipmon_handle_syscall(RB, syscall_no, args);
-#ifdef MVEE_IP_PKU_ENABLED
+
+#ifdef IPMON_USE_MPK
 	erim_switch_to_untrusted;
 #endif
 	return ret;
@@ -3827,7 +3827,7 @@ extern "C" void* ipmon_register_thread()
 		return NULL;
 	}
 
-#ifdef MVEE_IP_PKU_ENABLED
+#ifdef IPMON_USE_MPK
 	// erim_switch_to_trusted is moved inside the kernel (sys_prctl with PR_REGISTER_IPMON as argument)
 	// otherwise we open the following attack window:
 	//     1) attacker jumps before the domain switch
@@ -4076,7 +4076,7 @@ void __attribute__((constructor)) init()
 #endif
 
 	ipmon_register_thread();
-#ifdef MVEE_IP_PKU_ENABLED
+#ifdef IPMON_USE_MPK
 	erim_switch_to_untrusted;
 #endif
 }
