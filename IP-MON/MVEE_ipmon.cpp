@@ -3595,6 +3595,101 @@ extern "C" void ipmon_enclave_entrypoint();
 extern "C" void ipmon_enclave_entrypoint_alternative();
 extern "C" void* ipmon_register_thread();
 
+/*-----------------------------------------------------------------------------
+    ipmon_enclave_entrypoint - defined in MVEE_ipmon_syscall.S. This is where
+	the kernel will land when the app executes a syscall on the IP-MON whitelist
+-----------------------------------------------------------------------------*/
+static long ipmon_handle_syscall(struct ipmon_buffer* RB, unsigned long syscall_no, struct ipmon_syscall_args args)
+{
+	// In signal handler
+	if (RB->have_pending_signals & 2)
+		return ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
+
+	// If the syscall is not registered as a possibly unchecked syscall,
+	// then we can skip the policy checks and replication logic altogether.
+	//
+	// Do note that even if we did decide to let the call through,
+	// the kernel would refuse to dispatch it as an unchecked call anyway!
+	if (!ipmon_is_unchecked_syscall(mask, syscall_no)
+		|| ipmon_syscall_maybe_checked(args, syscall_no))
+		return ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
+
+	// Certain syscalls are always harmless and should bypass both the ptracer
+	// and the IP-MON's replication logic. Examples of such calls are
+	// sys_sched_yield and sys_madvise
+	if (ipmon_syscall_is_unsynced(args, syscall_no))
+		return ipmon_unchecked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
+
+	// OK. At this point we know that the syscall could possibly bypass
+	// the ptracer and that it does have to go through the policy and
+	// replication manager.
+	//
+	// We invoke the policy manager here first through ipmon_prepare_syscall.
+	// The policy manager will then tell us what to do with it.
+	while (true)
+	{
+		unsigned short syscall_type = ipmon_prepare_syscall(RB, args, syscall_no);
+
+		// Only the master should invoke the original syscall
+		if (syscall_type & IPMON_EXEC_MASTER)
+		{
+			// Execute and replicate in the master
+			if (ipmon_variant_num == 0)
+			{
+				long result = ipmon_unchecked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
+
+				long ret = ipmon_finish_syscall(RB, args, result);
+
+				if (ipmon_should_restart_call(result))
+					continue;
+
+				return ret;
+			}
+			// Skip execution but do try replicating in the slaves
+			else
+			{
+				long ret = ipmon_finish_syscall(RB, args, 0);
+
+				if (ipmon_should_restart_call(ret))
+					continue;
+
+				return ret;
+			}
+		}
+		// Execute and possibly replicate in all variants
+		else if (syscall_type & IPMON_EXEC_ALL)
+		{
+			long result = ipmon_unchecked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
+
+			long ret = ipmon_finish_syscall(RB, args, result);
+
+			if (ipmon_should_restart_call(result))
+				continue;
+
+			return ret;
+		}
+		else if (syscall_type & IPMON_EXEC_NOEXEC)
+		{
+			// Skip execution but do try replicating in all variants
+			long ret = ipmon_finish_syscall(RB, args, 0);
+		
+			if (ipmon_should_restart_call(ret))
+				continue;
+
+			return ret;
+		}
+		else if (syscall_type & IPMON_WAIT_FOR_SIGNAL_CALL)
+		{
+			// The master decided we shouldn't execute the call because a signal is pending
+			// Do a checked sys_getpid instead, then restart the original call
+			ipmon_checked_syscall(__NR_getpid);
+			continue;
+		}
+		else
+			return ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
+	}
+}
+
 ipmon_buffer* secret_ipmon_buffer_pointer = NULL;
 
 /*-----------------------------------------------------------------------------
@@ -3654,125 +3749,11 @@ extern "C" long ipmon_enclave
 		RB = (ipmon_buffer *) ipmon_register_thread();
 	}
 
-	// In signal handler
-	if (RB->have_pending_signals & 2) {
-		long ret = ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
+	long ret = ipmon_handle_syscall(RB, syscall_no, args);
 #ifdef MVEE_IP_PKU_ENABLED
-		erim_switch_to_untrusted;
+	erim_switch_to_untrusted;
 #endif
-		return ret;
-	}
-
-	// If the syscall is not registered as a possibly unchecked syscall,
-	// then we can skip the policy checks and replication logic altogether.
-	//
-	// Do note that even if we did decide to let the call through,
-	// the kernel would refuse to dispatch it as an unchecked call anyway!
-	if (!ipmon_is_unchecked_syscall(mask, syscall_no)
-		|| ipmon_syscall_maybe_checked(args, syscall_no)) {
-		long ret = ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
-#ifdef MVEE_IP_PKU_ENABLED
-		erim_switch_to_untrusted;
-#endif
-		return ret;
-	}
-
-	// Certain syscalls are always harmless and should bypass both the ptracer
-	// and the IP-MON's replication logic. Examples of such calls are
-	// sys_sched_yield and sys_madvise
-	if (ipmon_syscall_is_unsynced(args, syscall_no)) {
-		long ret = ipmon_unchecked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
-#ifdef MVEE_IP_PKU_ENABLED
-		erim_switch_to_untrusted;
-#endif
-		return ret;
-	}
-
-	// OK. At this point we know that the syscall could possibly bypass
-	// the ptracer and that it does have to go through the policy and
-	// replication manager.
-	//
-	// We invoke the policy manager here first through ipmon_prepare_syscall.
-	// The policy manager will then tell us what to do with it.
-	while (true)
-	{
-		unsigned short syscall_type = ipmon_prepare_syscall(RB, args, syscall_no);
-
-		// Only the master should invoke the original syscall
-		if (syscall_type & IPMON_EXEC_MASTER)
-		{
-			// Execute and replicate in the master
-			if (ipmon_variant_num == 0)
-			{
-				result = ipmon_unchecked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
-
-				long ret = ipmon_finish_syscall(RB, args, result);
-
-				if (ipmon_should_restart_call(result))
-					continue;
-
-#ifdef MVEE_IP_PKU_ENABLED
-				erim_switch_to_untrusted;
-#endif
-				return ret;
-			}
-			// Skip execution but do try replicating in the slaves
-			else
-			{
-				long ret = ipmon_finish_syscall(RB, args, 0);
-
-				if (ipmon_should_restart_call(ret))
-					continue;
-
-#ifdef MVEE_IP_PKU_ENABLED
-				erim_switch_to_untrusted;
-#endif
-				return ret;
-			}
-		}
-		// Execute and possibly replicate in all variants
-		else if (syscall_type & IPMON_EXEC_ALL)
-		{
-			result = ipmon_unchecked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
-
-			long ret = ipmon_finish_syscall(RB, args, result);
-
-			if (ipmon_should_restart_call(result))
-				continue;
-
-#ifdef MVEE_IP_PKU_ENABLED
-			erim_switch_to_untrusted;
-#endif
-			return ret;
-		}
-		else if (syscall_type & IPMON_EXEC_NOEXEC)
-		{
-			// Skip execution but do try replicating in all variants
-			long ret = ipmon_finish_syscall(RB, args, 0);
-		
-			if (ipmon_should_restart_call(ret))
-				continue;
-
-#ifdef MVEE_IP_PKU_ENABLED
-			erim_switch_to_untrusted;
-#endif
-			return ret;
-		}
-		else if (syscall_type & IPMON_WAIT_FOR_SIGNAL_CALL)
-		{
-			// The master decided we shouldn't execute the call because a signal is pending
-			// Do a checked sys_getpid instead, then restart the original call
-			ipmon_checked_syscall(__NR_getpid);
-			continue;
-		}
-		else
-		{	long ret = ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
-#ifdef MVEE_IP_PKU_ENABLED
-			erim_switch_to_untrusted;
-#endif
-			return ret;
-		}
-	}
+	return ret;
 }
 
 /*-----------------------------------------------------------------------------
