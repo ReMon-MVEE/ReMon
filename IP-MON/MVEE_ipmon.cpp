@@ -3592,7 +3592,7 @@ void ipmon_set_unchecked_syscall(unsigned char* mask, unsigned long syscall_no, 
 -----------------------------------------------------------------------------*/
 extern "C" void ipmon_enclave_entrypoint();
 extern "C" void ipmon_enclave_entrypoint_alternative();
-extern "C" void* ipmon_register_thread();
+extern "C" struct ipmon_buffer* ipmon_register_thread();
 
 /*-----------------------------------------------------------------------------
     ipmon_enclave_entrypoint - defined in MVEE_ipmon_syscall.S. This is where
@@ -3744,7 +3744,7 @@ extern "C" long ipmon_enclave
 		ipmon_checked_syscall(__NR_shmdt, (void*)((unsigned long)RB & ~(1UL << (sizeof(unsigned long)*8 - 1)))); // detach from parent's RB
 		ipmon_checked_syscall(__NR_shmdt, ipmon_reg_file_map); // detach from parent's file map
 
-		RB = (ipmon_buffer *) ipmon_register_thread();
+		RB = ipmon_register_thread();
 	}
 
 	long ret = ipmon_handle_syscall(RB, syscall_no, args);
@@ -3769,10 +3769,10 @@ void ipmon_rb_probe()
 /*-----------------------------------------------------------------------------
     ipmon_register_thread - IP-MON registration is thread-local now!
 -----------------------------------------------------------------------------*/
-extern "C" void* ipmon_register_thread()
+extern "C" struct ipmon_buffer* ipmon_register_thread()
 {
 	int rb_size;
-	void* RB = (void*)ipmon_checked_syscall(__NR_shmat,
+	struct ipmon_buffer* RB = (struct ipmon_buffer*)ipmon_checked_syscall(__NR_shmat,
 											ipmon_checked_syscall(MVEE_GET_SHARED_BUFFER, 0, MVEE_IPMON_BUFFER, &rb_size, NULL, NULL, 0 /*rb_already_initialized*/),
 											NULL, 0);
 
