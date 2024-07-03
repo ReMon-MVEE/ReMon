@@ -70,6 +70,7 @@
 extern "C" unsigned char ipmon_initialized; // MVEE_ipmon_syscall.S
 extern "C" void *ipmon_unchecked_syscall_ret;
 extern "C" void *ipmon_checked_syscall_ret;
+extern "C" void *ipmon_exchange_syscall_ret;
 unsigned char            ipmon_kernel_compatible = 0;
 unsigned char            ipmon_variant_num       = 0;
 #ifdef IPMON_USE_BPF
@@ -3600,7 +3601,9 @@ void ipmon_set_unchecked_syscall(unsigned char* mask, unsigned long syscall_no, 
 -----------------------------------------------------------------------------*/
 extern "C" void ipmon_enclave_entrypoint();
 extern "C" void ipmon_enclave_entrypoint_alternative();
+extern "C" void ipmon_seccomp_exchange_address();
 extern "C" struct ipmon_buffer* ipmon_register_thread();
+extern "C" void reroute_to_ipmon(void (*fptr)(void));
 
 /*-----------------------------------------------------------------------------
     ipmon_enclave_entrypoint - defined in MVEE_ipmon_syscall.S. This is where
@@ -3984,7 +3987,16 @@ static void set_seccomp_bpf_filter()
 			BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | ((unsigned int)ipmon_enclave_entrypoint_ptr_bits_24_35 & SECCOMP_RET_DATA)),
 			BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, invoke_key_exchange + 2, 0, 1),
 			BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | ((unsigned int)ipmon_enclave_entrypoint_ptr_bits_36_47 & SECCOMP_RET_DATA)),
+
+			/* Not yet in progress, double-check whether we're coming from the wrapped syscall, otherwise TRACE */
+			BPF_STMT(BPF_LD | BPF_W | BPF_ABS, (offsetof(struct seccomp_data, instruction_pointer))),
+			BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (uint32_t)((uintptr_t)&ipmon_exchange_syscall_ret), 0, 2),
+			BPF_STMT(BPF_LD | BPF_W | BPF_ABS, (offsetof(struct seccomp_data, instruction_pointer) + 4)),
+			BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (uint32_t)(((uintptr_t)&ipmon_exchange_syscall_ret) >> 32), 1, 0),
+			BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
+
 			/* If the syscall might be unchecked, start the procedure to transfer to IP-MON */
+			BPF_STMT(BPF_LD | BPF_W | BPF_ABS, (offsetof(struct seccomp_data, nr))),
 #include "MVEE_ipmon_seccomp_bpf_maybe_unchecked.h"
 			/* Otherwise, definitely checked, inform CP-MON */
 			BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
@@ -4212,7 +4224,11 @@ void __attribute__((constructor)) init()
 #endif
 
 	ipmon_register_thread();
+
+#ifdef IPMON_USE_BPF
 	set_seccomp_bpf_filter();
+	reroute_to_ipmon(ipmon_seccomp_exchange_address);
+#endif
 
 #ifdef IPMON_USE_MPK
 	erim_switch_to_untrusted;

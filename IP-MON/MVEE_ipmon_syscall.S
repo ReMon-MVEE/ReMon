@@ -231,6 +231,57 @@ FUNCTION_START_EXPORTED(ipmon_enclave_entrypoint)
 		
 FUNCTION_END(ipmon_enclave_entrypoint)
 
+FUNCTION_START(ipmon_seccomp_exchange_address)
+	mov [rsp-8], rax                 // Save original syscall number
+	syscall                            // Invoke syscall for the first time
+
+SYMBOL(ipmon_exchange_syscall_ret)
+	// Check if we will go to CP-MON or IP-MON
+	cmpq rax, -0x07FF                 // We only use ]-4096,-2048] (hex: ]-1000,-800]) to indicate that the errno value holds the exchange start key of the IP-MON entry secret
+	jge end      // Go to the exit when tracing with CP-MON
+	cmpq rax, -0x1000                 // Check if we will go to CP-MON or IP-MON
+	jle end      // Go to the exit when tracing with CP-MON
+
+	movq rcx, [rsp-8]                 // Move original syscall number into r12 by way of rcx
+	pushq r12
+	pushq r13
+	pushq r15
+	movq r12, rcx                     // Move original syscall number into r12
+	neg rax                           // Received the exchange start key as negative errno value, invert the value
+	movq r13, rax                     // Store the exchange start key to reuse later
+
+	syscall                            // Invoke syscall for the 2nd time to get bits 12 -> 23 of the IP-MON enclave
+	neg rax                           // Received the exchange start key as negative errno value, invert the value
+	shl rax, 12                       // Shift 12 bits to left, to align with the part of the address we received
+	movq r15, rax                     // Store bits 12 -> 23 in a register
+	add r13, 1                        // Add 1 to the previous value of the exchange key
+	movq rax, r13                     // Load new value of the exchange key in rax to get the next bits of the IP-MON enclave address
+
+	syscall                            // Invoke syscall for the 4th time to get bits 24 -> 35 of the IP-MON enclave
+	neg rax                           // Received a part of the IP-MON enlcave address as negative errno value, invert the value
+	shl rax, 24                       // Shift 24 bits to left, to align with the part of the address we received
+	addq r15, rax                     // Add new part of the address to r15
+	add r13, 1                        // Add 1 to the previous value of the exchange key
+	movq rax, r13                     // Load new value of the exchange key in rax to get the next bits of the IP-MON enclave address
+
+	syscall                            // Invoke syscall for the 5th time to get bits 36 -> 47 of the IP-MON enclave
+	neg rax                           // Received a part of the IP-MON enlcave address as negative errno value, invert the value
+	shl rax, 36                       // Shift 36 bits to left, to align with the part of the address we received
+	addq r15, rax                     // Add new part of the address to r15
+	add r13, 1                        // Add 1 to the previous value of the exchange key
+	movq rax, r13                     // Load new value of the exchange key in rax to get the next bits of the IP-MON enclave address
+
+	movq rax, r12                     // Restore the original syscall number
+	call r15                          // Call IP-MON enclave
+	popq r15                          // Overwrite IP-MON's address!
+	popq r13
+	popq r12
+
+end:
+	retq
+		
+FUNCTION_END(ipmon_seccomp_exchange_address)
+
 #else
 /*-----------------------------------------------------------------------------
     ipmon_enclave_entrypoint_alternative - This is an alternative version of
