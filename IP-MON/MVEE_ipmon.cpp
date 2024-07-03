@@ -3736,7 +3736,9 @@ extern "C" long ipmon_enclave
 	//     2) changes the domain and possibly corrupts the memory protected by MPK
 	//     Note that 2) can happen even without the use of system calls by using
 	//     a bug inside IP-MON.
-	// erim_switch_to_trusted;
+#ifdef IPMON_USE_BPF
+	erim_switch_to_trusted;
+#endif
 
 	// Remove this comment to check that MPK protection works
 	// !!! For testing purposes only !!!
@@ -3858,7 +3860,9 @@ extern "C" struct ipmon_buffer* ipmon_register_thread()
 	//     2) changes the domain and possibly corrupts the memory protected by MPK
 	//     Note that 2) can happen even without the use of system calls by using
 	//     a bug inside IP-MON.
-	// erim_switch_to_trusted;
+#ifdef IPMON_USE_BPF
+	erim_switch_to_trusted;
+#endif
 
 	int status;
 	int pkey;
