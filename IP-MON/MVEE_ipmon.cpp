@@ -3656,7 +3656,7 @@ extern "C" long ipmon_enclave
 
 	// In signal handler
 	if (RB->have_pending_signals & 2) {
-		long ret = ipmon_checked_syscall(syscall_no, arg1, arg2, arg3, arg4, arg5, arg6);
+		long ret = ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
 #ifdef MVEE_IP_PKU_ENABLED
 		erim_switch_to_untrusted;
 #endif
@@ -3670,7 +3670,7 @@ extern "C" long ipmon_enclave
 	// the kernel would refuse to dispatch it as an unchecked call anyway!
 	if (!ipmon_is_unchecked_syscall(mask, syscall_no)
 		|| ipmon_syscall_maybe_checked(args, syscall_no)) {
-		long ret = ipmon_checked_syscall(syscall_no, arg1, arg2, arg3, arg4, arg5, arg6);
+		long ret = ipmon_checked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
 #ifdef MVEE_IP_PKU_ENABLED
 		erim_switch_to_untrusted;
 #endif
