@@ -3709,7 +3709,6 @@ extern "C" long ipmon_enclave
 	unsigned long arg6
 )
 {
-	long result;
 	struct ipmon_syscall_args args;
 	args.arg1 = arg1;
 	args.arg2 = arg2;
