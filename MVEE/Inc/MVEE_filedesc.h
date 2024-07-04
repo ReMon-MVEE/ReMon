@@ -62,6 +62,7 @@ public:
 	bool                       unlinked;              // set to true when the file has been unlinked from the file system
     ssize_t                    original_file_size;    // for shared mappings that we changed to private, we need to know the original file size!!!
 	FileType                   file_type;
+	unsigned char              can_load_indirect_cache;
 
     void print_fd_info();
     fd_info();
@@ -82,6 +83,8 @@ public:
 	// * "[<path 0>, ..., <path N>]" if the file is not a master file and it does have the unsynced access flag set
 	//
 	std::string get_path_string();
+
+	bool can_load_indirect();
 };
 
 //

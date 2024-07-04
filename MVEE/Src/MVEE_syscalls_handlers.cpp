@@ -7701,8 +7701,7 @@ CALL(mmap)
             {
                 if (ARG4(0) & MAP_FIXED)
                 {
-                    warnf("GHUMVEE is running with non_overlapping_mmaps enabled but the following binary is not position independent: %s\n", info->paths[0].c_str());
-                    warnf("> We cannot enforce disjunct code within this address space!!!\n");
+					warnf("GHUMVEE is running with non_overlapping_mmaps enabled but the following binary is making MAP_FIXED mappings: %s. This can be allowed, but is not checked for DCL\n", info->paths[0].c_str());
                 }
                 else
                 {
@@ -7723,6 +7722,22 @@ CALL(mmap)
                 }
             }
         }
+		else if (!(ARG4(0) & MAP_FIXED) && (*mvee::config_variant_global)["non_overlapping_mmaps"].asInt() && info->can_load_indirect())
+		{
+				std::vector<unsigned long> bases(mvee::numvariants);
+				set_mmap_table->calculate_disjoint_bases(ARG2(0), bases);
+
+				for (int i = 0; i < mvee::numvariants; ++i)
+				{
+						debugf("GHUMVEE is overriding the base address of a new code region backed by file: %s\n",
+										info->paths[info->paths.size() > 1  ? i : 0].c_str());
+						/*
+								warnf("> variant %d => region span: 0x" PTRSTR "-0x" PTRSTR "\n",
+								i, bases[i], ROUND_UP(bases[i] + ARG2(0), 4096));
+								*/
+						SETARG1(i, bases[i]);
+				}
+		}
     }
 
     return MVEE_CALL_ALLOW;
