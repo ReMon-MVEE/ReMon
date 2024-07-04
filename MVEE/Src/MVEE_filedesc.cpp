@@ -16,6 +16,7 @@
 #include <sstream>
 #include <set>
 #include <string.h>
+#include <sys/stat.h>
 #include "MVEE.h"
 #include "MVEE_filedesc.h"
 #include "MVEE_macros.h"
@@ -62,6 +63,7 @@ fd_info::fd_info
 	, original_file_size(original_file_size)
     , file_type(type)
 	, mmapped_bases(mvee::numvariants)
+    , can_load_indirect_cache(0)
 {
 #ifndef MVEE_BENCHMARK
 	if (!unsynced_access &&
@@ -75,6 +77,43 @@ fd_info::fd_info
 	}
 #endif
 	mmapped_bases.resize(mvee::numvariants);
+}
+
+bool fd_info::can_load_indirect()
+{
+       if (can_load_indirect_cache)
+       if (can_load_indirect_cache)
+               return can_load_indirect_cache == 1;
+
+    std::string cmd = "/usr/bin/readelf -d " + paths[0] + " 2>&1";
+    std::string dyn = mvee::log_read_from_proc_pipe(cmd.c_str(), NULL);
+
+       // invalid ELF file
+       if (dyn.find("Error") != std::string::npos)
+       {
+               can_load_indirect_cache = (unsigned char)-1;
+               return false;
+       }
+
+       // dynamic section found => We can use the LD_Loader
+       if (dyn.find("There is no dynamic section in this file.") == std::string::npos)
+       {
+               can_load_indirect_cache = 1;
+               return true;
+       }
+
+       cmd = "/usr/bin/readelf -h " + paths[0] + " | grep Type 2>&1";
+       std::string header = mvee::log_read_from_proc_pipe(cmd.c_str(), NULL);
+
+       // statically linked, but PIE compiled
+       if (header.find("DYN") != std::string::npos)
+       {
+               can_load_indirect_cache = 1;
+               return true;
+       }
+
+       can_load_indirect_cache = (unsigned char)-1;
+       return false;
 }
 
 /*-----------------------------------------------------------------------------
