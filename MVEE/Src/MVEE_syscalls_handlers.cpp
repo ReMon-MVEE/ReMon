@@ -7493,6 +7493,7 @@ CALL(mmap)
 			}
             return MVEE_CALL_ALLOW;
 		}
+#ifdef MVEE_ALLOW_SHM
 		else if (ARG4(0) & MAP_SHARED)
         {
             if (!(shm_setup_state & SHM_SETUP_EXPECTING_ENTRY))
@@ -7539,6 +7540,7 @@ CALL(mmap)
             debugf("%s - call replaced by SYS_SHMAT(%d, 0x" PTRSTR ", 0)\n",
                     call_get_variant_pidstr(0).c_str(), shmid, base_address);
         }
+#endif
         return MVEE_CALL_ALLOW;
 	}
 

@@ -501,6 +501,7 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 					!rw::write_primitive<unsigned char>(variants[variantnum].variantpid, (void*) ARG5(variantnum), 1))
 					throw RwMemFailure(variantnum, "write runs_under_mvee_control master byte");
 
+#ifdef MVEE_ALLOW_SHM
                 if (ARG6(variantnum))
                 {
                     std::random_device rd;
@@ -528,6 +529,7 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
                     if(!rw::write_primitive<unsigned long>(variants[variantnum].variantpid, (void*) ARG6(variantnum), shm_tag))
                         throw RwMemFailure(variantnum, "write runs_under_mvee_control shared memory tag");
                 }
+#endif
 
 #ifdef MVEE_DISABLE_SYNCHRONIZATION_REPLICATION
                 result = MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(1);
