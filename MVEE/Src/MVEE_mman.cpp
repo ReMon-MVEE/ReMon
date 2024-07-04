@@ -1228,11 +1228,6 @@ void mmap_table::calculate_disjoint_bases (unsigned long size, std::vector<unsig
     if (!merged_regions.insert(pseudo).second)
         SAFEDELETE(pseudo);
 
-    warnf("merged set dump\n");
-    for (it = merged_regions.begin(); it != merged_regions.end(); ++it)
-        warnf("> found region - %p-%p\n", (void*) (*it)->region_base_address,
-                (void*) ((*it)->region_size + (*it)->region_base_address));
-
     // step 2: fill any holes that are not large enough to contain the new region
     unsigned long     prev_end = 0;
     for (it = merged_regions.begin(); it != merged_regions.end(); ++it)
@@ -1274,10 +1269,6 @@ void mmap_table::calculate_disjoint_bases (unsigned long size, std::vector<unsig
             prev_end = (*it)->region_base_address + (*it)->region_size;
         }
     }
-
-    // warnf("merged set dump\n");
-    // for (it = merged_regions.begin(); it != merged_regions.end(); ++it)
-    //	warnf("> found region - 0x%08x-0x%08x\n", (*it)->region_base_address, (*it)->region_size + (*it)->region_base_address);
 
     // step 3: for each variant, find a new base address that:
     // > a) does not overlap with code addresses in any other variants
@@ -1337,7 +1328,6 @@ void mmap_table::calculate_disjoint_bases (unsigned long size, std::vector<unsig
             }
             else
             {
-                warnf("found %p for %d\n\n",  (void*) test_region.region_base_address, i);
                 break;
             }
         }
