@@ -55,9 +55,6 @@ mmap_region_info::mmap_region_info
     , region_backing_file_unsynced(false)
     , region_is_so(false)
     , shadow(monitor_map)
-#ifdef MVEE_CONNECTED_MMAP_REGIONS
-    , connected_regions(nullptr)
-#endif
 {
     region_map_flags = map_flags & ~(MAP_FIXED);
 
@@ -84,6 +81,9 @@ mmap_region_info::mmap_region_info
                variantnum, address, region_size+address,
                region_backing_file_fd,
                region_backing_file_path.c_str());
+#endif
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
+    connected_regions = nullptr;
 #endif
 }
 
@@ -230,6 +230,16 @@ mmap_table::mmap_table(const mmap_table& parent)
                 new_region->shadow = new shared_monitor_map_info((*it)->shadow);
                 variant_mappings.push_back(new_region->shadow);
             }
+
+            #ifdef MVEE_CONNECTED_MMAP_REGIONS
+            if ((*it)->connected_regions)
+            {
+                if (i == 0)
+                    (*it)->connected_regions->new_region = new connected_region_info();
+                new_region->connected_regions = (*it)->connected_regions->new_region;
+                new_region->connected_regions->regions[i] = new_region;
+            }
+            #endif
         }
     }
 }
@@ -475,46 +485,27 @@ mmap_region_info* mmap_table::split_region(int variantnum, mmap_region_info* exi
 #ifdef MVEE_CONNECTED_MMAP_REGIONS
     if (existing_region->connected_regions)
     {
-        std::shared_ptr<mmap_region_info*[]> connected_regions(new mmap_region_info*[mvee::numvariants]);
-        lower_region->connected_regions = connected_regions;
-        connected_regions[variantnum] = lower_region;
-
-        unsigned long long offset = lower_region->region_size;
-        unsigned long long local_address;
-        mmap_region_info* local_region_info;
-
-        for (int i = 0; i < mvee::numvariants; i++)
+        connected_region_info* connected_regions = NULL;
+        unsigned long connected_regions_it;
+        for (connected_regions_it = 0; connected_regions_it < existing_region->connected_regions->split_regions.size(); connected_regions_it++)
         {
-            if (variantnum == i)
-                continue;
-            local_region_info = existing_region->connected_regions[i];
-            local_address = local_region_info->region_base_address + offset;
+            if (existing_region->connected_regions->split_regions[connected_regions_it]->regions[variantnum] == existing_region)
+            {
+                connected_regions = existing_region->connected_regions->split_regions[connected_regions_it];
+                break;
+            }
+        }
+        if (!connected_regions)
+            connected_regions = new connected_region_info(existing_region->connected_regions);
+        lower_region->connected_regions = connected_regions;
+        connected_regions->regions[variantnum] = lower_region;
 
-            std::set<mmap_region_info*>::iterator connected_it = full_map[i].find(existing_region);
-            if (connected_it != full_map[i].end())
-                full_map[i].erase(connected_it);
-
-            mmap_region_info* connected_lower_region = new mmap_region_info(*local_region_info);
-            mmap_region_info* connected_upper_region = local_region_info;
-
-            // at this point, both the upper and lower regions are copies of the original region
-            // the lower region has been inserted into the map by copy_region_info
-            connected_upper_region->region_base_address = local_address;
-            connected_upper_region->region_size         =
-                    connected_lower_region->region_base_address + connected_lower_region->region_size - local_address;
-            connected_lower_region->region_size         = local_address - connected_lower_region->region_base_address;
-            if (connected_upper_region->region_backing_file_path[0] != '[')
-                connected_upper_region->region_backing_file_offset =
-                        connected_lower_region->region_backing_file_offset + connected_lower_region->region_size;
-            full_map[i].insert(connected_lower_region);
-            full_map[i].insert(connected_upper_region);
-
-            // another region is referencing this shadow
-            if (connected_upper_region->shadow)
-                split_variant_shadow_region(connected_upper_region->shadow, local_address);
-
-            connected_lower_region->connected_regions = connected_regions;
-            connected_regions[i]                      = connected_lower_region;
+        if (!connected_regions->split)
+            existing_region->connected_regions->split_regions.push_back(connected_regions);
+        connected_regions->split++;
+        if (connected_regions->split == mvee::numvariants)
+        {
+            existing_region->connected_regions->split_regions.erase(existing_region->connected_regions->split_regions.begin() + connected_regions_it);
         }
     }
 #endif

@@ -856,7 +856,7 @@ std::string mmap_table::get_textual_prot_flags(unsigned int prot_flags)
 -----------------------------------------------------------------------------*/
 #ifdef MVEE_CONNECTED_MMAP_REGIONS
 void mmap_table::refresh_variant_maps(int variantnum, pid_t variantpid,
-                                      std::shared_ptr<mmap_region_info*[]> &stack_regions)
+                                      connected_region_info* stack_regions)
 #else
 void mmap_table::refresh_variant_maps(int variantnum, pid_t variantpid)
 #endif
@@ -916,7 +916,7 @@ void mmap_table::refresh_variant_maps(int variantnum, pid_t variantpid)
                 mmap_region_info *region_info = map_range(variantnum, region_start, region_end - region_start,
                         region_map_flags, get_numerical_prot_flags(flags), &info, region_file_offset);
                 region_info->connected_regions = stack_regions;
-                stack_regions[variantnum] = region_info;
+                stack_regions->regions[variantnum] = region_info;
             }
             else
 #endif

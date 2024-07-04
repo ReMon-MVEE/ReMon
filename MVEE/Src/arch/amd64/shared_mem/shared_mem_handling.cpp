@@ -315,7 +315,7 @@ int             shm_handling::same_ptr                                  (monitor
             relevant_monitor.set_mmap_table->get_region_info(first_variant, first_ptr);
     if (!region || !region->connected_regions)
         return -1;
-    mmap_region_info* second_region = region->connected_regions[second_variant];
+    mmap_region_info* second_region = region->connected_regions->regions[second_variant];
     unsigned long long offset = second_ptr - second_region->region_base_address;
     if (offset >= region->region_size || offset >= second_region->region_size)
         return -1;
@@ -2146,7 +2146,6 @@ int             instruction_intent_emulation::handle_emulation      (variantstat
 #ifdef MVEE_LOG_NON_INSTRUMENTED_INSTRUCTION
     mvee::log_non_instrumented(variant, relevant_monitor, instruction);
 #endif
-
     switch (instruction_intent_emulation::lookup_table[instruction->opcode()].emulator(*instruction, *relevant_monitor,
             variant))
     {
