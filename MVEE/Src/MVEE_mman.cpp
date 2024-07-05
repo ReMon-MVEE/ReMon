@@ -350,6 +350,36 @@ void mmap_table::print_mmap_table(void (*logfunc)(const char* format, ...))
 }
 
 /*-----------------------------------------------------------------------------
+    connected_region_info
+-----------------------------------------------------------------------------*/
+connected_region_info::connected_region_info()
+{
+    regions = std::vector<mmap_region_info*>(mvee::numvariants, 0);
+    split_regions = std::vector<connected_region_info*>(0);
+    split = 0;
+    new_region = nullptr;
+}
+
+/*-----------------------------------------------------------------------------
+    connected_region_info
+-----------------------------------------------------------------------------*/
+connected_region_info::connected_region_info(connected_region_info* source)
+{
+    regions = std::vector<mmap_region_info*>(source->regions);
+    split_regions = std::vector<connected_region_info*>(0);
+    split = 0;
+    new_region = nullptr;
+}
+
+/*-----------------------------------------------------------------------------
+    ~connected_region_info
+-----------------------------------------------------------------------------*/
+connected_region_info::~connected_region_info()
+{
+    exit(-1);
+}
+
+/*-----------------------------------------------------------------------------
     get_region_info
 -----------------------------------------------------------------------------*/
 mmap_region_info* mmap_table::get_region_info (int variantnum, unsigned long address, unsigned long region_size)
