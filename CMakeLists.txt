@@ -1,4 +1,5 @@
 cmake_minimum_required (VERSION 3.13)
+include(CMakeDependentOption)
 project(remon)
 
 if (NOT CMAKE_BUILD_TYPE)
