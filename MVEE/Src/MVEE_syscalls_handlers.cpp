@@ -7703,7 +7703,39 @@ CALL(mmap)
             {
                 if (ARG4(0) & MAP_FIXED)
                 {
-					warnf("GHUMVEE is running with non_overlapping_mmaps enabled but the following binary is making MAP_FIXED mappings: %s. This can be allowed, but is not checked for DCL\n", info->paths[0].c_str());
+					mmap_region_info* leader_region = set_mmap_table->get_region_info(variantnum, ARG1(0));
+					// if no leader region, no one should overlap.
+					if (!leader_region)
+					{
+						for (int variant_i = 1; variant_i < mvee::numvariants; variant_i++)
+						{
+							if (set_mmap_table->get_region_info(variant_i, ARG1(variant_i)))
+							{
+								warnf(" > variant %d overlaps existing region at 0x%llx, while leader does not at 0x%llx\n", variant_i, ARG1(variant_i), ARG1(0));
+								shutdown(false);
+							}
+						}
+					}
+					// no connected regions, throw error for now, means I messed up somewhere else.
+					else if (!leader_region->connected_regions)
+					{
+						warnf(" > no connected region at leader address 0x%llx\n", ARG1(0));
+						shutdown(false);
+					}
+					else
+					{
+						for (int variant_i = 1; variant_i < mvee::numvariants; variant_i++)
+						{
+							mmap_region_info* follower_region = leader_region->connected_regions->regions[variant_i];
+							if (ARG1(variant_i) < follower_region->region_base_address || ARG1(variant_i) >= (follower_region->region_base_address + follower_region->region_size))
+							{
+								warnf(" > variant %d not overwriting equivalent region at 0x%llx, leader at 0x%llx\n", variant_i, ARG1(variant_i), ARG1(0));
+								shutdown(false);
+							}
+						}
+					}
+
+					// warnf("GHUMVEE is running with non_overlapping_mmaps enabled but the following binary is making MAP_FIXED mappings: %s. This can be allowed, but is not checked for DCL\n", info->paths[0].c_str());
                 }
                 else
                 {
