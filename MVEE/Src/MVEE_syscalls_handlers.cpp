@@ -6006,7 +6006,7 @@ PRECALL(mprotect)
     CHECKARG(3);
     CHECKREGION(1, ARG2(0));
 
-#ifdef MVEE_IP_PKU_ENABLED
+#ifdef MVEE_USE_MPK
 	// Hax0r to deal with Ubuntu 20.04 using the enhanced version of mprotect
 	// to make a XOM page. This uses a key and "destroys" our gates that are based
 	// on the assumption that pkey_alloc will return 1.

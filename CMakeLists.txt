@@ -306,6 +306,7 @@ option(ShmAllowShadow "Allow variants to allocate shadow memory." ON)
 option(ShmInsLogging "Log instructions using shared memory." OFF)
 option(ShmInsLoggingFull "Log instructions using shared memory with more verbosity." OFF)
 option(ShmReplayLeader "Modifies replaying of shared memory instructions to follow leader-follower principle." ON)
+cmake_dependent_option(UseMPK "Use MPK to enhance user-space protections in IP-MON." ON "BuildIpmon" OFF)
 target_compile_definitions(mvee PRIVATE
     $<$<BOOL:${BenchmarkMode}>:MVEE_BENCHMARK>
     $<$<BOOL:${EmulateCPUID}>:MVEE_EMULATE_CPUID>
@@ -317,6 +318,7 @@ target_compile_definitions(mvee PRIVATE
     $<$<BOOL:${ShmInsLogging}>:MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING>
     $<$<BOOL:${ShmInsLoggingFull}>:MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL>
     $<$<BOOL:${ShmReplayLeader}>:MVEE_SHARED_MEMORY_REPLAY_LEADER>
+    $<$<BOOL:${UseMPK}>:MVEE_USE_MPK>
     #MVEE_LOG_ALL_SHM_INSTRUCTIONS
 )
 # ======================================================================================================================
