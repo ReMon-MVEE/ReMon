@@ -147,13 +147,13 @@ add_custom_target(
 )
 
 add_custom_target(
-        enable-ipmon-pomvee
+        enable-ipmon-pmvee
         COMMAND "${CMAKE_COMMAND}" ..
             -DIpmonPmveeHandling=ON
 )
 
 add_custom_target(
-        disable-ipmon-pomvee
+        disable-ipmon-pmvee
         COMMAND "${CMAKE_COMMAND}" ..
             -DIpmonPmveeHandling=OFF
 )
