@@ -7548,6 +7548,7 @@ CALL(mmap)
     if (!(ARG4(0) & MAP_ANONYMOUS))
     {
         fd_info* info = set_fd_table->get_fd_info(ARG5(0));
+		bool disjoint_bases = false;
 
 		// Handle firefox shm corner case here.  FF has threads that create
 		// temporary shm backing files.  These files are created, unlinked,
@@ -7590,7 +7591,7 @@ CALL(mmap)
         }
 
 #ifdef MVEE_ALLOW_SHM
-        if (ARG4(0) & MAP_SHARED)
+		if (ARG4(0) & MAP_SHARED)
         {
 			if (!info->unlinked)
 			{
@@ -7599,28 +7600,11 @@ CALL(mmap)
 				debugf("> map prot flags = %s\n", getTextualProtectionFlags(ARG3(0)).c_str());
 			}
 
-            if ((ARG3(0) & PROT_EXEC))
-            {
-                if ((*mvee::config_variant_global)["non_overlapping_mmaps"].asInt()) {
-                    if (ARG4(0) & MAP_FIXED) {
-                        warnf("GHUMVEE is running with non_overlapping_mmaps enabled but the following binary is not position independent: %s\n",
-                              info->paths[0].c_str());
-                        warnf("> We cannot enforce disjunct code within this address space!!!\n");
-                    } else {
-                        std::vector<unsigned long> bases(mvee::numvariants);
-                        set_mmap_table->calculate_disjoint_bases(ARG2(0), bases);
-
-                        debugf("GHUMVEE is overriding the base address of a new code region backed by file: %s\n",
-                               info->paths[0].c_str());
-
-                        for (int i = 0; i < mvee::numvariants; ++i) {
-                            // warnf("> variant %d => region span: 0x" PTRSTR "-0x" PTRSTR "\n", i,
-                            // bases[i], ROUND_UP(bases[i] + ARG2(0), 4096));
-                            SETARG1(i, bases[i]);
-                        }
-                    }
-                }
-            }
+			if ((ARG3(0) & PROT_EXEC))
+			{
+				if ((*mvee::config_variant_global)["non_overlapping_mmaps"].asInt())
+					disjoint_bases = true;
+			}
 			else if (shm_setup_state & SHM_SETUP_EXPECTING_ENTRY)
 			{
 				unsigned long base_address = set_mmap_table->calculate_data_mapping_base(ARG2(0));
@@ -7697,85 +7681,77 @@ CALL(mmap)
             }
         }
 #endif
-        else if ((ARG3(0) & PROT_EXEC))
-        {
-            if ((*mvee::config_variant_global)["non_overlapping_mmaps"].asInt())
-            {
-                if (ARG4(0) & MAP_FIXED)
-                {
-
-#ifdef MVEE_CONNECTED_MMAP_REGIONS
-					mmap_region_info* leader_region = set_mmap_table->get_region_info(variantnum, ARG1(0));
-					// if no leader region, no one should overlap.
-					if (!leader_region)
-					{
-						for (int variant_i = 1; variant_i < mvee::numvariants; variant_i++)
-						{
-							if (set_mmap_table->get_region_info(variant_i, ARG1(variant_i)))
-							{
-								warnf(" > variant %d overlaps existing region at 0x%llx, while leader does not at 0x%llx\n", variant_i, ARG1(variant_i), ARG1(0));
-								shutdown(false);
-							}
-						}
-					}
-					// no connected regions, throw error for now, means I messed up somewhere else.
-					else if (!leader_region->connected_regions)
-					{
-						warnf(" > no connected region at leader address 0x%llx\n", ARG1(0));
-						shutdown(false);
-					}
-					else
-					{
-						for (int variant_i = 1; variant_i < mvee::numvariants; variant_i++)
-						{
-							mmap_region_info* follower_region = leader_region->connected_regions->regions[variant_i];
-							if (ARG1(variant_i) < follower_region->region_base_address || ARG1(variant_i) >= (follower_region->region_base_address + follower_region->region_size))
-							{
-								warnf(" > variant %d not overwriting equivalent region at 0x%llx, leader at 0x%llx\n", variant_i, ARG1(variant_i), ARG1(0));
-								shutdown(false);
-							}
-						}
-					}
-#else
-					warnf("GHUMVEE is running with non_overlapping_mmaps enabled but the following binary is making MAP_FIXED mappings: %s. This can be allowed, but is not checked for DCL if we are not compiled with MVEE_CONNECTED_MMAP_REGIONS.\n", info->paths[0].c_str());
-#endif
-                }
-                else
-                {
-                    std::vector<unsigned long> bases(mvee::numvariants);
-                    set_mmap_table->calculate_disjoint_bases(ARG2(0), bases);
-
-
-                    for (int i = 0; i < mvee::numvariants; ++i)
-                    {
-						debugf("GHUMVEE is overriding the base address of a new code region backed by file: %s\n",
-								info->paths[info->paths.size() > 1  ? i : 0].c_str());
-                        /*
-                           warnf("> variant %d => region span: 0x" PTRSTR "-0x" PTRSTR "\n",
-                           i, bases[i], ROUND_UP(bases[i] + ARG2(0), 4096));
-                         */
-                        SETARG1(i, bases[i]);
-                    }
-                }
-            }
-        }
-		else if (!(ARG4(0) & MAP_FIXED) && (*mvee::config_variant_global)["non_overlapping_mmaps"].asInt() && info->can_load_indirect())
+		else if ((ARG3(0) & PROT_EXEC))
 		{
+			if ((*mvee::config_variant_global)["non_overlapping_mmaps"].asInt())
+				disjoint_bases = true;
+		}
+		else if (!(ARG4(0) & MAP_FIXED) && info->can_load_indirect())
+		{
+			if ((*mvee::config_variant_global)["non_overlapping_mmaps"].asInt())
+				disjoint_bases = true;
+		}
+
+		// Disjoint bases are requested for this mapping. The mapping in question might be executable, or
+		// might become re-mapped as executable in the future (in which case it definitely is not MAP_FIXED).
+		if (disjoint_bases)
+		{
+			if (ARG4(0) & MAP_FIXED)
+			{
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
+				mmap_region_info* leader_region = set_mmap_table->get_region_info(variantnum, ARG1(0));
+				// if no leader region, no one should overlap.
+				if (!leader_region)
+				{
+					for (int variant_i = 1; variant_i < mvee::numvariants; variant_i++)
+					{
+						if (set_mmap_table->get_region_info(variant_i, ARG1(variant_i)))
+						{
+							warnf(" > variant %d overlaps existing region at 0x%llx, while leader does not at 0x%llx\n", variant_i, ARG1(variant_i), ARG1(0));
+							shutdown(false);
+						}
+					}
+				}
+				// no connected regions, throw error for now, means I messed up somewhere else.
+				else if (!leader_region->connected_regions)
+				{
+					warnf(" > no connected region at leader address 0x%llx\n", ARG1(0));
+					shutdown(false);
+				}
+				else
+				{
+					for (int variant_i = 1; variant_i < mvee::numvariants; variant_i++)
+					{
+						mmap_region_info* follower_region = leader_region->connected_regions->regions[variant_i];
+						if (ARG1(variant_i) < follower_region->region_base_address || ARG1(variant_i) >= (follower_region->region_base_address + follower_region->region_size))
+						{
+							warnf(" > variant %d not overwriting equivalent region at 0x%llx, leader at 0x%llx\n", variant_i, ARG1(variant_i), ARG1(0));
+							shutdown(false);
+						}
+					}
+				}
+#else
+				warnf("GHUMVEE is running with non_overlapping_mmaps enabled but the following binary is making MAP_FIXED mappings: %s. This can be allowed, but is not checked for DCL if we are not compiled with MVEE_CONNECTED_MMAP_REGIONS.\n", info->paths[0].c_str());
+#endif
+			}
+			else
+			{
 				std::vector<unsigned long> bases(mvee::numvariants);
 				set_mmap_table->calculate_disjoint_bases(ARG2(0), bases);
 
 				for (int i = 0; i < mvee::numvariants; ++i)
 				{
-						debugf("GHUMVEE is overriding the base address of a new code region backed by file: %s\n",
-										info->paths[info->paths.size() > 1  ? i : 0].c_str());
-						/*
-								warnf("> variant %d => region span: 0x" PTRSTR "-0x" PTRSTR "\n",
-								i, bases[i], ROUND_UP(bases[i] + ARG2(0), 4096));
-								*/
-						SETARG1(i, bases[i]);
+					debugf("GHUMVEE is overriding the base address of a new region backed by file: %s\n",
+							info->paths[info->paths.size() > 1  ? i : 0].c_str());
+					/*
+					   warnf("> variant %d => region span: 0x" PTRSTR "-0x" PTRSTR "\n",
+					   i, bases[i], ROUND_UP(bases[i] + ARG2(0), 4096));
+					   */
+					SETARG1(i, bases[i]);
 				}
+			}
 		}
-    }
+	}
 
     return MVEE_CALL_ALLOW;
 }
