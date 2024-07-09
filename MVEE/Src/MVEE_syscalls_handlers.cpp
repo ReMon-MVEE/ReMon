@@ -7703,6 +7703,8 @@ CALL(mmap)
             {
                 if (ARG4(0) & MAP_FIXED)
                 {
+
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
 					mmap_region_info* leader_region = set_mmap_table->get_region_info(variantnum, ARG1(0));
 					// if no leader region, no one should overlap.
 					if (!leader_region)
@@ -7734,8 +7736,9 @@ CALL(mmap)
 							}
 						}
 					}
-
-					// warnf("GHUMVEE is running with non_overlapping_mmaps enabled but the following binary is making MAP_FIXED mappings: %s. This can be allowed, but is not checked for DCL\n", info->paths[0].c_str());
+#else
+					warnf("GHUMVEE is running with non_overlapping_mmaps enabled but the following binary is making MAP_FIXED mappings: %s. This can be allowed, but is not checked for DCL if we are not compiled with MVEE_CONNECTED_MMAP_REGIONS.\n", info->paths[0].c_str());
+#endif
                 }
                 else
                 {
