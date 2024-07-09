@@ -7748,6 +7748,9 @@ CALL(mmap)
 					   i, bases[i], ROUND_UP(bases[i] + ARG2(0), 4096));
 					   */
 					SETARG1(i, bases[i]);
+
+					// Make sure the kernel actually places the mapping at the requested address
+					SETARG4(i, ARG4(i) | MAP_FIXED);
 				}
 			}
 		}
