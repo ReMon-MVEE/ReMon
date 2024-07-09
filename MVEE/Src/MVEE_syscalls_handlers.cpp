@@ -7699,7 +7699,7 @@ CALL(mmap)
 			if (ARG4(0) & MAP_FIXED)
 			{
 #ifdef MVEE_CONNECTED_MMAP_REGIONS
-				mmap_region_info* leader_region = set_mmap_table->get_region_info(variantnum, ARG1(0));
+				mmap_region_info* leader_region = set_mmap_table->get_region_info(0, ARG1(0));
 				// if no leader region, no one should overlap.
 				if (!leader_region)
 				{
