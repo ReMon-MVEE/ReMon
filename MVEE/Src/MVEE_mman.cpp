@@ -179,12 +179,14 @@ mmap_table::mmap_table()
 	  thread_group_shutting_down(false),
 	  enlarged_initial_stacks(false),
 	  mmap_base(0),
-	  variant_mappings()
+	  variant_mappings(),
+	  ipmon_size(0)
 {
     init();
     full_map.resize(mvee::numvariants);
     cached_instrs.resize(mvee::numvariants);
 	mmap_startup_info.resize(mvee::numvariants);
+	ipmon_bases.resize(mvee::numvariants);
 
 	// Pick a random 1/256th chunk of the address space as our mmap region.
 	// Excluding the lowest and top ones...
@@ -214,6 +216,8 @@ mmap_table::mmap_table(const mmap_table& parent)
     cached_syms                = parent.cached_syms;
 	thread_group_shutting_down = false;
 	mmap_base                  = parent.mmap_base;
+	ipmon_bases                = parent.ipmon_bases;
+	ipmon_size                 = parent.ipmon_size;
 
     full_map.resize(mvee::numvariants);
 
@@ -1249,6 +1253,17 @@ void mmap_table::calculate_disjoint_bases (unsigned long size, std::vector<unsig
     if (!merged_regions.insert(pseudo).second)
         SAFEDELETE(pseudo);
 
+    // step 1c We also add a pseudo-region that reserves the IP-MON region, if it exists
+	if (ipmon_size)
+	{
+		for (int i = 0; i < mvee::numvariants; ++i)
+		{
+			mmap_region_info* pseudo = new mmap_region_info(i, ipmon_bases[i], ipmon_size, 0, NULL, 0, 0);
+			if (!merged_regions.insert(pseudo).second)
+				SAFEDELETE(pseudo);
+		}
+	}
+
     // step 2: fill any holes that are not large enough to contain the new region
     unsigned long     prev_end = 0;
     for (it = merged_regions.begin(); it != merged_regions.end(); ++it)
@@ -1373,6 +1388,20 @@ void mmap_table::calculate_disjoint_bases (unsigned long size, std::vector<unsig
 }
 
 /*-----------------------------------------------------------------------------
+    calculate_ipmon_bases - We want to keep IP-MON at a fixed address across execve's.
+	Therefore we cache its size and base addresses for the variants.
+-----------------------------------------------------------------------------*/
+void mmap_table::calculate_ipmon_bases (unsigned long size, std::vector<unsigned long>& bases)
+{
+	if (!ipmon_size)
+	{
+		calculate_disjoint_bases(size, ipmon_bases);
+		ipmon_size = size;
+	}
+	bases = ipmon_bases;
+}
+
+/*-----------------------------------------------------------------------------
     mvee_mman_check_vdso_overlap
 -----------------------------------------------------------------------------*/
 int mmap_table::check_vdso_overlap(int variantnum)
@@ -1397,6 +1426,35 @@ int mmap_table::check_vdso_overlap(int variantnum)
     }
 
     return -1;
+}
+
+/*-----------------------------------------------------------------------------
+    check_ipmon_overlap: Check whether this variant's stack or vdso overlap with
+    the IP-MON agent of one of the other variants.
+-----------------------------------------------------------------------------*/
+bool mmap_table::check_ipmon_overlap(int variantnum, const mmap_region_info* stack_region)
+{
+	if (!ipmon_size)
+		return false;
+
+	const mmap_region_info* vdso = get_vdso_region(variantnum);
+
+	for (int i = 0; i < mvee::numvariants; ++i)
+	{
+		const mmap_region_info tmp_ipmon(i, ipmon_bases[i], ipmon_size, 0, NULL, 0, 0);
+		if (mmap_table::check_region_overlap(vdso, &tmp_ipmon))
+		{
+			debugf("overlap ipmon with vdso\n");
+			return true;
+		}
+		if (mmap_table::check_region_overlap(stack_region, &tmp_ipmon))
+		{
+			debugf("overlap ipmon with stack\n");
+			return true;
+		}
+	}
+
+	return false;
 }
 
 /*-----------------------------------------------------------------------------

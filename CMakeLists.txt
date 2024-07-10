@@ -322,6 +322,7 @@ target_compile_definitions(mvee PRIVATE
     $<$<BOOL:${ShmInsLoggingFull}>:MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL>
     $<$<BOOL:${ShmReplayLeader}>:MVEE_SHARED_MEMORY_REPLAY_LEADER>
     $<$<BOOL:${UseBPF}>:MVEE_USE_BPF>
+    $<$<BOOL:${UseBPF}>:MVEE_CONNECTED_MMAP_REGIONS>
     $<$<BOOL:${UseMPK}>:MVEE_USE_MPK>
     $<$<BOOL:${DisableMonitorOutput}>:MVEE_NO_MONITOR_OUTPUT>
     #MVEE_LOG_ALL_SHM_INSTRUCTIONS

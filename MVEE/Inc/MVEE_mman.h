@@ -361,7 +361,9 @@ public:
     // Disjoint Code Layouting support
     //
     void calculate_disjoint_bases                  (unsigned long size, std::vector<unsigned long>& bases);
+    void calculate_ipmon_bases                     (unsigned long size, std::vector<unsigned long>& bases);
     int  check_vdso_overlap                        (int variantnum);
+	bool check_ipmon_overlap 					   (int variantnum, const mmap_region_info* stack_region);
 
 	//
 	// ASLR control support
@@ -451,6 +453,8 @@ private:
     pthread_mutex_t shared_mmap_lock;
     std::vector<shared_monitor_map_info*>
                     variant_mappings;
+    std::vector<unsigned long>   ipmon_bases;
+    unsigned long   ipmon_size;
 };
 
 #endif /* MVEE_MMAN_H_INCLUDED */

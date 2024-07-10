@@ -1273,64 +1273,66 @@ POSTCALL(execve)
         for (i = 0; i < mvee::numvariants; ++i)
             set_mmap_table->verify_mman_table(i, variants[i].variantpid);
 
-        if ((*mvee::config_variant_global)["non_overlapping_mmaps"].asInt())
-        {
-            // We need to check whether the initial VDSO pages overlap since we have
-            // no control over where these are mapped...
-            std::vector<bool> should_restart(mvee::numvariants);
-            int               ret;
-            // static int restart_test = 0;
-
-            for (int i = 1; i < mvee::numvariants; ++i)
-            {
-                if ((ret = set_mmap_table->check_vdso_overlap(i)) > -1 /* || restart_test++ == 0*/)
-                {
-                    warnf("Detected vdso overlap for variants %d (PID: %d) and %d (PID: %d)\n",
-                                i, variants[i].variantpid,
-                                ret, variants[ret].variantpid);
-                    should_restart[i] = true;
-                }
-            }
-
-            int               tries = 0;
 #ifdef MVEE_CONNECTED_MMAP_REGIONS
-            connected_region_info* stack_regions = new connected_region_info();
+		connected_region_info* stack_regions = initial_stack_regions;
 #endif
-            for (int j = 1; j < mvee::numvariants; ++j)
-            {
-                while (should_restart[j])
-                {
-                    if (!restart_variant(j))
-                    {
-                        warnf("Restart failed for variant %d\n", j);
-                        shutdown(false);
-                        return 0;
-                    }
-                    set_mmap_table->truncate_table_variant(j);
+		for (int i = 0; i < mvee::numvariants; ++i)
+		{
+			int               tries = 0;
+			while (true)
+			{
+				bool overlap = false;
+
+				// We need to check whether the initial VDSO pages overlap since we have
+				// no control over where these are mapped...
+				if ((*mvee::config_variant_global)["non_overlapping_mmaps"].asInt() && i)
+				{
+					// static int restart_test = 0;
+					int               ret;
+					if ((ret = set_mmap_table->check_vdso_overlap(i)) > -1 /* || restart_test++ == 0*/)
+					{
+						warnf("Detected vdso overlap for variants %d (PID: %d) and %d (PID: %d)\n",
+								i, variants[i].variantpid,
+								ret, variants[ret].variantpid);
+						overlap = true;
+					}
+				}
+
 #ifdef MVEE_CONNECTED_MMAP_REGIONS
-                    set_mmap_table->refresh_variant_maps(j, variants[j].variantpid, stack_regions);
+				// We also need to check whether our fixed IP-MON does not overlap with
+				// any regions whose mapping we cannot control: vdso and stacks
+				if (set_mmap_table->check_ipmon_overlap(i, stack_regions->regions[i]))
+				{
+					warnf("Detected overlap between an IP-MON agent and the stack or vdso for variant %d (PID: %d)\n",
+							i, variants[i].variantpid);
+					overlap = true;
+				}
+#endif
+
+				if (!overlap)
+					break;
+
+				if (tries++ > 5)
+				{
+					warnf("Are you trying to be funny by disabling ASLR?!\n");
+					shutdown(false);
+					return 0;
+				}
+
+				if (!restart_variant(i))
+				{
+					warnf("Restart failed for variant %d\n", i);
+					shutdown(false);
+					return 0;
+				}
+				set_mmap_table->truncate_table_variant(i);
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
+				set_mmap_table->refresh_variant_maps(i, variants[i].variantpid, stack_regions);
 #else
-                    set_mmap_table->refresh_variant_maps(j, variants[j].variantpid);
+				set_mmap_table->refresh_variant_maps(i, variants[i].variantpid);
 #endif
-                    if ((ret = set_mmap_table->check_vdso_overlap(j)) > -1)
-                    {
-                        warnf("Still detected vdso overlap...\n");
-                        tries++;
-
-                        if (tries > 5)
-                        {
-                            warnf("Are you trying to be funny by disabling ASLR?!\n");
-                            shutdown(false);
-                            return 0;
-                        }
-                    }
-                    else
-                    {
-                        should_restart[j] = false;
-                    }
-                }
-            }
-        }
+			}
+		}
 
 #ifdef MVEE_ARCH_USE_LIBUNWIND
 		for (i = 0; i < mvee::numvariants; ++i)
@@ -7876,7 +7878,14 @@ CALL(mmap)
 			else
 			{
 				std::vector<unsigned long> bases(mvee::numvariants);
-				set_mmap_table->calculate_disjoint_bases(ARG2(0), bases);
+#ifdef MVEE_USE_BPF
+				// IP-MON is a special case, we want to keep it a fixed address across successive execve's
+				if (info->get_path_string().find("libipmon.so") != std::string::npos)
+					set_mmap_table->calculate_ipmon_bases(ARG2(0), bases);
+				else
+#endif
+					set_mmap_table->calculate_disjoint_bases(ARG2(0), bases);
+
 
 				for (int i = 0; i < mvee::numvariants; ++i)
 				{
