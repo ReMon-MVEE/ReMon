@@ -362,6 +362,7 @@ struct pmvee_sync_t
 {
 	int multi;
 	int pmvee_sync_id;
+	unsigned long pmvee_migration_start;
 };
 
 struct pmvee_translation_unit_t
