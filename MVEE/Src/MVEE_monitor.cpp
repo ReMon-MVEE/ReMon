@@ -264,6 +264,7 @@ monitor::monitor(monitor* parent_monitor, bool shares_fd_table, bool shares_mmap
     for (std::vector<unsigned long> state_copies: parent_monitor->pmvee_state_migrations)
         pmvee_state_migrations.push_back(std::vector<unsigned long>(state_copies));
     pmvee_state_copy_zone = parent_monitor->pmvee_state_copy_zone;
+    pmvee_copy_zone = parent_monitor->pmvee_copy_zone;
     setup_pmvee_communication(parent_monitor);
     SET_MULTI_EXEC(PARENT_MULTI_EXEC);
 
@@ -318,6 +319,7 @@ monitor::monitor(std::vector<pid_t>& pids)
     pmvee_state_copies = std::vector<std::vector<unsigned long>>();
     pmvee_state_migrations = std::vector<std::vector<unsigned long>>();
     pmvee_state_copy_zone = { 0, 0, 0 };
+    pmvee_copy_zone = 0;
     setup_pmvee_communication(NULL);
     SET_MULTI_EXEC(1);
 

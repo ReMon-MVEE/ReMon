@@ -1287,6 +1287,7 @@ private:
 	pmvee_state_copy_zone_t pmvee_state_copy_zone;
 	int                     simple_mappings_id;
 	unsigned long           simple_mappings_pt;
+	unsigned long 			pmvee_copy_zone;
 	int 					translation_id;
 	struct pmvee_translation_unit_t
 							*pmvee_translations;
@@ -1415,6 +1416,7 @@ struct pmvee_sync_t
 {
 	int multi;
 	int pmvee_sync_id;
+	unsigned long pmvee_migration_start;
 };
 
 struct pmvee_translation_unit_t
