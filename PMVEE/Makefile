@@ -1,6 +1,6 @@
 obj-m += pmvee_kernel_module.o
 
-all: module lib
+all: module-install lib
 
 clean: module-clean lib-clean
 
@@ -15,6 +15,11 @@ lib-static:
 lib:
 	clang -DPMVEE_LEADER -DPMVEE_COPY_STATE -DPMVEE_PRELOAD -shared -ldl -fPIC -O3 -lc -o libpmvee.preload.so PMVEE.c
 	clang -DPMVEE_LEADER -DPMVEE_COPY_STATE -shared -fPIC -O3 -lc -o libpmvee.so PMVEE.c
+	ln -fs $(shell readlink -f ./libpmvee.so) ../patched_binaries/gnomelibs/amd64/libpmvee.so
+
+lib-scanning:
+	clang -DPMVEE_LEADER -DPMVEE_COPY_STATE -DPMVEE_HEAP_SCANNING -DPMVEE_PRELOAD -shared -ldl -fPIC -O3 -lc -o libpmvee.preload.so PMVEE.c
+	clang -DPMVEE_LEADER -DPMVEE_COPY_STATE -DPMVEE_HEAP_SCANNING -shared -fPIC -O3 -lc -o libpmvee.so PMVEE.c
 	ln -fs $(shell readlink -f ./libpmvee.so) ../patched_binaries/gnomelibs/amd64/libpmvee.so
 
 lib-debug:

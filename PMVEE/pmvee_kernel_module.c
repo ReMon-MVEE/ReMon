@@ -21,7 +21,14 @@ MODULE_DESCRIPTION("PMVEE project kernel module");
 MODULE_VERSION("0.1");
 
 
-#define DEBUG_ME
+#define PMVEE_KERNEL_NO_UNMAP      1
+#define PMVEE_KERNEL_SKIP          2
+#define PMVEE_KERNEL_SHORTEST_SKIP 3
+
+#define PMVEE_SKIP_LEVEL 3
+
+
+// define DEBUG_ME
 #ifdef DEBUG_ME
 #define debugk(...) printk(__VA_ARGS__);
 
@@ -336,8 +343,7 @@ again:
 		{
 			debugk(" > copy: %llx - %llx\n", pte_pfn(*dst_pte), pte_pfn(*src_pte));
 		}
-		entry.val = pmvee_copy_one_pte(dst_mm, src_mm, dst_pte, src_pte,
-							vma, addr, rss);
+		entry.val = pmvee_copy_one_pte(dst_mm, src_mm, dst_pte, src_pte, vma, addr, rss);
 		debugk(" > after copy: %llx - %llx\n", pte_pfn(*dst_pte), pte_pfn(*src_pte));
 		if (entry.val)
 			break;
@@ -352,6 +358,7 @@ again:
 	cond_resched();
 
 	if (entry.val) {
+		printk("> weird\n");
 		if (add_swap_count_continuation(entry, GFP_KERNEL) < 0)
 			return -ENOMEM;
 		progress = 0;
@@ -526,6 +533,105 @@ int pmvee_copy_page_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	return ret;
 }
 
+
+static unsigned long pmvee_zap_one_pte(struct mmu_gather *tlb,
+		struct mm_struct *dst_mm, struct vm_area_struct *dst_vma, pte_t *dst_pte,
+		unsigned long *addr, int *rss, struct zap_details *details)
+{
+	swp_entry_t entry;
+
+	if (pte_present(*dst_pte)) {
+		unsigned long ret = 0;
+		struct page *page;
+		pte_t dst_ptent;
+
+		page = vm_normal_page(dst_vma, (*addr), *dst_pte);
+		if (unlikely(details) && page) {
+			/*
+				* unmap_shared_mapping_pages() wants to
+				* invalidate cache without truncating:
+				* unmap shared but keep private pages.
+				*/
+			if (details->check_mapping &&
+				details->check_mapping != page_rmapping(page))
+			{
+				printk(" > I should never be seen.\n");
+				return 0;
+			}
+		}
+		dst_ptent = ptep_get_and_clear_full(dst_mm, (*addr), dst_pte,
+						tlb->fullmm);
+		tlb_remove_tlb_entry(tlb, dst_pte, (*addr));
+		if (unlikely(!page))
+		{
+			debugk("not page\n");
+			return 0;
+		}
+
+		if (!PageAnon(page)) {
+			if (pte_dirty(dst_ptent)) {
+				ret = 1;
+				set_page_dirty(page);
+			}
+			if (pte_young(dst_ptent) &&
+				likely(!(dst_vma->vm_flags & VM_SEQ_READ)))
+				mark_page_accessed(page);
+		}
+		rss[mm_counter(page)]--;
+		page_remove_rmap(page, false);
+		if (unlikely(page_mapcount(page) < 0))
+			printk(" > bad pte?\n");
+		if (unlikely(__tlb_remove_page(tlb, page))) {
+			ret = 1;
+			(*addr) += PAGE_SIZE;
+			debugk("added to addr\n");
+			return 1;
+		}
+		return ret;
+	}
+
+	entry = pte_to_swp_entry(*dst_pte);
+	if (non_swap_entry(entry) && is_device_private_entry(entry)) {
+		struct page *page = device_private_entry_to_page(entry);
+
+		if (unlikely(details && details->check_mapping)) {
+			/*
+				* unmap_shared_mapping_pages() wants to
+				* invalidate cache without truncating:
+				* unmap shared but keep private pages.
+				*/
+			if (details->check_mapping !=
+				page_rmapping(page))
+				return 0;
+		}
+
+		pte_clear_not_present_full(dst_mm, (*addr), dst_pte, tlb->fullmm);
+		rss[mm_counter(page)]--;
+		page_remove_rmap(page, false);
+		put_page(page);
+		return 0;
+	}
+
+	if (!non_swap_entry(entry)) {
+		/* Genuine swap entry, hence a private anon page */
+		if (!should_zap_cows(details))
+			return 0;
+		rss[MM_SWAPENTS]--;
+	} else if (is_migration_entry(entry)) {
+		struct page *page;
+
+		page = migration_entry_to_page(entry);
+		if (details && details->check_mapping &&
+			details->check_mapping != page_rmapping(page))
+			return 0;
+		rss[mm_counter(page)]--;
+	}
+	if (unlikely(!free_swap_and_cache(entry)))
+		printk(" > bad pte?\n");
+	pte_clear_not_present_full(dst_mm, (*addr), dst_pte, tlb->fullmm);
+	return 0;
+}
+
 static unsigned long pmvee_zap_pte_range(struct mmu_gather *tlb,
 				struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma, pmd_t *dst_pmd, pmd_t *src_pmd,
 				unsigned long addr, unsigned long end,
@@ -538,7 +644,6 @@ static unsigned long pmvee_zap_pte_range(struct mmu_gather *tlb,
 	spinlock_t *dst_ptl, *src_ptl;
 	pte_t *dst_start_pte, *src_start_pte;
 	pte_t *dst_pte, *src_pte;
-	swp_entry_t entry;
 
 	tlb_change_page_size(tlb, PAGE_SIZE);
 again:
@@ -553,6 +658,7 @@ again:
 		if (pte_none(*dst_pte))
 			continue;
 
+		#ifndef PMVEE_MICROBENCHMARK
 		if (pte_pfn(*dst_pte) == pte_pfn(*src_pte))
 		{
 			debugk(" > skipping zap\n");
@@ -562,90 +668,18 @@ again:
 		{
 			debugk(" > zap: %llx - %llx\n", pte_pfn(*dst_pte), pte_pfn(*src_pte));
 		}
+		#endif
 
 		if (need_resched())
 			break;
 
-		if (pte_present(*dst_pte)) {
-			struct page *page;
+		force_flush = pmvee_zap_one_pte(tlb, dst_mm, dst_vma, dst_pte, &addr, rss, details);
+		#if PMVEE_SKIP_LEVEL == 3
+		pmvee_copy_one_pte(dst_mm, src_mm, dst_pte, src_pte, src_vma, addr, rss);
+		#endif
 
-			page = vm_normal_page(dst_vma, addr, *dst_pte);
-			if (unlikely(details) && page) {
-				/*
-				 * unmap_shared_mapping_pages() wants to
-				 * invalidate cache without truncating:
-				 * unmap shared but keep private pages.
-				 */
-				if (details->check_mapping &&
-				    details->check_mapping != page_rmapping(page))
-					continue;
-			}
-			pte_t dst_ptent = ptep_get_and_clear_full(dst_mm, addr, dst_pte,
-							tlb->fullmm);
-			tlb_remove_tlb_entry(tlb, dst_pte, addr);
-			if (unlikely(!page))
-				continue;
-
-			if (!PageAnon(page)) {
-				if (pte_dirty(dst_ptent)) {
-					force_flush = 1;
-					set_page_dirty(page);
-				}
-				if (pte_young(dst_ptent) &&
-				    likely(!(dst_vma->vm_flags & VM_SEQ_READ)))
-					mark_page_accessed(page);
-			}
-			rss[mm_counter(page)]--;
-			page_remove_rmap(page, false);
-			if (unlikely(page_mapcount(page) < 0))
-				printk(" > bad pte?\n");
-			if (unlikely(__tlb_remove_page(tlb, page))) {
-				force_flush = 1;
-				addr += PAGE_SIZE;
-				break;
-			}
-			continue;
-		}
-
-		entry = pte_to_swp_entry(*dst_pte);
-		if (non_swap_entry(entry) && is_device_private_entry(entry)) {
-			struct page *page = device_private_entry_to_page(entry);
-
-			if (unlikely(details && details->check_mapping)) {
-				/*
-				 * unmap_shared_mapping_pages() wants to
-				 * invalidate cache without truncating:
-				 * unmap shared but keep private pages.
-				 */
-				if (details->check_mapping !=
-				    page_rmapping(page))
-					continue;
-			}
-
-			pte_clear_not_present_full(dst_mm, addr, dst_pte, tlb->fullmm);
-			rss[mm_counter(page)]--;
-			page_remove_rmap(page, false);
-			put_page(page);
-			continue;
-		}
-
-		if (!non_swap_entry(entry)) {
-			/* Genuine swap entry, hence a private anon page */
-			if (!should_zap_cows(details))
-				continue;
-			rss[MM_SWAPENTS]--;
-		} else if (is_migration_entry(entry)) {
-			struct page *page;
-
-			page = migration_entry_to_page(entry);
-			if (details && details->check_mapping &&
-			    details->check_mapping != page_rmapping(page))
-				continue;
-			rss[mm_counter(page)]--;
-		}
-		if (unlikely(!free_swap_and_cache(entry)))
-			printk(" > bad pte?\n");
-		pte_clear_not_present_full(dst_mm, addr, dst_pte, tlb->fullmm);
+		if (force_flush)
+			break;
 	} while (dst_pte++, src_pte++, addr += PAGE_SIZE, addr != end);
 
 	add_mm_rss_vec(dst_mm, rss);
@@ -720,6 +754,9 @@ static inline unsigned long pmvee_zap_pmd_range(struct mmu_gather *tlb,
 		if (pmd_none_or_trans_huge_or_clear_bad(dst_pmd))
 			goto next;
 		next = pmvee_zap_pte_range(tlb, dst_vma, src_vma, dst_pmd, src_pmd, addr, next, details);
+		#ifdef PMVEE_KERNEL_SHORTEST_SKIP
+		pmvee_copy_pte_range(dst_vma->vm_mm, src_vma->vm_mm, dst_pmd, src_pmd, src_vma, addr, next);
+		#endif
 next:
 		cond_resched();
 	} while (dst_pmd++, src_pmd++, addr = next, addr != end);
@@ -752,7 +789,7 @@ static inline unsigned long pmvee_zap_pud_range(struct mmu_gather *tlb,
 		if (pud_none_or_clear_bad(dst_pud))
 			continue;
 		next = pmvee_zap_pmd_range(tlb, dst_vma, src_vma, dst_pud, src_pud, addr, next, details);
-next:
+// next:
 		cond_resched();
 	} while (dst_pud++, src_pud++, addr = next, addr != end);
 
@@ -951,7 +988,7 @@ static long actual_pmvee_switch(
     struct file *file;
     LIST_HEAD(uf);
 
-    debugk("switching - %d >>> %d\n", source, destination);
+    debugk("switching - %d >>> %d (0x%lx)\n", source, destination, from);
 
 
     // checks >
@@ -962,7 +999,7 @@ static long actual_pmvee_switch(
 
         current->pmvee_ignored_current = 0;
         if (!destination || destination == source)
-            return -421;
+            return 0;
         source_task = current;
 
         if (!(destination_pid = find_get_pid(destination)))
@@ -1074,9 +1111,11 @@ static long actual_pmvee_switch(
                 goto cleanup;
             }
 
+			#if PMVEE_SKIP_LEVEL > 0
             if (!prev || !prev->vm_next ||
                     prev->vm_next->vm_start != source_mapping->vm_start ||
                     prev->vm_next->vm_end != source_mapping->vm_end)
+			#endif
             {
                 unsigned long next_start;
 
@@ -1148,28 +1187,34 @@ static long actual_pmvee_switch(
                     goto cleanup;
                 }
                 // link it in <
+				if (tmp->vm_ops && tmp->vm_ops->open)
+					tmp->vm_ops->open(tmp);
             }
-            else
+			#if PMVEE_SKIP_LEVEL > 0
             {
                 tmp = prev->vm_next;
+				#if PMVEE_SKIP_LEVEL > 1
                 pmvee_zap_page_range(tmp, source_mapping, tmp->vm_start, tmp->vm_end - tmp->vm_start);
+				  #if PMVEE_SKIP_LEVEL < 3
                 if (pmvee_copy_page_range(destination_mm, source_mm, source_mapping))
                 {
                     printk(" > couldn't copy pages\n");
                     ret = -ENOMEM;
                     goto cleanup;
                 }
-                // zap_page_range(tmp, tmp->vm_start, tmp->vm_end - tmp->vm_start);
-                // if (copy_page_range(destination_mm, source_mm, source_mapping))
-                // {
-                //     printk(" > couldn't copy pages\n");
-                //     ret = -ENOMEM;
-                //     goto cleanup;
-                // }
+				  #endif
+				#else
+                zap_page_range(tmp, tmp->vm_start, tmp->vm_end - tmp->vm_start);
+                if (copy_page_range(destination_mm, source_mm, source_mapping))
+                {
+                    printk(" > couldn't copy pages\n");
+                    ret = -ENOMEM;
+                    goto cleanup;
+                }
+				#endif
             }
+			#endif
 
-            if (tmp->vm_ops && tmp->vm_ops->open)
-                tmp->vm_ops->open(tmp);
             // remove unwanted permissions >
             if (tmp->vm_flags & ~remove)
             {
@@ -1178,9 +1223,6 @@ static long actual_pmvee_switch(
                 change_protection(tmp, tmp->vm_start, tmp->vm_end, tmp->vm_page_prot, false, 0);
             }
             // remove unwanted permissions <
-
-            // copy pages >
-            // copy pages <
             
             __pmvee_switch_next_mapping:
             prev = tmp;
@@ -1202,6 +1244,8 @@ static long actual_pmvee_switch(
             goto cleanup;
         }
     }
+
+	debugk(" > switch done\n\n");
 
 
         
@@ -1278,6 +1322,7 @@ static long actual_pmvee_check (
     {
         return -EINVAL;
     }
+    return 0;
 
 
 	destination_mm = destination_task->mm;
@@ -1377,6 +1422,10 @@ unsigned char actual_pmvee_should_skip(struct pt_regs *regs, unsigned long enter
     {
         return 0;
     }
+    // if (syscall == __NR_write)
+    // {
+    //     return 0;
+    // }
     return current->pmvee_ignored_current;
 }
 

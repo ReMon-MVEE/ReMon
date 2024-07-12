@@ -11,23 +11,13 @@
 
 static char* __pmvee_base = (char*) 0;
 static char* __pmvee_zone_base = (char*) 0;
+static unsigned long __pmvee_copy_size = 0;
 static char* __pmvee_communication = (char*) 0;
 
 #define debugf(...) ; // printf(__VA_ARGS__);fflush(stdout);
 
 char* get_pmvee_copy()
 {
-    // if (!__pmvee_zone_base)
-    // {
-    //     __pmvee_zone_base = mmap(NULL, PMVEE_COPY_DEFAULT_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    //     if (__pmvee_zone_base == MAP_FAILED)
-    //     {
-    //         debugf(" > could not map __pmvee_zone_base... for some reason. (%d)", errno);
-    //         exit(-1);
-    //     }
-    //     debugf(" > b-%p\n", (void*)__pmvee_base);
-    // }
-    
     if (!__pmvee_base)
         __pmvee_base = (char*)syscall(__NR_pmvee_switch, PMVEE_REGION_REQUEST);
 
@@ -40,17 +30,19 @@ char* get_pmvee_copy()
 }
 
 
+#if 0
 void __pmvee_copy_all(size_t size)
 {
     memcpy(__pmvee_zone_base, __pmvee_communication, size);
 }
+#endif
 
 
 __pmvee_dict_t* pmvee_dict      = (__pmvee_dict_t*) 0;
 __pmvee_dict_t* pmvee_dict_head = (__pmvee_dict_t*) 0;
 __pmvee_dict_t* pmvee_dict_tail = (__pmvee_dict_t*) 0;
 
-int lookup_pointer(void* original, void** new)
+int lookup_pointer(void* original, void** new, unsigned long size)
 {
     if (!pmvee_dict)
     {
@@ -83,6 +75,10 @@ int lookup_pointer(void* original, void** new)
         *new = original;
         return 0;
     }
+    if (!__pmvee_zone_base)
+    {
+        __pmvee_zone_base = (char*)syscall(__NR_pmvee_switch, PMVEE_ZONE_REQUEST);
+    }
 
     debugf(" > translating %p...", original);
     __pmvee_dict_t* pmvee_dict_i = (__pmvee_dict_t*) pmvee_dict_head;
@@ -96,6 +92,9 @@ int lookup_pointer(void* original, void** new)
         }
         pmvee_dict_i = pmvee_dict_i->next;
     }
+
+    *new = ((char*)__pmvee_zone_base) + __pmvee_copy_size;
+    __pmvee_copy_size += size;
 
     pmvee_dict_tail    =  pmvee_dict_i->next;
     pmvee_dict_i->from =  original;
@@ -122,6 +121,7 @@ void clear_pointer_lookup()
     (pmvee_dict + offset - 1)->next = (void*) -1;
     pmvee_dict_head = pmvee_dict;
     pmvee_dict_tail = pmvee_dict;
+    __pmvee_copy_size = 0;
 }
 
 
@@ -213,7 +213,6 @@ void* __attribute__ ((noinline)) __pmvee_copy_state_leader(char* __pmvee_zone, s
 {
     if (!__pmvee_base)
         __pmvee_base = (char*)syscall(__NR_pmvee_switch, PMVEE_REGION_REQUEST);
-    __pmvee_zone_base = __pmvee_zone;
     if (!__pmvee_copy_libc_state_leader_stub)
     {
         __asm("syscall;"
@@ -241,7 +240,9 @@ void* __attribute__ ((noinline)) __pmvee_copy_state_leader(char* __pmvee_zone, s
         __pmvee_state_copies.__pmvee_state_migrations[i](__pmvee_zone, __pmvee_args_size, origin);
     void* return_val = (void*)(__pmvee_zone + *__pmvee_args_size);
     __pmvee_migrate_pointers_leader(__pmvee_zone, __pmvee_args_size, origin);
-    // __pmvee_migrate_pointers_scan_leader(__pmvee_zone, __pmvee_args_size, origin);
+    #ifdef PMVEE_HEAP_SCANNING
+    __pmvee_migrate_pointers_scan_leader(__pmvee_zone, __pmvee_args_size, origin);
+    #endif
     for (int i = 0; i < __pmvee_state_copies.copy_count; i++)
         __pmvee_state_copies.__pmvee_state_copies[i](__pmvee_zone, __pmvee_args_size, origin);
 
@@ -290,7 +291,6 @@ static void __attribute__((noinline)) __pmvee_migrate_pointers_scan_follower(cha
 static void (*__pmvee_copy_libc_state_follower_stub) (char*, size_t*) = NULL;
 void __attribute__ ((noinline)) __pmvee_copy_state_follower(char* __pmvee_zone, size_t* __pmvee_args_size, void* origin)
 {
-    __pmvee_zone_base = __pmvee_zone;
     if (!__pmvee_copy_libc_state_follower_stub)
     {
         __asm("syscall;"
@@ -307,19 +307,25 @@ void __attribute__ ((noinline)) __pmvee_copy_state_follower(char* __pmvee_zone, 
     }
 
     if (!__pmvee_migration_info)
-        __pmvee_migration_info = (struct pmvee_migration_info_t*) syscall(__NR_pmvee_switch, PMVEE_MIGRATION_INFO_REQUEST, 0, 0);
+    {
+        __asm("syscall;"
+                : "=a" (__pmvee_migration_info)
+                : "a" (__NR_pmvee_switch), "D" (PMVEE_MIGRATION_INFO_REQUEST)
+                : "rsi", "rcx", "r8", "r9", "r10", "r11", "r12", "memory", "cc");
+    }
 
     __pmvee_copy_libc_state_follower_stub(__pmvee_zone, __pmvee_args_size);
     __pmvee_migrate_data_follower(__pmvee_zone, __pmvee_args_size, origin);
     for (int i = 0; i < __pmvee_state_copies.migration_count; i++)
         __pmvee_state_copies.__pmvee_state_migrations[i](__pmvee_zone, __pmvee_args_size, origin);
     __pmvee_migrate_pointers_follower(__pmvee_zone, __pmvee_args_size, origin);
-    // __pmvee_migrate_pointers_scan_follower(__pmvee_zone, __pmvee_args_size, origin);
+    #ifdef PMVEE_HEAP_SCANNING
+    __pmvee_migrate_pointers_scan_follower(__pmvee_zone, __pmvee_args_size, origin);
+    #endif
     for (int i = 0; i < __pmvee_state_copies.copy_count; i++)
         __pmvee_state_copies.__pmvee_state_copies[i](__pmvee_zone, __pmvee_args_size, origin);
 }
 
-#if 0
 #ifdef PMVEE_PRELOAD
 void* (*real_malloc) (size_t) = NULL;
 void* (*real_realloc) (void *, size_t) = NULL;
@@ -382,15 +388,14 @@ void free(void* ptr)
         real_realloc = real_realloc_temp;
         real_free = real_free_temp;
     }
-    if (__pmvee_zone_base)
-        debugf("free called on %p, %sin __pmvee_zone_base\n", ptr, (ptr >= (void*)__pmvee_zone_base && ptr < (void*)(__pmvee_zone_base + PMVEE_COPY_DEFAULT_SIZE)) ? "" : "not ");
-    if (__pmvee_zone_base && ptr >= (void*)__pmvee_zone_base &&
-            (ptr) < (void*)(__pmvee_zone_base + PMVEE_ZONE_ONE_DEFAULT_SIZE + PMVEE_ZONE_TWO_DEFAULT_SIZE))
+    if (__pmvee_base)
+        debugf("free called on %p, %sin __pmvee_base\n", ptr, (ptr >= (void*)__pmvee_base && ptr < (void*)(__pmvee_base + PMVEE_COPY_DEFAULT_SIZE)) ? "" : "not ");
+    if (__pmvee_base && ptr >= (void*)__pmvee_base &&
+            (ptr) < (void*)(__pmvee_base + PMVEE_ZONE_ONE_DEFAULT_SIZE + PMVEE_ZONE_TWO_DEFAULT_SIZE))
     {
         return;
     }
-    // else
-    //     printf("no zone set up\n");
+    return;
     real_free(ptr);
 }
 
@@ -403,13 +408,12 @@ void* realloc(void *ptr, size_t new_size)
     // printf(" > ptr: %p (%s)\n", ptr, __pmvee_zone_base && ptr >= (void*)__pmvee_zone_base &&
     //         (ptr + new_size) < (void*)(__pmvee_zone_base + PMVEE_ZONE_ONE_DEFAULT_SIZE + PMVEE_ZONE_TWO_DEFAULT_SIZE) ? "true":"false");
     // printf(" > end: %p", __pmvee_zone_base + PMVEE_ZONE_ONE_DEFAULT_SIZE + PMVEE_ZONE_TWO_DEFAULT_SIZE);fflush(stdout);
-    if (__pmvee_zone_base && ptr >= (void*)__pmvee_zone_base &&
-            (ptr + new_size) < (void*)(__pmvee_zone_base + PMVEE_ZONE_ONE_DEFAULT_SIZE + PMVEE_ZONE_TWO_DEFAULT_SIZE))
+    if (__pmvee_base && ptr >= (void*)__pmvee_base &&
+            (ptr + new_size) < (void*)(__pmvee_base + PMVEE_ZONE_ONE_DEFAULT_SIZE + PMVEE_ZONE_TWO_DEFAULT_SIZE))
     {
         _exit(42);
         return ptr;
     }
     return real_realloc(ptr, new_size);
 }
-#endif
 #endif
