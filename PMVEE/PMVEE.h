@@ -17,6 +17,7 @@
 #define PMVEE_COMMUNICATION_REQUEST     0x040
 #define PMVEE_MIGRATION_INFO_REQUEST    0x080
 #define PMVEE_MAPPINGS_REQUEST          0x100
+#define PMVEE_ZONE_REQUEST              0x200
 
 #define PMVEE_SCANNINGG_START           0x6969696969696969l
 
@@ -28,6 +29,10 @@
 #define PMVEE_ZONE_TWO_DEFAULT_SIZE 0xe0000000l
 #define PMVEE_COPY_DEFAULT_SIZE     0x4000 * 8
 #define PMVEE_DICT_DEFAULT_SIZE     0x4000 * 8
+
+#define PMVEE_COMMUNICATION_SIZE    PMVEE_COPY_DEFAULT_SIZE
+#define PMVEE_SIMPLE_MAPPINGS_SIZE  PMVEE_COPY_DEFAULT_SIZE
+#define PMVEE_ZONE_DEFAULT_SIZE     PMVEE_COPY_DEFAULT_SIZE
 
 
 #ifdef IPMON_PMVEE_HANDLING
@@ -215,7 +220,7 @@ typedef struct __pmvee_dict_s __pmvee_dict_t;
 extern __pmvee_dict_t* pmvee_dict;
 extern __pmvee_dict_t* pmvee_dict_head;
 extern __pmvee_dict_t* pmvee_dict_tail;
-extern int lookup_pointer(void* original, void** new);
+extern int lookup_pointer(void* original, void** new, unsigned long size);
 extern void clear_pointer_lookup();
 
 extern char* get_pmvee_copy();
@@ -391,7 +396,7 @@ char* __pmvee_zone = (char*)0;                 \
 __asm__(                                       \
     "movl %[index], %%r8d; syscall;"           \
     : y                                        \
-    : "a" (__NR_pmvee_switch), [index] "i" (x) \
+    : "a" (__NR_pmvee_switch), "D" (-1), [index] "i" (x) \
     : "rsi", "rdx", "rcx", "r8", "r9", "r10", "r11", "memory", "cc");
 
 
