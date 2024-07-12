@@ -2343,8 +2343,11 @@ CALL(brk)
 			if (ARG1(0) == 0)
 			{
 				// If the MVEE is controlling ASLR, then pick an address for the new heap
-				// address = set_mmap_table->calculate_data_mapping_base(4096);
+				#ifdef PMVEE_LIBC_MP_HEAP
 				address = set_mmap_table->calculate_joint_base(4096, true);
+				#else
+				address = set_mmap_table->calculate_data_mapping_base(4096);
+				#endif
 				if (address == (unsigned long)-1)
 				{
 					log_backtraces();
@@ -2373,7 +2376,7 @@ CALL(brk)
 
 					debugf("%s - call replaced by SYS_MMAP(0x" PTRSTR ", 4096, PROT_READ|PROT_WRITE, MAP_ANON|MAP_PRIVATE, -1, 0)\n",
 						   call_get_variant_pidstr(i).c_str(), 
-						   address);					
+						   address);
 				}
 			}
 			else
@@ -3851,6 +3854,9 @@ GET_CALL_TYPE(munmap)
 		}
 
     }
+
+	if (!IS_MULTI_EXEC)
+		return MVEE_CALL_TYPE_UNSYNCED;
 
     return MVEE_CALL_TYPE_NORMAL;
 }
@@ -7574,6 +7580,11 @@ CALL(mmap)
 	{
         if (ARG4(0) & MAP_PMVEE)
         {
+			#ifndef PMVEE_MICROBENCHMARK
+			#else
+			if (ARG4(0) & MAP_FIXED)
+				return MVEE_CALL_ALLOW;
+			#endif
             unsigned long address = set_mmap_table->calculate_joint_base(ARG2(0), true);
             if (address == (unsigned long)-1)
             {
@@ -7583,6 +7594,7 @@ CALL(mmap)
             SETARG1(0, address);
             SETARG4(0, (ARG4(0) & (~MAP_SHARED)) | MAP_PRIVATE);
         }
+		#ifndef PMVEE_MICROBENCHMARK
         else if (!IS_MULTI_EXEC)
         {
             unsigned long address = set_mmap_table->calculate_joint_base(ARG2(0), true);
@@ -7594,6 +7606,7 @@ CALL(mmap)
             SETARG1(0, address);
             SETARG4(0, (ARG4(0) & (~MAP_SHARED)) | MAP_PRIVATE);
 		}
+		#endif
 		return MVEE_CALL_ALLOW;
 	}
 
@@ -7639,16 +7652,40 @@ CALL(mmap)
         }
         if (ARG4(0) & MAP_PMVEE)
         {
-            unsigned long address = set_mmap_table->calculate_joint_base(ARG2(0), true);
-            if (address == (unsigned long)-1)
-            {
-                log_backtraces();
-                shutdown(false);
-            }
+			unsigned long address;
+			if (ARG4(0) & MAP_FIXED)
+			{
+				address = ARG1(0);
+				for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+				{
+					if (!(ARG1(variant_i) >= mp_start && (ARG1(variant_i) + ARG2(variant_i)) <= (mp_start + mp_size)))
+					{
+						warnf(" > invalid MAP_FIXED MP mmap.\n");
+						log_backtraces();
+						shutdown(false);
+					}
+					if (ARG1(variant_i) != address)
+					{
+						warnf(" > mismatching MAP_FIXED MP mmap.\n");
+						log_backtraces();
+						shutdown(false);
+					}
+				}
+			}
+			else
+			{
+				unsigned long address = set_mmap_table->calculate_joint_base(ARG2(0), true);
+				if (address == (unsigned long)-1)
+				{
+					log_backtraces();
+					shutdown(false);
+				}
+				for (int i = 0; i < mvee::numvariants; ++i)
+					call_overwrite_arg_value(i, 1, address, true);
+			}
 
 			for (int i = 0; i < mvee::numvariants; ++i)
 			{
-				call_overwrite_arg_value(i, 1, address, true);
 				SETARG4(i, (ARG4(0) & (~MAP_SHARED)) | MAP_PRIVATE);
 
 				debugf("%s - replaced call by SYS_MMAP(0x" PTRSTR ", %lu, %s, %s, %d, %lu)\n",

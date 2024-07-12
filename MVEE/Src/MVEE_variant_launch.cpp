@@ -59,8 +59,7 @@ void mvee::setup_env(int variantnum)
 			ld_preload += "/IP-MON/libipmon.so";
 		}
 	}
-	// ld_preload += os_get_mvee_root_dir();
-	// ld_preload += "/PMVEE/libpmvee.preload.so";
+
 	#ifdef PMVEE_LIBC_MP_HEAP
 	#elif 1 // elif defined(PMVEE_ALLOCATOR)
 	if (ld_preload.size())

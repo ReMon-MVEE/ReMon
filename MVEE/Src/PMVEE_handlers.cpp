@@ -551,7 +551,7 @@ void monitor::setup_pmvee_communication(monitor *parent)
     multi_exec->pmvee_sync_id = pmvee_sync_id;
 #endif
 
-    simple_mappings_id = shmget(IPC_PRIVATE, PMVEE_COPY_DEFAULT_SIZE, IPC_CREAT | S_IRUSR | S_IWUSR);
+    simple_mappings_id = shmget(IPC_PRIVATE, PMVEE_SIMPLE_MAPPINGS_SIZE, IPC_CREAT | S_IRUSR | S_IWUSR);
     if (simple_mappings_id == -1)
     {
         warnf(" > Could not get shm segemnt for simple mmaps | errno: %d\n", errno);
@@ -628,7 +628,7 @@ void monitor::setup_pmvee_communication(monitor *parent)
 
     for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
     {
-        variants[variant_i].pmvee_communication_id = shmget(IPC_PRIVATE, PMVEE_COPY_DEFAULT_SIZE, IPC_CREAT | S_IRUSR | S_IWUSR);
+        variants[variant_i].pmvee_communication_id = shmget(IPC_PRIVATE, PMVEE_COMMUNICATION_SIZE, IPC_CREAT | S_IRUSR | S_IWUSR);
         if (variants[variant_i].pmvee_communication_id == -1)
         {
             warnf(" > Variant %d could not get shm segemnt | errno: %d\n", variant_i, errno);
@@ -696,7 +696,6 @@ void monitor::call_jump_to_equivalent_function_addresses ()
         unsigned long *jump = &(jumps_a[jump_i]);
         if (jump[0] == variants[0].regs.rip)
         {
-            warnf(" > jumping to %p\n", (void*)jump[1]);
             for (int variant_i = 1; variant_i < mvee::numvariants; variant_i++)
             {
                 interaction::write_specific_reg(variants[variant_i].variantpid, RSP * 8, variants[variant_i].rollback_rsp);
