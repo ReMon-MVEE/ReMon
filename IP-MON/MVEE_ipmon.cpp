@@ -95,7 +95,6 @@ struct pmvee_translation_unit_t
 char                  *pmvee_commincations[10] = { NULL };
 unsigned long         entrance_address         = 0;
 unsigned long         *pmvee_jumps             = NULL;
-unsigned long 		  pmvee_migration_start    = -1;
 unsigned long 		  pmvee_pointer_start      = 0;
 unsigned long 		  pmvee_migration_end      = 0;
 unsigned long 		  pmvee_stack_reset        = 0;
@@ -2942,43 +2941,11 @@ PRECALL(setsockopt)
 /*-----------------------------------------------------------------------------
     pmvee_switch
 -----------------------------------------------------------------------------*/
+UNSYNCED(pmvee_switch)
+
 MAYBE_CHECKED(pmvee_switch)
 {
 	return args.arg1 < (unsigned long)0x1000;
-}
-
-CALCSIZE(pmvee_switch)
-{
-	COUNTREG(ARG);
-}
-
-PRECALL(pmvee_switch)
-{
-	if (!ipmon_variant_num)
-	{
-		if (args.arg1 == -1)
-		{
-			pmvee_migration_start = 0;
-			pmvee_pointer_start   = 0;
-			pmvee_migration_end   = 0;
-		}
-		else
-		{
-			pmvee_migration_start = args.arg2 - args.arg1;
-			pmvee_pointer_start   = args.arg3 - args.arg1;
-			pmvee_migration_end   = args.arg4 - args.arg1;
-		}
-		*(unsigned long*)(ipmon_get_data_at(entry, sizeof(struct ipmon_syscall_entry))->data) = pmvee_migration_start;
-	}
-	// order++;
-	entrance_address = args.arg6;
-	args.arg1 = ipmon_pmvee_info.source_pid; //  source
-	args.arg2 = ipmon_pmvee_info.my_pid; //  destination
-	args.arg3 = (unsigned long)ipmon_pmvee_info.mp_base; //  from
-	args.arg4 = ipmon_pmvee_info.size_one; //  size_one
-	args.arg5 = ipmon_pmvee_info.size_two; //  size_two
-	args.arg6 = 0; //  flags
-	return IPMON_PMVEE_WAKE | IPMON_REPLICATE_MASTER | IPMON_ORDER_CALL | IPMON_LOCKSTEP_CALL;
 }
 
 /*-----------------------------------------------------------------------------
@@ -3002,9 +2969,7 @@ PRECALL(pmvee_check)
 #ifdef IPMON_PMVEE_HANDLING
 extern "C" unsigned long ipmon_enclave_pmvee_exit_switch_alternative_monitor()
 {
-	unsigned long pmvee_migration_start_temp = pmvee_migration_start;
-	pmvee_migration_start = -1;
-	return pmvee_migration_start_temp;
+	return pmvee_sync->pmvee_migration_start;
 }
 
 extern "C" unsigned long ipmon_enclave_pmvee_exit_check_alternative_monitor()
@@ -3074,8 +3039,7 @@ void ipmon_pmvee_migration(struct ipmon_buffer* RB)
 					for (int variant_i = 1; variant_i < RB->numvariants; variant_i++)
 						pointer_migrations[variant_i][address_i] = pointer_migrations[0][address_i];
 					address_i++;
-					for (int variant_i = 1; variant_i < RB->numvariants; variant_i++)
-						pmvee_translate_at_index(RB->numvariants, pointer_migrations, address_i);
+					pmvee_translate_at_index(RB->numvariants, pointer_migrations, address_i);
 					address_i++;
 				}
 				for (int variant_i = 1; variant_i < RB->numvariants; variant_i++)
@@ -3105,7 +3069,8 @@ bool ipmon_syscall_maybe_checked(struct ipmon_syscall_args& args, unsigned long 
 /*-----------------------------------------------------------------------------
     ipmon_syscall_is_unsynced
 -----------------------------------------------------------------------------*/
-unsigned char ipmon_syscall_is_unsynced(struct ipmon_syscall_args& args, unsigned long syscall_no)
+unsigned char
+ipmon_syscall_is_unsynced(struct ipmon_syscall_args& args, unsigned long syscall_no)
 {
 	switch(syscall_no)
 	{
@@ -3598,37 +3563,6 @@ unsigned short ipmon_prepare_syscall (struct ipmon_buffer* RB, struct ipmon_sysc
 			(entry->syscall_type & IPMON_WAIT_FOR_SIGNAL_CALL))
 			return entry->syscall_type;
 
-#ifdef IPMON_PMVEE_HANDLING
-		if (entry->syscall_type & IPMON_PMVEE_WAKE)
-		{
-			pmvee_sync->multi = 1;
-
-			for (int variant_i = 1; variant_i < RB->numvariants; variant_i++)
-				*(unsigned long*)(pmvee_commincations[variant_i]) = 0xb00b135;
-			
-			unsigned long *jumps_a = &(pmvee_jumps[1]);
-			unsigned long jump_i;
-			for (jump_i = 0; jump_i < pmvee_jumps[0]; jump_i+=RB->numvariants)
-			{
-				unsigned long *jump = &(jumps_a[jump_i]);
-				if (jump[0] == entrance_address)
-				{
-					for (int variant_i = 1; variant_i < RB->numvariants; variant_i++)
-						*(unsigned long*)(pmvee_commincations[variant_i]) = jump[variant_i];
-					break;
-				}
-			}
-			if (jump_i == pmvee_jumps[0])
-				ipmon_arg_verify_failed(0x80081, 0x35, entrance_address);
-			ipmon_barrier_wait(RB, &RB->pmvee_barrier);
-			if (!ipmon_variant_num)
-			{
-				pmvee_sync->multi = 1;
-				ipmon_pmvee_migration(RB);
-			}
-		}
-#endif
-
 		// All relevant pre-syscall information has been logged into the buffer
 		// This is where we could sync with the slave variants to implement
 		// lock-stepping
@@ -3829,8 +3763,72 @@ static long ipmon_handle_syscall(struct ipmon_buffer* RB, unsigned long syscall_
 	// Certain syscalls are always harmless and should bypass both the ptracer
 	// and the IP-MON's replication logic. Examples of such calls are
 	// sys_sched_yield and sys_madvise
-	if (ipmon_syscall_is_unsynced(args, syscall_no))
+	if (ipmon_syscall_is_unsynced(args, syscall_no)) {
+		#ifdef IPMON_PMVEE_HANDLING
+		if (syscall_no == __NR_pmvee_switch)
+		{
+			if (!ipmon_variant_num)
+			{
+				entrance_address = args.arg6;
+				if (args.arg1 == -1)
+				{
+					pmvee_sync->pmvee_migration_start = 0;
+					pmvee_pointer_start   = 0;
+					pmvee_migration_end   = 0;
+				}
+				else
+				{
+					pmvee_sync->pmvee_migration_start = args.arg2 - args.arg1;
+					pmvee_pointer_start   = args.arg3 - args.arg1;
+					pmvee_migration_end   = args.arg4 - args.arg1;
+				}
+				pmvee_sync->multi = 1;
+
+				for (int variant_i = 1; variant_i < RB->numvariants; variant_i++)
+					*(unsigned long*)(pmvee_commincations[variant_i]) = 0xb00b135;
+
+				unsigned long *jumps_a = &(pmvee_jumps[1]);
+				unsigned long jump_i;
+				for (jump_i = 0; jump_i < pmvee_jumps[0]; jump_i+=RB->numvariants)
+				{
+					unsigned long *jump = &(jumps_a[jump_i]);
+					if (jump[0] == entrance_address)
+					{
+						for (int variant_i = 1; variant_i < RB->numvariants; variant_i++)
+							*(unsigned long*)(pmvee_commincations[variant_i]) = jump[variant_i];
+						break;
+					}
+				}
+				if (jump_i == pmvee_jumps[0])
+					ipmon_arg_verify_failed(0x80081, 0x35, entrance_address);
+				ipmon_barrier_wait(RB, &RB->pmvee_barrier);
+				ipmon_barrier_wait(RB, &RB->pmvee_barrier);
+				if (!ipmon_variant_num)
+				{
+					pmvee_sync->multi = 1;
+					ipmon_pmvee_migration(RB);
+				}
+			}
+			else
+			{
+				ipmon_barrier_wait(RB, &RB->pmvee_barrier);
+			}
+			ipmon_barrier_wait(RB, &RB->pmvee_barrier);
+			args.arg1 = ipmon_pmvee_info.source_pid; //  source
+			args.arg2 = ipmon_pmvee_info.my_pid; //  destination
+			args.arg3 = (unsigned long)ipmon_pmvee_info.mp_base; //  from
+			args.arg4 = ipmon_pmvee_info.size_one; //  size_one
+			args.arg5 = ipmon_pmvee_info.size_two; //  size_two
+			args.arg6 = 0; //  flags
+			long ret = ipmon_unchecked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
+			if (ipmon_variant_num)
+				ret = (long)(pmvee_commincations[ipmon_variant_num]);
+			ipmon_barrier_wait(RB, &RB->pmvee_barrier);
+			return ret;
+		}
+		#endif
 		return ipmon_unchecked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
+	}
 
 	// OK. At this point we know that the syscall could possibly bypass
 	// the ptracer and that it does have to go through the policy and
@@ -3909,19 +3907,6 @@ static long ipmon_handle_syscall(struct ipmon_buffer* RB, unsigned long syscall_
 			}
 			else
 				pmvee_sync->multi = 0;
-			return ret;
-		}
-		else if (syscall_type & IPMON_PMVEE_WAKE)
-		{
-			// ipmon_arg_verify_failed(0xdeadbeef, 0x00, 0x34);
-			long result = ipmon_unchecked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
-			long ret = ipmon_finish_syscall(RB, args, result);
-
-			if (ipmon_variant_num)
-			{
-				pmvee_migration_start = *(unsigned long*)(ipmon_get_data_at(args.entry, sizeof(struct ipmon_syscall_entry))->data);
-				ret = (long)(pmvee_commincations[ipmon_variant_num]);
-			}
 			return ret;
 		}
 #endif
@@ -4067,6 +4052,7 @@ extern "C" struct ipmon_buffer* ipmon_register_thread()
 	}
 	else
 	{
+		pmvee_sync = (struct pmvee_sync_t *)ipmon_checked_syscall(MVEE_GET_PMVEE_SYNC);
 		if (pmvee_commincations[ipmon_variant_num])
 			ipmon_checked_syscall(__NR_shmdt, pmvee_commincations[ipmon_variant_num]);
 		pmvee_commincations[ipmon_variant_num] = (char*) ipmon_checked_syscall(MVEE_GET_PMVEE_COMMUNICATION);		
@@ -4264,8 +4250,8 @@ void __attribute__((constructor)) init()
 	// conditionally allow
 	IPMON_MASK_SET(mask, __NR_write);
 	IPMON_MASK_SET(mask, __NR_writev);
-	IPMON_MASK_SET(mask, __NR_pwrite64); 
-	IPMON_MASK_SET(mask, __NR_pwritev); 
+	IPMON_MASK_SET(mask, __NR_pwrite64);
+	IPMON_MASK_SET(mask, __NR_pwritev);
 
 #   if CURRENT_POLICY >= SOCKET_RO_POLICY
 	// unconditionally allow
