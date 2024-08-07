@@ -2334,7 +2334,7 @@ CALL(brk)
                                         call_overwrite_arg_value(i, 1, address, true);
 					call_overwrite_arg_value(i, 2, 4096, true);
 					call_overwrite_arg_value(i, 3, PROT_READ | PROT_WRITE, true);
-					call_overwrite_arg_value(i, 4, MAP_ANONYMOUS | MAP_PRIVATE, true);
+					call_overwrite_arg_value(i, 4, MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED, true);
 					call_overwrite_arg_value(i, 5, -1, true);
 					call_overwrite_arg_value(i, 6, 0, true);		
 
@@ -7481,6 +7481,7 @@ CALL(mmap)
 			for (int i = 0; i < mvee::numvariants; ++i)
 			{
 				call_overwrite_arg_value(i, 1, address, true);
+				SETARG4(i, ARG4(i) | MAP_FIXED);
 
 				debugf("%s - replaced call by SYS_MMAP(0x" PTRSTR ", %lu, %s, %s, %d, %lu)\n",
 					   call_get_variant_pidstr(i).c_str(),
@@ -7508,7 +7509,10 @@ CALL(mmap)
                 return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
             }
             for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+            {
                 SETARG1(variant_i, base_address);
+                SETARG4(variant_i, ARG4(variant_i) | MAP_FIXED);
+            }
 
             // Set up shared memory segment
             int shmid = shmget(IPC_PRIVATE, ARG2(0), IPC_CREAT | S_IRUSR | S_IWUSR);
@@ -7615,7 +7619,10 @@ CALL(mmap)
 					return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(EPERM);
 				}
 				for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+				{
 					SETARG1(variant_i, base_address);
+					SETARG4(variant_i, ARG4(variant_i) | MAP_FIXED);
+				}
 			}
 			else if (shm_setup_state & SHM_SETUP_EXPECTING_ERROR)
 			{
