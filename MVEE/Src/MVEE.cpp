@@ -1017,7 +1017,7 @@ std::string mvee::os_get_rpath(std::string& binary)
 		}
 
 		char* path = realpath(rpath.c_str(), NULL);
-		mvee::warnf("realpath = %s (errno: %s)\n", path, getTextualErrno(errno));
+		warnf("realpath = %s (errno: %s)\n", path, getTextualErrno(errno));
 		if (path)
 		{
 			rpath = std::string(path);
@@ -1025,7 +1025,7 @@ std::string mvee::os_get_rpath(std::string& binary)
 		}
 	}
 
-	mvee::warnf("execve rpath = %s\n", rpath.c_str());
+	warnf("execve rpath = %s\n", rpath.c_str());
 
 	return rpath;
 }

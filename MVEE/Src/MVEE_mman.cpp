@@ -284,7 +284,7 @@ void mmap_table::truncate_table_variant(int variantnum)
          it != full_map[variantnum].end();
          ++it)
     {
-        //(*it)->print_region_info("deleting region", mvee::warnf);
+        //(*it)->print_region_info("deleting region", warnf);
         delete *it;
     }
 
@@ -939,9 +939,9 @@ static bool mvee_mman_compare_ranges_callback(mmap_table* table, std::vector<mma
         if (!mmap_table::is_same_region(infos[0], infos[i]))
         {
             warnf("region mismatch\n");
-            infos[0]->print_region_info("region 0 >>>", mvee::warnf);
-            infos[i]->print_region_info("slave region >>>", mvee::warnf);
-            table->print_mmap_table(mvee::warnf);
+            infos[0]->print_region_info("region 0 >>>", warnf);
+            infos[i]->print_region_info("slave region >>>", warnf);
+            table->print_mmap_table(warnf);
 
             return false;
         }
@@ -1101,7 +1101,7 @@ mmap_region_info* mmap_table::map_range (int variantnum, unsigned long address, 
     // overlap scenarios
     mmap_region_info* new_region = new mmap_region_info(variantnum, address, size, prot_flags, region_backing_file,
             region_backing_file_offset, map_flags, shadow);
-//    new_region->print_region_info("inserting region: ", mvee::warnf);
+//    new_region->print_region_info("inserting region: ", warnf);
     if (!full_map[variantnum].insert(new_region).second)
     {
         delete new_region;
@@ -1193,7 +1193,7 @@ void mmap_table::calculate_disjoint_bases (unsigned long size, std::vector<unsig
             // now enlarge it
             if (stack)
             {
-//				stack->print_region_info("stack > ", mvee::warnf);
+//				stack->print_region_info("stack > ", warnf);
 
                 // it should not overlap with anything that had been mapped below the stack before we could apply DCL
                 if (first_region_below_stack && (first_region_below_stack->region_base_address + first_region_below_stack->region_size > (stack_top - stack_limit - PAGE_SIZE))) // minus PAGE_SIZE b/c of the guard page

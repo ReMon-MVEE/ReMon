@@ -643,7 +643,7 @@ int mmap_table::dwarf_step (int variantnum, pid_t variantpid, mvee_dwarf_context
     if (!info)
     {
 #ifdef MVEE_DWARF_DEBUG
-        found_region->print_region_info("DWARF: couldn't get DWARF info for region:", mvee::warnf);
+        found_region->print_region_info("DWARF: couldn't get DWARF info for region:", warnf);
 #endif
         goto out;
     }
