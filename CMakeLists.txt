@@ -298,6 +298,7 @@ endif()
 
 # ----------------------------------------------------------------------------------------------------------------------
 option(BenchmarkMode "Run MVEE in Benchmark mode." OFF)
+option(DisableLogging "Disable all logging, including potential errors and warnings." OFF)
 option(BuildIpmon "Build IP-MON." ON)
 option(EmulateCPUID "Emulate CPUID instruction." ON)
 option(EmulateShm "Emulate shared memory." ON)
@@ -320,6 +321,7 @@ target_compile_definitions(mvee PRIVATE
     $<$<BOOL:${ShmInsLoggingFull}>:MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL>
     $<$<BOOL:${ShmReplayLeader}>:MVEE_SHARED_MEMORY_REPLAY_LEADER>
     $<$<BOOL:${UseMPK}>:MVEE_USE_MPK>
+    $<$<BOOL:${DisableLogging}>:MVEE_FILTER_LOGGING>
     #MVEE_LOG_ALL_SHM_INSTRUCTIONS
 )
 # ======================================================================================================================

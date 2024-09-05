@@ -1571,6 +1571,7 @@ void mvee::log_init()
 -----------------------------------------------------------------------------*/
 void mvee::log_fini(bool terminated)
 {
+#ifndef MVEE_FILTER_LOGGING
     if (terminated)
     {
         struct timeval tv;
@@ -1583,6 +1584,7 @@ void mvee::log_fini(bool terminated)
         fprintf(stderr, "%lf\n", currenttime - mvee::startup_time);
 #endif
     }
+#endif
 
 #ifndef MVEE_BENCHMARK
     sync();

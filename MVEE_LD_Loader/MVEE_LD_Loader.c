@@ -502,9 +502,12 @@ void  mvee_write_stack_and_transfer()
 int main (int argc, char** argv, char** envp)
 {
 #ifdef MVEE_EMULATE_CPUID
-    // disable CPUID execution for this process
-    if (syscall(__NR_arch_prctl, ARCH_SET_CPUID, 0) == -1)
+     // disable CPUID execution for this process
+    int res = syscall(__NR_arch_prctl, ARCH_SET_CPUID, 0);
+#ifndef MVEE_FILTER_LOGGING
+    if (res == -1)
         printf("CPUID faulting failed to disable\n");
+#endif
 #endif
 
     int           interp_fd = 0;

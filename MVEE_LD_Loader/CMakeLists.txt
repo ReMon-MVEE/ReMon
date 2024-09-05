@@ -19,6 +19,7 @@ target_compile_definitions(${LD_LOADER_LONG_NAME} PRIVATE
     UNISTD_HDR=<${UNISTD_HDR}>
     $<$<BOOL:${ShmInsLogging}>:MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING>
     $<$<BOOL:${EmulateCPUID}>:MVEE_EMULATE_CPUID>
+    $<$<BOOL:${DisableLogging}>:MVEE_FILTER_LOGGING>
     $<$<BOOL:FALSE>:MVEE_DEBUG>
 )
 target_compile_options(${LD_LOADER_LONG_NAME} PRIVATE

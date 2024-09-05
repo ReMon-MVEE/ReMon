@@ -1094,6 +1094,7 @@ void monitor::handle_execve_get_args(int variantnum)
 #if defined(MVEE_FILTER_LOGGING) && !defined(MVEE_BENCHMARK)
     if (set_mmap_table->mmap_startup_info[variantnum].image.find("parsec-2.1") != std::string::npos
         || set_mmap_table->mmap_startup_info[variantnum].image.find("parsec-3.0") != std::string::npos
+        || set_mmap_table->mmap_startup_info[variantnum].image.find("spec2017") != std::string::npos
         || set_mmap_table->mmap_startup_info[variantnum].image.find("spec2006") != std::string::npos)
     {
         set_mmap_table->set_logging_enabled = 1;
