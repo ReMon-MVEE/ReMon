@@ -170,6 +170,7 @@ void monitor::init()
 	ipmon_mmap_handling            = false;
 	ipmon_fd_handling              = false;
 	aliased_open                   = false;
+    fast_forwarding_main_binary    = false;
     monitorid                      = 0;
     parentmonitorid                = 0;
     state                          = STATE_NORMAL;

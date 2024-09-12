@@ -519,6 +519,9 @@ public:
 	// The SPEC profile to use
 	static std::string              spec_profile;
 
+	// The string that indicates how to diversify the variants
+	static std::string              diversified_variants;
+
 	// Spec ids for the variants we're running
 	static std::vector<std::string> variant_ids;
 
@@ -613,6 +616,11 @@ public:
 	// control from the main MVEE process to the primary monitor thread.
 	//
     volatile static unsigned long   can_run;
+
+	// 
+	// 
+	//
+	static std::deque<std::string> get_diversified_variants();
 private:
 
 	// *************************************************************************

@@ -1142,6 +1142,7 @@ private:
 	bool                              ipmon_mmap_handling;
 	bool                              ipmon_fd_handling;
     bool                              aliased_open;           // 
+    bool                              fast_forwarding_main_binary;   // Fast-forwarding through the syscalls for loading the main binary
 
 
     int                               parentmonitorid;        // monitorid of the monitor that created this monitor...

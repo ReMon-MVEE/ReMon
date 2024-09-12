@@ -86,6 +86,7 @@ Json::Value*                           mvee::config_variant_global              
 Json::Value*                           mvee::config_variant_exec                 = NULL;
 std::string                            mvee::synctrace_logfile                   = "";
 std::string                            mvee::spec_profile                   = "";
+std::string                            mvee::diversified_variants                = "";
 
 /*-----------------------------------------------------------------------------
     Prototypes
@@ -1817,7 +1818,7 @@ bool mvee::process_opts(int argc, char** argv, bool add_args)
 {
 	int opt;
 	bool stop = false;
-	while ((opt = getopt(argc, argv, ":s:f:N:npocS:P:")) != -1 && !stop)
+	while ((opt = getopt(argc, argv, ":s:f:N:npocS:P:D:")) != -1 && !stop)
 	{
 		switch(opt)
 		{
@@ -1845,6 +1846,9 @@ bool mvee::process_opts(int argc, char** argv, bool add_args)
 #endif
 			case 'P':
 				mvee::spec_profile = std::string(optarg);
+				break;
+			case 'D':
+				mvee::diversified_variants = std::string(optarg);
 				break;
 			case 's':
 				mvee::config_variant_set = std::string(optarg);

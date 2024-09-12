@@ -153,6 +153,14 @@ const char* mvee::get_spec_profile(bool native)
 }
 
 /*-----------------------------------------------------------------------------
+    get_diversified_variants -
+-----------------------------------------------------------------------------*/
+std::deque<std::string> mvee::get_diversified_variants()
+{
+	return strsplit(diversified_variants, ':');
+}
+
+/*-----------------------------------------------------------------------------
     set_builtin_config - 
 -----------------------------------------------------------------------------*/
 void mvee::set_builtin_config(int builtin)

@@ -112,6 +112,7 @@
 #include <sys/timerfd.h>
 #include <iomanip>
 #include <linux/dqblk_xfs.h>
+#include <regex>
 #include "MVEE.h"
 #include "MVEE_monitor.h"
 #include "MVEE_macros.h"
@@ -907,6 +908,18 @@ POSTCALL(close)
 	{
 		if (call_succeeded)
 			set_fd_table->free_temporary_fd_info(variantnum, ARG1(variantnum));
+
+    	if (fast_forwarding_main_binary)
+		{
+			variants[variantnum].fast_forwarding = false;
+
+			bool done = true;
+			for (auto i = 0; i < mvee::numvariants; ++i)
+				if (variants[i].fast_forwarding)
+					done = false;
+
+			fast_forwarding_main_binary = !done;
+		}
 	}
 
     return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
@@ -1121,14 +1134,21 @@ PRECALL(execve)
 	for (int i = 0; i < mvee::numvariants; ++i)
         handle_execve_get_args(i);
 
+	const std::string main_binary = set_mmap_table->mmap_startup_info[0].image;
+	auto binary_types = mvee::get_diversified_variants();
+	if (!binary_types.empty())
+	{
+		for (int i = 1; i < mvee::numvariants; ++i)
+			set_mmap_table->mmap_startup_info[i].image = std::regex_replace(main_binary, std::regex(binary_types[0]), binary_types[i]);
+	}
+
 	// This is the default, but we might set it to true if
 	// sys_execve mismatches on the first arg
 	set_mmap_table->have_diversified_variants = false;	
 
     for (int i = 1; i < mvee::numvariants; ++i)
     {
-        if (set_mmap_table->mmap_startup_info[i].image.compare(
-				set_mmap_table->mmap_startup_info[0].image))
+        if (set_mmap_table->mmap_startup_info[i].image != main_binary)
         {
             cache_mismatch_info("execve image mismatch\n");
             return MVEE_PRECALL_CALL_DENY | MVEE_PRECALL_ARGS_MISMATCH(1);
@@ -10199,6 +10219,16 @@ CALL(openat)
 		}
 
 		aliased_open = true;
+	}
+	// Diversified variants have to do an aliased open of their main binaries
+	// We also fast-forward through all ld-related syscalls
+	else if (set_mmap_table->have_diversified_variants &&
+			set_mmap_table->mmap_startup_info[0].image == path_processed)
+	{
+		aliased_open = true;
+    	fast_forwarding_main_binary = true;
+		for (auto i = 0; i < mvee::numvariants; ++i)
+			variants[i].fast_forwarding = true;
 	}
 	else
 	{
