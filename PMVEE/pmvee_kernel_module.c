@@ -754,7 +754,7 @@ static inline unsigned long pmvee_zap_pmd_range(struct mmu_gather *tlb,
 		if (pmd_none_or_trans_huge_or_clear_bad(dst_pmd))
 			goto next;
 		next = pmvee_zap_pte_range(tlb, dst_vma, src_vma, dst_pmd, src_pmd, addr, next, details);
-		#ifdef PMVEE_KERNEL_SHORTEST_SKIP
+		#if PMVEE_SKIP_LEVEL == PMVEE_KERNEL_SHORTEST_SKIP
 		pmvee_copy_pte_range(dst_vma->vm_mm, src_vma->vm_mm, dst_pmd, src_pmd, src_vma, addr, next);
 		#endif
 next:
@@ -1191,7 +1191,8 @@ static long actual_pmvee_switch(
 					tmp->vm_ops->open(tmp);
             }
 			#if PMVEE_SKIP_LEVEL > 0
-            {
+            else
+			{
                 tmp = prev->vm_next;
 				#if PMVEE_SKIP_LEVEL > 1
                 pmvee_zap_page_range(tmp, source_mapping, tmp->vm_start, tmp->vm_end - tmp->vm_start);
