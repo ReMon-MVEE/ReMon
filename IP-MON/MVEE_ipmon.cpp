@@ -2369,7 +2369,7 @@ PRECALL(write)
 	CHECKREG(ARG3);
 
 	// RAVEN extended syscall support
-	unsigned long result = IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER;
+	unsigned long result = IPMON_EXEC_MASTER | IPMON_REPLICATE_MASTER | IPMON_LOCKSTEP_CALL;
 	if ((int)ARG1 >= 0)
 	{
 		CHECKBUFFER(ARG2, ARG3);
@@ -2377,7 +2377,7 @@ PRECALL(write)
 	}
 	else
 	{
-		result |= IPMON_ORDER_CALL | IPMON_LOCKSTEP_CALL;
+		result |= IPMON_ORDER_CALL;
 	}
 	return result;	
 }
