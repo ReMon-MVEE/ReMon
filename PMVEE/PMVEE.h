@@ -18,6 +18,7 @@
 #define PMVEE_MIGRATION_INFO_REQUEST    0x080
 #define PMVEE_MAPPINGS_REQUEST          0x100
 #define PMVEE_ZONE_REQUEST              0x200
+#define PMVEE_DICT_REQUEST              0x400
 
 #define PMVEE_SCANNINGG_START           0x6969696969696969l
 
@@ -30,9 +31,13 @@
 #define PMVEE_COPY_DEFAULT_SIZE     0x4000 * 8
 #define PMVEE_DICT_DEFAULT_SIZE     0x4000 * 8
 
+#ifdef PMVEE_HEAP_SCANNING
+#define PMVEE_COMMUNICATION_SIZE    PMVEE_COPY_DEFAULT_SIZE * 4
+#else
 #define PMVEE_COMMUNICATION_SIZE    PMVEE_COPY_DEFAULT_SIZE
+#endif
 #define PMVEE_SIMPLE_MAPPINGS_SIZE  PMVEE_COPY_DEFAULT_SIZE
-#define PMVEE_ZONE_DEFAULT_SIZE     PMVEE_COPY_DEFAULT_SIZE
+#define PMVEE_ZONE_DEFAULT_SIZE     PMVEE_COPY_DEFAULT_SIZE + (0x1000)
 
 
 #ifdef IPMON_PMVEE_HANDLING
@@ -151,9 +156,8 @@ void __pmvee_copy_state_follower(char* __pmvee_zone, size_t* __pmvee_args_size, 
 #define PMVEE_STATE_COPY_POINTER_POINTER(__pointer)                \
 *(void**)(__pmvee_zone + *__pmvee_args_size) = (void*)__pointer;   \
 *__pmvee_args_size+=sizeof(void*);                                 \
-/* printf(">1-%ld", sizeof(void*));fflush(stdout); */              \
 *(void**)(__pmvee_zone + *__pmvee_args_size) = *(void**)__pointer; \
-*__pmvee_args_size+=sizeof(void*); // printf(">2-%ld", sizeof(void*));fflush(stdout);
+*__pmvee_args_size+=sizeof(void*); // printf(">1-%ld>2-%ld", sizeof(void*), sizeof(void*));fflush(stdout);
 
 #define PMVEE_STATE_COPY_STRUCT(__data, __struct)         \
 *(__struct*)(__pmvee_zone + *__pmvee_args_size) = __data; \
@@ -167,6 +171,10 @@ memcpy((void*)(__pmvee_zone + *__pmvee_args_size), __data, __size); \
 *(size_t*)(__pmvee_zone + *__pmvee_args_size) = (size_t)((unsigned long)__data_to - (unsigned long)__data_from); \
 *__pmvee_args_size+=sizeof(size_t); // printf(">%ld", sizeof(size_t));fflush(stdout);
 
+#define PMVEE_STATE_COPY_ADD_TO_ZONE(__pointer, __size)                         \
+*(char**)(__pmvee_zone + *__pmvee_args_size) = add_to_zone(__size);             \
+memcpy(*(char**)(__pmvee_zone + *__pmvee_args_size), (char*)__pointer, __size); \
+*__pmvee_args_size+=__size; // printf(">%ld", __size);fflush(stdout);
 
 #endif
 
@@ -199,6 +207,11 @@ memcpy(__data, (void*)(__pmvee_zone + *__pmvee_args_size), __size); \
 #define PMVEE_STATE_COPY_POINTER_OFFSET(__data_from, __data_to, __type_cast)            \
 __data_to = (__type_cast) (((unsigned long)__data_from) + *(size_t*)(__pmvee_zone + *__pmvee_args_size)) ; \
 *__pmvee_args_size+=sizeof(size_t);
+
+#define PMVEE_STATE_COPY_ADD_TO_ZONE(__pointer, __size)                         \
+memcpy((char*)__pointer, *(char**)(__pmvee_zone + *__pmvee_args_size), __size); \
+*__pmvee_args_size+=__size; // printf(">%ld", __size);fflush(stdout);
+
 #endif
 
 

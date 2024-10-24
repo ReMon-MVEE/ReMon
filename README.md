@@ -99,7 +99,8 @@ patch -p1 < /path/to/ReMon/patches/linux-5.3.0-full-ipmon.patch
 make menuconfig 
 # while you're in the config menu, you might want to bump the kernel tick rate up to 1000Hz
 # you can do so by navigating to "Processor type and features" > "Timer Frequency"
-# scripts/config --disable CONFIG_SYSTEM_TRUSTED_KEYS
+# ./scripts/config --disable CONFIG_SYSTEM_TRUSTED_KEYS
+# ./scripts/config --disable SYSTEM_REVOCATION_KEYS
 make -j$(nproc) deb-pkg LOCALVERSION=-ipmon
 sudo dpkg -i ../linux-headers*.deb ../linux-image*.deb ../linux-libc-dev*.deb
 ``` 

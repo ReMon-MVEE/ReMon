@@ -2958,12 +2958,14 @@ PRECALL(pmvee_check)
 	// 	ipmon_arg_verify_failed(0x880135, 0x00, 0x00);
 	if (!pmvee_stack_reset)
 		pmvee_stack_reset = args.arg1;
+#ifndef PMVEE_MICROBENCHMARK_ENTER_EXIT
 	args.arg1 = ipmon_pmvee_info.source_pid; //  source
 	args.arg2 = ipmon_pmvee_info.my_pid; //  destination
 	args.arg3 = (unsigned long)ipmon_pmvee_info.mp_base; //  from
 	args.arg4 = ipmon_pmvee_info.size_one; //  size_one
 	args.arg5 = ipmon_pmvee_info.size_two; //  size_two
 	args.arg6 = 0; //  flags
+#endif
 	return IPMON_PMVEE_WAIT | IPMON_REPLICATE_MASTER | IPMON_ORDER_CALL | IPMON_LOCKSTEP_CALL;
 }
 
@@ -2992,6 +2994,7 @@ unsigned long pmvee_translate_at_index(int numvariants, unsigned long** addresse
 	for (jump_i = 0; jump_i < pmvee_jumps[0]; jump_i+=numvariants)
 	{
 		unsigned long *jump = &(jumps_a[jump_i]);
+		// asm("mov %%rax, (0);" :: "a" (134250805l), "b" (jumps_a), "c" (jump));
 		if (jump[0] == address)
 		{
 			for (int variant_i = 1; variant_i < numvariants; variant_i++)
@@ -3868,26 +3871,27 @@ extern "C" long ipmon_enclave
 					ipmon_arg_verify_failed(0x80081, 0x35, entrance_address);
 				ipmon_barrier_wait(RB, &RB->pmvee_barrier);
 				ipmon_barrier_wait(RB, &RB->pmvee_barrier);
-				if (!ipmon_variant_num)
-				{
-					pmvee_sync->multi = 1;
-					ipmon_pmvee_migration(RB);
-				}
 			}
 			else
 			{
 				ipmon_barrier_wait(RB, &RB->pmvee_barrier);
 			}
 			ipmon_barrier_wait(RB, &RB->pmvee_barrier);
+#ifndef PMVEE_MICROBENCHMARK_ENTER_EXIT
 			args.arg1 = ipmon_pmvee_info.source_pid; //  source
 			args.arg2 = ipmon_pmvee_info.my_pid; //  destination
 			args.arg3 = (unsigned long)ipmon_pmvee_info.mp_base; //  from
 			args.arg4 = ipmon_pmvee_info.size_one; //  size_one
 			args.arg5 = ipmon_pmvee_info.size_two; //  size_two
 			args.arg6 = 0; //  flags
+#endif
 			long ret = ipmon_unchecked_syscall(syscall_no, args.arg1, args.arg2, args.arg3, args.arg4, args.arg5, args.arg6);
 			if (ipmon_variant_num)
 				ret = (long)(pmvee_commincations[ipmon_variant_num]);
+			if (!ipmon_variant_num)
+			{
+				ipmon_pmvee_migration(RB);
+			}
 			ipmon_barrier_wait(RB, &RB->pmvee_barrier);
 			return ret;
 		}
@@ -4208,7 +4212,9 @@ void __attribute__((constructor)) init()
 	IPMON_MASK_SET(mask, __NR_getppid);
 	IPMON_MASK_SET(mask, __NR_gettid);
 	IPMON_MASK_SET(mask, __NR_getuid);
+#ifndef PMVEE_MICROBENCHMARK_ENTER_EXIT
 	IPMON_MASK_SET(mask, __NR_getpid);
+#endif
 	IPMON_MASK_SET(mask, __NR_gettimeofday);
 	IPMON_MASK_SET(mask, __NR_time);
 	IPMON_MASK_SET(mask, __NR_clock_gettime);

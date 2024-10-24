@@ -1328,7 +1328,7 @@ POSTCALL(execve)
                         shutdown(false);
                         return 0;
                     }
-                    set_mmap_table->truncate_table_variant(i);
+                    set_mmap_table->truncate_table_variant(j);
 #ifdef MVEE_CONNECTED_MMAP_REGIONS
                     set_mmap_table->refresh_variant_maps(j, variants[j].variantpid, stack_regions);
 #else
@@ -1657,6 +1657,15 @@ LOG_ARGS(getpid)
 {
 	debugf("%s - SYS_GETPID()\n",
 		   call_get_variant_pidstr(variantnum).c_str());
+}
+
+GET_CALL_TYPE(getpid)
+{
+#ifndef PMVEE_MICROBENCHMARK_ENTER_EXIT
+	return MVEE_CALL_TYPE_NORMAL;
+#else
+	return MVEE_CALL_TYPE_UNSYNCED;
+#endif
 }
 
 PRECALL(getpid)
@@ -2479,6 +2488,9 @@ CALL(brk)
 		}
 	}
 
+	mmap_region_info* heap_region = set_mmap_table->get_heap_region(0);
+	if (heap_region)
+		set_mmap_table->add_address_to_mmap(heap_region->region_base_address, heap_region->region_size, PROT_READ | PROT_WRITE);
     return MVEE_CALL_ALLOW;
 }
 
@@ -7580,7 +7592,7 @@ CALL(mmap)
 	{
         if (ARG4(0) & MAP_PMVEE)
         {
-			#ifndef PMVEE_MICROBENCHMARK
+			#ifndef PMVEE_NO_ALLOCATOR
 			#else
 			if (ARG4(0) & MAP_FIXED)
 				return MVEE_CALL_ALLOW;
@@ -7594,7 +7606,7 @@ CALL(mmap)
             SETARG1(0, address);
             SETARG4(0, (ARG4(0) & (~MAP_SHARED)) | MAP_PRIVATE);
         }
-		#ifndef PMVEE_MICROBENCHMARK
+		#ifndef PMVEE_NO_ALLOCATOR
         else if (!IS_MULTI_EXEC)
         {
             unsigned long address = set_mmap_table->calculate_joint_base(ARG2(0), true);
@@ -7808,9 +7820,9 @@ CALL(mmap)
             {
                 if ((*mvee::config_variant_global)["non_overlapping_mmaps"].asInt()) {
                     if (ARG4(0) & MAP_FIXED) {
-                        warnf("GHUMVEE is running with non_overlapping_mmaps enabled but the following binary is not position independent: %s\n",
+                        // warnf("GHUMVEE is running with non_overlapping_mmaps enabled but the following binary is not position independent: %s\n",
                               info->paths[0].c_str());
-                        warnf("> We cannot enforce disjunct code within this address space!!!\n");
+                        // warnf("> We cannot enforce disjunct code within this address space!!!\n");
                     } else {
                         std::vector<unsigned long> bases(mvee::numvariants);
                         set_mmap_table->calculate_disjoint_bases(ARG2(0), bases);
@@ -7844,27 +7856,27 @@ CALL(mmap)
 			}
 		}
 #else
-		if (!(ARG4(0) & MAP_FIXED))
-		{
-			for (auto binary = mp_binaries.begin(); binary != mp_binaries.end(); binary++)
-			{
-				if (!binary->compare(info->paths[0]))
-				{
-                    unsigned long base = set_mmap_table->calculate_joint_base(ARG2(0), false);
-                    if (base == (unsigned long)-1)
-                    {
-                        log_backtraces();
-                        shutdown(false);
-                    }
-                    for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
-                    {
-                        SETARG1(variant_i, base);
-                        SETARG4(variant_i, (ARG4(0) & (~MAP_SHARED)) | MAP_PRIVATE);
-                    }
-                    break;
-                }
-			}
-		}
+		// if (!(ARG4(0) & MAP_FIXED))
+		// {
+		// 	for (auto binary = mp_binaries.begin(); binary != mp_binaries.end(); binary++)
+		// 	{
+		// 		if (!binary->compare(info->paths[0]))
+		// 		{
+        //             unsigned long base = set_mmap_table->calculate_joint_base(ARG2(0), false);
+        //             if (base == (unsigned long)-1)
+        //             {
+        //                 log_backtraces();
+        //                 shutdown(false);
+        //             }
+        //             for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+        //             {
+        //                 SETARG1(variant_i, base);
+        //                 SETARG4(variant_i, (ARG4(0) & (~MAP_SHARED)) | MAP_PRIVATE);
+        //             }
+        //             break;
+        //         }
+		// 	}
+		// }
 
         if ((info->access_flags & O_RDWR) && (ARG4(0) & MAP_SHARED))
 		{
@@ -7930,7 +7942,7 @@ CALL(mmap)
             {
                 if (ARG4(0) & MAP_FIXED)
                 {
-					warnf("GHUMVEE is running with non_overlapping_mmaps enabled but the following binary is making MAP_FIXED mappings: %s. This can be allowed, but is not checked for DCL\n", info->paths[0].c_str());
+					// warnf("GHUMVEE is running with non_overlapping_mmaps enabled but the following binary is making MAP_FIXED mappings: %s. This can be allowed, but is not checked for DCL\n", info->paths[0].c_str());
                 }
                 else
                 {
@@ -9497,6 +9509,7 @@ GET_CALL_TYPE(exit_group)
 	{
 		for (int variant_i = 1; variant_i < mvee::numvariants; variant_i++)
 		{
+			warnf("Exiting from SVX with code %lld\n", variants[0].regs.rdi);
 			call_check_regs(variant_i);
 			variants[variant_i].regs.rip = (unsigned long long) variants[variant_i].syscall_pointer;
 			variants[variant_i].regs.rax = __NR_exit_group;

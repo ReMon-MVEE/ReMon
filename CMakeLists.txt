@@ -346,6 +346,7 @@ target_compile_definitions(mvee PRIVATE
     $<$<BOOL:${EnablePMVEE}>:MVEE_CONNECTED_MMAP_REGIONS>
     $<$<BOOL:${IpmonPmveeHandling}>:IPMON_PMVEE_HANDLING>
     #MVEE_LOG_ALL_SHM_INSTRUCTIONS
+    PMVEE_MIGRATION_AFTER_RESUME
 )
 # ======================================================================================================================
 if (BuildIpmon)

@@ -198,6 +198,7 @@ pmvee_copy_one_pte(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 		unsigned long addr, int *rss)
 {
 	debugk("copying %llx", addr);
+	// printk("[%d] copying %llx\n", current->pid, addr);
 	unsigned long vm_flags = vma->vm_flags;
 	pte_t pte = *src_pte;
 	struct page *page;
@@ -1101,6 +1102,7 @@ static long actual_pmvee_switch(
         }
     }
 
+	// printk("[%d] start\n", current->pid);
     // putting it in a separate function is annoying, hence this loop to run this twice.
     to = from + size_one;
     remove = ~(VM_EXEC | VM_MAYEXEC);
@@ -1110,6 +1112,7 @@ static long actual_pmvee_switch(
         while (source_mapping && source_mapping->vm_end <= to)
         {
             debugk(" > doing [ %lx ; %lx )\n", source_mapping->vm_start, source_mapping->vm_end);
+            // printk("[%d] doing [ %lx ; %lx )\n", current->pid, source_mapping->vm_start, source_mapping->vm_end);
             if (!(flags & PMVEE_FLAGS_DUP_EXEC) && (source_mapping->vm_flags & VM_EXEC))
                 goto __pmvee_switch_next_mapping;
 
@@ -1241,6 +1244,7 @@ static long actual_pmvee_switch(
         to = to + size_two;
         // remove = ~(VM_EXEC | VM_MAYEXEC | VM_WRITE | VM_MAYWRITE);
     }
+	// printk("[%d] done\n", current->pid);
     debugk(" > done [ %lx ; %lx )\n", source_mapping->vm_start, source_mapping->vm_end);
     if (prev && prev->vm_next && prev->vm_next->vm_start < to)
     {
@@ -1286,7 +1290,8 @@ static long actual_pmvee_check (
 	LIST_HEAD(uf);
 
     debugk("checking <%d> - %d to %d\n", current->pid, source, destination);
-
+	// printk("[%d] from check\n", current->pid);
+	// actual_pmvee_switch(source, destination, from, size_one, size_two, flags);
 
     if (current->pid == source)
     {

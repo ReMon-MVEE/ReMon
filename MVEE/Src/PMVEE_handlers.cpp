@@ -94,7 +94,7 @@ unsigned long monitor::get_equivalent_address(int variant_i, unsigned long addre
         // warnf("   > could not find pre-computed equivalent for %p.\n", (void*)address);
 
         // for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
-        // //     warnf(" >> [%d] new base: (%p)%p%p\n", variant_i, (void*)&region->connected_regions->regions[variant_i], (void*)&region->connected_regions->regions[variant_i]->region_base_address, (void*)region->connected_regions->regions[variant_i]->region_base_address);
+        //     // warnf(" >> [%d] new base: (%p)%p%p\n", variant_i, (void*)&region->connected_regions->regions[variant_i], (void*)&region->connected_regions->regions[variant_i]->region_base_address, (void*)region->connected_regions->regions[variant_i]->region_base_address);
         if (region->connected_regions)
         {
             // warnf("   > maps to connected region @ %p\n", (void*)region->connected_regions->regions[variant_i]->region_base_address);
@@ -114,6 +114,9 @@ void monitor::copy_migration()
     #define MVEE_CONNECTED_MMAP_REGIONS
     #endif
     #ifdef MVEE_CONNECTED_MMAP_REGIONS
+    
+    if (!pmvee_state_copy_zone.state_alter_start)
+        return;
 
     // copy_migration_ipmon();
     // char* ipmon_migration = (char*)malloc(pmvee_state_copy_zone.state_copy_end - pmvee_zone_pt);
@@ -310,6 +313,9 @@ void monitor::add_connected_regions_to_map(connected_region_info* connected_regi
 
 void mmap_table::add_address_to_mmap(unsigned long address, size_t size, unsigned long prot)
 {
+    // warnf(" > adding\n");
+    // print_simple_addresses(simple_mappings);
+    // prot = (address >= mp_start && address < mp_end && (PROT_READ | PROT_WRITE)) ? (PROT_READ | PROT_WRITE) : 0;
     unsigned long* mapping_count = simple_mappings;
     struct pmvee_mappings_info_t* mappings = (struct pmvee_mappings_info_t*)(simple_mappings + 1);
 
@@ -325,6 +331,7 @@ void mmap_table::add_address_to_mmap(unsigned long address, size_t size, unsigne
 
     if (mapping_i == (*mapping_count))
     {
+        // warnf(" > 0\n");
         mappings[(*mapping_count)] = { start, end, prot };
         (*mapping_count)++;
         // print_simple_addresses(simple_mappings);
@@ -333,10 +340,11 @@ void mmap_table::add_address_to_mmap(unsigned long address, size_t size, unsigne
 
     if (end < mappings[mapping_i].start)
     {
+        // warnf(" > 1\n");
         memmove(
             &mappings[mapping_i + 1],
             &mappings[mapping_i],
-            sizeof(struct pmvee_mappings_info_t) * ((*mapping_count) - (mapping_i + 1))
+            sizeof(struct pmvee_mappings_info_t) * ((*mapping_count) - (mapping_i))
         );
         mappings[mapping_i] = { start, end, prot };
         (*mapping_count)++;
@@ -347,10 +355,11 @@ void mmap_table::add_address_to_mmap(unsigned long address, size_t size, unsigne
             mappings[mapping_i].start = start;
         else
         {
+        // warnf(" > 2\n");
             memmove(
                 &mappings[mapping_i + 1],
                 &mappings[mapping_i],
-                sizeof(struct pmvee_mappings_info_t) * ((*mapping_count) - (mapping_i + 1))
+                sizeof(struct pmvee_mappings_info_t) * ((*mapping_count) - (mapping_i))
             );
             mappings[mapping_i] = { start, end, prot };
             (*mapping_count)++;
@@ -367,10 +376,11 @@ void mmap_table::add_address_to_mmap(unsigned long address, size_t size, unsigne
         {
             if (start <= mappings[mapping_i].start)
             {
+        // warnf(" > 3\n");
                 memmove(
                     &mappings[mapping_i + 1],
                     &mappings[mapping_i],
-                    sizeof(struct pmvee_mappings_info_t) * ((*mapping_count) - (mapping_i + 1))
+                    sizeof(struct pmvee_mappings_info_t) * ((*mapping_count) - (mapping_i))
                 );
                 mappings[mapping_i] = { start, end, prot };
                 mappings[mapping_i + 1].start = end;
@@ -378,10 +388,11 @@ void mmap_table::add_address_to_mmap(unsigned long address, size_t size, unsigne
             }
             else
             {
+        // warnf(" > 4\n");
                 memmove(
                     &mappings[mapping_i + 2],
                     &mappings[mapping_i],
-                    sizeof(struct pmvee_mappings_info_t) * ((*mapping_count) - (mapping_i + 1))
+                    sizeof(struct pmvee_mappings_info_t) * ((*mapping_count) - (mapping_i))
                 );
                 mappings[mapping_i].end = start;
                 mappings[mapping_i + 1] = { start, end, prot };
@@ -409,10 +420,11 @@ void mmap_table::add_address_to_mmap(unsigned long address, size_t size, unsigne
             {
                 if ((mapping_i + 1) < (*mapping_count))
                 {
+        // warnf(" > 5\n");
                     memmove(
                         &mappings[mapping_i + 2],
                         &mappings[mapping_i + 1],
-                        sizeof(struct pmvee_mappings_info_t) * ((*mapping_count) - (mapping_i + 2))
+                        sizeof(struct pmvee_mappings_info_t) * ((*mapping_count) - (mapping_i))
                     );
                     (*mapping_count)++;
                 }
@@ -429,19 +441,21 @@ void mmap_table::add_address_to_mmap(unsigned long address, size_t size, unsigne
                 break;
             else if (mappings[mapping_i_next].end <= end)
             {
+        // warnf(" > 6\n");
                 memmove(
                     &mappings[mapping_i_next],
                     &mappings[mapping_i_next + 1],
-                    sizeof(struct pmvee_mappings_info_t) * ((*mapping_count) - (mapping_i_next + 1))
+                    sizeof(struct pmvee_mappings_info_t) * ((*mapping_count) - (mapping_i_next))
                 );
                 (*mapping_count)--;
             }
             else if (mappings[mapping_i_next].start < end)
             {
+        // warnf(" > 6\n");
                 memmove(
                     &mappings[mapping_i_next + 1],
                     &mappings[mapping_i_next],
-                    sizeof(struct pmvee_mappings_info_t) * ((*mapping_count) - (mapping_i_next + 1))
+                    sizeof(struct pmvee_mappings_info_t) * ((*mapping_count) - (mapping_i_next))
                 );
                 mappings[mapping_i_next].start = end;
                 (*mapping_count)++;
@@ -449,11 +463,12 @@ void mmap_table::add_address_to_mmap(unsigned long address, size_t size, unsigne
             }
             else if (mappings[mapping_i_next].prot == mappings[mapping_i].prot)
             {
+        // warnf(" > 8\n");
                 mappings[mapping_i].end = mappings[mapping_i_next].end;
                 memmove(
                     &mappings[mapping_i_next],
                     &mappings[mapping_i_next + 1],
-                    sizeof(struct pmvee_mappings_info_t) * ((*mapping_count) - (mapping_i_next + 1))
+                    sizeof(struct pmvee_mappings_info_t) * ((*mapping_count) - (mapping_i_next))
                 );
                 (*mapping_count)--;
                 break;
@@ -468,6 +483,8 @@ void mmap_table::add_address_to_mmap(unsigned long address, size_t size, unsigne
 
 void mmap_table::remove_address_from_mmap(unsigned long address, size_t size)
 {
+    // warnf(" > removing\n");
+    // print_simple_addresses(simple_mappings);
     unsigned long* mapping_count = simple_mappings;
     struct pmvee_mappings_info_t* mappings = (struct pmvee_mappings_info_t*)(simple_mappings + 1);
 
@@ -483,15 +500,23 @@ void mmap_table::remove_address_from_mmap(unsigned long address, size_t size)
 
     if (mapping_i == (*mapping_count))
     {
+        // warnf(" > early\n");
         // print_simple_addresses(simple_mappings);
         return;
     }
 
-
     if (start > mappings[mapping_i].start)
     {
+        // warnf(" > 1\n");
+        // memmove(
+        //     &mappings[mapping_i + 1],
+        //     &mappings[mapping_i],
+        //     sizeof(struct pmvee_mappings_info_t) * ((*mapping_count) - (mapping_i))
+        // );
+        // (*mapping_count)++;
         mappings[mapping_i].end = start;
         mapping_i++;
+        // mappings[mapping_i].start = start;
         if ((mapping_i) >= (*mapping_count))
         {
             // print_simple_addresses(simple_mappings);
@@ -501,16 +526,20 @@ void mmap_table::remove_address_from_mmap(unsigned long address, size_t size)
 
     while ((mapping_i + 1) < (*mapping_count) && mappings[mapping_i].end <= end)
     {
+        // warnf(" > 2\n");
         memmove(
             &mappings[mapping_i],
             &mappings[mapping_i + 1],
-            sizeof(struct pmvee_mappings_info_t) * ((*mapping_count) - (mapping_i + 1))
+            sizeof(struct pmvee_mappings_info_t) * ((*mapping_count) - (mapping_i))
         );
         (*mapping_count)--;
     }
 
-    if (mappings[mapping_i].start < end)
+    if (mappings[mapping_i].end <= end && mappings[mapping_i].start < end)
+    {
+        // warnf(" > huh?");
         mappings[mapping_i].start = end;
+    }
     
     // print_simple_addresses(simple_mappings);
 }
@@ -700,6 +729,7 @@ void monitor::call_jump_to_equivalent_function_addresses ()
             {
                 interaction::write_specific_reg(variants[variant_i].variantpid, RSP * 8, variants[variant_i].rollback_rsp);
                 interaction::write_specific_reg(variants[variant_i].variantpid, RIP * 8, jump[variant_i]);
+                // warnf("jumping to 0x%lx\n", jump[variant_i]);
             }
             return;
         }
@@ -731,6 +761,7 @@ void monitor::call_jump_to_equivalent_function_addresses ()
         // unsigned long offset = address;
         // address += set_mmap_table->find_image_base(variant_i, (alias != "" ? alias : lib).c_str());
         interaction::write_specific_reg(variants[variant_i].variantpid, RIP * 8, address);
+        // warnf("jumping to 0x%lx\n", address);
     }
 }
 
@@ -1236,7 +1267,7 @@ connected_region_info::~connected_region_info()
 }
 
 
-#if 1
+#if 0
 unsigned long monitor::pmvee_translate_at_index(int numvariants, unsigned long** addresses, unsigned long index)
 {
     unsigned long address = addresses[0][index];

@@ -313,7 +313,8 @@ unsigned char monitor::call_precall_get_call_type (int variantnum, long callnum)
                         ARG1(variantnum) == PMVEE_COMMUNICATION_REQUEST ||
                         ARG1(variantnum) == PMVEE_MAPPINGS_REQUEST ||
                         ARG1(variantnum) == PMVEE_MIGRATION_INFO_REQUEST ||
-                        ARG1(variantnum) == PMVEE_ZONE_REQUEST)
+                        ARG1(variantnum) == PMVEE_ZONE_REQUEST ||
+                        ARG1(variantnum) == PMVEE_DICT_REQUEST)
                 {
                     variants[variantnum].pmvee_state = ARG1(variantnum);
                     result = MVEE_CALL_TYPE_UNSYNCED;
@@ -344,7 +345,11 @@ unsigned char monitor::call_precall_get_call_type (int variantnum, long callnum)
                     pmvee_state_copy_zone.state_copy_start = variants[0].regs.rsi;
                     pmvee_state_copy_zone.state_alter_start = variants[0].regs.rdx;
                     pmvee_state_copy_zone.state_copy_end = variants[0].regs.r10;
+                    #ifndef PMVEE_MICROBENCHMARK_ENTER_EXIT
+                    #ifndef PMVEE_MIGRATION_AFTER_RESUME
                     copy_migration(); // TODO: Make this between two given variants.
+                    #endif
+                    #endif
                 }
                 else if (variants[variantnum].pmvee_communication_id != -1 &&
                         !variants[variantnum].pmvee_communication_pt)
@@ -801,7 +806,10 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
                 {
                     debugf(">PMVEE_ZONE_REQUEST\n\n");
                     if (variantnum)
-                        shutdown(false);
+                    {
+                        result = MVEE_CALL_DENY | MVEE_CALL_RETURN_EXTENDED_VALUE;
+                        variants[variantnum].extended_value = pmvee_copy_zone;
+                    }
                     if (!pmvee_copy_zone)
                         pmvee_copy_zone = set_mmap_table->calculate_joint_base(PMVEE_ZONE_DEFAULT_SIZE, 1);
                     SETSYSCALLNO(variantnum, __NR_mmap);
@@ -887,6 +895,32 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
                     }
                     result = MVEE_CALL_ALLOW;
                 }
+                else if (variants[variantnum].pmvee_state == PMVEE_DICT_REQUEST)
+                {
+                    debugf(">PMVEE_DICT_REQUEST\n\n");
+                    unsigned long address = set_mmap_table->calculate_data_mapping_base(PMVEE_DICT_DEFAULT_SIZE);
+                    if (address == (unsigned long)-1)
+                    {
+                        warnf(" > could not find location\n");
+                        shutdown(false);
+                    }
+                    variants[variantnum].regs.orig_rax = __NR_mmap;
+                    variants[variantnum].regs.rax = __NR_mmap;
+                    variants[variantnum].regs.rdi = address;
+                    variants[variantnum].regs.rsi = PMVEE_DICT_DEFAULT_SIZE;
+                    variants[variantnum].regs.rdx = PROT_READ | PROT_WRITE;
+                    variants[variantnum].regs.r10 = MAP_ANONYMOUS | MAP_PRIVATE;
+                    variants[variantnum].regs.r8  = -1;
+                    variants[variantnum].regs.r9  = 0;
+                    
+	                if (!interaction::write_all_regs(variants[variantnum].variantpid, &variants[variantnum].regs))
+                    {
+                        warnf(" > Could not write registers to variant %d for injecting shmat call | erno: %d\n",
+                                variantnum, errno);
+                        shutdown(false);
+                    }
+                    result = MVEE_CALL_ALLOW;
+                }
                 else if (variants[variantnum].pmvee_state == PMVEE_MAPPINGS_REQUEST)
                 {
                     debugf(">PMVEE_MAPPINGS_REQUEST | %d\n\n", simple_mappings_id);
@@ -929,6 +963,7 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
 
                     if (!variantnum)
                     {
+                        #ifndef PMVEE_MICROBENCHMARK_ENTER_EXIT
                         if (pmvee_zone_pt == (unsigned long) -1)
                             pmvee_zone_pt = variants[0].regs.rdi;
                         pmvee_state_copy_zone.state_copy_start = variants[0].regs.rsi;
@@ -936,6 +971,7 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
                         pmvee_state_copy_zone.state_copy_end = variants[0].regs.r10;
                         copy_migration();
                         SET_MULTI_EXEC(1);
+                        #endif
                     }
 
                     debugf(" [%d] swtich <%d> [ 0x%lx ; 0x%lx )\n", variantnum, variants[0].variantpid,
@@ -947,6 +983,7 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
                     // r10: size_one
                     // r08: size_two
                     // r09: flags
+                    #ifndef PMVEE_MICROBENCHMARK_ENTER_EXIT
                     variants[variantnum].regs.rdi = variants[0].variantpid;
                     variants[variantnum].regs.rsi = variantnum ? 0 : (mvee::numvariants > 1 ? variants[1].variantpid : 0);
                     variants[variantnum].regs.rdx = mp_start;
@@ -959,6 +996,7 @@ long monitor::call_call_dispatch_unsynced (int variantnum)
                     #endif
 
                     interaction::write_all_regs(variants[variantnum].variantpid, &variants[variantnum].regs);
+                    #endif
                     result = MVEE_CALL_ALLOW;
                 }
                 break;
@@ -1429,6 +1467,7 @@ long monitor::call_call_dispatch ()
                 pmvee_state_copy_zone.state_alter_start = variants[0].regs.rdx;
                 pmvee_state_copy_zone.state_copy_end = variants[0].regs.r10;
 
+                #ifndef PMVEE_MICROBENCHMARK_ENTER_EXIT
                 for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
                 {
                     // rdi: source
@@ -1439,6 +1478,7 @@ long monitor::call_call_dispatch ()
                     // r09: flags
                     debugf(" [%d] swtich <%d> [ 0x%lx ; 0x%lx )\n", variant_i, variants[0].variantpid,
                             (unsigned long) mp_start, (unsigned long) (mp_start + mp_size));
+                    #ifndef PMVEE_MICROBENCHMARK_ENTER_EXIT
                     variants[variant_i].regs.rdi = variants[0].variantpid;
                     variants[variant_i].regs.rsi = variants[variant_i].variantpid;
                     variants[variant_i].regs.rdx = mp_start;
@@ -1451,10 +1491,16 @@ long monitor::call_call_dispatch ()
                     #endif
 
                     interaction::write_all_regs(variants[variant_i].variantpid, &variants[variant_i].regs);
+                    #endif
                 }
+                #endif
                 SET_MULTI_EXEC(1);
 
+                #ifdef PMVEE_MIGRATION_AFTER_RESUME
+                result = MVEE_CALL_ALLOW | MVEE_CALL_MIGRATE;
+                #else
                 result = MVEE_CALL_ALLOW;
+                #endif
                 break;
             }
             case __NR_pmvee_check:
@@ -1471,6 +1517,7 @@ long monitor::call_call_dispatch ()
                     // r09: flags
                     if (variants[variant_i].rollback_rsp == (unsigned long) -1)
                         variants[variant_i].rollback_rsp = variants[variant_i].regs.rdi;
+                    #ifndef PMVEE_MICROBENCHMARK_ENTER_EXIT
                     variants[variant_i].regs.rdi = variants[0].variantpid;
                     variants[variant_i].regs.rsi = variants[variant_i].variantpid;
                     variants[variant_i].regs.rdx = mp_start;
@@ -1483,6 +1530,7 @@ long monitor::call_call_dispatch ()
                     #endif
 
                     interaction::write_all_regs(variants[variant_i].variantpid, &variants[variant_i].regs);
+                    #endif
                 }
 
                 result = MVEE_CALL_ALLOW;
@@ -1598,6 +1646,16 @@ long monitor::call_postcall_return_unsynced (int variantnum)
                 }
                 SETARG1(variantnum, pmvee_state_copy_zone.state_copy_start - pmvee_zone_pt);
             }
+            else if (variants[variantnum].pmvee_state == PMVEE_DICT_REQUEST)
+            {
+                set_mmap_table->map_range(variantnum, call_postcall_get_variant_result(variantnum), PMVEE_DICT_DEFAULT_SIZE, MAP_PRIVATE | MAP_ANONYMOUS, PROT_WRITE | PROT_READ, nullptr, 0, nullptr);
+                if (variants[variantnum].pmvee_communication_pt == (unsigned long)-1)
+                {
+                    warnf(" > Could not write registers to variant %d for injecting shmat call | erno: %d\n",
+                            variantnum, errno);
+                    shutdown(false);
+                }
+            }
             else if (variants[variantnum].pmvee_state == PMVEE_MAPPINGS_REQUEST)
             {
                 simple_mappings_pt = call_postcall_get_variant_result(variantnum);
@@ -1631,11 +1689,13 @@ long monitor::call_postcall_return_unsynced (int variantnum)
                 // warnf(" > assumed alter size: %ld - %ld = %ld\n", pmvee_state_copy_zone.state_alter_start, pmvee_state_copy_zone.state_copy_end, pmvee_state_copy_zone.state_copy_end - pmvee_state_copy_zone.state_alter_start);
                 // warnf(" > assumed total size: %ld - %ld = %ld\n", pmvee_state_copy_zone.state_copy_end, pmvee_zone_pt, pmvee_state_copy_zone.state_copy_end - pmvee_zone_pt);
                 // warnf(" > 0x%lx - 0x%lx - 0x%lx - 0x%lx\n", pmvee_zone_pt, pmvee_state_copy_zone.state_copy_start, pmvee_state_copy_zone.state_alter_start, pmvee_state_copy_zone.state_copy_end);
+                #ifndef PMVEE_MICROBENCHMARK_ENTER_EXIT
                 variants[variantnum].regs.rdi = pmvee_state_copy_zone.state_copy_start - pmvee_zone_pt;
 
                 variants[variantnum].regs.rax = variants[variantnum].pmvee_communication_pt;
                 variants[variantnum].regs.orig_rax = variants[variantnum].pmvee_communication_pt;
                 interaction::write_all_regs(variants[variantnum].variantpid, &variants[variantnum].regs);
+                #endif
             }
             result = MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
         }
@@ -1695,12 +1755,14 @@ long monitor::call_postcall_return ()
                     debugf(" > assumed aler size: %ld - %ld = %ld\n", pmvee_state_copy_zone.state_alter_start, pmvee_state_copy_zone.state_copy_start, pmvee_state_copy_zone.state_copy_start - pmvee_state_copy_zone.state_copy_start);
                     debugf(" > assumed total size: %ld - %ld = %ld\n", pmvee_state_copy_zone.state_copy_end, pmvee_zone_pt, pmvee_state_copy_zone.state_copy_end - pmvee_zone_pt);
                     debugf(" > 0x%lx - 0x%lx - 0x%lx - 0x%lx\n", pmvee_zone_pt, pmvee_state_copy_zone.state_copy_start, pmvee_state_copy_zone.state_alter_start, pmvee_state_copy_zone.state_copy_end);
+                    #ifndef PMVEE_MICROBENCHMARK_ENTER_EXIT
                     variants[variant_i].regs.rdi = pmvee_state_copy_zone.state_copy_start - pmvee_zone_pt;
                     // convert_equivalent_pointer_array();
 
                     variants[variant_i].regs.rax = variants[variant_i].pmvee_communication_pt;
                     variants[variant_i].regs.orig_rax = variants[variant_i].pmvee_communication_pt;
                     interaction::write_all_regs(variants[variant_i].variantpid, &variants[variant_i].regs);
+                    #endif
                 }
             }
         }
