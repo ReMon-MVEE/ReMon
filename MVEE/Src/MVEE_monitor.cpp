@@ -1575,6 +1575,7 @@ void monitor::handle_exit_event(int index)
 
     debugf("%s - received SIGTERM\n", 
 		   call_get_variant_pidstr(index).c_str());
+    log_backtraces();
 
 	// we treat this as an entrance to a sys_exit call so
 	// we can detect divergences where one variant is shut down
@@ -1924,6 +1925,17 @@ void monitor::handle_syscall_entrance_event(int index)
 		}
 
 		call_resume_all();
+
+		if (call_flags & MVEE_CALL_MIGRATE)
+		{
+            #ifndef PMVEE_MICROBENCHMARK_ENTER_EXIT
+            #ifdef PMVEE_MIGRATION_AFTER_RESUME
+			copy_migration();
+            #endif
+            #endif
+			return;
+		}
+
 		return;
 	}
 	// Arguments do not match
@@ -3487,6 +3499,7 @@ void* monitor::thread(void* param)
 				debugf("wait failed - error: %s - status: %s\n", 
 					   getTextualErrno(errno),
 					   getTextualMVEEWaitStatus(status).c_str());
+                mon->set_mmap_table->print_mmap_table();
                 mon->log_backtraces();
             }
 		}

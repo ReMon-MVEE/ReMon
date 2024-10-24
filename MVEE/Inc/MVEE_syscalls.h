@@ -193,6 +193,7 @@
 #define MVEE_CALL_RETURN_ERROR(a) (0x0004 | (a << 6))               // Used in conjunction with MVEE_CALL_DENY. Return error <a> from the denied syscall (this is equivalent to MVEE_CALL_RETURN_VALUE(-a))
 #define MVEE_CALL_RETURN_VALUE(a) (0x0008 | (a << 6))               // Used in conjunction with MVEE_CALL_DENY. Return value <a> from the denied syscall
 #define MVEE_CALL_RETURN_EXTENDED_VALUE   0x0010                    // Used in conjunction with MVEE_CALL_DENY. Return value <variants[].extended_value> from the denied syscall (we need this for word-sized return values)
+#define MVEE_CALL_MIGRATE                 0x0020                    // Used to signify we have to migrate state
 
 // Possible return values of the POSTCALL system call handler
 #define MVEE_POSTCALL_RESUME              0x0000                    // Default return value for postcall handlers. Resume the variant(s) from the syscall exit site
