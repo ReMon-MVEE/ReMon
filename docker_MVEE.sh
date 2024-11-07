@@ -10,7 +10,14 @@ set -o nounset
 # - 'run' (default) => runs the docker, in which you can build and use the MVEE
 # - 'dev'           => runs the docker in development mode (all sources are mounted to re-compile)
 
-IMAGE=remon
+# Check the number of parameters
+if [ "$#" -ne 2 ]; then
+    echo "Illegal number of parameters. Expected a version and a mode.."
+    exit 1
+fi
+VERSION=$1
+
+IMAGE="remon:${VERSION}"
 BUILD_DIR=$PWD/build
 DEPS_DIR=$PWD/deps
 SHARED_PROJECTS_DIR=$PWD/ext
@@ -23,14 +30,14 @@ build_docker() {
         exit 1
     fi
 
-    docker build . -t $IMAGE
+    docker build --file Dockerfile.${VERSION} --tag $IMAGE .
 }
 
 download_deps() {
     git submodule update --init --recursive
 
     # Set the version for the patched libc
-    ./scripts/switch_patched_binaries.sh ubuntu20
+    ./scripts/switch_patched_binaries.sh "ubuntu${VERSION}"
 }
 
 run_docker() {
@@ -74,14 +81,7 @@ run_docker() {
     x11docker $X11DOCKER_OPTIONS -- $DOCKER_OPTIONS -- $IMAGE bash -l
 }
 
-# Check the number of parameters
-if [ "$#" -ne 1 ]; then
-    echo "No mode specified, trying to just run the docker."
-    mode="run"
-else
-    mode="$1"
-fi
-
+mode="$2"
 case "$mode" in
     build)
         build_docker

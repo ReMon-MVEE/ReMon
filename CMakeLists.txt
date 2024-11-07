@@ -274,7 +274,6 @@ else()
     target_link_options(mvee PRIVATE
             -flto
             -O3
-            -static
             -s
     )
 
@@ -283,7 +282,6 @@ else()
             -O3
             -ffast-math
             -std=c++14
-            -static
             -fvisibility=hidden
     )
 endif()
