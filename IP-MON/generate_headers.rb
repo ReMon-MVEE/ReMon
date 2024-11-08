@@ -1,4 +1,5 @@
 #!/usr/bin/env ruby
+require 'fileutils'
 
 @syscalls      = Hash.new    # maps syscall number onto syscall name
 @unchecked     = Array.new   # all of the calls we may possibly allow to go through unchecked
@@ -8,17 +9,13 @@
 @precall       = Array.new
 @postcall      = Array.new
 
-def md5(file)
-  ret=`md5sum #{file} | cut -d' ' -f1`
-end
-
 def replace_if_different(oldfile, newfile)
-  if (not File.exists?(oldfile)) or (md5(oldfile) != md5(newfile))
+  if not FileUtils.identical?(oldfile, newfile)
     print("#{oldfile} > File has changed.\n")
-    `mv #{newfile} #{oldfile}`
+    FileUtils.mv(newfile, oldfile)
   else
     print("#{oldfile} > File has not changed.\n")
-    `rm #{newfile}`
+    FileUtils.rm(newfile)
   end
 end
 

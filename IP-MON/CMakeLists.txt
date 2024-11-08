@@ -11,6 +11,7 @@ set(generated_headers_list
 
 add_custom_command(
   OUTPUT  ${generated_headers_list}
+  COMMAND touch -a ${generated_headers_list}
   COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/generate_headers.rb
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/MVEE_ipmon.cpp
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
