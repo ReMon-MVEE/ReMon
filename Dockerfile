@@ -34,7 +34,7 @@ RUN \
 RUN rm -rf /opt/source/*
 
 # Set environment variable in container, so when building MVEE we know all dependencies can be found in /usr
-ENV MVEE_DEPS_PRESENT_IN_SYSTEM yes
+ENV MVEE_DEPS_PRESENT_IN_SYSTEM=yes
 ENV PATH="${PATH}:/opt/deps/llvm/build-tree/bin/"
 
 ################################################################################################################################################################
