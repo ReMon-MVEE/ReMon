@@ -509,13 +509,13 @@ const char* getTextualProcmaskRequest(int how)
 }
 
 /*-----------------------------------------------------------------------------
-    getTextualFutexOp
+    getTextualFutexCmd
 -----------------------------------------------------------------------------*/
-const char* getTextualFutexOp(int op)
+const char* getTextualFutexCmd(int cmd)
 {
-    const char* result = "(unknown)";
+	const char* result = "(unknown)";
 
-    switch(op)
+    switch(cmd)
     {
         DEF_CASE(FUTEX_WAIT);
         DEF_CASE(FUTEX_WAKE);
@@ -530,22 +530,21 @@ const char* getTextualFutexOp(int op)
         DEF_CASE(FUTEX_WAKE_BITSET);
         DEF_CASE(FUTEX_WAIT_REQUEUE_PI);
         DEF_CASE(FUTEX_CMP_REQUEUE_PI);
-        DEF_CASE(FUTEX_WAIT_PRIVATE);
-        DEF_CASE(FUTEX_WAKE_PRIVATE);
-        DEF_CASE(FUTEX_REQUEUE_PRIVATE);
-        DEF_CASE(FUTEX_CMP_REQUEUE_PRIVATE);
-        DEF_CASE(FUTEX_WAKE_OP_PRIVATE);
-        DEF_CASE(FUTEX_LOCK_PI_PRIVATE);
-        DEF_CASE(FUTEX_UNLOCK_PI_PRIVATE);
-        DEF_CASE(FUTEX_TRYLOCK_PI_PRIVATE);
-        DEF_CASE(FUTEX_WAIT_BITSET_PRIVATE);
-        DEF_CASE(FUTEX_WAKE_BITSET_PRIVATE);
-        DEF_CASE(FUTEX_WAIT_REQUEUE_PI_PRIVATE);
-        DEF_CASE(FUTEX_CMP_REQUEUE_PI_PRIVATE);
         DEF_CASE(MVEE_FUTEX_WAIT_TID);
     }
 
     return result;
+}
+
+/*-----------------------------------------------------------------------------
+    getTextualFutexOp
+-----------------------------------------------------------------------------*/
+std::string getTextualFutexOp(int op)
+{
+    std::string result = getTextualFutexCmd(op & FUTEX_CMD_MASK);
+    TEST_FLAG(op, FUTEX_PRIVATE_FLAG,   result);
+    TEST_FLAG(op, FUTEX_CLOCK_REALTIME, result);
+	return result;
 }
 
 /*-----------------------------------------------------------------------------

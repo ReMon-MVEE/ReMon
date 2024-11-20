@@ -8931,7 +8931,7 @@ LOG_ARGS(futex)
 	debugf("%s - SYS_FUTEX(0x" PTRSTR ", %s, %u, %s, 0x" PTRSTR ", %u)\n",
 		   call_get_variant_pidstr(variantnum).c_str(), 
 		   (unsigned long)ARG1(variantnum),
-		   getTextualFutexOp(ARG2(variantnum)), 
+		   getTextualFutexOp(ARG2(variantnum)).c_str(),
 		   (unsigned int)ARG3(variantnum),
 		   timestr.str().c_str(),
 		   (unsigned long)ARG5(variantnum),
