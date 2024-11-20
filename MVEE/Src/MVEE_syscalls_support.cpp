@@ -1016,7 +1016,9 @@ sigset_t monitor::call_get_sigset(int variantnum, void* sigset_ptr, bool is_old_
         }
         else
         {
-            if (!rw::read_struct(variants[variantnum].variantpid, sigset_ptr, sizeof(sigset_t), &set))
+            // Note: we don't read a struct with size sizeof(sigset_t) because this is unnecessarily large (128 bytes)
+            // The entire struct of that size does not actually exist, so trying to read it might cause errors.
+            if (!rw::read_struct(variants[variantnum].variantpid, sigset_ptr, sizeof(unsigned long int), &set))
 				throw RwMemFailure(variantnum, "read sigset (new)");
         }
     }
