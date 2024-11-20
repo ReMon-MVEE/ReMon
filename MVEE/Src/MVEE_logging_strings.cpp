@@ -531,6 +531,7 @@ const char* getTextualFutexCmd(int cmd)
         DEF_CASE(FUTEX_WAIT_REQUEUE_PI);
         DEF_CASE(FUTEX_CMP_REQUEUE_PI);
         DEF_CASE(MVEE_FUTEX_WAIT_TID);
+        DEF_CASE(MVEE_FUTEX_WAIT_BITSET_TID);
     }
 
     return result;

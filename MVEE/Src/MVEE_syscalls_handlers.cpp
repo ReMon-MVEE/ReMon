@@ -8971,6 +8971,11 @@ CALL(futex)
         mvee_bit = true;
         op = FUTEX_WAIT;
     }
+    if (op == MVEE_FUTEX_WAIT_BITSET_TID)
+    {
+        mvee_bit = true;
+        op = FUTEX_WAIT_BITSET;
+    }
 
     if (mvee_bit)
     {
@@ -8997,7 +9002,7 @@ POSTCALL(futex)
 	{
 		int op = ARG2(0) & FUTEX_CMD_MASK;
 		// sync the tids
-		if (op == MVEE_FUTEX_WAIT_TID)
+		if ((op == MVEE_FUTEX_WAIT_TID) || (op == MVEE_FUTEX_WAIT_BITSET_TID))
 		{
 			pid_t master_pid;
 			if (!rw::read_primitive<int>(variants[0].variantpid, (void*) ARG1(0), master_pid))

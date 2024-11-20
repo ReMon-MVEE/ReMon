@@ -43,6 +43,7 @@ typedef void (monitor:: *mvee_syscall_logger)(int);
 #define S_FILEMODEMASK                     (S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IWGRP | S_IXGRP | S_IROTH | S_IWOTH | S_IXOTH)
 #define MAP_MVEE_WASSHARED                 0x800000
 #define MVEE_FUTEX_WAIT_TID                30
+#define MVEE_FUTEX_WAIT_BITSET_TID         31
 #define PR_REGISTER_IPMON                  0xb00b135
 #define ENOIPMON                           256
 
