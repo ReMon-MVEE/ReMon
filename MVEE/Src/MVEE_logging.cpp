@@ -18,6 +18,7 @@
 #include <iomanip>
 #include <vector>
 #include <algorithm>
+#include <functional>
 #include <numeric>
 #include <execinfo.h>
 #include <sys/mman.h>
@@ -1069,7 +1070,7 @@ void monitor::log_calculate_clock_spread()
 	mean = std::accumulate(cntrs.begin(), cntrs.end(), 0.0) / cntrs.size();
 	std::vector<double> diff(cntrs.size());
 	std::transform(cntrs.begin(), cntrs.end(), diff.begin(), 
-				   std::bind2nd(std::minus<double>(), mean));
+				   std::bind(std::minus<double>(), std::placeholders::_1, mean));
 	variance = std::inner_product(diff.begin(), diff.end(), 
 						   diff.begin(), 0.0) / (cntrs.size() - 1);
 
