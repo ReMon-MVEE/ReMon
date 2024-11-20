@@ -8943,16 +8943,6 @@ PRECALL(futex)
 #ifndef MVEE_DISABLE_SYNCHRONIZATION_REPLICATION
     CHECKARG(2);
 
-    // if CLONE_CLEARTID is set, the kernel will clear
-    // the tid and cause a futex wake on the tid address
-    // the kernel (obviously) cannot guarantuee that it will
-    // have cleared all tids by the time the master returns
-    //
-    // we therefore changed the futex op for LLL_(TIMED)WAIT_TID
-    // this way, we can MANUALLY clear the tid if needed
-    if (ARG2(0) == MVEE_FUTEX_WAIT_TID)
-        SETARG2(0, FUTEX_WAIT);
-
     REPLACE_SHARED_POINTER_ARG(0, 1)
 
     return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_MASTER;
@@ -8967,13 +8957,34 @@ CALL(futex)
 		return MVEE_CALL_ALLOW;
 
 #ifndef MVEE_DISABLE_SYNCHRONIZATION_REPLICATION
-    // tid was already cleared
-    if (ARG2(0) == MVEE_FUTEX_WAIT_TID && ARG3(0) == 0)
+    // if CLONE_CLEARTID is set, the kernel will clear
+    // the tid and cause a futex wake on the tid address
+    // the kernel (obviously) cannot guarantuee that it will
+    // have cleared all tids by the time the master returns
+    //
+    // we therefore changed the futex op for LLL_(TIMED)WAIT_TID
+    // this way, we can MANUALLY clear the tid if needed
+    int op = ARG2(0) & FUTEX_CMD_MASK;
+    bool mvee_bit = false;
+    if (op == MVEE_FUTEX_WAIT_TID)
     {
-        // clear it for the slaves too and deny the call
-        for (int i = 1; i < mvee::numvariants; ++i)
-			rw::write_primitive<unsigned int>(variants[i].variantpid, (void*) ARG1(i), 0);
-        return MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
+        mvee_bit = true;
+        op = FUTEX_WAIT;
+    }
+
+    if (mvee_bit)
+    {
+        // Clear the flag
+        SETARG2(0, (ARG2(0) & !FUTEX_CMD_MASK) | op);
+
+        // tid was already cleared
+        if (ARG3(0) == 0)
+        {
+            // clear it for the slaves too and deny the call
+            for (int i = 1; i < mvee::numvariants; ++i)
+                rw::write_primitive<unsigned int>(variants[i].variantpid, (void*) ARG1(i), 0);
+            return MVEE_CALL_DENY | MVEE_CALL_RETURN_VALUE(0);
+        }
     }
 #endif
     return MVEE_CALL_ALLOW;
@@ -8984,8 +8995,9 @@ POSTCALL(futex)
 #ifndef MVEE_DISABLE_SYNCHRONIZATION_REPLICATION
 	if IS_SYNCED_CALL
 	{
+		int op = ARG2(0) & FUTEX_CMD_MASK;
 		// sync the tids
-		if (ARG2(0) == MVEE_FUTEX_WAIT_TID)
+		if (op == MVEE_FUTEX_WAIT_TID)
 		{
 			pid_t master_pid;
 			if (!rw::read_primitive<int>(variants[0].variantpid, (void*) ARG1(0), master_pid))
