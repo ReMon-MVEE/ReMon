@@ -4720,7 +4720,7 @@ PRECALL(send)
 -----------------------------------------------------------------------------*/
 LOG_ARGS(recvfrom)
 {
-	int len;
+    int len;
 
     // addrlen might be NULL. If it is, don't read (and cause a NULL dereference..) but just set len to 0
     if (ARG6(variantnum))
@@ -4731,14 +4731,14 @@ LOG_ARGS(recvfrom)
     else
         len = 0;
 
-	debugf("%s - SYS_RECVFROM(%d, " PTRSTR ", %zd, %u = %s, 0x" PTRSTR ", %d)\n",
-		   call_get_variant_pidstr(variantnum).c_str(),
-		   (int)ARG1(variantnum), 
-		   (unsigned long)ARG2(variantnum),
-		   (size_t)ARG3(variantnum),
-		   (unsigned int)ARG4(variantnum), getTextualSocketMsgFlags(ARG4(variantnum)).c_str(),
-		   (unsigned long)ARG5(variantnum),
-		   len);
+    debugf("%s - SYS_RECVFROM(%d, " PTRSTR ", %zd, %u = %s, 0x" PTRSTR ", %d)\n",
+           call_get_variant_pidstr(variantnum).c_str(),
+           (int)ARG1(variantnum),
+           (unsigned long)ARG2(variantnum),
+           (size_t)ARG3(variantnum),
+           (unsigned int)ARG4(variantnum), getTextualSocketMsgFlags(ARG4(variantnum)).c_str(),
+           (unsigned long)ARG5(variantnum),
+           len);
 }
 
 PRECALL(recvfrom)
