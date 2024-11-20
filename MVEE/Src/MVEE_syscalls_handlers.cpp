@@ -825,7 +825,7 @@ POSTCALL(open)
 		std::vector<std::string> resolved_paths(mvee::numvariants);
 		std::vector<unsigned long> path_ptrs(mvee::numvariants);
 
-		FILLARGARRAY(1, path_ptrs);
+		FILLARGARRAY(1, unsigned long, path_ptrs);
 
 		if (!call_resolve_open_paths(fds, path_ptrs, resolved_paths, unsynced_access))
 		{
@@ -2048,7 +2048,7 @@ POSTCALL(creat)
 		std::vector<std::string> resolved_paths(mvee::numvariants);
 		std::vector<unsigned long> path_ptrs(mvee::numvariants);
 
-		FILLARGARRAY(1, path_ptrs);
+		FILLARGARRAY(1, unsigned long, path_ptrs);
 
 		if (!call_resolve_open_paths(fds, path_ptrs, resolved_paths, unsynced_access))
 		{
@@ -3910,7 +3910,7 @@ PRECALL(munmap)
 
 	// finally, check whether these are writeback regions
 	std::vector<unsigned long> addresses(mvee::numvariants);
-	FILLARGARRAY(1, addresses);
+	FILLARGARRAY(1, unsigned long, addresses);
 	if (set_mmap_table->foreach_region(addresses, ARG2(0), this, handle_munmap_precall_callback) != 0)
 		return MVEE_PRECALL_ARGS_MISMATCH(1) | MVEE_PRECALL_CALL_DENY;
 
@@ -10056,7 +10056,7 @@ POSTCALL(openat)
 		std::vector<std::string> resolved_paths(mvee::numvariants);
 		std::vector<unsigned long> path_ptrs(mvee::numvariants);
 
-		FILLARGARRAY(2, path_ptrs);
+		FILLARGARRAY(2, unsigned long, path_ptrs);
 
 		if (!call_resolve_open_paths(fds, path_ptrs, resolved_paths, unsynced_access, ARG1(0)))
 		{
@@ -10778,7 +10778,7 @@ PRECALL(utimensat)
     CHECKARG(4);
     CHECKFD(1);
 
-    FILLARGARRAY(2, argarray);
+    FILLARGARRAY(2, const char*, argarray);
     bool should_compare = true;
     for (int i = 0; i < mvee::numvariants; ++i)
         if (!argarray[i])

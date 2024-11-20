@@ -28,9 +28,9 @@
 //
 // Fill an array with the values of a syscall argument in all variants
 //
-#define FILLARGARRAY(numarg, argarray) do {						\
+#define FILLARGARRAY(numarg, value_type, argarray) do {		    \
         for (int i = 0; i < mvee::numvariants; ++i)				\
-            *(unsigned long*)&argarray[i] = ARG ## numarg(i);	\
+            argarray[i] = (value_type) ARG ## numarg(i);	    \
 } while (0)
 
 //
@@ -39,7 +39,7 @@
 #define CHECKPOINTER(numarg)                                                                 \
     {                                                                                        \
         std::vector<void*> pointers(mvee::numvariants);					                     \
-        FILLARGARRAY(numarg, pointers);                                                      \
+        FILLARGARRAY(numarg, void*, pointers);                                               \
         if (call_compare_pointers(pointers) == 1)                                            \
         {                                                                                    \
             cache_mismatch_info("argument %d mismatch - pointer null-nonnull - syscall: %ld (%s)\n", \
@@ -153,7 +153,7 @@
 	if (ARG ## numarg(0))												\
 	{																	\
 		std::vector<fd_set*> pointers(mvee::numvariants);			\
-		FILLARGARRAY(numarg, pointers);									\
+		FILLARGARRAY(numarg, fd_set*, pointers);						\
 		if (!call_compare_fd_sets(pointers, nfds))						\
 		{																\
 			cache_mismatch_info("argument %d mismatch - fd_sets - syscall: %ld (%s)\n",	\
@@ -170,7 +170,7 @@
     if (ARG ## numarg(0) && len > 0)                                                    \
     {                                                                                   \
         std::vector<const unsigned char*> argarray(mvee::numvariants);                         \
-        FILLARGARRAY(numarg, argarray);                                                 \
+        FILLARGARRAY(numarg, const unsigned char*, argarray);                           \
         if (!call_compare_variant_buffers(argarray, len))				\
         {                                                                               \
             cache_mismatch_info("buffer contents mismatch - argument %d - syscall: %ld (%s)\n", \
@@ -187,7 +187,7 @@
     if (ARG ## numarg(0))                                                       \
     {                                                                           \
         std::vector<const char*> argarray(mvee::numvariants);                 \
-        FILLARGARRAY(numarg, argarray);                                         \
+        FILLARGARRAY(numarg, const char*, argarray);                            \
         if (!call_compare_variant_strings(argarray, 0))                           \
         {                                                                       \
             cache_mismatch_info("strings mismatch - argument %d - syscall: %ld (%s)\n", \
@@ -203,7 +203,7 @@
 #define CHECKSIGHAND(numarg)                                                    \
     {                                                                           \
         std::vector<unsigned long> argarray(mvee::numvariants);                 \
-        FILLARGARRAY(numarg, argarray);                                         \
+        FILLARGARRAY(numarg, unsigned long, argarray);                          \
         if (!call_compare_signal_handlers(argarray))                            \
         {                                                                       \
             cache_mismatch_info("sighand mismatch - argument %d - syscall: %ld (%s)\n", \
@@ -219,7 +219,7 @@
 #define CHECKREGION(numarg, len)                                                      \
     {                                                                                 \
         std::vector<unsigned long> addresses(mvee::numvariants);                      \
-        FILLARGARRAY(numarg, addresses);                                              \
+        FILLARGARRAY(numarg, unsigned long, addresses);                               \
         if (!set_mmap_table->compare_ranges(addresses, len))                          \
         {                                                                             \
             cache_mismatch_info("memory region mismatch - argument %d - syscall: %ld (%s)\n", \
@@ -236,7 +236,7 @@
     if (ARG ## numarg(0) && len > 0)                                    \
     {                                                                   \
         std::vector<struct iovec*> addresses(mvee::numvariants);        \
-        FILLARGARRAY(numarg, addresses);                                \
+        FILLARGARRAY(numarg, struct iovec*, addresses);                 \
         if (!call_compare_io_vectors(addresses, len))                   \
             return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
     }
@@ -248,7 +248,7 @@
     if (ARG ## numarg(0) && len > 0)                                    \
     {                                                                   \
         std::vector<struct iovec*> addresses(mvee::numvariants);        \
-        FILLARGARRAY(numarg, addresses);                                \
+        FILLARGARRAY(numarg, struct iovec*, addresses);                 \
         if (!call_compare_io_vectors(addresses, len, 1))                \
             return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
     }
@@ -260,7 +260,7 @@
     if (ARG ## numarg(0))                                               \
     {                                                                   \
         std::vector<struct msghdr*> addresses(mvee::numvariants);        \
-        FILLARGARRAY(numarg, addresses);                                \
+        FILLARGARRAY(numarg, struct msghdr*, addresses);                \
         if (!call_compare_msgvectors(addresses))                        \
             return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
     }
@@ -272,7 +272,7 @@
     if (ARG ## numarg(0))                                               \
     {                                                                   \
         std::vector<struct msghdr*> addresses(mvee::numvariants);        \
-        FILLARGARRAY(numarg, addresses);                                \
+        FILLARGARRAY(numarg, struct msghdr*, addresses);                \
         if (!call_compare_msgvectors(addresses, true))                  \
             return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
     }
@@ -284,7 +284,7 @@
     if (ARG ## numarg(0) && len > 0)                                        \
     {                                                                       \
         std::vector<struct mmsghdr*> addresses(mvee::numvariants);            \
-        FILLARGARRAY(numarg, addresses);                                    \
+        FILLARGARRAY(numarg, struct mmsghdr*, addresses);                   \
 		if (!call_compare_mmsgvectors(addresses, len))					\
 			return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
     }
@@ -296,7 +296,7 @@
     if (ARG ## numarg(0) && len > 0)                                        \
     {                                                                       \
         std::vector<struct mmsghdr*> addresses(mvee::numvariants);            \
-        FILLARGARRAY(numarg, addresses);                                    \
+        FILLARGARRAY(numarg, struct mmsghdr*, addresses);                   \
 		if (!call_compare_mmsgvectors(addresses, len, true))				\
 			return MVEE_PRECALL_ARGS_MISMATCH(numarg) | MVEE_PRECALL_CALL_DENY; \
     }
@@ -308,7 +308,7 @@
     if (ARG ## numarg(0))                                                                 \
     {                                                                                     \
         std::vector<void*> argarray(mvee::numvariants);                           \
-        FILLARGARRAY(numarg, argarray);                                                   \
+        FILLARGARRAY(numarg, void*, argarray);                                            \
         struct sigaction master_action = call_get_sigaction(0, argarray[0], is_old_call); \
         for (int i = 1; i < mvee::numvariants; ++i)                                       \
         {                                                                                 \
@@ -335,7 +335,7 @@
     if (ARG ## numarg(0))                                                          \
     {                                                                              \
         std::vector<void*> argarray(mvee::numvariants);                    \
-        FILLARGARRAY(numarg, argarray);                                            \
+        FILLARGARRAY(numarg, void*, argarray);                                     \
         sigset_t master_set = call_get_sigset(0, argarray[0], is_old_call);        \
         for (int i = 1; i < mvee::numvariants; ++i)                                \
         {                                                                          \
@@ -357,7 +357,7 @@
     if (ARG ## numarg(0))                                                                                      \
     {                                                                                                          \
         std::vector<void*> events(mvee::numvariants);                                                  \
-        FILLARGARRAY(numarg, events);                                                                          \
+        FILLARGARRAY(numarg, void*, events);                                                                   \
         struct epoll_event master_event, slave_event;                                                          \
         if (!rw::read_struct(variants[0].variantpid, events[0], sizeof(struct epoll_event), &master_event))    \
         {                                                                                                      \
@@ -392,7 +392,7 @@
             ARG ## numarg(0))                                       \
         {                                                           \
             std::vector<const unsigned char*> argarray(mvee::numvariants); \
-            FILLARGARRAY(numarg, argarray);                         \
+            FILLARGARRAY(numarg, const unsigned char*, argarray);   \
             call_replicate_buffer(argarray, len);                   \
         }                                                           \
     }
@@ -409,7 +409,7 @@
         {                                                           \
             long len = call_postcall_get_variant_result(0);           \
             std::vector<const unsigned char*> argarray(mvee::numvariants); \
-            FILLARGARRAY(numarg, argarray);                         \
+            FILLARGARRAY(numarg, const unsigned char*, argarray);   \
             call_replicate_buffer(argarray, len);                   \
         }                                                           \
     }
@@ -432,7 +432,7 @@
 				shutdown(false);										\
 			}															\
             std::vector<const unsigned char*> argarray(mvee::numvariants); \
-            FILLARGARRAY(bufferarg, argarray);							\
+            FILLARGARRAY(bufferarg, const unsigned char*, argarray);	\
             call_replicate_buffer(argarray, len);						\
             for (int j = 1; j < mvee::numvariants; ++j)					\
             {															\
@@ -457,7 +457,7 @@
         {                                                           \
             long len = call_postcall_get_variant_result(0);           \
             std::vector<struct iovec*> argarray(mvee::numvariants); \
-            FILLARGARRAY(numarg, argarray);                         \
+            FILLARGARRAY(numarg, struct iovec*, argarray);          \
             call_replicate_io_vector(argarray, len);                \
         }                                                           \
     }
@@ -474,7 +474,7 @@
         {                                                           \
             long len = call_postcall_get_variant_result(0);           \
             std::vector<struct msghdr*> argarray(mvee::numvariants); \
-            FILLARGARRAY(numarg, argarray);                         \
+            FILLARGARRAY(numarg, struct msghdr*, argarray);         \
             call_replicate_msgvector(argarray, len);                \
         }                                                           \
     }
@@ -492,7 +492,7 @@
         {                                                           \
             long len = call_postcall_get_variant_result(0);           \
             std::vector<struct mmsghdr*> argarray(mvee::numvariants); \
-            FILLARGARRAY(numarg, argarray);                         \
+            FILLARGARRAY(numarg, struct mmsghdr*, argarray);        \
             call_replicate_mmsgvector(argarray, len);               \
         }                                                           \
     }
@@ -507,7 +507,7 @@
         {                                                            \
             long len = call_postcall_get_variant_result(0);            \
             std::vector<struct mmsghdr*> argarray(mvee::numvariants);  \
-            FILLARGARRAY(numarg, argarray);                          \
+            FILLARGARRAY(numarg, struct mmsghdr*, argarray);         \
             call_replicate_mmsgvectorlens(argarray, len, attempted); \
         }                                                            \
     }
@@ -522,7 +522,7 @@
 		ARG ## numarg(0))											\
 	{																\
 		std::vector<struct ifconf*> argarray(mvee::numvariants);	\
-		FILLARGARRAY(numarg, argarray);								\
+		FILLARGARRAY(numarg, struct ifconf*, argarray);				\
 		call_replicate_ifconfs(argarray);							\
 	}																\
 	}
