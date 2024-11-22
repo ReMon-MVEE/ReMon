@@ -1583,10 +1583,19 @@ void monitor::handle_fork_event(int index, interaction::mvee_wait_status& status
 
         if (variants[0].callnum == __NR_clone)
         {
-            shares_fd_table      = ARG1(0) & CLONE_FILES;
-            shares_mmap_table    = ARG1(0) & CLONE_VM;
-            shares_sighand_table = ARG1(0) & CLONE_SIGHAND;
-            shares_threadgroup   = ARG1(0) & CLONE_THREAD;
+            int flags = ARG1(0);
+            shares_fd_table      = flags & CLONE_FILES;
+            shares_mmap_table    = flags & CLONE_VM;
+            shares_sighand_table = flags & CLONE_SIGHAND;
+            shares_threadgroup   = flags & CLONE_THREAD;
+        }
+        else if (variants[0].callnum == __NR_clone3)
+        {
+            int flags = variants[0].clone3_args.flags;
+            shares_fd_table      = flags & CLONE_FILES;
+            shares_mmap_table    = flags & CLONE_VM;
+            shares_sighand_table = flags & CLONE_SIGHAND;
+            shares_threadgroup   = flags & CLONE_THREAD;
         }
         else if (variants[0].callnum == __NR_vfork)
         {
@@ -1597,8 +1606,9 @@ void monitor::handle_fork_event(int index, interaction::mvee_wait_status& status
 
         monitor* new_monitor = new monitor(this,
                                            shares_fd_table, shares_mmap_table, shares_sighand_table, shares_threadgroup);
-        if (   variants[0].callnum == __NR_vfork
-            || (variants[0].callnum == __NR_clone && (ARG1(0) & CLONE_VFORK))  )
+        if (variants[0].callnum == __NR_vfork
+            || (variants[0].callnum == __NR_clone && (ARG1(0) & CLONE_VFORK))
+            || (variants[0].callnum == __NR_clone3 && (variants[0].clone3_args.flags & CLONE_VFORK)))
             new_monitor->created_by_vfork = true;
 
         for (int i = 0; i < mvee::numvariants; ++i)
@@ -1620,6 +1630,13 @@ void monitor::handle_fork_event(int index, interaction::mvee_wait_status& status
                     new_variant->tid_address[0] = (void*)ARG3(i);
                 if (ARG1(0) & CLONE_CHILD_SETTID)
                     new_variant->tid_address[1] = (void*)ARG4(i);
+            }
+            else if (variants[0].callnum == __NR_clone3)
+            {
+                if (variants[0].clone3_args.flags & CLONE_PARENT_SETTID)
+                    new_variant->tid_address[0] = (void*)variants[i].clone3_args.parent_tid;
+                if (variants[0].clone3_args.flags & CLONE_CHILD_SETTID)
+                    new_variant->tid_address[1] = (void*)variants[i].clone3_args.parent_tid;
             }
 
             // register in global detachlist so the new monitor can see it

@@ -1672,6 +1672,14 @@ std::string getTextualCloneFlags(unsigned int flags)
 }
 
 /*-----------------------------------------------------------------------------
+    getTextualClone3Flags
+-----------------------------------------------------------------------------*/
+std::string getTextualClone3Flags(size_t flags)
+{
+	return getTextualCloneFlags(flags);
+}
+
+/*-----------------------------------------------------------------------------
     getTextualMapType
 -----------------------------------------------------------------------------*/
 std::string getTextualMapType(int mode)

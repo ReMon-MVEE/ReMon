@@ -87,6 +87,7 @@ std::string getTextualFileMode          (int mode);
 std::string getTextualAccessMode        (int mode);
 std::string getTextualProtectionFlags   (int mode);
 std::string getTextualCloneFlags        (unsigned int flags);
+std::string getTextualClone3Flags       (size_t flags);
 std::string getTextualMapType           (int mode);
 std::string getTextualSigSet            (sigset_t set);
 std::string getTextualPollRequest       (int events);

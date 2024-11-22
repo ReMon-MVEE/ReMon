@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <signal.h>
 #include <fcntl.h>
+#include <linux/sched.h>
 #include <memory>
 #include <vector>
 #include <deque>
@@ -237,6 +238,9 @@ public:
 
     // somehow, the sigset gets corrupted across sigprocmask calls...
     sigset_t      last_sigset;
+
+    // clone3 args to support clone3
+    struct clone_args clone3_args;
 
     // Occasionally used vars...
     pid_t         varianttgid;                                      // Thread Group ID of this variant

@@ -5969,6 +5969,130 @@ POSTCALL(clone)
 }
 
 /*-----------------------------------------------------------------------------
+  sys_clone3 -
+
+  The signature of this syscall function is distribution-specific.
+  Ubuntu uses this version:
+
+  man(2): (struct clone_args *args, size_t size)
+  kernel: (struct clone_args *args, size_t size)
+-----------------------------------------------------------------------------*/
+LOG_ARGS(clone3)
+{
+	struct clone_args args;
+	if (!rw::read<struct clone_args>(variants[variantnum].variantpid, (struct clone_args*)ARG1(variantnum), args))
+		throw RwMemFailure(variantnum, "read clone_args in sys_clone3 log_args");
+
+	debugf("%s - SYS_CLONE3(%s)\n",
+			call_get_variant_pidstr(variantnum).c_str(),
+			getTextualClone3Flags(args.flags).c_str());
+}
+
+PRECALL(clone3)
+{
+	for (int i = 0; i < mvee::numvariants; ++i)
+	{
+		if (!rw::read<struct clone_args>(variants[i].variantpid, (struct clone_args*)ARG1(i), variants[i].clone3_args))
+			throw RwMemFailure(i, "read clone_args in sys_clone3");
+	}
+
+	CHECKARG(2);
+
+	// TODO: More fully compare clone3 args struct?
+	for (int i = 1; i < mvee::numvariants; ++i)
+	{
+		if (variants[0].clone3_args.flags != variants[i].clone3_args.flags)
+		{
+			cache_mismatch_info("clone3 flags field differs\n");
+			return MVEE_PRECALL_ARGS_MISMATCH(3) | MVEE_PRECALL_CALL_DENY;
+		}
+	}
+
+	return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_FORK;
+}
+
+CALL(clone3)
+{
+	// we weren't multithreaded yet but will be after this call!
+	if (!is_program_multithreaded() && (variants[0].clone3_args.flags & CLONE_VM))
+		enable_sync();
+
+	if (variants[0].clone3_args.flags & CLONE_VFORK)
+		call_release_syslocks(variantnum, __NR_clone3, MVEE_SYSLOCK_FULL);
+
+	return MVEE_CALL_ALLOW;
+}
+
+POSTCALL(clone3)
+{
+	if (variants[0].clone3_args.flags & CLONE_VFORK)
+		call_grab_syslocks(variantnum, __NR_clone3, MVEE_SYSLOCK_FULL);
+
+	if IS_UNSYNCED_CALL
+	{
+		if (call_succeeded)
+		{
+			// update stack regions (if applicable)
+			if (variants[variantnum].clone3_args.stack)
+			{
+				mmap_region_info* stack_info = set_mmap_table->get_region_info(variantnum, variants[variantnum].clone3_args.stack -1, 0);
+				int tid = call_postcall_get_variant_result(variantnum);
+
+				if (stack_info)
+				{
+					std::stringstream ss;
+					ss << "[stack:" << tid << "]";
+
+					stack_info->region_backing_file_path = ss.str();
+					stack_info->region_map_flags = MAP_PRIVATE | MAP_GROWSDOWN | MAP_STACK;
+				}
+			}
+		}
+
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
+
+	int i, result;
+
+	if (call_succeeded)
+	{
+		// I DARE YOU TO TRIGGER THIS DATA RACE
+		if (variants[0].clone3_args.flags & CLONE_PARENT_SETTID)
+		{
+			debugf("setting TID of the newly created thread in the address space of the parent\n");
+			for (int i = 1; i < mvee::numvariants; ++i)
+				rw::write_primitive<int>(variants[i].variantpid, (void*)variants[i].clone3_args.parent_tid,
+						(int)call_postcall_get_variant_result(0));
+		}
+
+		// update stack regions (if applicable)
+		if (variants[0].clone3_args.stack)
+		{
+			for (int i = 0; i < mvee::numvariants; ++i)
+			{
+				mmap_region_info* stack_info = set_mmap_table->get_region_info(i, variants[i].clone3_args.stack -1, 0);
+				int tid = call_postcall_get_variant_result(i);
+
+				if (stack_info)
+				{
+					std::stringstream ss;
+					ss << "[stack:" << tid << "]";
+
+					stack_info->region_backing_file_path = ss.str();
+					stack_info->region_map_flags = MAP_PRIVATE | MAP_GROWSDOWN | MAP_STACK;
+				}
+			}
+		}
+
+		result = call_postcall_get_variant_result(0);
+		for (i = 1; i < mvee::numvariants; ++i)
+			call_postcall_set_variant_result(i, result);
+	}
+
+	return 0;
+}
+
+/*-----------------------------------------------------------------------------
   sys_mprotect - 
 
   man(2): (void* start, size_t len, int prot)
@@ -11657,6 +11781,7 @@ void mvee::init_syslocks()
     REG_LOCKS(__NR_fork,                MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN | MVEE_SYSLOCK_SHM | MVEE_SYSLOCK_FULL);
     REG_LOCKS(__NR_execve,              MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN | MVEE_SYSLOCK_SHM | MVEE_SYSLOCK_FULL);
     REG_LOCKS(__NR_clone,               MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN | MVEE_SYSLOCK_SHM | MVEE_SYSLOCK_FULL);
+    REG_LOCKS(__NR_clone3,              MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN | MVEE_SYSLOCK_SHM | MVEE_SYSLOCK_FULL);
 
 	// Special case that affects all tables
     REG_LOCKS(__NR_unshare,             MVEE_SYSLOCK_FD | MVEE_SYSLOCK_MMAN | MVEE_SYSLOCK_SHM | MVEE_SYSLOCK_FULL);
