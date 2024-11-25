@@ -14,6 +14,8 @@ IMAGE=remon
 BUILD_DIR=$PWD/build
 DEPS_DIR=$PWD/deps
 SHARED_PROJECTS_DIR=$PWD/ext
+ROOTLESS=false
+[ "$(docker context show)" == "rootless" ] && ROOTLESS=true
 
 build_docker() {
     if ! command -v docker &> /dev/null; then
@@ -47,6 +49,9 @@ run_docker() {
     # - a shared 'projects' folder, where you can place applications to build and/or run in the MVEE, as well as their data.
     # - the 'build' data volume. This named volume can be used to incrementally build LLVM (or other applications) in.
     VOLUMES="--mount type=bind,src=$PWD,dst=/opt/repo --mount type=bind,src=$SHARED_PROJECTS_DIR,dst=/projects --mount type=volume,src=build,dst=/build"
+    if $ROOTLESS; then
+        VOLUMES="$VOLUMES --mount type=volume,src=home,dst=/root"
+    fi
 
     # In development mode, we also mount the source code of the dependencies
     if [ "$#" -eq 1 ]; then
@@ -59,7 +64,12 @@ run_docker() {
     #           This reduces container isolation, but as isolation is not the reason we're using x11docker that's not an issue.
     # 2nd line: the docker options (allow ptracing and mount volumes)
     # 3rd line: the actual docker image and the command to run in it
-    X11DOCKER_OPTIONS="--tty --ipc=host --network --interactive --home --sudouser --clipboard --cap-default"
+    X11DOCKER_OPTIONS="--tty --ipc=host --network --interactive --home --clipboard --cap-default"
+    if $ROOTLESS; then
+        X11DOCKER_OPTIONS="$X11DOCKER_OPTIONS --user=RETAIN"
+    else
+        X11DOCKER_OPTIONS="$X11DOCKER_OPTIONS --sudouser"
+    fi
     DOCKER_OPTIONS="--security-opt seccomp=unconfined -p 8080:8080  --tmpfs /tmp:exec --cap-add SYS_PTRACE -ti $VOLUMES"
     x11docker $X11DOCKER_OPTIONS -- $DOCKER_OPTIONS -- $IMAGE bash -l
 }
