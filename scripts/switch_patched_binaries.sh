@@ -52,7 +52,7 @@ switch_library_version ()
 	then
 		ln -nsf $SOURCE $DEST
 	else
-		rm $DEST
+		rm -f $DEST
 	fi
 }
 
