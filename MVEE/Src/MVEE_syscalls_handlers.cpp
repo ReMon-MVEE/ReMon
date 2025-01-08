@@ -11684,6 +11684,21 @@ POSTCALL(memfd_create)
 }
 
 /*-----------------------------------------------------------------------------
+  sys_rseq - (struct rseq *rseq, uint32_t rseq_len, int flags, uint32_t sig)
+-----------------------------------------------------------------------------*/
+// As this functionality can be used to bypass explicit synchronization (and its replication),
+// we don't support it.
+PRECALL(rseq)
+{
+    return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+}
+
+CALL(rseq)
+{
+	return MVEE_CALL_DENY | MVEE_CALL_RETURN_ERROR(ENOSYS);
+}
+
+/*-----------------------------------------------------------------------------
   handlers_setalias
 -----------------------------------------------------------------------------*/
 static void mvee_handlers_setalias(int callnum, int alias)
