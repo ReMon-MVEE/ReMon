@@ -321,6 +321,7 @@ target_compile_definitions(mvee PRIVATE
     $<$<BOOL:${ShmReplayLeader}>:MVEE_SHARED_MEMORY_REPLAY_LEADER>
     $<$<BOOL:${UseMPK}>:MVEE_USE_MPK>
     $<$<BOOL:${DisableLogging}>:MVEE_FILTER_LOGGING>
+    MVEE_CONNECTED_MMAP_REGIONS
     #MVEE_LOG_ALL_SHM_INSTRUCTIONS
 )
 # ======================================================================================================================

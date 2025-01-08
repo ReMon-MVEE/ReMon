@@ -4018,11 +4018,11 @@ void __attribute__((constructor)) init()
 #     if CURRENT_POLICY >= FULL_SYSCALLS
 
 	// Memory Management
-	IPMON_MASK_SET(mask, __NR_mmap);
+	//IPMON_MASK_SET(mask, __NR_mmap);
 	IPMON_MASK_SET(mask, __NR_munmap);
 	IPMON_MASK_SET(mask, __NR_mremap);
 	IPMON_MASK_SET(mask, __NR_mprotect);
-	IPMON_MASK_SET(mask, __NR_brk);
+	//IPMON_MASK_SET(mask, __NR_brk);
 
 	// File Management
 	IPMON_MASK_SET(mask, __NR_open);
