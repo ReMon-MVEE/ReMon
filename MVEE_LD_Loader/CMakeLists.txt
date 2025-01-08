@@ -20,6 +20,7 @@ target_compile_definitions(${LD_LOADER_LONG_NAME} PRIVATE
     $<$<BOOL:${ShmInsLogging}>:MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING>
     $<$<BOOL:${EmulateCPUID}>:MVEE_EMULATE_CPUID>
     $<$<BOOL:${DisableLogging}>:MVEE_FILTER_LOGGING>
+    $<$<NOT:$<BOOL:${UseSystemLd}>>:MVEE_USE_MVEE_LD>
     $<$<BOOL:FALSE>:MVEE_DEBUG>
 )
 target_compile_options(${LD_LOADER_LONG_NAME} PRIVATE

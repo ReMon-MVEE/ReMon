@@ -17,7 +17,6 @@
 
 // MVEE_USE_MVEE_LD: if this is defined, the MVEE loader will load the ld-linux binary in
 // <MVEE Root>/patched_binaries/ld-linux/amd64/, rather than the system provided LD
-#define MVEE_USE_MVEE_LD
 
 // #define MVEE_DEBUG
 
