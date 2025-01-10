@@ -626,16 +626,18 @@ int mmap_table::dwarf_step (int variantnum, pid_t variantpid, mvee_dwarf_context
     regtable.rt3_rules = NULL;
 
     // map EIP to a region
-    found_region       = get_region_info(variantnum, IP_IN_REGS(context->regs));
+    unsigned long address = IP_IN_REGS(context->regs);
+    found_region       = get_region_info(variantnum, address);
+
     if (!found_region)
     {
         warnf("DWARF: couldn't map EIP " PTRSTR " to a known region for variant: %d (pid: %d)\n",
-			  (unsigned long)IP_IN_REGS(context->regs), variantnum, variantpid);
+                         address, variantnum, variantpid);
         goto out;
     }
 
     // fetch the FDE that describes the frame at the specified address
-    pc                 = found_region->map_memory_pc_to_file_pc(variantnum, variantpid, IP_IN_REGS(context->regs) - found_region->region_base_address);
+    pc                 = found_region->map_memory_pc_to_file_pc(variantnum, variantpid, address - found_region->region_base_address);
 
     // now make sure that we get a valid dwarf info
     info               = found_region->get_dwarf_info(variantnum, variantpid);
