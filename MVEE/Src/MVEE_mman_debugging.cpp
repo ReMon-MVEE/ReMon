@@ -628,6 +628,13 @@ int mmap_table::dwarf_step (int variantnum, pid_t variantpid, mvee_dwarf_context
     // map EIP to a region
     unsigned long address = IP_IN_REGS(context->regs);
     found_region       = get_region_info(variantnum, address);
+    if (!found_region)
+    {
+        unsigned long rotated_address = (address >> 32) | ((0xFFFFFFFF & address) << 32);
+        found_region                  = get_region_info(variantnum, rotated_address, 0);
+        if (found_region)
+            address = rotated_address;
+    }
 
     if (!found_region)
     {
@@ -982,6 +989,14 @@ std::string mmap_table::get_caller_info
         instr.instruction_address     = address;
 
         found_region                  = get_region_info(variantnum, address, 0);
+
+        if (!found_region)
+		{
+			unsigned long rotated_address = (address >> 32) | ((0xFFFFFFFF & address) << 32);
+			found_region                  = get_region_info(variantnum, rotated_address, 0);
+			if (found_region)
+				address = rotated_address;
+		}
 
         if (!found_region)
         {
