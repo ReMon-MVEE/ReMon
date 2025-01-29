@@ -42,7 +42,7 @@ ENV PATH="${PATH}:/opt/deps/llvm/build-tree/bin/"
 ################################################################################################################################################################
 
 # Enable deb-src
-RUN sed -i 's/^#\sdeb-src/deb-src/' /etc/apt/sources.list
+RUN sed -i 's/^Types: deb/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
 
 # Install extra applications to run in MVEE, or tools to build those applications
 RUN \
