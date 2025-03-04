@@ -32,6 +32,7 @@
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <linux/dqblk_xfs.h>
+#include <linux/memfd.h>
 #include "MVEE.h"
 #include "MVEE_monitor.h"
 #include "MVEE_logging.h"
