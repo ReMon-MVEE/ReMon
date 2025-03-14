@@ -328,7 +328,7 @@ public:
     mmap_region_info* get_heap_region             (int variantnum);
     bool              get_ld_loader_bounds        (int variantnum, unsigned long& loader_base, unsigned long& loader_size);
     static bool       is_same_region              (mmap_region_info* region1, mmap_region_info* region2);
-    static bool       check_region_overlap        (mmap_region_info* region1, mmap_region_info* region2);
+    static bool       check_region_overlap        (const mmap_region_info* region1, const mmap_region_info* region2);
     bool              compare_region_addresses    (std::vector<unsigned long>& addresses);
     bool              insert_region               (int variantnum, mmap_region_info* region);
 

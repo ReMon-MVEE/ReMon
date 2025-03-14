@@ -632,7 +632,7 @@ bool mmap_table::is_same_region(mmap_region_info* region1, mmap_region_info* reg
 /*-----------------------------------------------------------------------------
     check_region_overlap
 -----------------------------------------------------------------------------*/
-bool mmap_table::check_region_overlap(mmap_region_info* region_a, mmap_region_info* region_b)
+bool mmap_table::check_region_overlap(const mmap_region_info* region_a, const mmap_region_info* region_b)
 {
     if (!region_a || !region_b)
         return false;
