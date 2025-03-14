@@ -1306,7 +1306,7 @@ POSTCALL(execve)
                         shutdown(false);
                         return 0;
                     }
-                    set_mmap_table->truncate_table_variant(i);
+                    set_mmap_table->truncate_table_variant(j);
 #ifdef MVEE_CONNECTED_MMAP_REGIONS
                     set_mmap_table->refresh_variant_maps(j, variants[j].variantpid, stack_regions);
 #else
