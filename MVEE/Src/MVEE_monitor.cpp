@@ -385,7 +385,7 @@ bool monitor::restart_variant(int variantnum)
 		{
 			if (status.reason == STOP_SYSCALL)
 			{
-				debugf("%s - Hit the first syscall entrance after execve!\n",
+				debugf("%s - Hit the first syscall exit after execve!\n",
 					   call_get_variant_pidstr(variantnum).c_str());
 				return true;
 			}
