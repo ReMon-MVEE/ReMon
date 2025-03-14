@@ -1257,6 +1257,8 @@ POSTCALL(execve)
 		for (i = 0; i < mvee::numvariants; ++i)
 			variants[i].should_sync_ptr = 0;
 
+		ipmon_initialized = false;
+
 		set_mmap_table->truncate_table();
 
 #ifdef MVEE_CONNECTED_MMAP_REGIONS
@@ -1267,8 +1269,6 @@ POSTCALL(execve)
         for (i = 0; i < mvee::numvariants; ++i)
             set_mmap_table->refresh_variant_maps(i, variants[i].variantpid);
 #endif
-
-		ipmon_initialized = false;
 
         for (i = 0; i < mvee::numvariants; ++i)
             set_mmap_table->verify_mman_table(i, variants[i].variantpid);
