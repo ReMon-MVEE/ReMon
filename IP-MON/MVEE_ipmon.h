@@ -65,7 +65,7 @@ extern "C" {
 // Allow all supported calls
 #define FULL_SYSCALLS        6
 
-#define CURRENT_POLICY       FULL_SYSCALLS
+#define CURRENT_POLICY       SOCKET_RW_POLICY
 
 /*-----------------------------------------------------------------------------
     Definitions and Generic Macros
