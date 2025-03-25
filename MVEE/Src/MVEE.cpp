@@ -1136,7 +1136,7 @@ void mvee::shutdown(int sig, int should_backtrace)
         sched_yield();
     }
 
-#ifndef MVEE_FILTER_LOGGING
+#ifndef MVEE_NO_MONITOR_OUTPUT
     printf("all monitors terminated\n");
 #endif
     mvee::log_fini(true);

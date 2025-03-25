@@ -1504,14 +1504,18 @@ void mvee::log_init()
 {
 #ifndef MVEE_BENCHMARK
     mvee::clear_log_folder();
+#ifndef MVEE_NO_MONITOR_OUTPUT
     printf("Opening MVEE Monitor Log @ %s\n", LOGNAME);
+#endif
     mvee::logfile              = fopen64(LOGNAME, "w");
     if (mvee::logfile == NULL)
         perror("Failed to open monitor log");
 #endif
 
 #ifdef MVEE_LOG_NON_INSTRUMENTED_INSTRUCTION
+#ifndef MVEE_NO_MONITOR_OUTPUT
     printf("Opening log for non-instrumented instructions @ %s\n", NON_INSTRUMENTED_LOGNAME);
+#endif
     mvee::non_instrumented_logfile = fopen64(NON_INSTRUMENTED_LOGNAME, "w");
     if (mvee::non_instrumented_logfile == nullptr)
         warnf("Failed to non instrumented instruction log");
@@ -1571,7 +1575,7 @@ void mvee::log_init()
 -----------------------------------------------------------------------------*/
 void mvee::log_fini(bool terminated)
 {
-#ifndef MVEE_FILTER_LOGGING
+#ifndef MVEE_NO_MONITOR_OUTPUT
     if (terminated)
     {
         struct timeval tv;
@@ -1624,18 +1628,18 @@ void mvee::log_fini(bool terminated)
 -----------------------------------------------------------------------------*/
 void mvee::warnf(const char* format, ...)
 {
-#ifdef MVEE_FILTER_LOGGING
     if (!mvee::active_monitor
         || !mvee::active_monitor->is_logging_enabled())
         return;
-#endif
 
     MutexLock lock(&mvee::loglock);
+#ifndef MVEE_NO_MONITOR_OUTPUT
     va_list va;
     va_start(va, format);
     printf("MONITOR[%d] - WARNING: ", mvee::active_monitorid);
     vfprintf(stdout, format, va);
     va_end(va);
+#endif
 
 #ifndef MVEE_BENCHMARK
     struct timeval tv;
@@ -1659,7 +1663,6 @@ void mvee::warnf(const char* format, ...)
         va_end(va);
     }
 #endif
-    va_end(va);
 }
 
 //
