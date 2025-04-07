@@ -2525,7 +2525,7 @@ CALL(brk)
                                         call_overwrite_arg_value(i, 1, address, true);
 					call_overwrite_arg_value(i, 2, 4096, true);
 					call_overwrite_arg_value(i, 3, PROT_READ | PROT_WRITE, true);
-					call_overwrite_arg_value(i, 4, MAP_ANONYMOUS | MAP_PRIVATE, true);
+					call_overwrite_arg_value(i, 4, MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED, true);
 					call_overwrite_arg_value(i, 5, -1, true);
 					call_overwrite_arg_value(i, 6, 0, true);		
 
