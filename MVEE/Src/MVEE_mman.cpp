@@ -142,11 +142,14 @@ void mmap_region_info::print_region_info(const char* log_prefix, void (*logfunc)
         logfunc = mvee::logf;
 
     std::stringstream stream;
+    stream.str("");
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
+    if (this->connected_regions && this->connected_regions->split)
+        stream << " - [ " << this->connected_regions->split << " ] ";
+#endif
     if (shadow)
         stream << " - [ " << std::hex << (unsigned long long) shadow->monitor_base << " ; " << std::hex <<
                 ((unsigned long long) shadow->monitor_base + shadow->size) << " )";
-    else
-        stream.str("");
     logfunc("%s - " PTRSTR "-" PTRSTR " - %s@%d - %s - %s - %d bytes%s\n",
             log_prefix,
             region_base_address, region_base_address + region_size,
@@ -327,6 +330,7 @@ void mmap_table::full_release_lock()
 -----------------------------------------------------------------------------*/
 void mmap_table::print_mmap_table(void (*logfunc)(const char* format, ...))
 {
+    int connected_mappings = 0;
     if (!logfunc)
         logfunc = mvee::logf;
     logfunc("======================================== MMAN TABLE DUMP ========================================\n");
@@ -360,8 +364,18 @@ void mmap_table::print_mmap_table(void (*logfunc)(const char* format, ...))
                 mp_seen = false;
             }
             char prefix[100];
+
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
+            if ((*it)->connected_regions && !i)
+                (*it)->connected_regions->split = connected_mappings++;
+#endif
             sprintf(prefix, "variant %d ->", i);
             (*it)->print_region_info(prefix, logfunc);
+
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
+            if ((*it)->connected_regions && i == (mvee::numvariants - 1))
+                (*it)->connected_regions->split = 0;
+#endif
         }
     }
 
