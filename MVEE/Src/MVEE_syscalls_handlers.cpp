@@ -7599,6 +7599,7 @@ PRECALL(mmap)
 	if (IS_UNSYNCED_CALL)
 		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
 
+	#if 0
     for (int i = 1; i < mvee::numvariants; ++i)
     {
         if (ARG2(i) != ARG2(i-1))
@@ -7608,10 +7609,14 @@ PRECALL(mmap)
                 if (ARG2(variant_i) > size)
                     size = ARG2(variant_i);
             for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
+			{
                 SETARG2(variant_i, size);
+				ARG2(variant_i) = size;
+			}
             break;
         }
     }
+	#endif
 
     CHECKARG(3);
     CHECKARG(4);
