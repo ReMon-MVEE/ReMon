@@ -918,10 +918,9 @@ void monitor::insert_jump_targets(fd_info* info, std::vector<unsigned long> base
 
 
 #ifdef MVEE_CONNECTED_MMAP_REGIONS
-void mmap_table::diff_memory(int leader_pid, int follower, int follower_pid, int initial, int include_exec)
+void monitor::diff_memory(int follower, int initial, int include_exec, int args)
 {
-    warnf("Memory diffing disable for now.\n");
-    return;
+    warnf("Memory diffing enabled for now.\n");
     if (mvee::numvariants <= 1)
         return;
 
@@ -932,10 +931,44 @@ void mmap_table::diff_memory(int leader_pid, int follower, int follower_pid, int
     void (*outputf) (const char* format, ...) = &mvee::warnf;
 #endif
 
+    set_mmap_table->print_mmap_table(outputf);
+
     outputf("memory diff>>===============start===============\n");
     if (initial)
         outputf("memory diff>>initial state\n");
+    else
+        outputf("memory diff>>later state\n");
+
+    if (args)
+    {
+        outputf("memory diff>>args start\n");
+        unsigned long args_size = pmvee_state_copy_zone.state_copy_start - variants[0].pmvee_communication_pt;
+        char* output_args = (char*) malloc(2 * args_size + 1);
+        FILL_HEX_CHARS(((char*)variants[0].pmvee_communication_mon_pt), 0, args_size, output_args, args_size);
+        // output_args[data_i*2] = 0xff & ((unsigned long)leader_data[data_i]));
+        output_args[args_size * 2] = 0;
+        outputf("%s\n", output_args);
+        free(output_args);
+        outputf("memory diff>>args end\n");
+    }
+
+    set_mmap_table->diff_memory(variants[0].variantpid, follower, variants[follower].variantpid, include_exec);
+
+    outputf("memory diff>>===============end===============\n");
+}
+
+
+void mmap_table::diff_memory(int leader_pid, int follower, int follower_pid, int include_exec)
+{
+#ifndef MVEE_BENCHMARK
+    void (*outputf) (const char* format, ...) = &mvee::logf;
+#else
+    return;
+    void (*outputf) (const char* format, ...) = &mvee::warnf;
+#endif
+
     outputf("memory diff>>mp: [ %p ; %p )\n", (void*)mp_start, (void*)mp_end);
+
     for (auto it = full_map[0].begin();it != full_map[0].end(); ++it)
     {
         mmap_region_info* region = *it;
@@ -948,6 +981,37 @@ void mmap_table::diff_memory(int leader_pid, int follower, int follower_pid, int
         }
         else
         {
+            if (region->region_base_address >= mp_start && (region->region_base_address + region->region_size) < mp_end)
+            {
+                char* leader_data = (char*)malloc(region->region_size);
+                if (!interaction::read_memory(leader_pid, (void*)region->region_base_address, region->region_size, leader_data))
+                {
+                    outputf("memory diff>>issue reading from leader mapping [ %p ; %p )\n",
+                            (void*)region->region_base_address, (void*)(region->region_base_address + region->region_size));
+                    continue;
+                }
+
+                outputf("memory diff>>DIFFING>>%s vs %s\n", region->region_backing_file_path.c_str(), region->region_backing_file_path.c_str());
+                outputf("memory diff>>REGION>>[ %p ; %p ) vs [ %p ; %p ) \n",
+                        (void*)region->region_base_address, (void*)(region->region_base_address + region->region_size),
+                        (void*)region->region_base_address, (void*)(region->region_base_address + region->region_size));
+
+                outputf("memory diff>>dump start\n");
+                {
+
+                    char* output_leader = (char*) malloc((region->region_size * 2) + 1);
+                    outputf("memory diff>>%llx-%d\n", region->region_base_address, region->region_size);
+                    FILL_HEX_CHARS(leader_data, 0, region->region_size, output_leader, region->region_size);
+                    // output_leader[data_i*2] = 0xff & ((unsigned long)leader_data[data_i]));
+                    output_leader[region->region_size * 2] = 0;
+                    outputf("%s\n", output_leader);
+
+                    free(output_leader);
+                    free(leader_data);
+                }
+                outputf("memory diff>>dump end\n");
+                outputf("memory diff>>DIFFING end\n");
+            }
             follower_region = get_region_info(follower, region->region_base_address, 1);
             if (!follower_region || follower_region->region_base_address != region->region_base_address)
             {
@@ -989,6 +1053,7 @@ void mmap_table::diff_memory(int leader_pid, int follower, int follower_pid, int
         char follower_first_part[9]  = { 0 };
         char follower_second_part[9] = { 0 };
 
+        outputf("memory diff>>basic diff start\n");
         for (base_i = 0; base_i < (max_region_size / 8); base_i++)
         {
             if (base_i >= (region->region_size / 8) || base_i >= (follower_region->region_size / 8))
@@ -1021,6 +1086,7 @@ void mmap_table::diff_memory(int leader_pid, int follower, int follower_pid, int
         {
             outputf("memory diff>>follower area longer than follower\n");
         }
+        outputf("memory diff>>basic diff end\n");
 
         outputf("memory diff>>pointer diff\n");
         
@@ -1028,6 +1094,21 @@ void mmap_table::diff_memory(int leader_pid, int follower, int follower_pid, int
         {
             if (base_i >= (region->region_size / 8) || base_i >= (follower_region->region_size / 8))
                 break;
+            if ((((unsigned long*)leader_data)[base_i] >= mp_start && ((unsigned long*)leader_data)[base_i] < mp_end) ||
+                    (((unsigned long*)follower_data)[base_i] >= mp_start && ((unsigned long*)follower_data)[base_i] <= mp_end))
+            {
+                outputf("memory diff>>mp pointers\n");
+                outputf("memory diff>>leader pointer: 0x%llx%s - 0x%llx %s@0x%llx\n", ((unsigned long*)leader_data)[base_i],
+                    (((unsigned long*)leader_data)[base_i] >= mp_start && ((unsigned long*)leader_data)[base_i] < mp_end) ? " - MP" : "",
+                    8*base_i,
+                    region->region_backing_file_path.c_str(),
+                    region->region_backing_file_offset);
+                outputf("memory diff>>follower pointer: 0x%llx%s - 0x%llx %s@0x%llx\n", ((unsigned long*)follower_data)[base_i],
+                    (((unsigned long*)follower_data)[base_i] >= mp_start && ((unsigned long*)follower_data)[base_i] < mp_end) ? " - MP" : "",
+                    8*base_i,
+                    follower_region->region_backing_file_path.c_str(),
+                    follower_region->region_backing_file_offset);
+            }
             if (((unsigned long*)leader_data)[base_i] == ((unsigned long*)follower_data)[base_i])
                 continue;
 
@@ -1068,6 +1149,7 @@ void mmap_table::diff_memory(int leader_pid, int follower, int follower_pid, int
                 }
             }
         }
+
         if ((base_i * 8) < region->region_size)
         {
             outputf("memory diff>>leader area longer than follower\n");
@@ -1077,10 +1159,26 @@ void mmap_table::diff_memory(int leader_pid, int follower, int follower_pid, int
             outputf("memory diff>>follower area longer than follower\n");
         }
 
+        outputf("memory diff>>pointer diff end\n");
+
+        outputf("memory diff>>dump start\n");
+        if (region->region_base_address == follower_region->region_base_address &&
+                region->region_base_address >= mp_start && region->region_base_address < mp_end)
+        {
+            char* output_leader = (char*) malloc((region->region_size * 2) + 1);
+            outputf("memory diff>>%llx-%d\n", region->region_base_address, region->region_size);
+            FILL_HEX_CHARS(leader_data, 0, region->region_size, output_leader, region->region_size);
+            // output_leader[data_i*2] = 0xff & ((unsigned long)leader_data[data_i]));
+            output_leader[region->region_size * 2] = 0;
+            outputf("%s\n", output_leader);
+            free(output_leader);
+        }
+        outputf("memory diff>>dump end\n");
+        outputf("memory diff>>DIFFING end\n");
+
         free(leader_data);
         free(follower_data);
     }
-    outputf("memory diff>>===============end===============\n");
 }
 #endif
 

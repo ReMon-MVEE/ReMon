@@ -1453,7 +1453,7 @@ long monitor::call_call_dispatch ()
                 {
                     warnf(">PMVEE_DIFF_MEMORY\n");
 #ifdef MVEE_CONNECTED_MMAP_REGIONS
-                    set_mmap_table->diff_memory(variants[0].variantpid, 1, variants[1].variantpid, 1, 0);
+                    diff_memory(1, 1, 0, 0);
 #else
                     warnf("PMVEE_DIFF_MEMORY requires MVEE_CONNECTED_MMAP_REGIONS.\n");
 #endif
@@ -1731,6 +1731,14 @@ long monitor::call_postcall_return ()
 #ifdef MVEE_ENABLE_PMVEE
         if (callnum == __NR_pmvee_switch)
         {
+            if (!variants[0].pmvee_state)
+            {
+#ifdef MVEE_CONNECTED_MMAP_REGIONS
+                diff_memory(1, 0, 0, 1);
+#else
+                warnf("PMVEE_DIFF_MEMORY requires MVEE_CONNECTED_MMAP_REGIONS.\n");
+#endif
+            }
             for (int variant_i = 1; variant_i < mvee::numvariants; variant_i++)
             {
                 if (variants[variant_i].pmvee_state == PMVEE_COMMUNICATION_REQUEST)

@@ -438,7 +438,7 @@ public:
     unsigned long      init_mp                      (size_t mp_size);
     unsigned long      calculate_joint_base         (unsigned long size, bool allow_writes);
 #ifdef MVEE_CONNECTED_MMAP_REGIONS
-    void               diff_memory                  (int leader_pid, int follower, int follower_pid, int initial, int include_exec);
+    void               diff_memory                  (int leader_pid, int follower, int follower_pid, int include_exec);
 #endif
     void               add_address_to_mmap          (unsigned long address,
                                                      size_t size,
