@@ -259,10 +259,10 @@ void* __attribute__ ((noinline)) __pmvee_copy_state_leader(char* __pmvee_zone, s
         __pmvee_state_copies.__pmvee_state_migrations[i](__pmvee_zone, __pmvee_args_size, origin);
     void* return_val = (void*)(__pmvee_zone + *__pmvee_args_size);
     // printf(" > pointers\n");fflush(stdout);
-    __pmvee_migrate_pointers_leader(__pmvee_zone, __pmvee_args_size, origin);
     #ifdef PMVEE_HEAP_SCANNING
     __pmvee_migrate_pointers_scan_leader(__pmvee_zone, __pmvee_args_size, origin);
     #endif
+    __pmvee_migrate_pointers_leader(__pmvee_zone, __pmvee_args_size, origin);
     for (int i = 0; i < __pmvee_state_copies.copy_count; i++)
         __pmvee_state_copies.__pmvee_state_copies[i](__pmvee_zone, __pmvee_args_size, origin);
 
@@ -347,10 +347,10 @@ void __attribute__ ((noinline)) __pmvee_copy_state_follower(char* __pmvee_zone, 
     __pmvee_migrate_data_follower(__pmvee_zone, __pmvee_args_size, origin);
     for (int i = 0; i < __pmvee_state_copies.migration_count; i++)
         __pmvee_state_copies.__pmvee_state_migrations[i](__pmvee_zone, __pmvee_args_size, origin);
-    __pmvee_migrate_pointers_follower(__pmvee_zone, __pmvee_args_size, origin);
     #ifdef PMVEE_HEAP_SCANNING
     __pmvee_migrate_pointers_scan_follower(__pmvee_zone, __pmvee_args_size, origin);
     #endif
+    __pmvee_migrate_pointers_follower(__pmvee_zone, __pmvee_args_size, origin);
     for (int i = 0; i < __pmvee_state_copies.copy_count; i++)
         __pmvee_state_copies.__pmvee_state_copies[i](__pmvee_zone, __pmvee_args_size, origin);
         
