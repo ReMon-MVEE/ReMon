@@ -68,7 +68,7 @@ then
     patch -d ./ -p1 < ../../patches/jsoncpp.patch
     mkdir build
     cd build
-    cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_STATIC_LIBS=ON -DBUILD_SHARED_LIBS=OFF -DCMAKE_CXX_COMPILER=$ORIG_PWD/deps/llvm/build-tree/bin/clang++ -DCMAKE_CXX_FLAGS=-O3 ..
+    cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_STATIC_LIBS=ON -DBUILD_SHARED_LIBS=ON -DCMAKE_CXX_COMPILER=$ORIG_PWD/deps/llvm/build-tree/bin/clang++ -DCMAKE_CXX_FLAGS=-O3 ..
     make -j `getconf _NPROCESSORS_ONLN`
     cd ../../../
 fi
