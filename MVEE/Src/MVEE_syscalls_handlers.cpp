@@ -7744,6 +7744,8 @@ CALL(mmap)
         if (ARG4(0) & MAP_PMVEE)
         {
 			#ifndef PMVEE_NO_ALLOCATOR
+			if (ARG4(0) & MAP_FIXED && ARG1(0) >= mp_start && ARG1(0) < (mp_start + mp_size))
+				return MVEE_CALL_ALLOW;
 			#else
 			if (ARG4(0) & MAP_FIXED)
 				return MVEE_CALL_ALLOW;
@@ -7976,10 +7978,13 @@ CALL(mmap)
                         // warnf("> We cannot enforce disjunct code within this address space!!!\n");
                     } else {
                         std::vector<unsigned long> bases(mvee::numvariants);
-                        set_mmap_table->calculate_disjoint_bases(ARG2(0), bases);
+						unsigned long max_size = ARG2(0);
+						for (int variant_i = 1; variant_i < mvee::numvariants; variant_i++)
+							if (ARG2(variant_i) > max_size) max_size = ARG2(variant_i);
+                        set_mmap_table->calculate_disjoint_bases(max_size, bases);
 
-                        debugf("GHUMVEE is overriding the base address of a new code region backed by file: %s\n",
-                               info->paths[0].c_str());
+                        debugf("GHUMVEE is overriding the base address of a new code region backed by file: %s - %p\n",
+                               info->paths[0].c_str(), (void*)bases[i]);
 
                         for (int i = 0; i < mvee::numvariants; ++i) {
                             // warnf("> variant %d => region span: 0x" PTRSTR "-0x" PTRSTR "\n", i,
@@ -8098,13 +8103,16 @@ CALL(mmap)
                 else
                 {
                     std::vector<unsigned long> bases(mvee::numvariants);
-                    set_mmap_table->calculate_disjoint_bases(ARG2(0), bases);
+					unsigned long max_size = ARG2(0);
+					for (int variant_i = 1; variant_i < mvee::numvariants; variant_i++)
+						if (ARG2(variant_i) > max_size) max_size = ARG2(variant_i);
+                    set_mmap_table->calculate_disjoint_bases(max_size, bases);
 
 
                     for (int i = 0; i < mvee::numvariants; ++i)
                     {
-						debugf("GHUMVEE is overriding the base address of a new code region backed by file: %s\n",
-								info->paths[info->paths.size() > 1  ? i : 0].c_str());
+						debugf("GHUMVEE is overriding the base address of a new code region backed by file: %s - %p\n",
+								info->paths[info->paths.size() > 1  ? i : 0].c_str(), (void*)bases[i]);
                         /*
                            warnf("> variant %d => region span: 0x" PTRSTR "-0x" PTRSTR "\n",
                            i, bases[i], ROUND_UP(bases[i] + ARG2(0), 4096));
@@ -8117,12 +8125,15 @@ CALL(mmap)
 		else if (!(ARG4(0) & MAP_FIXED) && (*mvee::config_variant_global)["non_overlapping_mmaps"].asInt() && info->can_load_indirect())
 		{
 				std::vector<unsigned long> bases(mvee::numvariants);
-				set_mmap_table->calculate_disjoint_bases(ARG2(0), bases);
+				unsigned long max_size = ARG2(0);
+				for (int variant_i = 1; variant_i < mvee::numvariants; variant_i++)
+					if (ARG2(variant_i) > max_size) max_size = ARG2(variant_i);
+				set_mmap_table->calculate_disjoint_bases(max_size, bases);
 
 				for (int i = 0; i < mvee::numvariants; ++i)
 				{
-						debugf("GHUMVEE is overriding the base address of a new code region backed by file: %s\n",
-										info->paths[info->paths.size() > 1  ? i : 0].c_str());
+						debugf("GHUMVEE is overriding the base address of a new code region backed by file: %s - %p\n",
+										info->paths[info->paths.size() > 1  ? i : 0].c_str(), (void*)bases[i]);
 						/*
 								warnf("> variant %d => region span: 0x" PTRSTR "-0x" PTRSTR "\n",
 								i, bases[i], ROUND_UP(bases[i] + ARG2(0), 4096));
@@ -8174,12 +8185,12 @@ POSTCALL(mmap)
 					if ((unsigned long)variants[variant_i].ld_current_fd != ARG5(variant_i))
 						break;
 				}
-				if (variant_i < mvee::numvariants)
-				{
-					warnf("loader heuristic failure.\n");
-					shutdown(false);
-					return 0;
-				}
+				// if (variant_i < mvee::numvariants)
+				// {
+				// 	warnf("loader heuristic failure.\n");
+				// 	shutdown(false);
+				// 	return 0;
+				// }
 				for (variant_i = 0; variant_i < mvee::numvariants; variant_i++)
 				{
 					variants[variant_i].ld_current_base = results[variant_i];
