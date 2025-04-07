@@ -1025,6 +1025,11 @@ private:
 	//
     void log_backtraces                  ();
 
+	//
+	// Generate memory diff for dynamic analysis of PMVEE
+	//
+	void diff_memory                     (int follower, int initial, int include_exec, int args);
+
 	// 
 	// Log the contents of all known shared memory segments attached by the
 	// variants. Among other things, we use this to visualize the contents

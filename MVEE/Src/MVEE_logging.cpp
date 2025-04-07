@@ -1117,7 +1117,7 @@ void monitor::log_call_mismatch(int index1, int index2)
         return;
 
     if (mvee::numvariants > 1)
-        set_mmap_table->diff_memory(variants[0].variantpid, 1, variants[1].variantpid, 0, 0);
+        diff_memory(1, 0, 0, 0);
     warnf("==================================\n");
     warnf("ERROR: Callnumber mismatch\n");
     warnf("pid1     : %d\n",       variants[index1].variantpid);
@@ -1151,7 +1151,7 @@ void monitor::log_callargs_mismatch()
         return;
 
     if (mvee::numvariants > 1)
-        set_mmap_table->diff_memory(variants[0].variantpid, 1, variants[1].variantpid, 0, 0);
+        diff_memory(1, 0, 0, 0);
     warnf("==================================\n");
     warnf("ERROR: Call arguments mismatch\n");
     warnf("call     : %ld (%s)\n",
@@ -1431,7 +1431,7 @@ void monitor::log_segfault(int variantnum)
 #if !defined(MVEE_BENCHMARK) || defined(MVEE_FORCE_ENABLE_BACKTRACING)
     log_variant_backtrace(variantnum, 0, 1, 1);
     if (mvee::numvariants > 1)
-        set_mmap_table->diff_memory(variants[0].variantpid, 1, variants[1].variantpid, 0, 0);
+        diff_memory(1, 0, 0, 0);
 #endif
 
 	log_ipmon_state();
