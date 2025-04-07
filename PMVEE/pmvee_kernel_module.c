@@ -1441,6 +1441,10 @@ unsigned char actual_pmvee_should_skip(struct pt_regs *regs, unsigned long enter
     {
         return 0;
     }
+    if (syscall == __NR_execve)
+    {
+        return 0;
+    }
     // if (syscall == __NR_write)
     // {
     //     return 0;

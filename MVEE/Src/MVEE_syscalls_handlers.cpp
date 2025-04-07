@@ -1125,6 +1125,106 @@ void monitor::handle_execve_get_args(int variantnum)
 #endif
 }
 
+void monitor::handle_execve_inject_args()
+{
+	std::string pathname   = set_mmap_table->mmap_startup_info[0].image;
+	std::deque<char*> argv;
+	std::deque<char*> envp;
+
+    for (unsigned i = 0; i < set_mmap_table->mmap_startup_info[0].argv.size(); ++i)
+        argv.push_back(mvee::strdup(set_mmap_table->mmap_startup_info[0].argv[i].c_str()));
+    argv.push_back(NULL);
+
+    for (unsigned i = 0; i < set_mmap_table->mmap_startup_info[0].envp.size(); ++i)
+        envp.push_back(mvee::strdup(set_mmap_table->mmap_startup_info[0].envp[i].c_str()));
+    envp.push_back(NULL);
+
+	// serialize, relocate, write, ...
+    unsigned long argv_len = 0, envp_len = 0;
+
+    for (unsigned i = 0; i < argv.size(); ++i)
+        if (argv[i])
+            argv_len += strlen(argv[i]) + 1;
+    for (unsigned i = 0; i < envp.size(); ++i)
+        if (envp[i])
+            envp_len += strlen(envp[i]) + 1;
+
+    char*  serialized_argv = new char[argv_len];
+    char*  serialized_envp = (envp_len > 0) ? new char[envp_len] : NULL;
+    char** relocated_argv  = NULL;
+    char** relocated_envp  = NULL;
+
+    // Find an appropriate location to write all of this stuff
+    unsigned long     total_len       =
+        (pathname.length() + 1)       + // the new execve pathname
+        (sizeof(char*) * argv.size()) + // the argv pointer array
+        (sizeof(char*) * envp.size()) + // the envp pointer array
+        argv_len                      +
+        envp_len;
+
+	for (int variant_i = 1; variant_i < mvee::numvariants; variant_i++)
+	{
+		unsigned long pathname_target_address;
+		mmap_region_info* writable = set_mmap_table->find_writable_region(variant_i, total_len);
+		if (!writable)
+		{
+			warnf("%s - Could not find a writable region of at least %lu bytes long in the address space of this variant => execve arguments writing failed\n",
+					call_get_variant_pidstr(variant_i).c_str(), total_len);
+			shutdown(false);
+			return;
+		}
+		pathname_target_address = writable->region_base_address;
+
+		// now serialize and relocate
+		// We want the following layout in the writable region
+		// +---------------------+---------------+---------------+--------------+--------------+
+		// | new execve pathname | argv pointers | envp pointers | argv strings | envp strings |
+		// +---------------------+---------------+---------------+--------------+--------------+
+		//
+		unsigned long     relocated_argv_target_address = pathname_target_address + pathname.length() + 1;
+		unsigned long     relocated_envp_target_address = relocated_argv_target_address + (sizeof(char*) * argv.size());
+		unsigned long     argv_target_address           = relocated_envp_target_address + (sizeof(char*) * envp.size());
+		unsigned long     envp_target_address           = argv_target_address + argv_len;
+
+		serialize_and_relocate_arr(argv, serialized_argv, relocated_argv, argv_target_address);
+		serialize_and_relocate_arr(envp, serialized_envp, relocated_envp, envp_target_address);
+
+		debugf("%s - Writing new execve arguments...\n",
+			call_get_variant_pidstr(variant_i).c_str());
+		if (rw::copy_data(mvee::os_gettid(), (void*)pathname.c_str(), variants[variant_i].variantpid, (void*)pathname_target_address, pathname.length() + 1) == -1)
+			throw RwMemFailure(variant_i, "execve arguments copy - pathname");
+		if (rw::copy_data(mvee::os_gettid(), (void*)relocated_argv, variants[variant_i].variantpid, (void*)relocated_argv_target_address, sizeof(char*) * argv.size()) == -1)
+			throw RwMemFailure(variant_i, "execve arguments copy - relocated argv");
+		if (rw::copy_data(mvee::os_gettid(), (void*)relocated_envp, variants[variant_i].variantpid, (void*)relocated_envp_target_address, sizeof(char*) * envp.size()) == -1)
+			throw RwMemFailure(variant_i, "execve arguments copy - relocated envp");
+		if (argv_len && rw::copy_data(mvee::os_gettid(), (void*)serialized_argv, variants[variant_i].variantpid, (void*)argv_target_address, argv_len) == -1)
+			throw RwMemFailure(variant_i, "execve arguments copy - serialized argv");
+		if (envp_len && rw::copy_data(mvee::os_gettid(), (void*)serialized_envp, variants[variant_i].variantpid, (void*)envp_target_address, envp_len) == -1)
+			throw RwMemFailure(variant_i, "execve arguments copy - serialized envp");
+
+		// set the registers
+		debugf("%s - Setting execve registers...\n",
+			call_get_variant_pidstr(variant_i).c_str());
+		ARG1(variant_i) = pathname_target_address;
+		ARG2(variant_i) = relocated_argv_target_address;
+		ARG3(variant_i) = relocated_envp_target_address;
+		NEXT_SYSCALL_NO(variant_i) = __NR_execve;
+		variants[variant_i].regs.rip -= 2;
+
+		if (!interaction::write_all_regs(variants[variant_i].variantpid, &variants[variant_i].regs))
+			throw RwRegsFailure(variant_i, "execve arguments rewrite");
+
+		SAFEDELETEARRAY(serialized_argv);
+		SAFEDELETEARRAY(serialized_envp);
+		SAFEDELETEARRAY(relocated_argv);
+		SAFEDELETEARRAY(relocated_envp);
+		for (unsigned i = 0; i < argv.size(); ++i)
+			SAFEDELETEARRAY(argv[i]);
+		for (unsigned i = 0; i < envp.size(); ++i)
+			SAFEDELETEARRAY(envp[i]);
+	}
+}
+
 LOG_ARGS(execve)
 {
 	handle_execve_get_args(variantnum);
@@ -1137,8 +1237,26 @@ LOG_ARGS(execve)
 		);
 }
 
+#ifdef MVEE_ENABLE_PMVEE
+GET_CALL_TYPE(execve)
+{
+	if (!IS_MULTI_EXEC)
+		return MVEE_CALL_TYPE_UNSYNCED;
+	return MVEE_CALL_TYPE_NORMAL;
+}
+#endif
+
 PRECALL(execve)
 {
+#ifdef MVEE_ENABLE_PMVEE
+	if IS_UNSYNCED_CALL
+	{
+		warnf("> Pretty sure this won't get called?\n");
+		shutdown(false);
+		return MVEE_PRECALL_ARGS_MATCH | MVEE_PRECALL_CALL_DISPATCH_NORMAL;
+	}
+#endif
+
 	for (int i = 0; i < mvee::numvariants; ++i)
         handle_execve_get_args(i);
 
@@ -1172,6 +1290,21 @@ CALL(execve)
 	{
 		warnf("unsynced execve dispatch - was this intentional?\n");
 		variants[variantnum].entry_point_bp_set = false;
+		return MVEE_CALL_ALLOW;
+	}
+#endif
+
+#ifdef MVEE_ENABLE_PMVEE
+	if IS_UNSYNCED_CALL
+	{
+        handle_execve_get_args(0);
+		handle_execve_inject_args();
+
+		call_overwrite_arg_value(0, 1, variants[0].variantpid, true);
+		call_overwrite_arg_value(0, 2, variants[0].variantpid, true);
+		call_overwrite_arg_value(0, 3, variants[0].variantpid, true);
+		interaction::write_syscall_no(variants[0].variantpid, __NR_pmvee_switch);
+
 		return MVEE_CALL_ALLOW;
 	}
 #endif
@@ -1247,6 +1380,19 @@ CALL(execve)
 
 POSTCALL(execve)
 {
+#ifdef MVEE_ENABLE_PMVEE
+	if IS_UNSYNCED_CALL
+	{
+		unsigned long ip = 0;
+		interaction::fetch_ip(variants[0].variantpid, ip);
+		interaction::write_ip(variants[0].variantpid, ip - 2);
+		interaction::write_next_syscall_no(variants[0].variantpid, __NR_execve);
+		SET_MULTI_EXEC(1);
+		for (int variant_i = 1; variant_i < mvee::numvariants; variant_i ++)
+			call_resume(variant_i);
+		return MVEE_POSTCALL_HANDLED_UNSYNCED_CALL;
+	}
+#endif
     if (call_succeeded)
     {
         int i;
