@@ -7744,6 +7744,8 @@ CALL(mmap)
         if (ARG4(0) & MAP_PMVEE)
         {
 			#ifndef PMVEE_NO_ALLOCATOR
+			if (ARG4(0) & MAP_FIXED && ARG1(0) >= mp_start && ARG1(0) < (mp_start + mp_size))
+				return MVEE_CALL_ALLOW;
 			#else
 			if (ARG4(0) & MAP_FIXED)
 				return MVEE_CALL_ALLOW;
@@ -8127,7 +8129,10 @@ CALL(mmap)
 			else
 			{
 				std::vector<unsigned long> bases(mvee::numvariants);
-				set_mmap_table->calculate_disjoint_bases(ARG2(0), bases);
+				unsigned long max_size = ARG2(0);
+				for (int variant_i = 1; variant_i < mvee::numvariants; variant_i++)
+					if (ARG2(variant_i) > max_size) max_size = ARG2(variant_i);
+				set_mmap_table->calculate_disjoint_bases(max_size, bases);
 
 				for (int i = 0; i < mvee::numvariants; ++i)
 				{
@@ -8188,12 +8193,12 @@ POSTCALL(mmap)
 					if ((unsigned long)variants[variant_i].ld_current_fd != ARG5(variant_i))
 						break;
 				}
-				if (variant_i < mvee::numvariants)
-				{
-					warnf("loader heuristic failure.\n");
-					shutdown(false);
-					return 0;
-				}
+				// if (variant_i < mvee::numvariants)
+				// {
+				// 	warnf("loader heuristic failure.\n");
+				// 	shutdown(false);
+				// 	return 0;
+				// }
 				for (variant_i = 0; variant_i < mvee::numvariants; variant_i++)
 				{
 					variants[variant_i].ld_current_base = results[variant_i];
