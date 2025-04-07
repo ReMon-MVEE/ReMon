@@ -95,7 +95,7 @@ unsigned long monitor::get_equivalent_address(int variant_i, unsigned long addre
 
         // for (int variant_i = 0; variant_i < mvee::numvariants; variant_i++)
         //     // warnf(" >> [%d] new base: (%p)%p%p\n", variant_i, (void*)&region->connected_regions->regions[variant_i], (void*)&region->connected_regions->regions[variant_i]->region_base_address, (void*)region->connected_regions->regions[variant_i]->region_base_address);
-        if (region->connected_regions)
+        if (region->connected_regions) // && !(region->region_prot_flags & PROT_EXEC))
         {
             // warnf("   > maps to connected region @ %p\n", (void*)region->connected_regions->regions[variant_i]->region_base_address);
             return (address - region->region_base_address + region->connected_regions->regions[variant_i]->region_base_address);
@@ -313,6 +313,7 @@ void monitor::add_connected_regions_to_map(connected_region_info* connected_regi
 
 void mmap_table::add_address_to_mmap(unsigned long address, size_t size, unsigned long prot)
 {
+    if (!simple_mappings) return;
     // warnf(" > adding\n");
     // print_simple_addresses(simple_mappings);
     // prot = (address >= mp_start && address < mp_end && (PROT_READ | PROT_WRITE)) ? (PROT_READ | PROT_WRITE) : 0;
@@ -483,6 +484,7 @@ void mmap_table::add_address_to_mmap(unsigned long address, size_t size, unsigne
 
 void mmap_table::remove_address_from_mmap(unsigned long address, size_t size)
 {
+    if (!simple_mappings) return;
     // warnf(" > removing\n");
     // print_simple_addresses(simple_mappings);
     unsigned long* mapping_count = simple_mappings;
