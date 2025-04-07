@@ -628,6 +628,11 @@ private:
 	// 
     void        handle_execve_get_args              (int variantnum);
 
+	//
+	// Copy execve args from leder to followers from single variant execution.
+	//
+    void        handle_execve_inject_args           ();
+
 	// 
 	// callback function for the iterator function that iterates over regions
 	// that were unmapped by the preceding sys_munmap call.  This function
