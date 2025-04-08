@@ -1,6 +1,7 @@
 enable_language(ASM)
 
 cmake_dependent_option(PassRbPointerExplicitly "Pass the pointer to the replication buffer explicitly to the IP-MON enclave." ON "NOT UseBPF" OFF)
+cmake_dependent_option(UseBPFCallGate "Use Syscall User Dispatch so only IP-MON can do system calls." ON "HAVE_SUD; UseBPF; UseMPK" OFF)
 
 set(generated_headers_list
   ${CMAKE_CURRENT_SOURCE_DIR}/MVEE_ipmon_maybe_checked.h
@@ -36,6 +37,7 @@ add_dependencies(ipmon
 target_compile_definitions(ipmon PRIVATE
     $<$<BOOL:${PassRbPointerExplicitly}>:IPMON_PASS_RB_POINTER_EXPLICITLY>
     $<$<BOOL:${UseBPF}>:IPMON_USE_BPF>
+    $<$<BOOL:${UseBPFCallGate}>:IPMON_USE_BPF_CALLGATE>
     $<$<BOOL:${UseMPK}>:IPMON_USE_MPK>
 )
 

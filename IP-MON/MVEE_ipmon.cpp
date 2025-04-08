@@ -48,6 +48,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <linux/filter.h>
+#include <linux/prctl.h>
 #include <linux/seccomp.h>
 #include <linux/socket.h>
 #include <arpa/inet.h>
@@ -3765,6 +3766,10 @@ extern "C" long ipmon_enclave
 	}
 #endif
 
+#ifdef IPMON_USE_BPF_CALLGATE
+	RB->variant_info[ipmon_variant_num].syscall_switch =  SYSCALL_DISPATCH_FILTER_ALLOW;
+#endif
+
 	long ret = ipmon_handle_syscall(RB, syscall_no, args);
 
 #ifdef IPMON_USE_BPF
@@ -3777,6 +3782,10 @@ extern "C" long ipmon_enclave
 
 		RB = (ipmon_buffer *) ipmon_register_thread();
 	}
+#endif
+
+#ifdef IPMON_USE_BPF_CALLGATE
+	RB->variant_info[ipmon_variant_num].syscall_switch =  SYSCALL_DISPATCH_FILTER_BLOCK;
 #endif
 
 #ifdef IPMON_USE_MPK
@@ -3906,6 +3915,12 @@ extern "C" struct ipmon_buffer* ipmon_register_thread()
 		printf("ERROR: IP-MON RB registration failed. pkey_mprotect returned -1.");
 #endif
 
+#ifdef IPMON_USE_BPF_CALLGATE
+	ret = ipmon_checked_syscall(__NR_prctl, PR_SET_SYSCALL_USER_DISPATCH,
+			PR_SYS_DISPATCH_ON,
+			0, 1, &RB->variant_info[ipmon_variant_num].syscall_switch);
+#endif
+
 #ifdef IPMON_USE_BPF
 	ipmon_RB = (ipmon_buffer*)RB;
 	ipmon_RB_initialized = 1;
@@ -3930,6 +3945,32 @@ static void set_seccomp_bpf_filter()
 
 	if (!ipmon_checked_syscall(MVEE_IS_SECCOMP_BPF_FILTER_INSTALLED))
 	{
+#ifdef IPMON_USE_BPF_CALLGATE
+		// Define seccomp-bpf filter
+		struct sock_filter filter[] = {
+			/* Unsynced system calls that can always execute without any checking */
+			BPF_STMT(BPF_LD | BPF_W | BPF_ABS, (offsetof(struct seccomp_data, nr))),
+#include "MVEE_ipmon_seccomp_bpf_always_allow.h"
+
+			/* Load the instruction pointer from 'seccomp_data' buffer into accumulator.
+			 * There are two possibilities, with different corresponding actions:
+			 * - 1. ipmon_unchecked_syscall_ret => IP-MON wants to do an UNchecked system call, ALLOW
+			 * - 2. everything else             => IP-MON wants to do a checked system call,
+			 *   								=> or any other code wants to do a system call
+			 *                                  => definitely checked: transfer to CP-MON, TRACE
+			 */
+
+			/* Check for case 1: IP-MON wants to do an UNchecked system call */
+			BPF_STMT(BPF_LD | BPF_W | BPF_ABS, (offsetof(struct seccomp_data, instruction_pointer))),
+			BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (uint32_t)((uintptr_t)&ipmon_unchecked_syscall_ret), 0, 3),
+			BPF_STMT(BPF_LD | BPF_W | BPF_ABS, (offsetof(struct seccomp_data, instruction_pointer) + 4)),
+			BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (uint32_t)(((uintptr_t)&ipmon_unchecked_syscall_ret) >> 32), 0, 1),
+			BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+
+			/* Otherwise, definitely checked, inform CP-MON */
+			BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
+		};
+#else
 		// Get the address of the ipmon enclave entrypoint
 		unsigned long long ipmon_enclave_entrypoint_ptr = (unsigned long long)ipmon_enclave_entrypoint;
 
@@ -4001,6 +4042,7 @@ static void set_seccomp_bpf_filter()
 			/* Otherwise, definitely checked, inform CP-MON */
 			BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
 		};
+#endif
 
 		// Set BPF-filter
 		struct sock_fprog prog = {
@@ -4223,11 +4265,17 @@ void __attribute__((constructor)) init()
     IPMON_MASK_UNSET(mask, __NR_futex);
 #endif
 
-	ipmon_register_thread();
+	struct ipmon_buffer* RB = (ipmon_buffer *) ipmon_register_thread();
 
 #ifdef IPMON_USE_BPF
 	set_seccomp_bpf_filter();
+
+#ifdef IPMON_USE_BPF_CALLGATE
+	reroute_to_ipmon(ipmon_enclave_entrypoint);
+	RB->variant_info[ipmon_variant_num].syscall_switch =  SYSCALL_DISPATCH_FILTER_BLOCK;
+#else
 	reroute_to_ipmon(ipmon_seccomp_exchange_address);
+#endif
 #endif
 
 #ifdef IPMON_USE_MPK

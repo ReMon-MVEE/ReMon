@@ -2,6 +2,7 @@ cmake_minimum_required (VERSION 3.13)
 include(CMakeDependentOption)
 project(remon)
 include(CMakeDependentOption)
+include(CheckCSourceCompiles)
 
 if (NOT CMAKE_BUILD_TYPE)
         message(STATUS "CMAKE_BUILD_TYPE not defined. Defaulting to Release.")
@@ -48,6 +49,11 @@ execute_process(
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/MVEE_LD_Loader
 )
 
+# Check whether Syscall User Dispatch is supported
+check_c_source_compiles(
+	"#include <linux/prctl.h>;
+	int main(void) { return PR_SET_SYSCALL_USER_DISPATCH; }"
+	HAVE_SUD)
 
 # generate syscall tables
 add_custom_target(syscall_tables

@@ -1311,7 +1311,8 @@ struct ipmon_variant_info
 {
 	unsigned int  pos;
 	unsigned int  status;
-	unsigned char padding[64 - 2 * sizeof(unsigned int)];
+	char syscall_switch;                              // Whether or not syscalls can be done
+	unsigned char padding[64 - 2 * sizeof(unsigned int) - sizeof(char)];
 };
 
 struct ipmon_buffer
