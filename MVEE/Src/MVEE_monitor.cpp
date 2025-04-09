@@ -452,9 +452,14 @@ void monitor::rewrite_execve_args(int variantnum, bool write_to_stack, bool rewr
 	}
 
     // the original image becomes the first argument for our interpreter
-    SAFEDELETEARRAY(argv.front());
-    argv.pop_front();
-    argv.push_front(mvee::strdup(image.c_str()));
+    // If the path is not relative or absolute, and instead still has to found in PATH,
+    // replace it with an absolute path
+	if (argv[0][0] != '.' && argv[0][0] != '/')
+	{
+		SAFEDELETEARRAY(argv.front());
+		argv.pop_front();
+		argv.push_front(mvee::strdup(image.c_str()));
+	}
 
 	size_t argv_size = argv.size();
 	if (!mvee::os_add_interp_for_file(argv, image))
