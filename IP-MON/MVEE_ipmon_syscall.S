@@ -32,6 +32,8 @@ name:
 		.hidden name;					\
 name:
 
+#define MAX_ERRNO 4095
+
 /*-----------------------------------------------------------------------------
     Global Variables
 -----------------------------------------------------------------------------*/
@@ -236,40 +238,28 @@ FUNCTION_START(ipmon_seccomp_exchange_address)
 	syscall                            // Invoke syscall for the first time
 
 SYMBOL(ipmon_exchange_syscall_ret)
-	// Check if we will go to CP-MON or IP-MON
-	cmpq rax, -0x07FF                 // We only use ]-4096,-2048] (hex: ]-1000,-800]) to indicate that the errno value holds the exchange start key of the IP-MON entry secret
-	jge end      // Go to the exit when tracing with CP-MON
-	cmpq rax, -0x1000                 // Check if we will go to CP-MON or IP-MON
-	jle end      // Go to the exit when tracing with CP-MON
+	cmpq rax, -MAX_ERRNO
+	jne end                           // Go to the exit when tracing with CP-MON
 
 	movq rcx, [rsp-8]                 // Move original syscall number into r12 by way of rcx
 	pushq r12
 	pushq r13
 	pushq r15
-	movq r12, rcx                     // Move original syscall number into r12
+	movq r12, rcx                     // Store original syscall number in r12
+	movq r13, MAX_ERRNO + 3           // r13 contains the exchange key, will decrements every loop
+	xorq r15, r15                     // We will build the entrypoint address in r15
+
+exchange:
+	movq rax, r13                     // Load new value of the exchange key in rax to get the next bits of the IP-MON enclave address
+	syscall                           // Invoke syscall to get new part
+SYMBOL(ipmon_exchange_syscall_ret2)
 	neg rax                           // Received the exchange start key as negative errno value, invert the value
-	movq r13, rax                     // Store the exchange start key to reuse later
+	addq r15, rax                     // Add new part to the entrypoint address
+	shl r15, 12                       // Shift 12 bits to left, to align with the part of the address we received
 
-	syscall                            // Invoke syscall for the 2nd time to get bits 12 -> 23 of the IP-MON enclave
-	neg rax                           // Received the exchange start key as negative errno value, invert the value
-	shl rax, 12                       // Shift 12 bits to left, to align with the part of the address we received
-	movq r15, rax                     // Store bits 12 -> 23 in a register
-	add r13, 1                        // Add 1 to the previous value of the exchange key
-	movq rax, r13                     // Load new value of the exchange key in rax to get the next bits of the IP-MON enclave address
-
-	syscall                            // Invoke syscall for the 4th time to get bits 24 -> 35 of the IP-MON enclave
-	neg rax                           // Received a part of the IP-MON enlcave address as negative errno value, invert the value
-	shl rax, 24                       // Shift 24 bits to left, to align with the part of the address we received
-	addq r15, rax                     // Add new part of the address to r15
-	add r13, 1                        // Add 1 to the previous value of the exchange key
-	movq rax, r13                     // Load new value of the exchange key in rax to get the next bits of the IP-MON enclave address
-
-	syscall                            // Invoke syscall for the 5th time to get bits 36 -> 47 of the IP-MON enclave
-	neg rax                           // Received a part of the IP-MON enlcave address as negative errno value, invert the value
-	shl rax, 36                       // Shift 36 bits to left, to align with the part of the address we received
-	addq r15, rax                     // Add new part of the address to r15
-	add r13, 1                        // Add 1 to the previous value of the exchange key
-	movq rax, r13                     // Load new value of the exchange key in rax to get the next bits of the IP-MON enclave address
+	sub r13, 1                        // Decrement exchange key
+	cmpq r13, MAX_ERRNO               // We stop at MAX_ERRNO
+	jne exchange
 
 	movq rax, r12                     // Restore the original syscall number
 	call r15                          // Call IP-MON enclave
