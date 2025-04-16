@@ -62,6 +62,7 @@ fd_info::fd_info
 	, unlinked(unlinked)
 	, original_file_size(original_file_size)
     , file_type(type)
+	, mmapped_bases(mvee::numvariants)
     , can_load_indirect_cache(0)
 	, mmapped_bases(mvee::numvariants)
 {

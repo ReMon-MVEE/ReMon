@@ -329,7 +329,10 @@ option(ShmAllowShadow "Allow variants to allocate shadow memory." ON)
 option(ShmInsLogging "Log instructions using shared memory." OFF)
 option(ShmInsLoggingFull "Log instructions using shared memory with more verbosity." OFF)
 option(ShmReplayLeader "Modifies replaying of shared memory instructions to follow leader-follower principle." ON)
+<<<<<<< HEAD
 cmake_dependent_option(UseMPK "Use MPK to enhance user-space protections in IP-MON." ON "BuildIpmon" OFF)
+=======
+>>>>>>> d53f1eac0073a7cf2832564f64928fb36ed2ef56
 option(EnablePMVEE "Enables PMVEE functionality." ON)
 option(IpmonPmveeHandling "Enables IP-MON's PMVEE functionality." OFF)
 
@@ -344,7 +347,10 @@ target_compile_definitions(mvee PRIVATE
     $<$<BOOL:${ShmInsLogging}>:MVEE_SHARED_MEMORY_INSTRUCTION_LOGGING>
     $<$<BOOL:${ShmInsLoggingFull}>:MVEE_SHARED_MEMORY_INSTRUCTION_LOG_FULL>
     $<$<BOOL:${ShmReplayLeader}>:MVEE_SHARED_MEMORY_REPLAY_LEADER>
+<<<<<<< HEAD
     $<$<BOOL:${UseMPK}>:MVEE_USE_MPK>
+=======
+>>>>>>> d53f1eac0073a7cf2832564f64928fb36ed2ef56
     $<$<BOOL:${EnablePMVEE}>:MVEE_ENABLE_PMVEE>
     $<$<BOOL:${EnablePMVEE}>:MVEE_CONNECTED_MMAP_REGIONS>
     $<$<BOOL:${IpmonPmveeHandling}>:IPMON_PMVEE_HANDLING>
