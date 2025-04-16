@@ -1,0 +1,4 @@
+3;migration_test;4924;/home/jonas/repos/fortdivide/eurosp2025/microbenchmarks/mapping_count/lib/mapping_count_l.so;4784;/home/jonas/repos/fortdivide/eurosp2025/microbenchmarks/mapping_count/lib/mapping_count_f.so
+1;enter_exit_test;4697;/home/jonas/repos/fortdivide/eurosp2025/microbenchmarks/mapping_count/lib/mapping_count_l.so;4656;/home/jonas/repos/fortdivide/eurosp2025/microbenchmarks/mapping_count/lib/mapping_count_f.so
+4;pointer_test;5080;/home/jonas/repos/fortdivide/eurosp2025/microbenchmarks/mapping_count/lib/mapping_count_l.so;4928;/home/jonas/repos/fortdivide/eurosp2025/microbenchmarks/mapping_count/lib/mapping_count_f.so
+2;base_line_tests;4777;/home/jonas/repos/fortdivide/eurosp2025/microbenchmarks/mapping_count/lib/mapping_count_l.so;4720;/home/jonas/repos/fortdivide/eurosp2025/microbenchmarks/mapping_count/lib/mapping_count_f.so

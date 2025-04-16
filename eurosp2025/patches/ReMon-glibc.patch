@@ -1,0 +1,471 @@
+diff --git a/csu/Makefile b/csu/Makefile
+index 7ea54c51c1..b392723a9d 100644
+--- a/csu/Makefile
++++ b/csu/Makefile
+@@ -27,7 +27,7 @@ subdir := csu
+ include ../Makeconfig
+ 
+ routines = init-first libc-start $(libc-init) sysdep version check_fds \
+-	   libc-tls elf-init dso_handle mvee-sync-agent mvee-shm-agent
++	   libc-tls elf-init dso_handle mvee-sync-agent mvee-shm-agent pmvee-state-agent
+ aux	 = errno
+ elide-routines.os = libc-tls
+ static-only-routines = elf-init
+diff --git a/csu/libc-start.c b/csu/libc-start.c
+index 32d891f3e1..c8628c64da 100644
+--- a/csu/libc-start.c
++++ b/csu/libc-start.c
+@@ -110,6 +110,7 @@ apply_irel (void)
+ 
+ #ifdef USE_MVEE_LIBC
+ # include "mvee-agent-shared.h"
++# include "pmvee-state-agent.h"
+ #endif
+ 
+ STATIC int LIBC_START_MAIN (int (*main) (int, char **, char **
+@@ -295,6 +296,8 @@ LIBC_START_MAIN (int (*main) (int, char **, char ** MAIN_AUXVEC_DECL),
+ #ifdef USE_MVEE_LIBC
+   (void) syscall(MVEE_RUNS_UNDER_MVEE_CONTROL, &mvee_sync_enabled, &mvee_infinite_loop, 
+ 				 &mvee_num_variants, NULL, &mvee_master_variant, &mvee_shm_tag);
++  (void) syscall(__NR_pmvee_switch, PMVEE_LIBC_SET, &__pmvee_copy_libc_state_leader,
++				 &__pmvee_copy_libc_state_follower);
+ 
+ #ifdef EXPOSE_MEMCPY_TO_DYNINST
+   extern uint64_t mvee_shm_memcpy_ptr_for_gs_segment;
+diff --git a/elf/dl-load.c b/elf/dl-load.c
+index a6b80f9395..161e18d52d 100644
+--- a/elf/dl-load.c
++++ b/elf/dl-load.c
+@@ -49,9 +49,9 @@ struct filebuf
+ {
+   ssize_t len;
+ #if __WORDSIZE == 32
+-# define FILEBUF_SIZE 512
++# define FILEBUF_SIZE 512*2
+ #else
+-# define FILEBUF_SIZE 832
++# define FILEBUF_SIZE 832*2
+ #endif
+   char buf[FILEBUF_SIZE] __attribute__ ((aligned (__alignof (ElfW(Ehdr)))));
+ };
+diff --git a/malloc/arena.c b/malloc/arena.c
+index 034b449804..31c12707b4 100644
+--- a/malloc/arena.c
++++ b/malloc/arena.c
+@@ -102,6 +102,13 @@ int __malloc_initialized = -1;
+ /**************************************************************************/
+ 
+ 
++
++#ifdef PMVEE_LIBC_MP_HEAP
++#define MAP_PMVEE 0x2000000
++#else
++#define MAP_PMVEE 0x00
++#endif
++
+ /* arena_get() acquires an arena and locks the corresponding mutex.
+    First, try the one last locked successfully by this thread.  (This
+    is the common case and handled with a macro for speed.)  Then, loop
+@@ -476,7 +483,7 @@ new_heap (size_t size, size_t top_pad)
+   if (prev_heap_area)
+     {
+       p2 = (char *) MMAP (prev_heap_area, HEAP_MAX_SIZE, PROT_NONE,
+-                          MAP_NORESERVE);
++                          MAP_NORESERVE | MAP_PMVEE);
+       atomic_store_release(&aligned_heap_area, NULL);
+       if (p2 != MAP_FAILED && !mvee_all_heaps_aligned(p2, HEAP_MAX_SIZE))
+         {
+@@ -487,7 +494,7 @@ new_heap (size_t size, size_t top_pad)
+   if (p2 == MAP_FAILED)
+     {
+ 	  (void) mvee_all_heaps_aligned(0, HEAP_MAX_SIZE);
+-      p1 = (char *) MMAP (0, HEAP_MAX_SIZE << 1, PROT_NONE, MAP_NORESERVE);
++      p1 = (char *) MMAP (0, HEAP_MAX_SIZE << 1, PROT_NONE, MAP_NORESERVE | MAP_PMVEE);
+       if (p1 != MAP_FAILED)
+         {
+           p2 = (char *) (((unsigned long) p1 + (HEAP_MAX_SIZE - 1))
+@@ -502,7 +509,7 @@ new_heap (size_t size, size_t top_pad)
+         {
+           /* Try to take the chance that an allocation of only HEAP_MAX_SIZE
+              is already aligned. */
+-          p2 = (char *) MMAP (0, HEAP_MAX_SIZE, PROT_NONE, MAP_NORESERVE);
++          p2 = (char *) MMAP (0, HEAP_MAX_SIZE, PROT_NONE, MAP_NORESERVE | MAP_PMVEE);
+           if (p2 == MAP_FAILED)
+             return 0;
+ 
+diff --git a/malloc/malloc.c b/malloc/malloc.c
+index 137b054761..cd52d29375 100644
+--- a/malloc/malloc.c
++++ b/malloc/malloc.c
+@@ -1032,7 +1032,7 @@ static void*   memalign_check(size_t alignment, size_t bytes,
+ #endif
+ 
+ #define MMAP(addr, size, prot, flags) \
+- __mmap((addr), (size), (prot), (flags)|MAP_ANONYMOUS|MAP_PRIVATE, -1, 0)
++ __mmap((addr), (size), (prot), (flags)|MAP_ANONYMOUS|MAP_PRIVATE|0x2000000, -1, 0)
+ 
+ 
+ /*
+@@ -1307,8 +1307,8 @@ checked_request2size (size_t req, size_t *sz) __nonnull (1)
+ #define set_foot(p, s)       (((mchunkptr) ((char *) (p) + (s)))->mchunk_prev_size = (s))
+ 
+ 
+-#pragma GCC poison mchunk_size
+-#pragma GCC poison mchunk_prev_size
++// #pragma GCC poison mchunk_size
++// #pragma GCC poison mchunk_prev_size
+ 
+ /*
+    -------------------- Internal data structures --------------------
+@@ -2340,7 +2340,7 @@ sysmalloc (INTERNAL_SIZE_T nb, mstate av)
+       /* Don't try if size wraps around 0 */
+       if ((unsigned long) (size) > (unsigned long) (nb))
+         {
+-          mm = (char *) (MMAP (0, size, PROT_READ | PROT_WRITE, 0));
++          mm = (char *) (MMAP (0, size, PROT_READ | PROT_WRITE, MAP_PMVEE));
+ 
+           if (mm != MAP_FAILED)
+             {
+@@ -5641,3 +5641,192 @@ compat_symbol (libc, __libc_free, cfree, GLIBC_2_0);
+  * c-basic-offset: 2
+  * End:
+  */
++
++
++#ifdef PMVEE_LIBC_MP_HEAP
++static void __pmvee_state_copy_mchunk_leader(struct malloc_chunk* chunk, struct malloc_chunk* end, char* __pmvee_zone, size_t* __pmvee_args_size)
++{
++  *(struct malloc_chunk**)(__pmvee_zone + *__pmvee_args_size) = chunk->fd;
++  (*__pmvee_args_size)+=(sizeof(struct malloc_chunk*));
++  *(struct malloc_chunk**)(__pmvee_zone + *__pmvee_args_size) = chunk->bk;
++  (*__pmvee_args_size)+=(sizeof(struct malloc_chunk*));
++  *(struct malloc_chunk**)(__pmvee_zone + *__pmvee_args_size) = chunk->fd_nextsize;
++  (*__pmvee_args_size)+=(sizeof(struct malloc_chunk*));
++  *(struct malloc_chunk**)(__pmvee_zone + *__pmvee_args_size) = chunk->bk_nextsize;
++  (*__pmvee_args_size)+=(sizeof(struct malloc_chunk*));
++
++  // if (chunk->fd && chunk->fd != end)
++  //   __pmvee_state_copy_mchunk_leader(chunk->fd, end, __pmvee_zone, __pmvee_args_size);
++  if (chunk->bk && chunk->bk != end)
++    __pmvee_state_copy_mchunk_leader(chunk->bk, end, __pmvee_zone, __pmvee_args_size);
++  // if (chunk->fd_nextsize && chunk->fd_nextsize != end)
++  //   __pmvee_state_copy_mchunk_leader(chunk->fd_nextsize, end, __pmvee_zone, __pmvee_args_size);
++  // if (chunk->bk_nextsize && chunk->bk_nextsize != end)
++  //   __pmvee_state_copy_mchunk_leader(chunk->bk_nextsize, end, __pmvee_zone, __pmvee_args_size);
++}
++
++void
++__pmvee_copy_state_malloc_leader(char* __pmvee_zone, size_t* __pmvee_args_size)
++{
++  int i;
++  mbinptr bin;
++  *(struct malloc_state**)(__pmvee_zone + *__pmvee_args_size) = main_arena.next;
++  (*__pmvee_args_size)+=(sizeof(struct malloc_state*));
++  for (i = 1; i < NBINS; ++i)
++  {
++    bin = bin_at (&main_arena, i);
++    __pmvee_state_copy_mchunk_leader(bin, bin, __pmvee_zone, __pmvee_args_size);
++  }
++  struct malloc_state* next_state = main_arena.next;
++  while (next_state && next_state != &main_arena)
++  {
++    malloc_printerr("here\n");
++    for (i = 1; i < NBINS; ++i)
++    {
++      bin = bin_at (next_state, i);
++      __pmvee_state_copy_mchunk_leader(bin, bin, __pmvee_zone, __pmvee_args_size);
++    }
++    next_state = next_state->next;
++  }
++}
++
++
++static void __pmvee_state_copy_mchunk_follower(struct malloc_chunk* chunk, struct malloc_chunk* end, char* __pmvee_zone, size_t* __pmvee_args_size)
++{
++  chunk->fd = *(struct malloc_chunk**)(__pmvee_zone + *__pmvee_args_size);
++  (*__pmvee_args_size)+=(sizeof(struct malloc_chunk*));
++  chunk->bk = *(struct malloc_chunk**)(__pmvee_zone + *__pmvee_args_size);
++  (*__pmvee_args_size)+=(sizeof(struct malloc_chunk*));
++  chunk->fd_nextsize = *(struct malloc_chunk**)(__pmvee_zone + *__pmvee_args_size);
++  (*__pmvee_args_size)+=(sizeof(struct malloc_chunk*));
++  chunk->bk_nextsize = *(struct malloc_chunk**)(__pmvee_zone + *__pmvee_args_size);
++  (*__pmvee_args_size)+=(sizeof(struct malloc_chunk*));
++
++  // if (chunk->fd && chunk->fd != end)
++  //   __pmvee_state_copy_mchunk_follower(chunk->fd, end, __pmvee_zone, __pmvee_args_size);
++  if (chunk->bk && chunk->bk != end)
++    __pmvee_state_copy_mchunk_follower(chunk->bk, end, __pmvee_zone, __pmvee_args_size);
++  // if (chunk->fd_nextsize && chunk->fd_nextsize != end)
++  //   __pmvee_state_copy_mchunk_follower(chunk->fd_nextsize, end, __pmvee_zone, __pmvee_args_size);
++  // if (chunk->bk_nextsize && chunk->bk_nextsize != end)
++  //   __pmvee_state_copy_mchunk_follower(chunk->bk_nextsize, end, __pmvee_zone, __pmvee_args_size);
++}
++
++
++void
++__pmvee_copy_state_malloc_follower(char* __pmvee_zone, size_t* __pmvee_args_size)
++{
++  int i;
++  mbinptr bin;
++  main_arena.next = *(struct malloc_state**)(__pmvee_zone + *__pmvee_args_size);
++  (*__pmvee_args_size)+=(sizeof(struct malloc_state*));
++  for (i = 1; i < NBINS; ++i)
++  {
++    bin = bin_at (&main_arena, i);
++    __pmvee_state_copy_mchunk_follower(bin, bin, __pmvee_zone, __pmvee_args_size);
++  }
++  struct malloc_state* next_state = main_arena.next;
++  while (next_state && next_state != &main_arena)
++  {
++    for (i = 1; i < NBINS; ++i)
++    {
++      bin = bin_at (next_state, i);
++      __pmvee_state_copy_mchunk_follower(bin, bin, __pmvee_zone, __pmvee_args_size);
++    }
++    next_state = next_state->next;
++  }
++}
++
++
++void
++__pmvee_copy_malloc_follower(char* __pmvee_zone, size_t* __pmvee_args_size)
++{
++  mbinptr bin_i;
++  // main_arena = *(struct malloc_state*)(__pmvee_zone + *__pmvee_args_size);
++  // (*__pmvee_args_size)+=(sizeof(struct malloc_state));
++
++  // __libc_lock_define (, mutex);
++  main_arena.flags = *(int*)(__pmvee_zone + *__pmvee_args_size);
++  (*__pmvee_args_size)+=(sizeof(int));
++  main_arena.have_fastchunks = *(int*)(__pmvee_zone + *__pmvee_args_size);
++  (*__pmvee_args_size)+=(sizeof(int));
++  // mfastbinptr fastbinsY[NFASTBINS];
++  // mchunkptr top;
++  // mchunkptr last_remainder;
++  // mchunkptr bins[NBINS * 2 - 2];
++  for (int i = 1; i < NBINS; ++i)
++  {
++    bin_i = bin_at (&main_arena, i);
++    bin_i->mchunk_prev_size = *(INTERNAL_SIZE_T*)(__pmvee_zone + *__pmvee_args_size);
++    (*__pmvee_args_size)+=(sizeof(INTERNAL_SIZE_T));
++    bin_i->mchunk_size = *(INTERNAL_SIZE_T*)(__pmvee_zone + *__pmvee_args_size);
++    (*__pmvee_args_size)+=(sizeof(INTERNAL_SIZE_T));
++  }
++  memcpy(main_arena.binmap, __pmvee_zone + *__pmvee_args_size, sizeof(unsigned int)*BINMAPSIZE);
++  (*__pmvee_args_size)+=(sizeof(unsigned int)*BINMAPSIZE);
++  // struct malloc_state *next;
++  // struct malloc_state *next_free;
++  main_arena.attached_threads = *(INTERNAL_SIZE_T*)(__pmvee_zone + *__pmvee_args_size);
++  (*__pmvee_args_size)+=(sizeof(INTERNAL_SIZE_T));
++  main_arena.system_mem = *(INTERNAL_SIZE_T*)(__pmvee_zone + *__pmvee_args_size);
++  (*__pmvee_args_size)+=(sizeof(INTERNAL_SIZE_T));
++  main_arena.max_system_mem = *(INTERNAL_SIZE_T*)(__pmvee_zone + *__pmvee_args_size);
++  (*__pmvee_args_size)+=(sizeof(INTERNAL_SIZE_T));
++
++  mp_ = *(struct malloc_par*)(__pmvee_zone + *__pmvee_args_size);
++  (*__pmvee_args_size)+=(sizeof(struct malloc_par));
++
++  dumped_main_arena_start = *(struct malloc_chunk**)(__pmvee_zone + *__pmvee_args_size);
++  (*__pmvee_args_size)+=(sizeof(struct malloc_chunk*));
++  dumped_main_arena_end = *(struct malloc_chunk**)(__pmvee_zone + *__pmvee_args_size);
++  (*__pmvee_args_size)+=(sizeof(struct malloc_chunk*));
++}
++
++
++void
++__pmvee_copy_malloc_leader(char* __pmvee_zone, size_t* __pmvee_args_size)
++{
++  mbinptr bin_i;
++  // *(struct malloc_state*)(__pmvee_zone + *__pmvee_args_size) = main_arena;
++  // (*__pmvee_args_size)+=(sizeof(struct malloc_state));
++
++  // __libc_lock_define (, mutex);
++  *(int*)(__pmvee_zone + *__pmvee_args_size) = main_arena.flags;
++  (*__pmvee_args_size)+=(sizeof(int));
++  *(int*)(__pmvee_zone + *__pmvee_args_size) = main_arena.have_fastchunks;
++  (*__pmvee_args_size)+=(sizeof(int));
++  // mfastbinptr fastbinsY[NFASTBINS];
++  // mchunkptr top;
++  // mchunkptr last_remainder;
++  // mchunkptr bins[NBINS * 2 - 2];
++  for (int i = 1; i < NBINS; ++i)
++  {
++    bin_i = bin_at (&main_arena, i);
++    *(INTERNAL_SIZE_T*)(__pmvee_zone + *__pmvee_args_size) = bin_i->mchunk_prev_size;
++    (*__pmvee_args_size)+=(sizeof(INTERNAL_SIZE_T));
++    *(INTERNAL_SIZE_T*)(__pmvee_zone + *__pmvee_args_size) = bin_i->mchunk_size;
++    (*__pmvee_args_size)+=(sizeof(INTERNAL_SIZE_T));
++  }
++  memcpy(__pmvee_zone + *__pmvee_args_size, main_arena.binmap, sizeof(unsigned int)*BINMAPSIZE);
++  (*__pmvee_args_size)+=(sizeof(unsigned int)*BINMAPSIZE);
++  // struct malloc_state *next;
++  // struct malloc_state *next_free;
++  *(INTERNAL_SIZE_T*)(__pmvee_zone + *__pmvee_args_size) = main_arena.attached_threads;
++  (*__pmvee_args_size)+=(sizeof(INTERNAL_SIZE_T));
++  *(INTERNAL_SIZE_T*)(__pmvee_zone + *__pmvee_args_size) = main_arena.system_mem;
++  (*__pmvee_args_size)+=(sizeof(INTERNAL_SIZE_T));
++  *(INTERNAL_SIZE_T*)(__pmvee_zone + *__pmvee_args_size) = main_arena.max_system_mem;
++  (*__pmvee_args_size)+=(sizeof(INTERNAL_SIZE_T));
++
++  // for (int bin_i = 0; bin_i < NBINS; bin_i++)
++  //   printf("[%d] > %lx\n", bin_i, (unsigned long) main_arena.bins[bin_i]->bk);
++
++  *(struct malloc_par*)(__pmvee_zone + *__pmvee_args_size) = mp_;
++  (*__pmvee_args_size)+=(sizeof(struct malloc_par));
++
++  *(struct malloc_chunk**)(__pmvee_zone + *__pmvee_args_size) = dumped_main_arena_start;
++  (*__pmvee_args_size)+=(sizeof(struct malloc_chunk*));
++  *(struct malloc_chunk**)(__pmvee_zone + *__pmvee_args_size) = dumped_main_arena_end;
++  (*__pmvee_args_size)+=(sizeof(struct malloc_chunk*));
++}
++#endif
+\ No newline at end of file
+diff --git a/sysdeps/x86/atomic-machine.h b/sysdeps/x86/atomic-machine.h
+index 5b937411eb..c0a6016ebf 100644
+--- a/sysdeps/x86/atomic-machine.h
++++ b/sysdeps/x86/atomic-machine.h
+@@ -596,6 +596,9 @@ typedef uintmax_t uatomic_max_t;
+ #define MVEE_LIBC_VARIANTWIDE_ATOMIC_BUFFER         24
+ #define MVEE_FUTEX_WAIT_TID             30
+ 
++#define PMVEE_LIBC_REQUEST              0x2
++#define PMVEE_LIBC_SET                  0x4
++
+ enum mvee_alloc_types
+   {
+   LIBC_MALLOC,
+diff --git a/csu/pmvee-state-agent.c b/csu/pmvee-state-agent.c
+new file mode 100644
+index 0000000000..8a55443ee0
+--- /dev/null
++++ b/csu/pmvee-state-agent.c
+@@ -0,0 +1,87 @@
++#include "pmvee-state-agent.h"
++#include <stdio.h>
++
++extern void __pmvee_copy_malloc_leader(char*, size_t*);
++extern void __pmvee_copy_malloc_follower(char*, size_t*);
++
++void
++__pmvee_copy_libc_state_leader(char* __pmvee_zone, size_t* __pmvee_args_size)
++{
++    // int _flags;		/* High-order word is _IO_MAGIC; rest is flags. */
++// 
++    // /* The following pointers correspond to the C++ streambuf protocol. */
++    // char *_IO_read_ptr;	/* Current read pointer */
++    // char *_IO_read_end;	/* End of get area. */
++    // char *_IO_read_base;	/* Start of putback+get area. */
++    // char *_IO_write_base;	/* Start of put area. */
++    // char *_IO_write_ptr;	/* Current put pointer. */
++    // char *_IO_write_end;	/* End of put area. */
++    // char *_IO_buf_base;	/* Start of reserve area. */
++    // char *_IO_buf_end;	/* End of reserve area. */
++// 
++    // /* The following fields are used to support backing up and undo. */
++    // char *_IO_save_base; /* Pointer to start of non-current get area. */
++    // char *_IO_backup_base;  /* Pointer to first valid character of backup area */
++    // char *_IO_save_end; /* Pointer to end of non-current get area. */
++// 
++    // struct _IO_marker *_markers;
++// 
++    // struct _IO_FILE *_chain;
++// 
++    // int _fileno;
++    // int _flags2;
++    // __off_t _old_offset; /* This used to be _offset but it's too small.  */
++// 
++    // /* 1+column number of pbase(); 0 is unknown. */
++    // unsigned short _cur_column;
++    // signed char _vtable_offset;
++    // char _shortbuf[1];
++// 
++    // _IO_lock_t *_lock;
++    // FILE stdout
++    *((struct __pmvee_FILE_copy_t*) (__pmvee_zone + *__pmvee_args_size)) = (struct __pmvee_FILE_copy_t){
++        stdout->_fileno,
++        stdout->_IO_read_ptr,	/* Current read pointer */
++        stdout->_IO_read_end,	/* End of get area. */
++        stdout->_IO_read_base,	/* Start of putback+get area. */
++        stdout->_IO_write_base,	/* Start of put area. */
++        stdout->_IO_write_ptr,	/* Current put pointer. */
++        stdout->_IO_write_end,	/* End of put area. */
++        stdout->_IO_buf_base,	/* Start of reserve area. */
++        stdout->_IO_buf_end,	/* End of reserve area. */
++
++        /* The following fields are used to support backing up and undo. */
++        stdout->_IO_save_base, /* Pointer to start of non-current get area. */
++        stdout->_IO_backup_base,  /* Pointer to first valid character of backup area */
++        stdout->_IO_save_end /* Pointer to end of non-current get area. */
++    };
++    *__pmvee_args_size+=sizeof(struct __pmvee_FILE_copy_t);
++    #ifdef PMVEE_LIBC_MP_HEAP
++    __pmvee_copy_malloc_leader(__pmvee_zone, __pmvee_args_size);
++    #endif
++}
++
++void
++__pmvee_copy_libc_state_follower(char* __pmvee_zone, size_t* __pmvee_args_size)
++{
++    // FILE stdout
++    struct __pmvee_FILE_copy_t* __pmvee_stdout = (struct __pmvee_FILE_copy_t*) (__pmvee_zone + (*__pmvee_args_size));
++    stdout->_fileno = __pmvee_stdout->_fileno;
++    stdout->_IO_read_ptr = __pmvee_stdout->_IO_read_ptr;	/* Current read pointer */
++    stdout->_IO_read_end = __pmvee_stdout->_IO_read_end;	/* End of get area. */
++    stdout->_IO_read_base = __pmvee_stdout->_IO_read_base;	/* Start of putback+get area. */
++    stdout->_IO_write_base = __pmvee_stdout->_IO_write_base;	/* Start of put area. */
++    stdout->_IO_write_ptr = __pmvee_stdout->_IO_write_ptr;	/* Current put pointer. */
++    stdout->_IO_write_end = __pmvee_stdout->_IO_write_end;	/* End of put area. */
++    stdout->_IO_buf_base = __pmvee_stdout->_IO_buf_base;	/* Start of reserve area. */
++    stdout->_IO_buf_end = __pmvee_stdout->_IO_buf_end;	/* End of reserve area. */
++
++    /* The following fields are used to support backing up and undo. */
++    stdout->_IO_save_base = __pmvee_stdout->_IO_save_base; /* Pointer to start of non-current get area. */
++    stdout->_IO_backup_base = __pmvee_stdout->_IO_backup_base;  /* Pointer to first valid character of backup area */
++    stdout->_IO_save_end = __pmvee_stdout->_IO_save_end; /* Pointer to end of non-current get area. */
++    *__pmvee_args_size+=sizeof(struct __pmvee_FILE_copy_t);
++    #ifdef PMVEE_LIBC_MP_HEAP
++    __pmvee_copy_malloc_follower(__pmvee_zone, __pmvee_args_size);
++    #endif
++}
+diff --git a/csu/pmvee-state-agent.h b/csu/pmvee-state-agent.h
+new file mode 100644
+index 0000000000..43bef7314b
+--- /dev/null
++++ b/csu/pmvee-state-agent.h
+@@ -0,0 +1,35 @@
++#ifndef LIBC_PMVEE_H
++#define LIBC_PMVEE_H
++
++#include <unistd.h>
++
++# include <sys/syscall.h>
++#ifndef __NR_pmvee_switch
++# define __NR_pmvee_switch 509
++#endif
++
++struct __pmvee_FILE_copy_t
++{
++    int _fileno;
++          /* The following pointers correspond to the C++ streambuf protocol. */
++    char *_IO_read_ptr;	/* Current read pointer */
++    char *_IO_read_end;	/* End of get area. */
++    char *_IO_read_base;	/* Start of putback+get area. */
++    char *_IO_write_base;	/* Start of put area. */
++    char *_IO_write_ptr;	/* Current put pointer. */
++    char *_IO_write_end;	/* End of put area. */
++    char *_IO_buf_base;	/* Start of reserve area. */
++    char *_IO_buf_end;	/* End of reserve area. */
++
++    /* The following fields are used to support backing up and undo. */
++    char *_IO_save_base; /* Pointer to start of non-current get area. */
++    char *_IO_backup_base;  /* Pointer to first valid character of backup area */
++    char *_IO_save_end; /* Pointer to end of non-current get area. */
++};
++
++extern void
++__pmvee_copy_libc_state_leader(char* __pmvee_zone, size_t* __pmvee_args_size);
++extern void
++__pmvee_copy_libc_state_follower(char* __pmvee_zone, size_t* __pmvee_args_size);
++
++#endif
+\ No newline at end of file

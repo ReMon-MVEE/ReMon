@@ -1,0 +1,668 @@
+diff --git a/nginx-1.23.3/auto/sources b/nginx-1.23.3/auto/sources
+index a539093..23e2a3a 100644
+--- a/nginx-1.23.3/auto/sources
++++ b/nginx-1.23.3/auto/sources
+@@ -5,7 +5,7 @@
+ 
+ CORE_MODULES="ngx_core_module ngx_errlog_module ngx_conf_module"
+ 
+-CORE_INCS="src/core"
++CORE_INCS="src/core src/http src/http/modules"
+ 
+ CORE_DEPS="src/core/nginx.h \
+            src/core/ngx_config.h \
+diff --git a/nginx-1.23.3/conf/nginx.conf b/nginx-1.23.3/conf/nginx.conf
+index 29bc085..e75799c 100644
+--- a/nginx-1.23.3/conf/nginx.conf
++++ b/nginx-1.23.3/conf/nginx.conf
+@@ -1,13 +1,13 @@
+ 
+ #user  nobody;
+-worker_processes  1;
++worker_processes 4;
+ 
+ #error_log  logs/error.log;
+ #error_log  logs/error.log  notice;
+ #error_log  logs/error.log  info;
+ 
+ #pid        logs/nginx.pid;
+-
++daemon off;
+ 
+ events {
+     worker_connections  1024;
+@@ -33,7 +33,7 @@ http {
+     #gzip  on;
+ 
+     server {
+-        listen       80;
++        listen       8080;
+         server_name  localhost;
+ 
+         #charset koi8-r;
+diff --git a/nginx-1.23.3/src/core/ngx_connection.c b/nginx-1.23.3/src/core/ngx_connection.c
+index fe729a7..12aaf2c 100644
+--- a/nginx-1.23.3/src/core/ngx_connection.c
++++ b/nginx-1.23.3/src/core/ngx_connection.c
+@@ -8,9 +8,44 @@
+ #include <ngx_config.h>
+ #include <ngx_core.h>
+ #include <ngx_event.h>
++#if defined(PMVEE_LEADER) || defined(PMVEE_FOLLOWER)
++#include "stubs.h"
++#endif
+ 
+ 
+ ngx_os_io_t  ngx_io;
++#ifndef PMVEE_DISABLE_STATE_MIGRATION
++#if defined(PMVEE_LEADER) || defined(PMVEE_FOLLOWER)
++void
++__pmvee_state_copy_ngx_connection(char* __pmvee_zone, size_t* __pmvee_args_size, void* origin)
++{
++    // printf(">__pmvee_state_copy_ngx_connection");fflush(stdout);
++    // if (origin == &ngx_http_process_request_line)
++    {
++        PMVEE_STATE_COPY_POINTER(ngx_io.recv);
++        PMVEE_STATE_COPY_POINTER(ngx_io.recv_chain);
++        PMVEE_STATE_COPY_POINTER(ngx_io.udp_recv);
++        PMVEE_STATE_COPY_POINTER(ngx_io.send);
++        PMVEE_STATE_COPY_POINTER(ngx_io.udp_send);
++        PMVEE_STATE_COPY_POINTER(ngx_io.udp_send_chain);
++        PMVEE_STATE_COPY_POINTER(ngx_io.send_chain);
++
++        PMVEE_STATE_COPY_POINTER(ngx_posted_events.prev)
++        PMVEE_STATE_COPY_POINTER(ngx_posted_events.next)
++    }
++}
++
++void
++__pmvee_state_migration_ngx_connection(char* __pmvee_zone, size_t* __pmvee_args_size, void* origin)
++{
++    // printf(">__pmvee_state_migration_ngx_connection");fflush(stdout);
++    // if (origin == &ngx_http_process_request_line)
++    {
++        PMVEE_STATE_COPY_STRUCT(ngx_io.flags, ngx_uint_t);
++    }
++}
++#endif
++#endif
+ 
+ 
+ static void ngx_drain_connections(ngx_cycle_t *cycle);
+diff --git a/nginx-1.23.3/src/core/ngx_times.c b/nginx-1.23.3/src/core/ngx_times.c
+index 16788c9..b332dcf 100644
+--- a/nginx-1.23.3/src/core/ngx_times.c
++++ b/nginx-1.23.3/src/core/ngx_times.c
+@@ -58,6 +58,40 @@ static u_char            cached_syslog_time[NGX_TIME_SLOTS]
+                                     [sizeof("Sep 28 12:00:00")];
+ 
+ 
++#ifndef PMVEE_DISABLE_STATE_MIGRATION
++#if defined(PMVEE_LEADER) || defined(PMVEE_FOLLOWER)
++#include "stubs.h"
++extern void ngx_http_process_request_line(ngx_event_t *rev);
++extern void ngx_http_wait_request_handler(ngx_event_t *ev);
++void
++__pmvee_state_migration_ngx_time(char* __pmvee_zone, size_t* __pmvee_args_size, void* origin)
++{
++    // printf(">__pmvee_state_migration_ngx_time");fflush(stdout);
++    // if (origin == &ngx_http_process_request_line)
++    {
++        #if !(NGX_WIN32)
++        PMVEE_STATE_COPY_STRUCT(cached_gmtoff, ngx_int_t);
++        #endif
++        PMVEE_STATE_COPY_REGION((void*)cached_time, NGX_TIME_SLOTS*sizeof(ngx_time_t));
++        PMVEE_STATE_COPY_REGION((void*)cached_err_log_time, NGX_TIME_SLOTS*sizeof("1970/09/28 12:00:00"));
++        PMVEE_STATE_COPY_REGION((void*)cached_http_time, NGX_TIME_SLOTS*sizeof("Mon, 28 Sep 1970 06:00:00 GMT"));
++        PMVEE_STATE_COPY_REGION((void*)cached_http_log_time, NGX_TIME_SLOTS*sizeof("28/Sep/1970:12:00:00 +0600"));
++        PMVEE_STATE_COPY_REGION((void*)cached_http_log_iso8601, NGX_TIME_SLOTS*sizeof("1970-09-28T12:00:00+06:00"));
++        PMVEE_STATE_COPY_REGION((void*)cached_syslog_time, NGX_TIME_SLOTS*sizeof("Sep 28 12:00:00"));
++        PMVEE_STATE_COPY_STRUCT(slot, ngx_uint_t);
++        PMVEE_STATE_COPY_STRUCT(ngx_current_msec, ngx_msec_t);
++        PMVEE_STATE_COPY_POINTER_OFFSET(cached_time, ngx_cached_time, ngx_time_t *);
++        PMVEE_STATE_COPY_POINTER_OFFSET(cached_err_log_time, ngx_cached_err_log_time.data, unsigned char * volatile);
++        PMVEE_STATE_COPY_POINTER_OFFSET(cached_http_time, ngx_cached_http_time.data, unsigned char * volatile);
++        PMVEE_STATE_COPY_POINTER_OFFSET(cached_http_log_time, ngx_cached_http_log_time.data, unsigned char * volatile);
++        PMVEE_STATE_COPY_POINTER_OFFSET(cached_http_log_iso8601, ngx_cached_http_log_iso8601.data, unsigned char * volatile);
++        PMVEE_STATE_COPY_POINTER_OFFSET(cached_syslog_time, ngx_cached_syslog_time.data, unsigned char * volatile);
++    }
++}
++#endif
++#endif
++
++
+ static char  *week[] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+ static char  *months[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+diff --git a/nginx-1.23.3/src/event/modules/ngx_epoll_module.c b/nginx-1.23.3/src/event/modules/ngx_epoll_module.c
+index 98e3ce7..e443ca7 100644
+--- a/nginx-1.23.3/src/event/modules/ngx_epoll_module.c
++++ b/nginx-1.23.3/src/event/modules/ngx_epoll_module.c
+@@ -8,6 +8,9 @@
+ #include <ngx_config.h>
+ #include <ngx_core.h>
+ #include <ngx_event.h>
++#if defined(PMVEE_LEADER) || defined(PMVEE_FOLLOWER)
++#include "stubs.h"
++#endif
+ 
+ 
+ #if (NGX_TEST_BUILD_EPOLL)
+diff --git a/nginx-1.23.3/src/event/ngx_event.c b/nginx-1.23.3/src/event/ngx_event.c
+index d81547a..fca2c21 100644
+--- a/nginx-1.23.3/src/event/ngx_event.c
++++ b/nginx-1.23.3/src/event/ngx_event.c
+@@ -1345,3 +1345,34 @@ ngx_event_core_init_conf(ngx_cycle_t *cycle, void *conf)
+ 
+     return NGX_CONF_OK;
+ }
++
++#ifndef PMVEE_DISABLE_STATE_MIGRATION
++#if defined(PMVEE_LEADER) || defined(PMVEE_FOLLOWER)
++#include "stubs.h"
++extern void ngx_http_process_request_line(ngx_event_t *rev);
++extern void ngx_http_wait_request_handler(ngx_event_t *ev);
++void
++__pmvee_state_copy_ngx_event(char* __pmvee_zone, size_t* __pmvee_args_size, void* origin)
++{
++    // printf(">__pmvee_state_copy_ngx_event");fflush(stdout);
++    // if (origin == &ngx_http_process_request_line)
++    {
++        PMVEE_STATE_COPY_POINTER(ngx_event_actions.add);
++        PMVEE_STATE_COPY_POINTER(ngx_event_actions.del);
++
++        PMVEE_STATE_COPY_POINTER(ngx_event_actions.enable);
++        PMVEE_STATE_COPY_POINTER(ngx_event_actions.disable);
++
++        PMVEE_STATE_COPY_POINTER(ngx_event_actions.add_conn);
++        PMVEE_STATE_COPY_POINTER(ngx_event_actions.del_conn);
++
++        PMVEE_STATE_COPY_POINTER(ngx_event_actions.notify);
++
++        PMVEE_STATE_COPY_POINTER(ngx_event_actions.process_events);
++
++        PMVEE_STATE_COPY_POINTER(ngx_event_actions.init);
++        PMVEE_STATE_COPY_POINTER(ngx_event_actions.done);
++    }
++}
++#endif
++#endif
+diff --git a/nginx-1.23.3/src/event/ngx_event.h b/nginx-1.23.3/src/event/ngx_event.h
+index deac04e..17ddeb7 100644
+--- a/nginx-1.23.3/src/event/ngx_event.h
++++ b/nginx-1.23.3/src/event/ngx_event.h
+@@ -529,5 +529,10 @@ ngx_int_t ngx_send_lowat(ngx_connection_t *c, size_t lowat);
+ #include <ngx_iocp_module.h>
+ #endif
+ 
++struct ngx_udp_connection_s {
++    ngx_rbtree_node_t   node;
++    ngx_connection_t   *connection;
++    ngx_buf_t          *buffer;
++};
+ 
+ #endif /* _NGX_EVENT_H_INCLUDED_ */
+diff --git a/nginx-1.23.3/src/event/ngx_event_timer.c b/nginx-1.23.3/src/event/ngx_event_timer.c
+index 35052bc..5a3e63a 100644
+--- a/nginx-1.23.3/src/event/ngx_event_timer.c
++++ b/nginx-1.23.3/src/event/ngx_event_timer.c
+@@ -124,3 +124,36 @@ ngx_event_no_timers_left(void)
+ 
+     return NGX_OK;
+ }
++
++#ifndef PMVEE_DISABLE_STATE_MIGRATION
++#if defined(PMVEE_LEADER) || defined(PMVEE_FOLLOWER)
++
++#include "stubs.h"
++
++extern void ngx_http_process_request_line(ngx_event_t *rev);
++extern void ngx_http_wait_request_handler(ngx_event_t *ev);
++void
++__pmvee_state_copy_ngx_event_timer(char* __pmvee_zone, size_t* __pmvee_args_size, void* origin)
++{
++    // printf(">__pmvee_state_copy_ngx_event_timer");fflush(stdout);
++    // if (origin == &ngx_http_process_request_line)
++    {
++        PMVEE_STATE_COPY_POINTER(ngx_event_timer_rbtree.insert);
++        PMVEE_STATE_COPY_POINTER(ngx_event_timer_rbtree.root);
++        PMVEE_STATE_COPY_POINTER(ngx_event_timer_rbtree.sentinel);
++    }
++}
++
++
++void
++__pmvee_state_migration_ngx_event_timer(char* __pmvee_zone, size_t* __pmvee_args_size, void* origin)
++{
++    // printf(">__pmvee_state_migration_ngx_event_timer");fflush(stdout);
++    // if (origin == &ngx_http_process_request_line)
++    {
++        PMVEE_STATE_COPY_STRUCT(ngx_event_timer_rbtree.root, ngx_rbtree_node_t*);
++        PMVEE_STATE_COPY_STRUCT(ngx_event_timer_rbtree.sentinel, ngx_rbtree_node_t*);
++    }
++}
++#endif
++#endif
+diff --git a/nginx-1.23.3/src/event/ngx_event_udp.c b/nginx-1.23.3/src/event/ngx_event_udp.c
+index 1ac82c7..e32491d 100644
+--- a/nginx-1.23.3/src/event/ngx_event_udp.c
++++ b/nginx-1.23.3/src/event/ngx_event_udp.c
+@@ -12,11 +12,6 @@
+ 
+ #if !(NGX_WIN32)
+ 
+-struct ngx_udp_connection_s {
+-    ngx_rbtree_node_t   node;
+-    ngx_connection_t   *connection;
+-    ngx_buf_t          *buffer;
+-};
+ 
+ 
+ static void ngx_close_accepted_udp_connection(ngx_connection_t *c);
+diff --git a/nginx-1.23.3/src/http/modules/ngx_http_log_module.c b/nginx-1.23.3/src/http/modules/ngx_http_log_module.c
+index f7c4bd2..377df31 100644
+--- a/nginx-1.23.3/src/http/modules/ngx_http_log_module.c
++++ b/nginx-1.23.3/src/http/modules/ngx_http_log_module.c
+@@ -1907,3 +1907,37 @@ ngx_http_log_init(ngx_conf_t *cf)
+ 
+     return NGX_OK;
+ }
++
++#if defined(PMVEE_LEADER) || defined(PMVEE_FOLLOWER)
++#ifndef PMVEE_DISABLE_STATE_MIGRATION
++#if 1 // ifdef __PMVEE_REAL_NGX_HTTP_HANDLER
++#else
++#if 1 // ifdef __PMVEE_REAL_NGX_HTTP_PROCESS_REQUEST_LINE
++#include "stubs.h"
++extern void ngx_http_process_request_line(ngx_event_t *rev);
++void
++__pmvee_state_copy_ngx_http_log_module(char* __pmvee_zone, size_t* __pmvee_args_size, void* origin)
++{
++    // printf(">__pmvee_state_copy_ngx_http_log_module");fflush(stdout);
++    // if (origin == &ngx_http_process_request_line)
++    {
++        ngx_connection_t* c = (*((ngx_event_t**) __pmvee_zone))->data;
++        ngx_http_request_t* r = c->data;
++        ngx_http_log_loc_conf_t* lcf = ngx_http_get_module_loc_conf(r, ngx_http_log_module);
++        ngx_http_log_t* log = lcf->logs->elts;
++        for (unsigned int i = 0; i < lcf->logs->nelts; i++)
++        {
++            ngx_http_log_op_t* ops = log[i].format->ops->elts;
++            for (unsigned int j = 0; j < log[i].format->ops->nelts; j++)
++            {
++                // printf(">loop %d - %d", i, j);fflush(stdout);
++                PMVEE_STATE_COPY_POINTER(ops[j].getlen)
++                PMVEE_STATE_COPY_POINTER(ops[j].run)
++            }
++        }
++    }
++}
++#endif
++#endif
++#endif
++#endif
+diff --git a/nginx-1.23.3/src/http/ngx_http.h b/nginx-1.23.3/src/http/ngx_http.h
+index a7f312f..dca5de2 100644
+--- a/nginx-1.23.3/src/http/ngx_http.h
++++ b/nginx-1.23.3/src/http/ngx_http.h
+@@ -120,7 +120,15 @@ ngx_int_t ngx_http_process_request_uri(ngx_http_request_t *r);
+ ngx_int_t ngx_http_process_request_header(ngx_http_request_t *r);
+ void ngx_http_process_request(ngx_http_request_t *r);
+ void ngx_http_update_location_config(ngx_http_request_t *r);
++#if 1 // ifdef __PMVEE_REAL_NGX_HTTP_HANDLER
++#if defined(PMVEE_LEADER) || defined(PMVEE_FOLLOWER)
++void __pmvee_real_ngx_http_handler(ngx_http_request_t *r);
++#else
+ void ngx_http_handler(ngx_http_request_t *r);
++#endif
++#else
++void ngx_http_handler(ngx_http_request_t *r);
++#endif
+ void ngx_http_run_posted_requests(ngx_connection_t *c);
+ ngx_int_t ngx_http_post_request(ngx_http_request_t *r,
+     ngx_http_posted_request_t *pr);
+diff --git a/nginx-1.23.3/src/http/ngx_http_copy_filter_module.c b/nginx-1.23.3/src/http/ngx_http_copy_filter_module.c
+index bd3028b..506a75f 100644
+--- a/nginx-1.23.3/src/http/ngx_http_copy_filter_module.c
++++ b/nginx-1.23.3/src/http/ngx_http_copy_filter_module.c
+@@ -9,6 +9,9 @@
+ #include <ngx_core.h>
+ #include <ngx_http.h>
+ 
++#if defined(PMVEE_LEADER) || defined(PMVEE_FOLLOWER)
++#include "stubs.h"
++#endif
+ 
+ typedef struct {
+     ngx_bufs_t  bufs;
+diff --git a/nginx-1.23.3/src/http/ngx_http_core_module.c b/nginx-1.23.3/src/http/ngx_http_core_module.c
+index 2647e7c..c1a01be 100644
+--- a/nginx-1.23.3/src/http/ngx_http_core_module.c
++++ b/nginx-1.23.3/src/http/ngx_http_core_module.c
+@@ -9,6 +9,10 @@
+ #include <ngx_core.h>
+ #include <ngx_http.h>
+ 
++#if defined(PMVEE_LEADER) || defined(PMVEE_FOLLOWER)
++#include "stubs.h"
++#endif
++
+ 
+ typedef struct {
+     u_char    *name;
+@@ -815,9 +819,14 @@ ngx_module_t  ngx_http_core_module = {
+ 
+ ngx_str_t  ngx_http_core_get_method = { 3, (u_char *) "GET" };
+ 
+-
+ void
+ ngx_http_handler(ngx_http_request_t *r)
++#if 1 // ifdef __PMVEE_REAL_NGX_HTTP_HANDLER
++;
++void
++__pmvee_real_ngx_http_handler(ngx_http_request_t *r)
++#else
++#endif
+ {
+     ngx_http_core_main_conf_t  *cmcf;
+ 
+@@ -2547,7 +2556,17 @@ ngx_http_internal_redirect(ngx_http_request_t *r,
+     r->add_uri_to_alias = 0;
+     r->main->count++;
+ 
++
++
++#if defined(PMVEE_DISABLE_STATE_MIGRATION) || (defined(PMVEE_LEADER) || defined(PMVEE_FOLLOWER))
++#if 1 // ifdef __PMVEE_REAL_NGX_HTTP_HANDLER
++    __pmvee_real_ngx_http_handler(r);
++#else
++    ngx_http_handler(r);
++#endif
++#else
+     ngx_http_handler(r);
++#endif
+ 
+     return NGX_DONE;
+ }
+@@ -5284,3 +5303,53 @@ ngx_http_core_pool_size(ngx_conf_t *cf, void *post, void *data)
+ 
+     return NGX_CONF_OK;
+ }
++
++#if defined(PMVEE_LEADER) || defined(PMVEE_FOLLOWER)
++#ifndef PMVEE_DISABLE_STATE_MIGRATION
++#if 1 // ifdef __PMVEE_REAL_NGX_HTTP_HANDLER
++#else
++#include "stubs.h"
++extern void ngx_http_process_request_line(ngx_event_t *rev);
++void
++__pmvee_state_copy_ngx_http_core_module(char* __pmvee_zone, size_t* __pmvee_args_size, void* origin)
++{
++    // printf(">__pmvee_state_copy_ngx_http_core_module");fflush(stdout);
++    // if (origin == &ngx_http_process_request_line)
++    {
++        #ifdef PMVEE_FOLLOWER
++        // asm("movq %%rbx, (0);" :: "b" ((*((ngx_event_t**) __pmvee_zone))->data));
++        // __asm("movq %%rbx, (0);" :: "b" ((*((ngx_event_t**) __pmvee_zone))->data));
++        #endif
++        ngx_connection_t* c = (*((ngx_event_t**) __pmvee_zone))->data;
++        ngx_http_request_t* r = c->data;
++        ngx_http_core_main_conf_t  *cmcf = ngx_http_get_module_main_conf(r, ngx_http_core_module);
++        ngx_http_variable_t* v = cmcf->variables.elts;
++
++
++        for (unsigned int v_i = 0; v_i < cmcf->variables.nelts; v_i++)
++        {
++            // printf(">loop %d", v_i);fflush(stdout);
++            PMVEE_STATE_COPY_POINTER(v[v_i].set_handler);
++            PMVEE_STATE_COPY_POINTER(v[v_i].get_handler);
++        }
++    }
++    // if (origin == &ngx_http_wait_request_handler)
++    // {
++    //     #ifdef PMVEE_FOLLOWER
++    //     // __asm("movq %%rbx, (0);" :: "b" ((*((ngx_event_t**) __pmvee_zone))->data));
++    //     #endif
++    //     ngx_connection_t* c = (*((ngx_event_t**) __pmvee_zone))->data;
++    //     ngx_http_connection_t *hc = c->data;
++    //     ngx_http_core_main_conf_t  *cmcf = ngx_http_get_module_main_conf(hc->conf_ctx, ngx_http_core_module);
++    //     ngx_http_variable_t* v = cmcf->variables.elts;
++    //     for (unsigned int v_i = 0; v_i < cmcf->variables.nelts; v_i++)
++    //     {
++    //         // printf(">loop %d", v_i);fflush(stdout);
++    //         PMVEE_STATE_COPY_POINTER(v[v_i].set_handler);
++    //         PMVEE_STATE_COPY_POINTER(v[v_i].get_handler);
++    //     }
++    // }
++}
++#endif
++#endif
++#endif
+diff --git a/nginx-1.23.3/src/http/ngx_http_request.c b/nginx-1.23.3/src/http/ngx_http_request.c
+index 131a2c8..3a126c5 100644
+--- a/nginx-1.23.3/src/http/ngx_http_request.c
++++ b/nginx-1.23.3/src/http/ngx_http_request.c
+@@ -8,11 +8,16 @@
+ #include <ngx_config.h>
+ #include <ngx_core.h>
+ #include <ngx_http.h>
++#if defined(PMVEE_LEADER) || defined(PMVEE_FOLLOWER)
++#include <stubs.h>
++#endif
+ 
+-
+-static void ngx_http_wait_request_handler(ngx_event_t *ev);
++#ifdef __PMVEE_REAL_NGX_HTTP_WAIT_REQUEST_HANDLER
++#else
++static  void ngx_http_wait_request_handler(ngx_event_t *ev);
++#endif
+ static ngx_http_request_t *ngx_http_alloc_request(ngx_connection_t *c);
+-static void ngx_http_process_request_line(ngx_event_t *rev);
++extern void ngx_http_process_request_line(ngx_event_t *rev);
+ static void ngx_http_process_request_headers(ngx_event_t *rev);
+ static ssize_t ngx_http_read_request_header(ngx_http_request_t *r);
+ static ngx_int_t ngx_http_alloc_large_header_buffer(ngx_http_request_t *r,
+@@ -371,9 +376,13 @@ ngx_http_init_connection(ngx_connection_t *c)
+     }
+ }
+ 
+-
++#ifdef __PMVEE_REAL_NGX_HTTP_WAIT_REQUEST_HANDLER
++void
++__pmvee_real_ngx_http_wait_request_handler(ngx_event_t *rev)
++#else
+ static void
+ ngx_http_wait_request_handler(ngx_event_t *rev)
++#endif
+ {
+     u_char                    *p;
+     size_t                     size;
+@@ -1046,8 +1055,14 @@ failed:
+ #endif
+ 
+ 
+-static void
++#if 1 // ifdef __PMVEE_REAL_NGX_HTTP_PROCESS_REQUEST_LINE
++#include "PMVEE.h"
++void
++__pmvee_real_ngx_http_process_request_line(ngx_event_t *rev)
++#else
++void
+ ngx_http_process_request_line(ngx_event_t *rev)
++#endif
+ {
+     ssize_t              n;
+     ngx_int_t            rc, rv;
+@@ -1065,6 +1080,9 @@ ngx_http_process_request_line(ngx_event_t *rev)
+         ngx_log_error(NGX_LOG_INFO, c->log, NGX_ETIMEDOUT, "client timed out");
+         c->timedout = 1;
+         ngx_http_close_request(r, NGX_HTTP_REQUEST_TIME_OUT);
++#if 1 // ifdef __PMVEE_REAL_NGX_HTTP_PROCESS_REQUEST_LINE
++        PMVEE_EXIT;
++#endif
+         return;
+     }
+ 
+@@ -1330,6 +1348,124 @@ ngx_http_process_request_uri(ngx_http_request_t *r)
+ }
+ 
+ 
++#ifndef PMVEE_DISABLE_STATE_MIGRATION
++#if defined(PMVEE_LEADER) || defined(PMVEE_FOLLOWER)
++
++#ifdef PMVEE_LEADER
++void
++recursive_tree_search(ngx_rbtree_node_t* node, char* __pmvee_zone, size_t* __pmvee_args_size)
++{
++    if (node->left)
++    {
++        if (node->left == ngx_event_timer_rbtree.sentinel)
++        {
++            PMVEE_STATE_COPY_POINTER_POINTER(&node->left)
++        }
++        else
++            recursive_tree_search(node->left, __pmvee_zone, __pmvee_args_size);
++    }
++
++    if (node->right)
++    {
++        if (node->right == ngx_event_timer_rbtree.sentinel)
++        {
++            PMVEE_STATE_COPY_POINTER_POINTER(&node->right)
++        }
++        else
++            recursive_tree_search(node->right, __pmvee_zone, __pmvee_args_size);
++    }
++}
++#endif
++
++void
++__pmvee_state_copy(char* __pmvee_zone, size_t* __pmvee_args_size, void* origin)
++{
++    // printf(">__pmvee_state_copy");fflush(stdout);
++    ngx_connection_t* c = (*((ngx_event_t**) __pmvee_zone))->data;
++    ngx_http_request_t* r = c->data;
++
++    PMVEE_STATE_COPY_POINTER(c->log->handler);
++    PMVEE_STATE_COPY_POINTER(r->log_handler);
++
++    PMVEE_STATE_COPY_POINTER(c->read->timer.left);
++    PMVEE_STATE_COPY_POINTER(c->read->timer.right);
++    PMVEE_STATE_COPY_POINTER(c->read->timer.parent);
++
++    PMVEE_STATE_COPY_POINTER(c->send_chain);
++    // PMVEE_STATE_COPY_POINTER(ngx_event_timer_rbtree.root);
++    // PMVEE_STATE_COPY_POINTER(ngx_event_timer_rbtree.sentinel);
++
++    // for (unsigned long header_i = 0; header_i < (sizeof(ngx_http_headers_in)/sizeof(ngx_http_headers_in[0])); header_i++)
++    // {
++    //     PMVEE_STATE_COPY_POINTER(ngx_http_headers_in[header_i].handler);
++    // }
++    #ifdef PMVEE_LEADER
++    // printf(">recursion start");fflush(stdout);
++    recursive_tree_search(ngx_event_timer_rbtree.root, __pmvee_zone, __pmvee_args_size);
++    recursive_tree_search(ngx_event_timer_rbtree.sentinel, __pmvee_zone, __pmvee_args_size);
++    PMVEE_STATE_COPY_NULL;
++    // printf(">recursion end");fflush(stdout);
++    #elif defined(PMVEE_FOLLOWER)
++    while (*(void**)(__pmvee_zone + *__pmvee_args_size))
++        PMVEE_STATE_COPY_POINTER_POINTER;
++    PMVEE_STATE_COPY_NULL;
++    #else
++    #error what?
++    #endif
++
++    ngx_http_core_main_conf_t* cmcf = NULL;
++    // if (origin == &ngx_http_wait_request_handler)
++    // {
++    //     PMVEE_STATE_COPY_POINTER(c->recv);
++    //     ngx_http_connection_t *hc = c->data;
++    //     cmcf = ngx_http_get_module_main_conf(hc->conf_ctx, ngx_http_core_module);
++    // }
++    // else if (origin == &ngx_http_process_request_line)
++    {
++        cmcf = ngx_http_get_module_main_conf(r, ngx_http_core_module);
++        PMVEE_STATE_COPY_POINTER(cmcf->phase_engine.handlers[r->phase_handler].checker);
++    }
++
++    for (unsigned int i = 0; i < cmcf->headers_in_hash.size; i++)
++    {
++        if (cmcf->headers_in_hash.buckets[i])
++        {
++            // printf(">loop %d", i);fflush(stdout);
++            PMVEE_STATE_COPY_POINTER(cmcf->headers_in_hash.buckets[i]->value);
++        }
++    }
++
++    int n_handlers = 1 +
++            (cmcf->phases[NGX_HTTP_REWRITE_PHASE].handlers.nelts ? 1 : 0) +
++            (cmcf->phases[NGX_HTTP_ACCESS_PHASE].handlers.nelts ? 1 : 0);
++    for (int phases_i = 0; phases_i <= NGX_HTTP_LOG_PHASE; phases_i++)
++    {
++        n_handlers += cmcf->phases[phases_i].handlers.nelts;
++        if (cmcf->phases[phases_i].handlers.size == sizeof(void*))
++        {
++            ngx_http_handler_pt* elts = cmcf->phases[phases_i].handlers.elts;
++            for (unsigned int handler_i = 0; handler_i < cmcf->phases[phases_i].handlers.nelts; handler_i++)
++            {
++                // printf(">loop %d - %d", phases_i, handler_i);fflush(stdout);
++                PMVEE_STATE_COPY_POINTER(elts[handler_i]);
++            }
++        }
++    }
++
++    ngx_http_phase_handler_t* handlers = cmcf->phase_engine.handlers;
++    for(int handler_i = 0; handler_i < n_handlers; handler_i++)
++    {
++        // printf(">loop %d", handler_i);fflush(stdout);
++        PMVEE_STATE_COPY_POINTER(handlers[handler_i].checker)
++        PMVEE_STATE_COPY_POINTER(handlers[handler_i].handler)
++    }
++
++    return;
++}
++#endif
++#endif
++
++
+ static void
+ ngx_http_process_request_headers(ngx_event_t *rev)
+ {
+@@ -1362,7 +1498,6 @@ ngx_http_process_request_headers(ngx_event_t *rev)
+     rc = NGX_AGAIN;
+ 
+     for ( ;; ) {
+-
+         if (rc == NGX_AGAIN) {
+ 
+             if (r->header_in->pos == r->header_in->end) {
+diff --git a/nginx-1.23.3/src/os/unix/ngx_process.c b/nginx-1.23.3/src/os/unix/ngx_process.c
+index 1568023..072c567 100644
+--- a/nginx-1.23.3/src/os/unix/ngx_process.c
++++ b/nginx-1.23.3/src/os/unix/ngx_process.c
+@@ -196,6 +196,10 @@ ngx_spawn_process(ngx_cycle_t *cycle, ngx_spawn_proc_pt proc, void *data,
+     case 0:
+         ngx_parent = ngx_pid;
+         ngx_pid = ngx_getpid();
++        #if defined(PMVEE) && (defined(PMVEE_LEADER) || defined(PMVEE_FOLLOWER) || defined(PMVEE_DISABLE_STATE_MIGRATION))
++        __asm__("syscall;" : : "a" (__NR_pmvee_switch), "D" (0x020) : "rsi", "rdx", "r10");
++        __asm__("mov %%rsp, %%rdi; syscall;" : : "a" (__NR_pmvee_check ) : "rsi", "rdx", "r10");
++        #endif
+         proc(cycle, data);
+         break;
+ 
+diff --git a/nginx-1.23.3/src/os/unix/ngx_process_cycle.c b/nginx-1.23.3/src/os/unix/ngx_process_cycle.c
+index 98d2dd2..84fc4bd 100644
+--- a/nginx-1.23.3/src/os/unix/ngx_process_cycle.c
++++ b/nginx-1.23.3/src/os/unix/ngx_process_cycle.c
+@@ -130,6 +130,10 @@ ngx_master_process_cycle(ngx_cycle_t *cycle)
+     ngx_start_worker_processes(cycle, ccf->worker_processes,
+                                NGX_PROCESS_RESPAWN);
+     ngx_start_cache_manager_processes(cycle, 0);
++    #if (PMVEE) && (defined(PMVEE_LEADER) || defined(PMVEE_FOLLOWER) || defined(PMVEE_DISABLE_STATE_MIGRATION))
++    __asm__("syscall;" : : "a" (__NR_pmvee_switch), "D" (0x020) : "rsi", "rdx", "r10");
++    __asm__("mov %%rsp, %%rdi; syscall;" : : "a" (__NR_pmvee_check) : "rsi", "rdx", "r10");
++    #endif
+ 
+     ngx_new_binary = 0;
+     delay = 0;

@@ -1,0 +1,3 @@
+##benchmark_location##/out/lighttpd-1.4.60/pmvee/leader/sbin/lighttpd;##benchmark_location##/out/lighttpd-1.4.60/pmvee/followers/sbin/lighttpd;connection_read_cq
+##benchmark_location##/out/lighttpd-1.4.60/pmvee/leader/sbin/lighttpd;##benchmark_location##/out/lighttpd-1.4.60/pmvee/followers/sbin/lighttpd;connection_write_cq
+##benchmark_location##/out/lighttpd-1.4.60/pmvee/leader/sbin/lighttpd;##benchmark_location##/out/lighttpd-1.4.60/pmvee/followers/sbin/lighttpd;connection_handle_read_post_state

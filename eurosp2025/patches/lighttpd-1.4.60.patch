@@ -1,0 +1,180 @@
+diff --git a/lighttpd-1.4.60/src/CMakeLists.txt b/lighttpd-1.4.60/src/CMakeLists.txt
+index 0dd3364f..373c650e 100644
+--- a/lighttpd-1.4.60/src/CMakeLists.txt
++++ b/lighttpd-1.4.60/src/CMakeLists.txt
+@@ -797,6 +797,7 @@ add_executable(lighttpd
+ 	server.c
+ 	response.c
+ 	connections.c
++	stubs.c
+ 	h2.c
+ 	reqpool.c
+ 	sock_addr_cache.c
+diff --git a/lighttpd-1.4.60/src/Makefile.am b/lighttpd-1.4.60/src/Makefile.am
+index 29b17d0e..b70e0518 100644
+--- a/lighttpd-1.4.60/src/Makefile.am
++++ b/lighttpd-1.4.60/src/Makefile.am
+@@ -102,7 +102,8 @@ src = server.c response.c connections.c h2.c reqpool.c \
+ 	http_range.c \
+ 	data_config.c \
+ 	vector.c \
+-	configfile.c configparser.c
++	configfile.c configparser.c \
++	stubs.c
+ 
+ lib_LTLIBRARIES =
+ 
+diff --git a/lighttpd-1.4.60/src/chunk.c b/lighttpd-1.4.60/src/chunk.c
+index de38a8ab..b8fbe46c 100644
+--- a/lighttpd-1.4.60/src/chunk.c
++++ b/lighttpd-1.4.60/src/chunk.c
+@@ -1568,3 +1568,14 @@ chunkqueue_read_squash (chunkqueue * const restrict cq, log_error_st * const res
+     chunkqueue_append_chunk(cq, c);
+     return c->mem;
+ }
++
++#if defined(PMVEE_LEADER) || defined(PMVEE_FOLLOWER)
++#include "PMVEE.h"
++void
++__pmvee_state_migration_chunk(char* __pmvee_zone, size_t* __pmvee_args_size, void* origin)
++{
++    PMVEE_STATE_COPY_POINTER(chunks);
++    PMVEE_STATE_COPY_POINTER(chunks_oversized);
++    PMVEE_STATE_COPY_POINTER(chunks_filechunk);
++}
++#endif
+\ No newline at end of file
+diff --git a/lighttpd-1.4.60/src/connections.c b/lighttpd-1.4.60/src/connections.c
+index 12dd030d..b6b191cb 100644
+--- a/lighttpd-1.4.60/src/connections.c
++++ b/lighttpd-1.4.60/src/connections.c
+@@ -33,6 +33,10 @@
+ 
+ #include "sys-socket.h"
+ 
++#if defined(PMVEE_LEADER) || defined(PMVEE_FOLLOWER)
++#include "stubs.h"
++#endif
++
+ #define HTTP_LINGER_TIMEOUT 5
+ 
+ #define connection_set_state(r, n) ((r)->state = (n))
+@@ -642,8 +646,16 @@ connection_transition_h2 (request_st * const h2r, connection * const con)
+  *
+  * we get called by the state-engine and by the fdevent-handler
+  */
+-__attribute_noinline__
+-static int connection_handle_read_state(connection * const con)  {
++#if defined(PMVEE_LEADER) || defined(PMVEE_FOLLOWER)
++#ifdef PMVEE_CONNECTION_HANDLE_READ_STATE
++int connection_handle_read_state(connection * con);
++int __pmvee_real_connection_handle_read_state(connection * con)  {
++#else
++int connection_handle_read_state(connection * con)  {
++#endif
++#else
++int connection_handle_read_state(connection * con)  {
++#endif
+     /*(should not be reached by HTTP/2 streams)*/
+     chunkqueue * const cq = con->read_queue;
+     chunk *c = cq->first;
+@@ -1970,3 +1982,20 @@ connection_handle_read_post_state (request_st * const r)
+           : HANDLER_WAIT_FOR_EVENT;
+     }
+ }
++
++#if defined(PMVEE_LEADER) || defined(PMVEE_FOLLOWER)
++#ifdef PMVEE_CONNECTION_HANDLE_READ_STATE
++void
++__pmvee_state_copy(char* __pmvee_zone, size_t* __pmvee_args_size, void* origin)
++{
++    // printf(">__pmvee_state_copy");fflush(stdout);
++    if (origin == &connection_handle_read_state)
++    {
++        connection* con = *(connection**) __pmvee_zone;
++		PMVEE_STATE_COPY_POINTER(con->network_read)
++		PMVEE_STATE_COPY_POINTER(con->network_write)
++		PMVEE_STATE_COPY_POINTER(con->reqbody_read)
++    }
++}
++#endif
++#endif
+\ No newline at end of file
+diff --git a/lighttpd-1.4.60/src/request.c b/lighttpd-1.4.60/src/request.c
+index ed2e5310..fba3c8ac 100644
+--- a/lighttpd-1.4.60/src/request.c
++++ b/lighttpd-1.4.60/src/request.c
+@@ -1259,7 +1259,16 @@ http_request_headers_fin (request_st * const restrict r)
+ 
+ 
+ void
+-http_request_headers_process (request_st * const restrict r, char * const restrict hdrs, const unsigned short * const restrict hoff, const int scheme_port)
++#if defined(PMVEE_LEADER) || defined(PMVEE_FOLLOWER)
++#if 1 // ifdef PMVEE_HTTP_REQUEST_HEADERS_PROCESS
++__pmvee_real_http_request_headers_process
++#else
++http_request_headers_process
++#endif
++#else
++http_request_headers_process
++#endif
++(request_st * const restrict r, char * const restrict hdrs, const unsigned short * const restrict hoff, const int scheme_port)
+ {
+     r->http_status = http_request_parse_hoff(r, hdrs, hoff, scheme_port);
+ 
+diff --git a/lighttpd-1.4.60/src/server.c b/lighttpd-1.4.60/src/server.c
+index 3eed0aa0..fdf793c4 100644
+--- a/lighttpd-1.4.60/src/server.c
++++ b/lighttpd-1.4.60/src/server.c
+@@ -90,6 +90,9 @@ static size_t malloc_top_pad;
+ #define TEXT_SSL
+ #endif
+ 
++#include <unistd.h>
++#include <sys/syscall.h>      /* Definition of SYS_* constants */
++
+ #ifndef __sgi
+ /* IRIX doesn't like the alarm based time() optimization */
+ /* #define USE_ALARM */
+@@ -1924,6 +1927,9 @@ __attribute_noinline__
+ static void server_main_loop (server * const srv) {
+ 	unix_time64_t last_active_ts = server_monotonic_secs();
+ 	log_epoch_secs = server_epoch_secs(srv);
++	#if defined(PMVEE_LEADER) || defined(PMVEE_FOLLOWER)
++	__asm__("mov %%rsp, %%rdi; syscall;" : : "a" (__NR_pmvee_check ), "D" (-1) : "rsi", "rdx", "r10");
++	#endif
+ 
+ 	while (!srv_shutdown) {
+ 
+diff --git a/lighttpd-1.4.60/src/sys-socket.h b/lighttpd-1.4.60/src/sys-socket.h
+index 7851656b..ce9ac1e5 100644
+--- a/lighttpd-1.4.60/src/sys-socket.h
++++ b/lighttpd-1.4.60/src/sys-socket.h
+@@ -35,7 +35,7 @@
+ 
+ /* for solaris 2.5 and NetBSD 1.3.x */
+ #ifndef HAVE_SOCKLEN_T
+-typedef int socklen_t;
++typedef unsigned int socklen_t;
+ #endif
+ 
+ #ifndef SHUT_WR
+diff --git a/lighttpd-1.4.60/src/sys-time.h b/lighttpd-1.4.60/src/sys-time.h
+index 7b5d95f3..2252f7ee 100644
+--- a/lighttpd-1.4.60/src/sys-time.h
++++ b/lighttpd-1.4.60/src/sys-time.h
+@@ -33,10 +33,10 @@
+ #define timegm(tm) _mkgmtime(tm)
+ #else
+ __attribute_pure__
+-static inline time_t
+-timegm (const struct tm * const tm);
+-static inline time_t
+-timegm (const struct tm * const tm)
++inline time_t
++timegm (struct tm * tm);
++inline time_t
++timegm (struct tm * tm)
+ {
+     int y = tm->tm_year + 1900;
+     int m = tm->tm_mon + 1;

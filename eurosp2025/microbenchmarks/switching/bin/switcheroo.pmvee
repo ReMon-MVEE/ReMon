@@ -1,0 +1,3 @@
+1;enter_exit_test;4441;/home/jonas/repos/fortdivide/eurosp2025/microbenchmarks/switching/lib/switcheroo_l.so;4416;/home/jonas/repos/fortdivide/eurosp2025/microbenchmarks/switching/lib/switcheroo_f.so
+2;base_line_tests;4521;/home/jonas/repos/fortdivide/eurosp2025/microbenchmarks/switching/lib/switcheroo_l.so;4480;/home/jonas/repos/fortdivide/eurosp2025/microbenchmarks/switching/lib/switcheroo_f.so
+3;enter_exit_direct;4756;/home/jonas/repos/fortdivide/eurosp2025/microbenchmarks/switching/bin/switcheroo_pmvee;4720;/home/jonas/repos/fortdivide/eurosp2025/microbenchmarks/switching/bin/switcheroo_pmvee

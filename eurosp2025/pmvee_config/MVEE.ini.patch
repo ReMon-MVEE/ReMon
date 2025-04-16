@@ -1,0 +1,64 @@
+diff --git a/MVEE/bin/Debug/MVEE.ini b/MVEE/bin/Debug/MVEE.ini
+index 9b7c409..57725e5 100644
+--- a/MVEE/bin/Debug/MVEE.ini
++++ b/MVEE/bin/Debug/MVEE.ini
+@@ -1,6 +1,8 @@
+ {
+   "monitor":
+   {
++    "pmvee_mappings": "##fortdivide_location##/eurosp2025/pmvee_config/mappings.pmvee",
++    "pmvee_migrations": "##fortdivide_location##/eurosp2025/pmvee_config/migrations.pmvee",
+ 	
+     //
+     // Can be used to forcibly set the location of the ReMon root folder.
+@@ -249,7 +251,17 @@
+     "specs": 
+     {
+ 	  "variant-A": {},
+-      "variant-B": {}
++      "variant-B": {
++      "exec": { "alias" : [
++          "##fortdivide_location##/PMVEE/allocator/pmvee_allocator_l.so=##fortdivide_location##/PMVEE/allocator/pmvee_allocator_f.so",
++          "##fortdivide_location##/eurosp2025/out/nginx-1.23.3/pmvee/leader/sbin/nginx=##fortdivide_location##/eurosp2025/out/nginx-1.23.3/pmvee/followers/sbin/nginx",
++          "##fortdivide_location##/eurosp2025/out/lighttpd-1.4.60/pmvee/leader/sbin/lighttpd=##fortdivide_location##/eurosp2025/out/lighttpd-1.4.60/pmvee/followers/sbin/lighttpd",
++          "##fortdivide_location##/eurosp2025/pmvee_config/nginx-1.23.3/lib/nginx_l.so=##fortdivide_location##/eurosp2025/pmvee_config/nginx-1.23.3/lib/nginx_f.so",
++          "##fortdivide_location##/eurosp2025/pmvee_config/lighttpd-1.4.60/lib/lighttpd_l.so=##fortdivide_location##/eurosp2025/pmvee_config/lighttpd-1.4.60/lib/lighttpd_f.so",
++          "##fortdivide_location##/eurosp2025/microbenchmarks/mapping_count/lib/mapping_count_l.so=##fortdivide_location##/eurosp2025/microbenchmarks/mapping_count/lib/mapping_count_f.so",
++          "##fortdivide_location##/eurosp2025/microbenchmarks/switching/lib/switcheroo_l.so=##fortdivide_location##/eurosp2025/microbenchmarks/switching/lib/switcheroo_f.so"
++        ]}
++      }
+     }
+   }
+ }
+diff --git a/MVEE/bin/Release/MVEE.ini b/MVEE/bin/Release/MVEE.ini
+index 1e2b7be..57725e5 100644
+--- a/MVEE/bin/Release/MVEE.ini
++++ b/MVEE/bin/Release/MVEE.ini
+@@ -1,6 +1,8 @@
+ {
+   "monitor":
+   {
++    "pmvee_mappings": "##fortdivide_location##/eurosp2025/pmvee_config/mappings.pmvee",
++    "pmvee_migrations": "##fortdivide_location##/eurosp2025/pmvee_config/migrations.pmvee",
+ 	
+     //
+     // Can be used to forcibly set the location of the ReMon root folder.
+@@ -249,7 +251,17 @@
+     "specs": 
+     {
+ 	  "variant-A": {},
+-      "variant-B": {}
++      "variant-B": {
++      "exec": { "alias" : [
++          "##fortdivide_location##/PMVEE/allocator/pmvee_allocator_l.so=##fortdivide_location##/PMVEE/allocator/pmvee_allocator_f.so",
++          "##fortdivide_location##/eurosp2025/out/nginx-1.23.3/pmvee/leader/sbin/nginx=##fortdivide_location##/eurosp2025/out/nginx-1.23.3/pmvee/followers/sbin/nginx",
++          "##fortdivide_location##/eurosp2025/out/lighttpd-1.4.60/pmvee/leader/sbin/lighttpd=##fortdivide_location##/eurosp2025/out/lighttpd-1.4.60/pmvee/followers/sbin/lighttpd",
++          "##fortdivide_location##/eurosp2025/pmvee_config/nginx-1.23.3/lib/nginx_l.so=##fortdivide_location##/eurosp2025/pmvee_config/nginx-1.23.3/lib/nginx_f.so",
++          "##fortdivide_location##/eurosp2025/pmvee_config/lighttpd-1.4.60/lib/lighttpd_l.so=##fortdivide_location##/eurosp2025/pmvee_config/lighttpd-1.4.60/lib/lighttpd_f.so",
++          "##fortdivide_location##/eurosp2025/microbenchmarks/mapping_count/lib/mapping_count_l.so=##fortdivide_location##/eurosp2025/microbenchmarks/mapping_count/lib/mapping_count_f.so",
++          "##fortdivide_location##/eurosp2025/microbenchmarks/switching/lib/switcheroo_l.so=##fortdivide_location##/eurosp2025/microbenchmarks/switching/lib/switcheroo_f.so"
++        ]}
++      }
+     }
+   }
+ }

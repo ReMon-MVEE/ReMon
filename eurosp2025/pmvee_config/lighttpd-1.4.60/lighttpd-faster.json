@@ -1,0 +1,24 @@
+[
+    {
+        "meta": "includes",
+        "includes":
+        [
+            "stdint.h",
+            "##benchmark_location##/lighttpd-1.4.60/src/first.h",
+            "##benchmark_location##/lighttpd-1.4.60/src/base.h",
+            "##benchmark_location##/lighttpd-1.4.60/src/base_decls.h"
+        ]
+    },
+    {
+        "meta": "function",
+        "name": "http_request_headers_process",
+        "return": "void",
+        "arguments": 
+        [
+            { "name": "r", "type": "request_st *" },
+            { "name": "hdrs", "type": "char *", "ignore": true },
+            { "name": "hoff", "type": "const unsigned short *", "size": 8192 },
+            { "name": "scheme_port", "type": "int" }
+        ]
+    }
+]

@@ -1,0 +1,26 @@
+[
+    {
+        "meta": "function",
+        "name": "enter_exit_test",
+        "return": "void",
+        "state": "False"
+    },
+    {
+        "meta": "function",
+        "name": "base_line_tests",
+        "return": "void",
+        "state": "False"
+    },
+    {
+        "meta": "function",
+        "name": "migration_test",
+        "return": "void",
+        "copy": "##benchmark_location##/microbenchmarks/mapping_count/migration_test.c"
+    },
+    {
+        "meta": "function",
+        "name": "pointer_test",
+        "return": "void",
+        "migration": "##benchmark_location##/microbenchmarks/mapping_count/pointer_test.c"
+    }
+]

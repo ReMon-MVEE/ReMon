@@ -1,0 +1,40 @@
+[
+    {
+        "meta": "includes",
+        "includes":
+        [
+            "##benchmark_location##/nginx-1.23.3/src/core/ngx_core.h",
+            "##benchmark_location##/nginx-1.23.3/src/http/ngx_http.h",
+            "##benchmark_location##/nginx-1.23.3/src/event/ngx_event.h",
+            "##benchmark_location##/nginx-1.23.3/src/core/ngx_connection.h",
+            "##benchmark_location##/nginx-1.23.3/src/http/ngx_http_request.h",
+            "##benchmark_location##/nginx-1.23.3/src/core/ngx_proxy_protocol.h",
+            "##benchmark_location##/nginx-1.23.3/src/core/ngx_string.h",
+            "##benchmark_location##/nginx-1.23.3/src/core/ngx_buf.h",
+            "##benchmark_location##/nginx-1.23.3/src/core/ngx_palloc.h",
+            "##benchmark_location##/nginx-1.23.3/objs/ngx_auto_headers.h",
+            "##benchmark_location##/nginx-1.23.3/src/os/unix/ngx_linux_config.h",
+            "##benchmark_location##/nginx-1.23.3/src/http/modules/ngx_http_ssi_filter_module.h"
+        ]
+    },
+    {
+        "meta": "function",
+        "name": "ngx_http_process_request_line",
+        "return": "void",
+        "enterexit": "enter",
+        "arguments": 
+        [
+            { "name": "rev", "type": "ngx_event_t*" }
+        ]
+    },
+    {
+        "meta": "function",
+        "name": "ngx_http_handler",
+        "return": "void",
+        "enterexit": "exit",
+        "arguments": 
+        [
+            { "name": "r", "type": "ngx_http_request_t *" }
+        ]
+    }
+]
