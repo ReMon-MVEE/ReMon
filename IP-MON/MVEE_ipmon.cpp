@@ -3881,8 +3881,6 @@ extern "C" struct ipmon_buffer* ipmon_register_thread()
 	int status;
 	int pkey;
 
-	int flags = ERIM_FLAG_ISOLATE_TRUSTED;
-
 	/*
 	* Allocate a protection key:
 	*/
@@ -3903,24 +3901,45 @@ extern "C" struct ipmon_buffer* ipmon_register_thread()
 	* Note that it is still read/write as far as mprotect() is
 	* concerned and the previous pkey_set() overrides it. !!! We changed that though !!!
 	*/
-	status = ipmon_checked_syscall(__NR_pkey_mprotect, ipmon_reg_file_map, 4096/* TODO this number may change at some point */, PROT_READ | PROT_WRITE, ERIM_TRUSTED_DOMAIN_ID(flags));
+	status = ipmon_checked_syscall(__NR_pkey_mprotect, ipmon_reg_file_map, 4096/* TODO this number may change at some point */, PROT_READ | PROT_WRITE, ERIM_TRUSTED_DOMAIN_ID(ERIM_FLAG_ISOLATE_TRUSTED));
 	if (status == -1)
 		printf("ERROR: IP-MON File-Map registration failed. pkey_mprotect returned -1.");
 
+#ifdef IPMON_USE_BPF_CALLGATE
+	int header_size = (1 + RB->numvariants) * 64;
+
+	/*
+	* Set the protection key on the RB headers: this remains readable, so the kernel can read the syscall switch.
+	* Note that it is still read/write as far as mprotect() is
+	* concerned and the previous pkey_set() overrides it. !!! We changed that though !!!
+	*/
+	status = ipmon_checked_syscall(__NR_pkey_mprotect, RB, header_size, PROT_READ | PROT_WRITE, ERIM_TRUSTED_DOMAIN_ID(ERIM_FLAG_INTEGRITY_ONLY));
+	if (status == -1)
+		printf("ERROR: IP-MON RB header registration failed. pkey_mprotect returned -1.");
+
+	/*
+	* Set the protection key on RB data.
+	* Note that it is still read/write as far as mprotect() is
+	* concerned and the previous pkey_set() overrides it. !!! We changed that though !!!
+	*/
+	status = ipmon_checked_syscall(__NR_pkey_mprotect, RB + header_size, rb_size - header_size, PROT_READ | PROT_WRITE, ERIM_TRUSTED_DOMAIN_ID(ERIM_FLAG_ISOLATE_TRUSTED));
+	if (status == -1)
+		printf("ERROR: IP-MON RB data registration failed. pkey_mprotect returned -1.");
+
+	ret = ipmon_checked_syscall(__NR_prctl, PR_SET_SYSCALL_USER_DISPATCH,
+			PR_SYS_DISPATCH_ON,
+			0, 1, &RB->variant_info[ipmon_variant_num].syscall_switch);
+#else
 	/*
 	* Set the protection key on RB.
 	* Note that it is still read/write as far as mprotect() is
 	* concerned and the previous pkey_set() overrides it. !!! We changed that though !!!
 	*/
-	status = ipmon_checked_syscall(__NR_pkey_mprotect, RB, rb_size, PROT_READ | PROT_WRITE, ERIM_TRUSTED_DOMAIN_ID(flags));
+	status = ipmon_checked_syscall(__NR_pkey_mprotect, RB, rb_size, PROT_READ | PROT_WRITE, ERIM_TRUSTED_DOMAIN_ID(ERIM_FLAG_ISOLATE_TRUSTED));
 	if (status == -1)
-		printf("ERROR: IP-MON RB registration failed. pkey_mprotect returned -1.");
-#endif
+		printf("ERROR: IP-MON RB data registration failed. pkey_mprotect returned -1.");
 
-#ifdef IPMON_USE_BPF_CALLGATE
-	ret = ipmon_checked_syscall(__NR_prctl, PR_SET_SYSCALL_USER_DISPATCH,
-			PR_SYS_DISPATCH_ON,
-			0, 1, &RB->variant_info[ipmon_variant_num].syscall_switch);
+#endif
 #endif
 
 #ifdef IPMON_USE_BPF
