@@ -3965,8 +3965,10 @@ static void set_seccomp_bpf_filter()
 #ifdef IPMON_USE_BPF_CALLGATE
 		// Define seccomp-bpf filter
 		struct sock_filter filter[] = {
-			/* Unsynced system calls that can always execute without any checking */
+			/* Load the syscall number, we will decide what action to take based on that */
 			BPF_STMT(BPF_LD | BPF_W | BPF_ABS, (offsetof(struct seccomp_data, nr))),
+
+			/* Unsynced system calls that can always execute without any checking */
 #include "MVEE_ipmon_seccomp_bpf_always_allow.h"
 
 			/* Load the instruction pointer from 'seccomp_data' buffer into accumulator.
