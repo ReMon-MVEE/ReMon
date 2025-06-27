@@ -3979,13 +3979,18 @@ static void set_seccomp_bpf_filter()
 			 *                                  => definitely checked: transfer to CP-MON, TRACE
 			 */
 
-			/* Check for case 1: IP-MON wants to do an UNchecked system call */
-			BPF_STMT(BPF_LD | BPF_W | BPF_ABS, (offsetof(struct seccomp_data, instruction_pointer))),
-			BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (uint32_t)((uintptr_t)&ipmon_unchecked_syscall_ret), 0, 3),
-			BPF_STMT(BPF_LD | BPF_W | BPF_ABS, (offsetof(struct seccomp_data, instruction_pointer) + 4)),
-			BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (uint32_t)(((uintptr_t)&ipmon_unchecked_syscall_ret) >> 32), 0, 1),
-			BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+#define ALLOW_SYSCALL_FROM_IPMON(name) \
+			BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_##name, 0, 6), \
+			BPF_STMT(BPF_LD | BPF_W | BPF_ABS, (offsetof(struct seccomp_data, instruction_pointer))), \
+			BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (uint32_t)((uintptr_t)&ipmon_unchecked_syscall_ret), 0, 3), \
+			BPF_STMT(BPF_LD | BPF_W | BPF_ABS, (offsetof(struct seccomp_data, instruction_pointer) + 4)), \
+			BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (uint32_t)(((uintptr_t)&ipmon_unchecked_syscall_ret) >> 32), 0, 1), \
+			BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW), \
+			BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE)
+#define MAYBE_UNCHECKED_SYSCALL(name) ALLOW_SYSCALL_FROM_IPMON(name)
 
+			/* Check for case 1: IP-MON wants to do an UNchecked system call */
+#include "MVEE_ipmon_seccomp_bpf_maybe_unchecked.h"
 			/* Otherwise, definitely checked, inform CP-MON */
 			BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
 		};
@@ -4044,6 +4049,7 @@ static void set_seccomp_bpf_filter()
 			BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (uint32_t)(((uintptr_t)&ipmon_exchange_syscall_ret) >> 32), 0, 1), \
 			BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (MAX_ERRNO & SECCOMP_RET_DATA)), \
 			BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE)
+#define MAYBE_UNCHECKED_SYSCALL(name) START_KEY_EXCHANGE_SYSCALL(name)
 
 			/* If the syscall might be unchecked, start the procedure to transfer to IP-MON */
 #include "MVEE_ipmon_seccomp_bpf_maybe_unchecked.h"

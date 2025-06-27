@@ -83,6 +83,6 @@ write_bpf_header(@unsynced, "seccomp_bpf_always_allow", "ALLOW_SYSCALL(", "),")
 write_header(@maybe_checked, "maybe_checked", "args", "return", "")
 write_header(@calcsize, "calcsize", "args, args_size, ret_size", "", "break;")
 write_header(@precall, "precall", "args, entry", "return", "")
-write_bpf_header(@unchecked, "seccomp_bpf_maybe_unchecked", "START_KEY_EXCHANGE_SYSCALL(", "),")
+write_bpf_header(@unchecked, "seccomp_bpf_maybe_unchecked", "MAYBE_UNCHECKED_SYSCALL(", "),")
 write_header(@postcall, "postcall", "args, entry, ret, realret, success", "return", "")
 
